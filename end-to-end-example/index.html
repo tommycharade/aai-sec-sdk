@@ -676,6 +676,8 @@ example is intentionally not a production email integration. A production
 application should replace the store, approval provider, policy engine, and
 credential broker with authenticated adapters while preserving the same
 runtime boundary and tests.</p>
+<p><code>stop()</code> prevents actions that have not started; it is not a cancellation or
+timeout mechanism for a handler already in progress.</p>
 <p>The example’s security-path tests are in
 <code>tests/test_support_agent.py</code> and are executed by <code>make check</code>.</p>
 

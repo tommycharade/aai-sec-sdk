@@ -641,7 +641,8 @@
 
 
 <h1 id="getting-started">Getting started</h1>
-<p>The SDK is being built in public. Until the runtime package is available, clone the repository and validate the project foundation:</p>
+<p>The SDK is being built in public as a pre-release package. Clone the
+repository, install the development dependencies, and validate the project:</p>
 <pre><code class="language-bash">git clone https://github.com/tommycharade/aai-sec-sdk.git
 cd aai-sec-sdk
 python3 -m pip install -e '.[dev,docs]'
@@ -652,7 +653,7 @@ make check
 <li>Create an authenticated execution context.</li>
 <li>Register tools explicitly with typed arguments and impact metadata.</li>
 <li>Pass model proposals to the SDK execution boundary.</li>
-<li>Handle structured allow, deny, approval, and retryable outcomes.</li>
+<li>Handle structured executed, denied, approval-required, and failed outcomes.</li>
 <li>Export the resulting trace and audit events.</li>
 </ol>
 <p>The SDK does not make an LLM trustworthy. It limits what an incorrect or manipulated model can cause at the execution boundary.</p>

@@ -652,7 +652,7 @@
 </code></pre>
 <p>No side effect or privileged credential mint may happen before applicable checks pass. A credential broker receives only the application-owned context, validated live resources, and registered tool definition; the resulting short-lived credential is attached to the handler context and is never copied into proposals or audit payloads. Provider integrations, policy engines, credential brokers, sandboxes, telemetry backends, and approval systems belong behind adapters.</p>
 <h2 id="current-runtime-scope">Current runtime scope</h2>
-<p>The first runtime release provides the framework-neutral core: explicit tool
+<p>The current pre-release provides the framework-neutral core: explicit tool
 registration, deterministic argument validation, deny-by-default local policy,
 tenant/resource checks, scoped in-memory approvals for development and tests,
 budgets, emergency stop, idempotency, and redaction-aware hash-chain audit
@@ -661,6 +661,11 @@ provide the first credential integration surface. Production deployments should
 implement that contract with an audience- and resource-bound provider; external
 policy engines, sandboxes, OpenTelemetry exporters, and MCP gateways remain
 separate adapters without weakening the core execution invariant.</p>
+<p>The current runtime does not provide handler timeouts, cancellation of already
+running handlers, rate limits, fan-out limits, cost budgets, durable audit
+storage, or a network client for OPA/Cedar. The injected OPA/Cedar evaluators
+are decision-shape adapters, not full policy-server integrations. These are
+deployment and roadmap concerns, not guarantees of the current package.</p>
 <p>The first telemetry adapter is <code>OpenTelemetryAuditSink</code>. It wraps an
 authoritative audit sink and emits one span per redacted security event.
 OpenTelemetry is optional; applications install <code>opentelemetry-api</code> and pass

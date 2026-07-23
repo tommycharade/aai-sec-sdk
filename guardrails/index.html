@@ -935,7 +935,7 @@
 <li>Prefer structured decisions such as <code>ALLOW</code>, <code>DENY</code>, <code>APPROVAL_REQUIRED</code>, and <code>RETRYABLE_ERROR</code> over <code>True</code>/<code>False</code>.</li>
 <li>Exceptions are reserved for programmer/configuration failures; expected policy outcomes are data.</li>
 <li>No hidden network calls, credential acquisition, retries, or approval prompts in constructors.</li>
-<li>Async and sync APIs have equivalent semantics and documented cancellation behavior.</li>
+<li>Async and sync APIs must have equivalent semantics and documented cancellation behavior when they are introduced; the current core is synchronous only.</li>
 <li>Every public method documents inputs, outputs, side effects, failure modes, security assumptions, and an example.</li>
 <li>Configuration must be inspectable and serializable without exposing secrets.</li>
 <li>Breaking changes require a migration note and a versioning decision.</li>
