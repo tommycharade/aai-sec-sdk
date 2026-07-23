@@ -1,0 +1,46 @@
+site_name: Agentic AI Security SDK
+site_description: Open-source execution security runtime for agentic AI systems
+site_url: https://tommycharade.github.io/aai-sec-sdk/
+repo_url: https://github.com/tommycharade/aai-sec-sdk
+repo_name: tommycharade/aai-sec-sdk
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+strict: true
+docs_dir: docs
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+exclude_docs: |
+  README.md
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Security model: security-model.md
+  - Architecture: architecture.md
+  - End-to-end example: end-to-end-example.md
+  - API reference: api.md
+  - Engineering guardrails: guardrails.md
+  - Licensing: license.md
+  - Contributing: contributing.md
+  - Releasing: releasing.md
