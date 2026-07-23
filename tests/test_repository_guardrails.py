@@ -31,6 +31,9 @@ def test_license_policy_is_explicit() -> None:
     assert "Apache License" in license_text
     assert "Creative Commons Attribution 4.0" in docs_text
     assert "commercial" in docs_text.lower()
+    assert "no separate" in docs_text.lower()
+    assert "commercial permission" in docs_text.lower()
+    assert "branding" in docs_text.lower()
 
 
 def test_generated_readme_links_resolve_from_repository_root() -> None:
