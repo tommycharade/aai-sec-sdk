@@ -19,7 +19,21 @@ An authorization decision should include, at minimum:
 
 ## Guarantees and non-guarantees
 
-The SDK aims to guarantee that unknown or unauthorized actions do not execute and that security decisions are observable. It does not guarantee that every prompt injection is detected, that business authorization can be inferred automatically, or that infrastructure such as IAM, network controls, and sandboxes is unnecessary.
+The SDK aims to guarantee that unknown or unauthorized actions do not execute
+when all handlers are routed through the runtime and the application supplies
+trusted identity, policy, and resource extraction. Security decisions are
+observable through the configured audit sink. The default audit sink is an
+in-memory development chain, not durable forensic storage.
+
+The SDK does not guarantee that every prompt injection is detected, that
+business authorization can be inferred automatically, that an in-flight
+handler can be cancelled by `stop()`, or that infrastructure such as IAM,
+network controls, timeouts, and sandboxes is unnecessary.
+
+Handlers may return arbitrary application values; the core does not impose an
+output schema, output-size limit, or result-content policy. Applications must
+validate and redact tool results before returning them to a model or exporting
+them to another system.
 
 ## Credential-brokering threat model
 

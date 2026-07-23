@@ -22,19 +22,19 @@ docs-check:
 	$(PYTHON) -m mkdocs build --strict --site-dir /tmp/agentic-security-sdk-site
 
 format:
-	$(PYTHON) -m ruff format src tests scripts
+	$(PYTHON) -m ruff format src tests scripts examples
 
 format-check:
-	$(PYTHON) -m ruff format --check src tests scripts
+	$(PYTHON) -m ruff format --check src tests scripts examples
 
 lint:
-	$(PYTHON) -m ruff check src tests scripts
+	$(PYTHON) -m ruff check src tests scripts examples
 
 type:
 	@if find src -name '*.py' -print -quit | grep -q .; then \
-		$(PYTHON) -m mypy src tests scripts; \
+		$(PYTHON) -m mypy src tests scripts examples; \
 	else \
-		$(PYTHON) -m mypy tests scripts; \
+		$(PYTHON) -m mypy tests scripts examples; \
 	fi
 
 test:

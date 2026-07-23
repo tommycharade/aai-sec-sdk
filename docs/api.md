@@ -1,24 +1,51 @@
 # API reference and design
 
-The public API uses typed objects and structured outcomes. A minimal integration looks like this:
+The public API uses typed objects and structured outcomes. A minimal integration
+with the current SDK looks like this:
 
 The package ships a `py.typed` marker so downstream type checkers can use its
 public annotations.
 
 ```python
-@agent.tool(
-    name="send_email",
-    risk=Risk.HIGH,
-    requires_scope="mail.send",
-    approval=Approval.required(ttl_seconds=120),
+from agentic_security import (
+    ActionProposal,
+    ExecutionContext,
+    GuardedRuntime,
+    InMemoryAuditSink,
+    Principal,
+    RiskLevel,
+    ToolDefinition,
+    ToolRegistry,
 )
-def send_email(ctx: ExecutionContext, args: SendEmail) -> SendResult:
-    """Send one approved message using the caller-scoped credential."""
-    return mail_client.send(to=args.to, body=args.body,
-                            credential=ctx.credential)
+from agentic_security.policies import AllowListPolicy
+
+context = ExecutionContext(
+    agent_id="agent:example",
+    principal=Principal("user:alice"),
+    task_id="task:example",
+    purpose="read one synthetic record",
+)
+registry = ToolRegistry()
+registry.register(ToolDefinition(
+    name="read_record",
+    handler=lambda ctx, args: {"record_id": args["record_id"]},
+    validator=lambda args: {"record_id": args["record_id"]},
+    risk=RiskLevel.LOW,
+    description="Read one synthetic record.",
+))
+runtime = GuardedRuntime(
+    context, registry, AllowListPolicy({"read_record"}), InMemoryAuditSink()
+)
+result = runtime.execute(
+    ActionProposal("read_record", {"record_id": "record_001"}, "proposal:1")
+)
+assert result.status == "executed"
 ```
 
-Expected policy outcomes are structured decisions rather than ambiguous boolean returns. The generated reference below is built from the public docstrings and is checked in CI.
+Expected outcomes use `ExecutionStatus.EXECUTED`, `DENIED`,
+`APPROVAL_REQUIRED`, or `FAILED`; policy decisions use `PolicyDecision`. The
+generated reference below is built from public docstrings and is checked in CI.
+The example is synthetic and does not connect to a model or external service.
 
 ## Public runtime API
 
@@ -26,9 +53,15 @@ Expected policy outcomes are structured decisions rather than ambiguous boolean 
 
 ::: agentic_security.types.ExecutionContext
 
+::: agentic_security.types.Principal
+
+::: agentic_security.types.Resource
+
 ::: agentic_security.types.ActionProposal
 
 ::: agentic_security.types.ExecutionResult
+
+::: agentic_security.types.ExecutionStatus
 
 ::: agentic_security.RuntimeConfig
 
@@ -56,7 +89,15 @@ Expected policy outcomes are structured decisions rather than ambiguous boolean 
 
 ## Approvals and audit
 
+Approvals must be bound to the hash of the validated arguments and extracted
+resources. An approval for one proposal or argument set cannot authorize a
+modified action.
+
 ::: agentic_security.approvals.ApprovalProvider
+
+::: agentic_security.approvals.ApprovalGrant
+
+::: agentic_security.approvals.action_hash
 
 ::: agentic_security.approvals.InMemoryApprovalProvider
 
@@ -65,6 +106,8 @@ Expected policy outcomes are structured decisions rather than ambiguous boolean 
 ## Credential brokering
 
 ::: agentic_security.credentials.CredentialBroker
+
+::: agentic_security.credentials.CredentialMetadata
 
 ::: agentic_security.credentials.ScopedCredential
 

@@ -14,6 +14,6 @@ def test_guarded_runtime_example_runs() -> None:
         text=True,
     )
 
-    assert "status='executed'" in completed.stdout
-    assert "status='denied'" in completed.stdout
+    assert "status=<ExecutionStatus.EXECUTED: 'executed'>" in completed.stdout
+    assert "status=<ExecutionStatus.DENIED: 'denied'>" in completed.stdout
     assert "audit chain valid: True" in completed.stdout

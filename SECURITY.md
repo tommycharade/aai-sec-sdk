@@ -6,7 +6,10 @@ Until the first stable release, only the latest `0.1.x` development line is supp
 
 ## Reporting a vulnerability
 
-Please do not report security vulnerabilities in public issues. Use GitHub’s private security advisory mechanism for this repository, or contact the maintainers through the private security contact configured in the repository.
+Please do not report security vulnerabilities in public issues. Use the
+repository’s enabled GitHub private vulnerability reporting channel. If that
+channel is unavailable, contact the maintainers through the repository’s
+private security contact.
 
 Include:
 

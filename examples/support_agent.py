@@ -24,6 +24,7 @@ from agentic_security import (
     RiskLevel,
     ToolDefinition,
     ToolRegistry,
+    action_hash,
 )
 from agentic_security.policies import AllowListPolicy
 
@@ -183,6 +184,7 @@ def build_demo_application() -> tuple[
             resources=ticket_resource,
             risk=RiskLevel.HIGH,
             requires_approval=True,
+            external_egress=True,
             idempotency_required=True,
             requires_credential=True,
             description="Queue a synthetic customer email after explicit approval.",
@@ -227,6 +229,12 @@ def main() -> None:
         "send_customer_email",
         email_proposal.proposal_id,
         "approver:manager",
+        action_hash(
+            runtime.context,
+            email_proposal.tool_name,
+            email_proposal.arguments,
+            (store.resource_for("ticket_001"),),
+        ),
     )
     email = runtime.execute(
         ActionProposal(

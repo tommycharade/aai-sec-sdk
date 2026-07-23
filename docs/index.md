@@ -16,6 +16,7 @@ The SDK is built around one boundary:
 - [Engineering guardrails](guardrails.md)
 - [Licensing](license.md)
 - [Contributing](contributing.md)
+- [Governance](https://github.com/tommycharade/aai-sec-sdk/blob/main/GOVERNANCE.md)
 - [Releasing](releasing.md)
 
 The core runtime and a complete synthetic reference application are available;

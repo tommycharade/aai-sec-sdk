@@ -58,7 +58,7 @@ No side effect or privileged credential mint may happen before all applicable ch
 - Prefer structured decisions such as `ALLOW`, `DENY`, `APPROVAL_REQUIRED`, and `RETRYABLE_ERROR` over `True`/`False`.
 - Exceptions are reserved for programmer/configuration failures; expected policy outcomes are data.
 - No hidden network calls, credential acquisition, retries, or approval prompts in constructors.
-- Async and sync APIs have equivalent semantics and documented cancellation behavior.
+- Async and sync APIs must have equivalent semantics and documented cancellation behavior when they are introduced; the current core is synchronous only.
 - Every public method documents inputs, outputs, side effects, failure modes, security assumptions, and an example.
 - Configuration must be inspectable and serializable without exposing secrets.
 - Breaking changes require a migration note and a versioning decision.

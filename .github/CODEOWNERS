@@ -1,0 +1,3 @@
+# Security-sensitive source, policy, credential, and audit changes require
+# review from the repository maintainer.
+*\t@tommycharade

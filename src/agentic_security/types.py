@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from .errors import SecurityConfigurationError
+
 
 class RiskLevel(StrEnum):
     """Impact classification used to select policy and approval controls."""
@@ -15,6 +17,15 @@ class RiskLevel(StrEnum):
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
+
+
+class ExecutionStatus(StrEnum):
+    """Structured outcome values returned by the guarded runtime."""
+
+    EXECUTED = "executed"
+    DENIED = "denied"
+    APPROVAL_REQUIRED = "approval_required"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +41,20 @@ class Principal:
     kind: str = "user"
     tenant: str | None = None
 
+    def __post_init__(self) -> None:
+        """Reject incomplete authenticated identity supplied by the host."""
+        if (
+            not isinstance(self.id, str)
+            or not self.id.strip()
+            or not isinstance(self.kind, str)
+            or not self.kind.strip()
+        ):
+            raise SecurityConfigurationError("principal id and kind are required")
+        if self.tenant is not None and (
+            not isinstance(self.tenant, str) or not self.tenant.strip()
+        ):
+            raise SecurityConfigurationError("principal tenant cannot be empty")
+
 
 @dataclass(frozen=True, slots=True)
 class Resource:
@@ -38,6 +63,20 @@ class Resource:
     id: str
     kind: str
     tenant: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject resources that cannot be unambiguously authorized."""
+        if (
+            not isinstance(self.id, str)
+            or not self.id.strip()
+            or not isinstance(self.kind, str)
+            or not self.kind.strip()
+        ):
+            raise SecurityConfigurationError("resource id and kind are required")
+        if self.tenant is not None and (
+            not isinstance(self.tenant, str) or not self.tenant.strip()
+        ):
+            raise SecurityConfigurationError("resource tenant cannot be empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +98,22 @@ class ExecutionContext:
     # it is never populated from an untrusted action proposal.
     credential: Any = field(default=None, repr=False, compare=False)
 
+    def __post_init__(self) -> None:
+        """Reject incomplete host-owned context before it reaches policy."""
+        if (
+            not isinstance(self.agent_id, str)
+            or not self.agent_id.strip()
+            or not isinstance(self.task_id, str)
+            or not self.task_id.strip()
+            or not isinstance(self.purpose, str)
+            or not self.purpose.strip()
+        ):
+            raise SecurityConfigurationError("agent id, task id, and purpose are required")
+        if self.tenant is not None and (
+            not isinstance(self.tenant, str) or not self.tenant.strip()
+        ):
+            raise SecurityConfigurationError("task tenant cannot be empty")
+
 
 @dataclass(frozen=True, slots=True)
 class ActionProposal:
@@ -74,7 +129,7 @@ class ActionProposal:
 class ExecutionResult:
     """Structured outcome of an attempted action."""
 
-    status: str
+    status: ExecutionStatus
     tool_name: str
     request_id: str
     reason: str | None = None

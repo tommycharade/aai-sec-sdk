@@ -77,6 +77,8 @@ def test_runtime_mints_scoped_credential_only_after_authorization() -> None:
     assert seen[0].valid_for("read_record", (Resource("record:1", "record", "tenant:a"),))
     assert seen[0].secret not in repr(seen[0])
     assert seen[0].secret not in str(audit.events())
+    assert broker.issued()[0].credential_id == seen[0].credential_id
+    assert not hasattr(broker.issued()[0], "secret")
 
 
 def test_missing_broker_fails_closed_without_handler() -> None:

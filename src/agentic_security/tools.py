@@ -47,6 +47,10 @@ class ToolDefinition:
             raise SecurityConfigurationError(
                 f"high-impact tool {self.name!r} must require approval"
             )
+        if self.external_egress and not self.requires_approval:
+            raise SecurityConfigurationError(
+                f"external-egress tool {self.name!r} must require approval"
+            )
         if self.requires_credential and self.credential_ttl_seconds <= 0:
             raise SecurityConfigurationError(
                 f"credential TTL for tool {self.name!r} must be positive"
@@ -68,6 +72,8 @@ class ToolRegistry:
 
     def get(self, name: str) -> ToolDefinition | None:
         """Return a registered tool, or ``None`` for an unknown proposal."""
+        if not isinstance(name, str):
+            return None
         return self._tools.get(name)
 
     def names(self) -> frozenset[str]:

@@ -69,10 +69,10 @@ class AllowListPolicy:
             and context.principal.id not in self._allowed_principals
         ):
             return PolicyResult(PolicyDecision.DENY, "principal is not allowed for this task")
-        if context.tenant is not None and context.principal.tenant not in {None, context.tenant}:
+        if context.tenant is not None and context.principal.tenant != context.tenant:
             return PolicyResult(PolicyDecision.DENY, "principal tenant does not match task tenant")
         if context.tenant is not None and any(
-            resource.tenant not in {None, context.tenant} for resource in resources
+            resource.tenant != context.tenant for resource in resources
         ):
             return PolicyResult(PolicyDecision.DENY, "resource is outside the task tenant")
         if tool.requires_approval:

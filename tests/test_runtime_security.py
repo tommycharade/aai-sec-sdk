@@ -19,6 +19,7 @@ from agentic_security import (
     RiskLevel,
     ToolDefinition,
     ToolRegistry,
+    action_hash,
 )
 from agentic_security.budgets import Budget, BudgetState
 from agentic_security.errors import DuplicateToolError, SecurityConfigurationError
@@ -109,6 +110,21 @@ def test_unknown_tool_is_denied_without_side_effect() -> None:
     assert audit.events()[0].event_type == "action_denied"
 
 
+def test_malformed_tool_and_arguments_fail_closed_without_audit_crash() -> None:
+    runtime, audit = make_runtime()
+
+    malformed_tool = runtime.execute(ActionProposal([], {}, "proposal:bad-tool"))  # type: ignore[arg-type]
+    malformed_arguments = runtime.execute(
+        ActionProposal("read_record", "not-a-mapping", "proposal:bad-args")  # type: ignore[arg-type]
+    )
+
+    assert malformed_tool.status == "denied"
+    assert malformed_tool.reason == "malformed tool"
+    assert malformed_arguments.status == "denied"
+    assert malformed_arguments.reason == "invalid tool arguments"
+    assert audit.verify()
+
+
 def test_invalid_arguments_are_denied_before_policy_and_handler() -> None:
     calls: list[dict[str, Any]] = []
     runtime, audit = make_runtime(calls=calls)
@@ -160,6 +176,39 @@ def test_default_policy_denies_cross_tenant_resource() -> None:
     assert result.reason == "resource is outside the task tenant"
 
 
+def test_tenant_context_rejects_missing_tenant_metadata() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="unscoped_lookup",
+            handler=lambda *_: {"unexpected": True},
+            validator=validator,
+            resources=lambda _: (Resource("record:unscoped", "record"),),
+            description="Synthetic unscoped lookup.",
+        )
+    )
+    missing_principal_tenant = ExecutionContext(
+        agent_id="agent:test",
+        principal=Principal("user:alice"),
+        task_id="task:1",
+        purpose="test",
+        tenant="tenant:a",
+    )
+    runtime = GuardedRuntime(
+        missing_principal_tenant,
+        registry,
+        AllowListPolicy({"unscoped_lookup"}),
+        InMemoryAuditSink(),
+    )
+
+    result = runtime.execute(
+        ActionProposal("unscoped_lookup", {"value": "safe"}, "proposal:unscoped")
+    )
+
+    assert result.status == "denied"
+    assert result.reason == "principal tenant does not match task tenant"
+
+
 def test_high_impact_tool_requires_approval_at_configuration_time() -> None:
     with pytest.raises(SecurityConfigurationError):
         ToolDefinition(
@@ -171,6 +220,13 @@ def test_high_impact_tool_requires_approval_at_configuration_time() -> None:
         )
 
 
+def test_incomplete_host_identity_is_rejected() -> None:
+    with pytest.raises(SecurityConfigurationError):
+        Principal("")
+    with pytest.raises(SecurityConfigurationError):
+        ExecutionContext("", Principal("user:test"), "task:1", "test")
+
+
 def test_approval_is_scoped_single_use_and_not_replayable() -> None:
     approvals = InMemoryApprovalProvider()
     runtime, _ = make_runtime(
@@ -178,7 +234,19 @@ def test_approval_is_scoped_single_use_and_not_replayable() -> None:
         requires_approval=True,
         approvals=approvals,
     )
-    grant = approvals.issue("approval:1", context(), "read_record", "proposal:1", "approver:1")
+    grant = approvals.issue(
+        "approval:1",
+        context(),
+        "read_record",
+        "proposal:1",
+        "approver:1",
+        action_hash(
+            context(),
+            "read_record",
+            {"value": "safe"},
+            (Resource("record:1", "record", "tenant:a"),),
+        ),
+    )
 
     first = runtime.execute(
         ActionProposal("read_record", {"value": "safe"}, "proposal:1", grant.approval_id)
@@ -192,11 +260,49 @@ def test_approval_is_scoped_single_use_and_not_replayable() -> None:
     assert "approval" in (replay.reason or "")
 
 
+def test_approval_is_bound_to_validated_arguments() -> None:
+    approvals = InMemoryApprovalProvider()
+    runtime, _ = make_runtime(risk=RiskLevel.HIGH, requires_approval=True, approvals=approvals)
+    grant = approvals.issue(
+        "approval:bound",
+        context(),
+        "read_record",
+        "proposal:bound",
+        "approver:1",
+        action_hash(
+            context(),
+            "read_record",
+            {"value": "safe"},
+            (Resource("record:1", "record", "tenant:a"),),
+        ),
+    )
+
+    result = runtime.execute(
+        ActionProposal("read_record", {"value": "changed"}, "proposal:bound", grant.approval_id)
+    )
+
+    assert result.status == "denied"
+    assert "approval" in (result.reason or "")
+
+
 def test_expired_approval_is_denied() -> None:
     now = [datetime.now(UTC)]
     approvals = InMemoryApprovalProvider(lambda: now[0])
     runtime, _ = make_runtime(risk=RiskLevel.HIGH, requires_approval=True, approvals=approvals)
-    grant = approvals.issue("approval:2", context(), "read_record", "proposal:1", "approver:1", 1)
+    grant = approvals.issue(
+        "approval:2",
+        context(),
+        "read_record",
+        "proposal:1",
+        "approver:1",
+        action_hash(
+            context(),
+            "read_record",
+            {"value": "safe"},
+            (Resource("record:1", "record", "tenant:a"),),
+        ),
+        1,
+    )
     now[0] += timedelta(seconds=2)
 
     result = runtime.execute(
@@ -251,6 +357,37 @@ def test_idempotency_prevents_concurrent_duplicate_side_effects() -> None:
     assert len(calls) == 1
 
 
+def test_idempotency_key_includes_tool_and_arguments() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="first_action",
+            handler=lambda *_: {"tool": "first"},
+            validator=validator,
+            idempotency_required=True,
+            description="First synthetic action.",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="second_action",
+            handler=lambda *_: {"tool": "second"},
+            validator=validator,
+            idempotency_required=True,
+            description="Second synthetic action.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(), registry, AllowListPolicy({"first_action", "second_action"}), InMemoryAuditSink()
+    )
+
+    first = runtime.execute(ActionProposal("first_action", {"value": "safe"}, "proposal:same"))
+    second = runtime.execute(ActionProposal("second_action", {"value": "safe"}, "proposal:same"))
+
+    assert first.output == {"tool": "first"}
+    assert second.output == {"tool": "second"}
+
+
 def test_stop_switch_denies_future_actions() -> None:
     calls: list[dict[str, Any]] = []
     runtime, _ = make_runtime(calls=calls)
@@ -292,6 +429,17 @@ def test_registry_rejects_duplicate_tool_names() -> None:
 
     with pytest.raises(DuplicateToolError):
         registry.register(tool)
+
+
+def test_external_egress_requires_approval() -> None:
+    with pytest.raises(SecurityConfigurationError):
+        ToolDefinition(
+            name="send_data",
+            handler=lambda *_: None,
+            validator=validator,
+            external_egress=True,
+            description="Synthetic external send.",
+        )
 
 
 def test_budget_state_rejects_concurrent_over_allocation() -> None:

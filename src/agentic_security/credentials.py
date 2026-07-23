@@ -46,10 +46,22 @@ class ScopedCredential:
         """Return whether this credential is live and exactly scope-matched."""
         current = now or datetime.now(UTC)
         return (
-            current < self.expires_at
+            self.issued_at <= current
+            and current < self.expires_at
             and tool_name == self.tool_name
             and resources == self.resources
         )
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialMetadata:
+    """Non-secret record describing a credential issued during a test run."""
+
+    credential_id: str
+    tool_name: str
+    resources: tuple[Resource, ...]
+    issued_at: datetime
+    expires_at: datetime
 
 
 class CredentialBroker(Protocol):
@@ -73,6 +85,7 @@ class InMemoryCredentialBroker:
         """Create a broker with an injectable clock for deterministic tests."""
         self._now = now or (lambda: datetime.now(UTC))
         self._issued: list[ScopedCredential] = []
+        self._sequence = 0
         self._lock = Lock()
 
     def mint(
@@ -87,7 +100,8 @@ class InMemoryCredentialBroker:
             raise ValueError("credential TTL must be positive")
         issued_at = self._now()
         with self._lock:
-            sequence = len(self._issued) + 1
+            self._sequence += 1
+            sequence = self._sequence
         credential = ScopedCredential(
             credential_id=f"cred:{context.task_id}:{sequence}",
             tool_name=tool.name,
@@ -100,7 +114,16 @@ class InMemoryCredentialBroker:
             self._issued.append(credential)
         return credential
 
-    def issued(self) -> tuple[ScopedCredential, ...]:
-        """Return issued credential metadata for tests, excluding secret values."""
+    def issued(self) -> tuple[CredentialMetadata, ...]:
+        """Return issued credential metadata without exposing any secret."""
         with self._lock:
-            return tuple(self._issued)
+            return tuple(
+                CredentialMetadata(
+                    credential.credential_id,
+                    credential.tool_name,
+                    credential.resources,
+                    credential.issued_at,
+                    credential.expires_at,
+                )
+                for credential in self._issued
+            )

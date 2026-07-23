@@ -19,7 +19,7 @@ No side effect or privileged credential mint may happen before applicable checks
 
 ## Current runtime scope
 
-The first runtime release provides the framework-neutral core: explicit tool
+The current pre-release provides the framework-neutral core: explicit tool
 registration, deterministic argument validation, deny-by-default local policy,
 tenant/resource checks, scoped in-memory approvals for development and tests,
 budgets, emergency stop, idempotency, and redaction-aware hash-chain audit
@@ -28,6 +28,12 @@ provide the first credential integration surface. Production deployments should
 implement that contract with an audience- and resource-bound provider; external
 policy engines, sandboxes, OpenTelemetry exporters, and MCP gateways remain
 separate adapters without weakening the core execution invariant.
+
+The current runtime does not provide handler timeouts, cancellation of already
+running handlers, rate limits, fan-out limits, cost budgets, durable audit
+storage, or a network client for OPA/Cedar. The injected OPA/Cedar evaluators
+are decision-shape adapters, not full policy-server integrations. These are
+deployment and roadmap concerns, not guarantees of the current package.
 
 The first telemetry adapter is `OpenTelemetryAuditSink`. It wraps an
 authoritative audit sink and emits one span per redacted security event.

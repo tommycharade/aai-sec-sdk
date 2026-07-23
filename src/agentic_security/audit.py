@@ -5,19 +5,33 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Protocol
 
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
-_SECRET_KEYS = {"password", "secret", "token", "api_key", "authorization"}
+_SECRET_KEYS = {
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "private_key",
+    "cookie",
+    "session",
+    "bearer_token",
+    "authorization",
+    "authorization_header",
+}
 
 
 def redact(value: Any) -> Any:
     """Return a JSON-shaped copy with common secrets and email addresses masked."""
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {
             str(key): "[REDACTED]" if str(key).lower() in _SECRET_KEYS else redact(item)
             for key, item in value.items()
@@ -26,7 +40,11 @@ def redact(value: Any) -> Any:
         return [redact(item) for item in value]
     if isinstance(value, str):
         return _EMAIL.sub("[EMAIL]", value)
-    return value
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    # Audit must remain JSON-serializable even when an untrusted proposal
+    # contains bytes, custom objects, or another non-JSON value.
+    return f"[UNSERIALIZABLE:{type(value).__name__}]"
 
 
 @dataclass(frozen=True, slots=True)

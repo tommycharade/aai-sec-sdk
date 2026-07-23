@@ -42,5 +42,8 @@ application should replace the store, approval provider, policy engine, and
 credential broker with authenticated adapters while preserving the same
 runtime boundary and tests.
 
+`stop()` prevents actions that have not started; it is not a cancellation or
+timeout mechanism for a handler already in progress.
+
 The example’s security-path tests are in
 `tests/test_support_agent.py` and are executed by `make check`.
