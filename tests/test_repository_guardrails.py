@@ -31,3 +31,11 @@ def test_license_policy_is_explicit() -> None:
     assert "Apache License" in license_text
     assert "Creative Commons Attribution 4.0" in docs_text
     assert "commercial" in docs_text.lower()
+
+
+def test_generated_readme_links_resolve_from_repository_root() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "](docs/getting-started.md)" in readme
+    assert "](docs/end-to-end-example.md)" in readme
+    assert "](SDK-assessment.md)" in readme
+    assert "](../SDK-assessment.md)" not in readme

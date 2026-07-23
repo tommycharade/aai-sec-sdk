@@ -7,6 +7,7 @@ documentation from diverging. The generated marker is also checked in CI.
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +18,26 @@ MARKER = "<!-- THIS FILE IS GENERATED. Edit docs/README.md and run `make docs`. 
 
 def generated_text() -> str:
     """Return the root README content with its generated-file marker."""
-    return f"{MARKER}\n\n{SOURCE.read_text(encoding='utf-8')}"
+    source = SOURCE.read_text(encoding="utf-8")
+    # The source page is rendered inside MkDocs at ``docs/README.md`` but the
+    # generated copy is rendered by GitHub at the repository root. Translate
+    # local Markdown targets so both locations resolve to real files.
+    source = re.sub(r"\]\((?!https?://|mailto:|#)([^)]+)\)", _root_link, source)
+    return f"{MARKER}\n\n{source}"
+
+
+def _root_link(match: re.Match[str]) -> str:
+    """Translate one relative documentation link for the root README."""
+    target = match.group(1)
+    suffix = ""
+    if "#" in target:
+        target, anchor = target.split("#", 1)
+        suffix = f"#{anchor}"
+    if target.startswith("../"):
+        target = target[3:]
+    elif not target.startswith("docs/"):
+        target = f"docs/{target}"
+    return f"]({target}{suffix})"
 
 
 def main() -> int:
