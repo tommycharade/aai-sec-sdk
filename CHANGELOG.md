@@ -23,6 +23,9 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 - Fixed concurrent JSONL audit writers to refresh the hash chain under the
   interprocess lock, bounded subprocess stdin writes by the execution timeout,
   and made timed-out-worker capacity admission atomic.
+- Kept reconciliation results explicitly uncertain while a timed-out worker is
+  still live, and made worker-capacity rejection fail closed without leaking
+  action budget or concurrency slots.
 - Hardened action authorization by binding approvals to exact validated action
   hashes, scoping idempotency keys to the tool and action, rejecting malformed
   proposals safely, requiring complete tenant metadata, and enforcing approval

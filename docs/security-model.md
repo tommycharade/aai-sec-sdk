@@ -65,11 +65,13 @@ The runtime timeout bounds policy evaluation, credential minting, audit
 persistence, and handler invocation. A timeout in policy or credential minting
 denies without running the handler. A handler timeout returns `TIMED_OUT` and
 the runtime retains the concurrency slot until the worker exits. The side
-effect remains uncertain, so callers must reconcile before retrying. High-impact
+effect remains uncertain, so callers must reconcile before retrying. A
+reconciliation callback is evidence only while the original worker may still
+commit; it cannot make the immediate result final. High-impact
 and external-egress tools must be idempotent or declare a reconciliation
 callback. After a handler timeout, the runtime invokes that callback and
-returns `RECONCILED` only when it returns `True`; otherwise the result remains
-uncertain.
+returns `True`; the immediate result remains `TIMED_OUT` while the original
+worker is still live.
 
 ## Production readiness checklist
 

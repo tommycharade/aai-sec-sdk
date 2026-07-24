@@ -19,3 +19,7 @@ class RuntimeCancelledError(RuntimeError):
 
 class RuntimeOperationTimeoutError(RuntimeError):
     """Raised when a bounded policy, credential, audit, or handler call expires."""
+
+
+class WorkerCapacityError(RuntimeOperationTimeoutError):
+    """Raised when no bounded worker slot is available for a new operation."""

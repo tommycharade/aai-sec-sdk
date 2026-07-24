@@ -875,7 +875,7 @@ def test_reconciliation_runs_after_timeout_and_reports_reconciled() -> None:
     )
     release.set()
 
-    assert result.status is ExecutionStatus.RECONCILED
+    assert result.status is ExecutionStatus.TIMED_OUT
     assert reconciled == [True]
 
 

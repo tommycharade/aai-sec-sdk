@@ -21,6 +21,7 @@ from .errors import (
     RuntimeCancelledError,
     RuntimeOperationTimeoutError,
     SecurityConfigurationError,
+    WorkerCapacityError,
 )
 from .policies import PolicyDecision, PolicyEngine, PolicyResult
 from .tools import ToolRegistry
@@ -322,6 +323,8 @@ class GuardedRuntime:
                 with self._idempotency_lock:
                     self._completed[idempotency_key] = result
             return result
+        except WorkerCapacityError:
+            return self._deny(request_id, proposal, "bounded worker capacity exhausted")
         except RuntimeOperationTimeoutError:
             cancellation.cancel()
             # A non-cooperative handler may still be performing a side effect
@@ -344,11 +347,9 @@ class GuardedRuntime:
                         request_id=request_id,
                     )
                     if reconciled is True:
-                        result = replace(
-                            result,
-                            status=ExecutionStatus.RECONCILED,
-                            reason="uncertain side effect was reconciled",
-                        )
+                        # The original timed-out worker may still commit after
+                        # this callback returns. Keep the result uncertain.
+                        del reconciled
                 except Exception as exc:
                     self._record(
                         "reconciliation_failed",
@@ -439,7 +440,7 @@ class GuardedRuntime:
             # thread, so admission must reserve capacity before a race can
             # create more lingering workers than the configured maximum.
             if self._bounded_workers >= self.config.max_timed_out_workers:
-                raise RuntimeOperationTimeoutError("timed-out worker limit reached")
+                raise WorkerCapacityError("bounded worker capacity exhausted")
             self._bounded_workers += 1
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agentic-security")
         future = executor.submit(operation)
