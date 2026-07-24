@@ -67,11 +67,36 @@ denies without running the handler. A handler timeout returns `TIMED_OUT` and
 the runtime retains the concurrency slot until the worker exits. The side
 effect remains uncertain, so callers must reconcile before retrying. A
 reconciliation callback is evidence only while the original worker may still
-commit; it cannot make the immediate result final. High-impact
-and external-egress tools must be idempotent or declare a reconciliation
-callback. After a handler timeout, the runtime invokes that callback and
-returns `True`; the immediate result remains `TIMED_OUT` while the original
-worker is still live.
+commit; it cannot make the immediate result final. High-impact and
+external-egress tools must be idempotent or declare a reconciliation
+callback. `ExecutionResult.reconciliation_state` is separate evidence: a
+callback cannot claim `CONFIRMED_COMPLETE` or `CONFIRMED_ABSENT` while the
+original worker remains capable of committing, and the runtime reports
+`STILL_RUNNING` instead. Callers must reconcile before retrying an uncertain
+operation.
+
+## Idempotency and restart safety
+
+Idempotent tools require a stable caller-supplied `ActionProposal.operation_key`.
+The key is atomically bound to the exact action fingerprint, tenant, principal,
+tool, and resource IDs. A changed action under an existing key is denied. An
+`IdempotencyStore` implementation must provide atomic claims and persist
+completed/uncertain states; `InMemoryIdempotencyStore` is only a process-local
+reference implementation. Without a configured store, the runtime fails
+closed. If terminal persistence fails after execution, the runtime returns
+`EXECUTED_UNRECORDED` rather than claiming a durable success. The SDK does not
+claim restart or multi-process safety for local memory.
+
+## Isolation attestation
+
+`requires_isolation=True` does not accept a handler boolean or trust a Python
+attribute. The handler must provide a nonce-bound `IsolationAttestation`, and a
+configured trusted `IsolationVerifier` must validate its issuer, workload,
+profile, expiry, action binding, and capabilities. The verifier is the adapter
+boundary for containers, microVMs, WASM runtimes, or platform attestation.
+`SubprocessToolHandler` intentionally makes no isolation claim: it is a
+no-shell process boundary and must be deployed inside a real sandbox when
+handling hostile code.
 
 ## Production readiness checklist
 
@@ -83,6 +108,9 @@ worker is still live.
 - Export local audit events to encrypted, access-controlled WORM/SIEM storage.
 - Alert on `GuardedRuntime.health()["timed_out_workers"]` before retrying
   uncertain actions.
+- Monitor the per-operation timeout counters in `GuardedRuntime.health()`;
+  policy, credential, audit, reconciliation, and handler workers all retain
+  lifecycle accounting until they exit.
 - Configure rate, fan-out, cost, delegation, and action budgets per task.
 - Run the release verification, SBOM, provenance, and compatibility checks
   described in `releasing.md` before depending on a published version.

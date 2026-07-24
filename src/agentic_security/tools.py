@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypeAlias
 
 from .errors import DuplicateToolError, SecurityConfigurationError
-from .types import ExecutionContext, Resource, RiskLevel
+from .types import ExecutionContext, ReconciliationResult, Resource, RiskLevel
 
 ArgumentValidator: TypeAlias = Callable[[Mapping[str, Any]], Any]
 """Callable that validates and normalizes untrusted tool arguments."""
@@ -18,8 +18,12 @@ ToolHandler: TypeAlias = Callable[[ExecutionContext, Any], Any]
 OutputValidator: TypeAlias = Callable[[Any], Any]
 """Callable that normalizes a handler result before it crosses the boundary."""
 
-ReconciliationHandler: TypeAlias = Callable[[ExecutionContext, Any], bool]
-"""Callable returning whether an uncertain side effect was reconciled."""
+ReconciliationHandler: TypeAlias = Callable[[ExecutionContext, Any], ReconciliationResult | bool]
+"""Callable returning typed reconciliation evidence for an uncertain action.
+
+``bool`` is accepted temporarily for source compatibility; the runtime treats
+it as ``STILL_RUNNING`` and never interprets it as final confirmation.
+"""
 
 
 @dataclass(frozen=True, slots=True)

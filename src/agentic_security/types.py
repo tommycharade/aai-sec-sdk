@@ -34,6 +34,29 @@ class ExecutionStatus(StrEnum):
     RECONCILED = "reconciled"
 
 
+class ReconciliationState(StrEnum):
+    """Independent evidence state for a timed-out side effect."""
+
+    UNKNOWN = "unknown"
+    CONFIRMED_COMPLETE = "confirmed_complete"
+    CONFIRMED_ABSENT = "confirmed_absent"
+    STILL_RUNNING = "still_running"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationResult:
+    """Typed reconciliation evidence; it is not permission to ignore a live worker."""
+
+    state: ReconciliationState
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        """Require a structured state rather than an ambiguous boolean."""
+        if not isinstance(self.reason, str):
+            raise SecurityConfigurationError("reconciliation reason must be text")
+
+
 class CancellationToken:
     """Thread-safe cooperative cancellation signal for a running handler."""
 
@@ -147,6 +170,7 @@ class ActionProposal:
     arguments: Mapping[str, Any]
     proposal_id: str
     approval_id: str | None = None
+    operation_key: str | None = None
 
     def __post_init__(self) -> None:
         """Reject malformed model-originated proposals before registry lookup."""
@@ -160,6 +184,10 @@ class ActionProposal:
             not isinstance(self.approval_id, str) or not self.approval_id.strip()
         ):
             raise SecurityConfigurationError("approval id must be a non-empty string")
+        if self.operation_key is not None and (
+            not isinstance(self.operation_key, str) or not self.operation_key.strip()
+        ):
+            raise SecurityConfigurationError("operation key must be a non-empty string")
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,3 +201,4 @@ class ExecutionResult:
     output: Any = None
     approval_id: str | None = None
     audit_recorded: bool = True
+    reconciliation_state: ReconciliationState | None = None

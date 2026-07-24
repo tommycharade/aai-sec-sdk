@@ -13,7 +13,8 @@ python examples/support_agent.py
 The application registers three tools:
 
 - `read_ticket` is an allow-listed read operation.
-- `update_ticket` is an idempotent write operation.
+- `update_ticket` is an idempotent write operation and callers provide a stable
+  `operation_key` for each business update.
 - `send_customer_email` is high impact, requires single-use approval, is
   idempotent, and receives a short-lived broker-issued credential only after
   authorization.
@@ -31,7 +32,8 @@ The output includes:
 - a cross-tenant denial before the handler runs;
 - an approval-required email attempt;
 - an approved credential-backed email;
-- an idempotent replay that does not send a second message;
+- an idempotent replay with the same operation key that does not send a second
+  message;
 - an approval replay with a different proposal that is denied;
 - an emergency-stop denial;
 - a verified hash-chain audit result.

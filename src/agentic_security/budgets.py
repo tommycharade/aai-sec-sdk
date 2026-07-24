@@ -31,7 +31,7 @@ class BudgetState:
             or budget.max_concurrent <= 0
             or budget.max_fan_out <= 0
             or budget.max_cost_units <= 0
-            or budget.max_delegation_depth <= 0
+            or budget.max_delegation_depth < 0
             or (
                 budget.max_actions_per_second is not None
                 and (

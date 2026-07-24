@@ -20,6 +20,7 @@ def _email_proposal(proposal_id: str = "proposal:test-email") -> ActionProposal:
             "body": "Synthetic update.",
         },
         proposal_id,
+        operation_key=f"operation:email:{proposal_id}",
     )
 
 
@@ -77,6 +78,7 @@ def test_support_agent_requires_approval_before_credential_backed_side_effect() 
             proposal.arguments,
             proposal.proposal_id,
             grant.approval_id,
+            proposal.operation_key,
         )
     )
 

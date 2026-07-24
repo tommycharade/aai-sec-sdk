@@ -19,9 +19,11 @@ from agentic_security import (
     InMemoryApprovalProvider,
     InMemoryAuditSink,
     InMemoryCredentialBroker,
+    InMemoryIdempotencyStore,
     Principal,
     Resource,
     RiskLevel,
+    RuntimeConfig,
     ToolDefinition,
     ToolRegistry,
     action_hash,
@@ -204,6 +206,7 @@ def build_demo_application() -> tuple[
         audit,
         approvals=approvals,
         credentials=InMemoryCredentialBroker(),
+        config=RuntimeConfig(idempotency_store=InMemoryIdempotencyStore()),
     )
     return runtime, approvals, audit, store
 
@@ -226,6 +229,7 @@ def main() -> None:
             "body": "Your synthetic ticket has been resolved.",
         },
         "proposal:email",
+        operation_key="operation:email:ticket_001",
     )
     approval_needed = runtime.execute(email_proposal)
     grant = approvals.issue(
@@ -250,6 +254,7 @@ def main() -> None:
             email_proposal.arguments,
             email_proposal.proposal_id,
             grant.approval_id,
+            email_proposal.operation_key,
         )
     )
     idempotent_replay = runtime.execute(email_proposal)
@@ -259,6 +264,7 @@ def main() -> None:
             dict(email_proposal.arguments),
             "proposal:approval-replay",
             grant.approval_id,
+            "operation:email:replay",
         )
     )
     runtime.stop()

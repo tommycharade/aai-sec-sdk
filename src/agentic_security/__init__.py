@@ -29,6 +29,19 @@ from .errors import (
     RuntimeStateError,
     SecurityConfigurationError,
 )
+from .idempotency import (
+    IdempotencyClaim,
+    IdempotencyClaimStatus,
+    IdempotencyRecord,
+    IdempotencyState,
+    IdempotencyStore,
+    InMemoryIdempotencyStore,
+)
+from .isolation import (
+    CallbackIsolationVerifier,
+    IsolationAttestation,
+    IsolationVerifier,
+)
 from .policies import AllowListPolicy, PolicyDecision, PolicyEngine, PolicyResult
 from .policy_adapters import CedarPolicyEngine, OpaPolicyEngine, PolicyRequest
 from .runtime import GuardedRuntime, RuntimeConfig
@@ -41,6 +54,8 @@ from .types import (
     ExecutionResult,
     ExecutionStatus,
     Principal,
+    ReconciliationResult,
+    ReconciliationState,
     Resource,
     RiskLevel,
 )
@@ -57,6 +72,15 @@ __all__ = [
     "CredentialBroker",
     "CredentialMetadata",
     "Budget",
+    "IdempotencyClaim",
+    "IdempotencyClaimStatus",
+    "IdempotencyRecord",
+    "IdempotencyState",
+    "IdempotencyStore",
+    "InMemoryIdempotencyStore",
+    "IsolationAttestation",
+    "IsolationVerifier",
+    "CallbackIsolationVerifier",
     "CedarPolicyEngine",
     "DuplicateToolError",
     "ExecutionContext",
@@ -81,6 +105,8 @@ __all__ = [
     "Principal",
     "Resource",
     "RiskLevel",
+    "ReconciliationResult",
+    "ReconciliationState",
     "RuntimeConfig",
     "RuntimeStateError",
     "RuntimeCancelledError",

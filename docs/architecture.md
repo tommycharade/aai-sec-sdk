@@ -37,6 +37,11 @@ rate, active fan-out, cost-unit, and delegation budgets, but not full
 OS/container sandboxing. Durable JSONL audit and
 bounded HTTP policy/approval adapters are provided, but deployments must still
 configure authenticated endpoints and operational storage controls.
+Side-effect safety is adapter-based: `IdempotencyStore` is the durable claim
+boundary and `IsolationVerifier` is the platform evidence boundary. The core
+ships process-local references for tests and development; deployments must
+provide transactional durable storage and real sandbox/attestation evidence
+for consequential or hostile workloads.
 When an evaluator returns `policy_version`/`version` or
 `provenance`/`source`, those values are retained in execution audit evidence.
 

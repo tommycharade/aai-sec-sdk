@@ -6,6 +6,23 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 
 ## Unreleased
 
+- Added explicit reconciliation states that never finalize a side effect while
+  a timed-out worker may still commit.
+- Added typed, verifier-backed isolation attestations; the legacy
+  `isolated=True` marker is no longer accepted as evidence.
+- Added stable caller operation keys and the `IdempotencyStore` protocol with a
+  process-local development implementation. Missing stores and key collisions
+  fail closed; durable restart/multi-process behavior remains an adapter
+  responsibility.
+- Unified lifecycle accounting for policy, credential, audit, reconciliation,
+  and handler workers, including per-operation health counters.
+- Allowed `Budget(max_delegation_depth=0)` to explicitly prohibit delegation.
+- Added adversarial SEC-001–SEC-005 acceptance tests and documented the
+  production boundaries around durable storage and real sandboxing.
+- Fixed pre-admission audit timeout accounting so denied actions cannot release
+  an action budget they never acquired, and report terminal idempotency-store
+  failures as `EXECUTED_UNRECORDED` instead of apparent success.
+
 - Added provider-scope-attested credentials with non-returning secret use,
   strict content-aware redaction, runtime-independent tenant/approval/isolation
   invariants, automatic reconciliation outcomes, and tracked timed-out-worker

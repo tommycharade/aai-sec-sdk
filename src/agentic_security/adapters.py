@@ -85,7 +85,6 @@ class SubprocessToolHandler:
     timeout_seconds: float = 10.0
     max_output_bytes: int = 1_000_000
     environment: Mapping[str, str] = field(default_factory=dict)
-    isolated: bool = field(default=True, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Reject shell-like or unbounded subprocess configurations."""

@@ -17,6 +17,7 @@ from agentic_security import (
     GuardedRuntime,
     InMemoryApprovalProvider,
     InMemoryAuditSink,
+    InMemoryIdempotencyStore,
     Principal,
     Resource,
     RiskLevel,
@@ -86,13 +87,20 @@ def make_runtime(
         policy or AllowListPolicy({tool_name}),
         audit,
         approvals,
-        config=None if budget is None else RuntimeConfig(budget),
+        config=RuntimeConfig(
+            budget or Budget(),
+            idempotency_store=InMemoryIdempotencyStore(),
+        ),
     )
     return runtime, audit
 
 
-def proposal(value: str = "safe", **kwargs: Any) -> ActionProposal:
-    return ActionProposal("read_record", {"value": value, **kwargs}, "proposal:1")
+def proposal(
+    value: str = "safe", operation_key: str | None = None, **kwargs: Any
+) -> ActionProposal:
+    return ActionProposal(
+        "read_record", {"value": value, **kwargs}, "proposal:1", operation_key=operation_key
+    )
 
 
 def test_allowed_action_executes_with_application_principal() -> None:
@@ -681,8 +689,8 @@ def test_idempotency_returns_original_result_without_second_side_effect() -> Non
     calls: list[dict[str, Any]] = []
     runtime, _ = make_runtime(idempotency_required=True, calls=calls)
 
-    first = runtime.execute(proposal())
-    second = runtime.execute(proposal())
+    first = runtime.execute(proposal(operation_key="operation:read:1"))
+    second = runtime.execute(proposal(operation_key="operation:read:1"))
 
     assert first == second
     assert len(calls) == 1
@@ -711,9 +719,17 @@ def test_idempotency_prevents_concurrent_duplicate_side_effects() -> None:
         registry,
         AllowListPolicy({"idempotent_action"}),
         InMemoryAuditSink(),
-        config=RuntimeConfig(Budget(max_actions=2, max_concurrent=2)),
+        config=RuntimeConfig(
+            Budget(max_actions=2, max_concurrent=2),
+            idempotency_store=InMemoryIdempotencyStore(),
+        ),
     )
-    action = ActionProposal("idempotent_action", {"value": "safe"}, "proposal:concurrent")
+    action = ActionProposal(
+        "idempotent_action",
+        {"value": "safe"},
+        "proposal:concurrent",
+        operation_key="operation:concurrent",
+    )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(runtime.execute, [action, action]))
@@ -743,14 +759,27 @@ def test_idempotency_key_includes_tool_and_arguments() -> None:
         )
     )
     runtime = GuardedRuntime(
-        context(), registry, AllowListPolicy({"first_action", "second_action"}), InMemoryAuditSink()
+        context(),
+        registry,
+        AllowListPolicy({"first_action", "second_action"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(idempotency_store=InMemoryIdempotencyStore()),
     )
 
-    first = runtime.execute(ActionProposal("first_action", {"value": "safe"}, "proposal:same"))
-    second = runtime.execute(ActionProposal("second_action", {"value": "safe"}, "proposal:same"))
+    first = runtime.execute(
+        ActionProposal(
+            "first_action", {"value": "safe"}, "proposal:same", operation_key="operation:same"
+        )
+    )
+    second = runtime.execute(
+        ActionProposal(
+            "second_action", {"value": "safe"}, "proposal:same", operation_key="operation:same"
+        )
+    )
 
     assert first.output == {"tool": "first"}
-    assert second.output == {"tool": "second"}
+    assert second.status is ExecutionStatus.DENIED
+    assert "conflicts" in (second.reason or "")
 
 
 def test_stop_switch_denies_future_actions() -> None:
@@ -899,7 +928,7 @@ def test_isolation_requirement_rejects_in_process_handler() -> None:
     )
 
     assert result.status is ExecutionStatus.DENIED
-    assert result.reason == "tool requires an isolated handler"
+    assert result.reason == "tool requires a verifier-backed isolation attestation"
 
 
 def test_runtime_reports_timed_out_worker_health_until_release() -> None:

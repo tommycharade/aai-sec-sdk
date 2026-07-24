@@ -1,0 +1,503 @@
+"""Adversarial acceptance tests for SEC-001 through SEC-005."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from threading import Barrier, Event, Thread
+from time import sleep
+from typing import Any
+
+from agentic_security import (
+    ActionProposal,
+    AllowListPolicy,
+    CallbackIsolationVerifier,
+    ExecutionContext,
+    ExecutionStatus,
+    GuardedRuntime,
+    IdempotencyState,
+    InMemoryAuditSink,
+    InMemoryIdempotencyStore,
+    IsolationAttestation,
+    Principal,
+    ReconciliationResult,
+    ReconciliationState,
+    Resource,
+    RuntimeConfig,
+    ToolDefinition,
+    ToolRegistry,
+)
+from agentic_security.budgets import Budget, BudgetState
+from agentic_security.idempotency import IdempotencyClaimStatus, new_record
+from agentic_security.isolation import validate_attestation
+from agentic_security.policies import PolicyDecision, PolicyResult
+
+
+def _context() -> ExecutionContext:
+    return ExecutionContext(
+        "agent:test",
+        Principal("user:test", tenant="tenant:test"),
+        "task:test",
+        "test",
+        tenant="tenant:test",
+    )
+
+
+def _tool(name: str, handler: Any, **kwargs: Any) -> ToolDefinition:
+    return ToolDefinition(
+        name,
+        handler,
+        lambda arguments: dict(arguments),
+        resources=lambda _: (Resource("resource:test", "record", "tenant:test"),),
+        description="Synthetic backlog acceptance tool.",
+        **kwargs,
+    )
+
+
+def test_reconciliation_cannot_finalize_a_live_timed_out_worker() -> None:
+    release = Event()
+
+    def handler(_context: ExecutionContext, _arguments: Any) -> dict[str, bool]:
+        release.wait(1)
+        return {"complete": True}
+
+    registry = ToolRegistry()
+    registry.register(
+        _tool(
+            "uncertain",
+            handler,
+            reconciliation=lambda *_: ReconciliationResult(
+                ReconciliationState.CONFIRMED_COMPLETE, "remote lookup says complete"
+            ),
+        )
+    )
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"uncertain"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(execution_timeout_seconds=0.005),
+    )
+
+    result = runtime.execute(ActionProposal("uncertain", {}, "proposal:1"))
+    release.set()
+
+    assert result.status is ExecutionStatus.TIMED_OUT
+    assert result.reconciliation_state is ReconciliationState.STILL_RUNNING
+
+
+def test_isolation_requires_verifier_bound_attestation_not_a_boolean_marker() -> None:
+    class ClaimedWorker:
+        def __call__(self, _context: ExecutionContext, _arguments: Any) -> dict[str, bool]:
+            return {"ok": True}
+
+        def get_isolation_attestation(
+            self,
+            context: ExecutionContext,
+            tool_name: str,
+            _resources: tuple[Resource, ...],
+            nonce: str,
+        ) -> IsolationAttestation:
+            return IsolationAttestation(
+                "test-provider",
+                "workload:test",
+                "profile:restricted",
+                datetime.now(UTC) + timedelta(minutes=1),
+                nonce,
+                tool_name,
+                context.tenant or "",
+                {"network": False, "filesystem": False},
+            )
+
+    registry = ToolRegistry()
+    registry.register(_tool("isolated", ClaimedWorker(), requires_isolation=True))
+    verifier = CallbackIsolationVerifier(
+        lambda attestation, *_: attestation.profile == "profile:restricted"
+    )
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"isolated"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(isolation_verifier=verifier),
+    )
+
+    assert (
+        runtime.execute(ActionProposal("isolated", {}, "proposal:1")).status
+        is ExecutionStatus.EXECUTED
+    )
+
+    forged = GuardedRuntime(
+        _context(),
+        ToolRegistry(),
+        AllowListPolicy(set()),
+        InMemoryAuditSink(),
+    )
+    assert (
+        forged.execute(ActionProposal("isolated", {}, "proposal:2")).status
+        is ExecutionStatus.DENIED
+    )
+
+
+def test_idempotency_is_stable_across_proposals_and_rejects_collisions() -> None:
+    store = InMemoryIdempotencyStore()
+    calls: list[int] = []
+
+    def write(_context: ExecutionContext, arguments: Any) -> dict[str, bool]:
+        calls.append(arguments["value"])
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registry.register(
+        _tool(
+            "write",
+            write,
+            idempotency_required=True,
+        )
+    )
+    config = RuntimeConfig(idempotency_store=store)
+    first_runtime = GuardedRuntime(
+        _context(), registry, AllowListPolicy({"write"}), InMemoryAuditSink(), config=config
+    )
+    first = first_runtime.execute(
+        ActionProposal("write", {"value": 1}, "proposal:first", operation_key="op:1")
+    )
+    second_runtime = GuardedRuntime(
+        _context(), registry, AllowListPolicy({"write"}), InMemoryAuditSink(), config=config
+    )
+    replay = second_runtime.execute(
+        ActionProposal("write", {"value": 1}, "proposal:new", operation_key="op:1")
+    )
+    collision = second_runtime.execute(
+        ActionProposal("write", {"value": 2}, "proposal:changed", operation_key="op:1")
+    )
+
+    assert first.status is ExecutionStatus.EXECUTED
+    assert replay == first
+    assert collision.status is ExecutionStatus.DENIED
+    assert calls == [1]
+    assert store.lookup("op:1") is not None
+    assert store.lookup("op:1").state is IdempotencyState.COMPLETED  # type: ignore[union-attr]
+
+
+def test_missing_idempotency_store_fails_closed() -> None:
+    registry = ToolRegistry()
+    registry.register(_tool("write", lambda *_: {"ok": True}, idempotency_required=True))
+    runtime = GuardedRuntime(_context(), registry, AllowListPolicy({"write"}), InMemoryAuditSink())
+
+    result = runtime.execute(
+        ActionProposal("write", {}, "proposal:1", operation_key="op:missing-store")
+    )
+
+    assert result.status is ExecutionStatus.DENIED
+    assert "store" in (result.reason or "")
+
+
+def test_policy_timeout_retains_action_capacity_until_worker_exit() -> None:
+    release = Event()
+
+    class SlowPolicy:
+        def decide(self, *_: Any) -> PolicyResult:
+            release.wait(1)
+            return PolicyResult(PolicyDecision.ALLOW, "late")
+
+    registry = ToolRegistry()
+    registry.register(_tool("read", lambda *_: {"ok": True}))
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        SlowPolicy(),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(
+            Budget(max_concurrent=1), execution_timeout_seconds=0.005, max_timed_out_workers=4
+        ),
+    )
+
+    timed_out = runtime.execute(ActionProposal("read", {}, "proposal:1"))
+    blocked = runtime.execute(ActionProposal("read", {}, "proposal:2"))
+    release.set()
+
+    assert timed_out.status is ExecutionStatus.DENIED
+    assert "timed out" in (timed_out.reason or "")
+    assert blocked.status is ExecutionStatus.DENIED
+
+
+def test_zero_delegation_budget_is_valid_and_denies_delegating_tools() -> None:
+    state = BudgetState(Budget(max_delegation_depth=0))
+    assert state.budget.max_delegation_depth == 0
+
+    registry = ToolRegistry()
+    registry.register(_tool("delegated", lambda *_: {"ok": True}, delegation_depth=1))
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"delegated"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(Budget(max_delegation_depth=0)),
+    )
+    result = runtime.execute(ActionProposal("delegated", {}, "proposal:1"))
+
+    assert result.status is ExecutionStatus.DENIED
+    assert "delegation" in (result.reason or "")
+
+
+def test_idempotency_store_claim_update_and_invalid_inputs_fail_closed() -> None:
+    store = InMemoryIdempotencyStore()
+    record = new_record(
+        operation_key="op:store",
+        action_fingerprint="fingerprint",
+        tenant="tenant:test",
+        principal_id="user:test",
+        tool_name="write",
+        resource_ids=("resource:test",),
+        ttl_seconds=30,
+    )
+    claimed = store.claim(record)
+    assert claimed.status is IdempotencyClaimStatus.CLAIMED
+    assert store.claim(record).status is IdempotencyClaimStatus.EXISTING
+    conflict = store.claim(
+        new_record(
+            operation_key="op:store",
+            action_fingerprint="different",
+            tenant="tenant:test",
+            principal_id="user:test",
+            tool_name="write",
+            resource_ids=("resource:test",),
+        )
+    )
+    assert conflict.status is IdempotencyClaimStatus.CONFLICT
+    assert store.complete("op:store", {"done": True}).state is IdempotencyState.COMPLETED
+    assert store.mark_uncertain("op:store", {"unknown": True}).state is IdempotencyState.UNCERTAIN
+
+    try:
+        store.claim(
+            new_record(
+                operation_key=" ",
+                action_fingerprint="fingerprint",
+                tenant="tenant:test",
+                principal_id="user:test",
+                tool_name="write",
+                resource_ids=(),
+            )
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("blank operation keys must fail closed")
+
+    try:
+        store.complete("op:unknown", {"bad": True})
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("unknown operation keys must not be created by completion")
+
+
+def test_isolation_attestation_rejects_expiry_and_verifier_errors() -> None:
+    context = _context()
+    resource = (Resource("resource:test", "record", "tenant:test"),)
+    expired = IsolationAttestation(
+        "provider",
+        "workload",
+        "profile",
+        datetime.now(UTC) + timedelta(seconds=1),
+        "nonce",
+        "tool",
+        "tenant:test",
+        {},
+    )
+    assert validate_attestation(expired, context, "tool", resource, "wrong-nonce") is False
+    assert (
+        CallbackIsolationVerifier(lambda *_: (_ for _ in ()).throw(RuntimeError())).verify(
+            expired, context, "tool", resource, "nonce"
+        )
+        is False
+    )
+
+    try:
+        IsolationAttestation(
+            "",
+            "workload",
+            "profile",
+            datetime.now(UTC) + timedelta(minutes=1),
+            "nonce",
+            "tool",
+            "tenant:test",
+            {},
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("incomplete attestations must fail closed")
+
+    try:
+        IsolationAttestation(
+            "provider",
+            "workload",
+            "profile",
+            datetime.now(UTC) - timedelta(seconds=1),
+            "nonce",
+            "tool",
+            "tenant:test",
+            {},
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expired attestations must fail closed")
+
+
+def test_idempotent_tool_requires_explicit_operation_key() -> None:
+    registry = ToolRegistry()
+    registry.register(_tool("write", lambda *_: {"ok": True}, idempotency_required=True))
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"write"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(idempotency_store=InMemoryIdempotencyStore()),
+    )
+
+    result = runtime.execute(ActionProposal("write", {}, "proposal:no-key"))
+
+    assert result.status is ExecutionStatus.DENIED
+    assert "operation key" in (result.reason or "")
+
+
+def test_idempotency_claim_failure_and_worker_limit_are_fail_closed() -> None:
+    try:
+        RuntimeConfig(max_timed_out_workers=0)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("zero worker capacity must be rejected")
+
+    class BrokenStore:
+        def lookup(self, _operation_key: str) -> None:
+            return None
+
+        def claim(self, _record: Any) -> Any:
+            raise RuntimeError("store unavailable")
+
+        def complete(self, _operation_key: str, _result: Any) -> Any:
+            raise AssertionError("unreachable")
+
+        def mark_uncertain(self, _operation_key: str, _result: Any) -> Any:
+            raise AssertionError("unreachable")
+
+    registry = ToolRegistry()
+    registry.register(_tool("write", lambda *_: {"ok": True}, idempotency_required=True))
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"write"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(idempotency_store=BrokenStore()),
+    )
+    result = runtime.execute(
+        ActionProposal("write", {}, "proposal:broken-store", operation_key="op:broken")
+    )
+    assert result.status is ExecutionStatus.DENIED
+    assert "store" in (result.reason or "")
+
+
+def test_action_budget_release_is_idempotent() -> None:
+    runtime = GuardedRuntime(
+        _context(), ToolRegistry(), AllowListPolicy(set()), InMemoryAuditSink()
+    )
+    assert runtime._budget.acquire() is True
+    state = [False, False]
+    runtime._release_action_budget_once(state)
+    runtime._release_action_budget_once(state)
+    assert state == [False, True]
+
+
+def test_timed_out_audit_for_pre_admission_denial_never_releases_missing_lease() -> None:
+    class SlowAudit:
+        def append(self, *_: Any) -> None:
+            sleep(0.03)
+
+    runtime = GuardedRuntime(
+        _context(),
+        ToolRegistry(),
+        AllowListPolicy(set()),
+        SlowAudit(),  # type: ignore[arg-type]
+        config=RuntimeConfig(execution_timeout_seconds=0.001),
+    )
+
+    result = runtime.execute(ActionProposal("not-registered", {}, "proposal:denied"))
+    sleep(0.05)
+
+    assert result.status is ExecutionStatus.DENIED
+    assert runtime._budget._active == 0
+    assert runtime._budget._fan_out == 0
+
+
+def test_idempotency_terminal_store_failure_is_not_reported_as_success() -> None:
+    class BrokenCompletionStore(InMemoryIdempotencyStore):
+        def complete(self, *_: Any) -> Any:
+            raise RuntimeError("durable store unavailable")
+
+    calls: list[int] = []
+
+    def write(_context: ExecutionContext, arguments: Any) -> dict[str, bool]:
+        calls.append(arguments["value"])
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registry.register(
+        _tool(
+            "write",
+            write,
+            idempotency_required=True,
+        )
+    )
+    store = BrokenCompletionStore()
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"write"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(idempotency_store=store),
+    )
+
+    result = runtime.execute(
+        ActionProposal(
+            "write",
+            {"value": 1},
+            "proposal:store-failure",
+            operation_key="op:store-failure",
+        )
+    )
+
+    assert result.status is ExecutionStatus.EXECUTED_UNRECORDED
+    assert "idempotency" in (result.reason or "")
+    assert calls == [1]
+    assert store.lookup("op:store-failure") is not None
+    assert store.lookup("op:store-failure").state is IdempotencyState.IN_PROGRESS  # type: ignore[union-attr]
+
+
+def test_idempotency_claim_is_atomic_under_concurrent_race() -> None:
+    store = InMemoryIdempotencyStore()
+    record = new_record(
+        operation_key="op:race",
+        action_fingerprint="fingerprint",
+        tenant="tenant:test",
+        principal_id="user:test",
+        tool_name="write",
+        resource_ids=("resource:test",),
+    )
+    barrier = Barrier(8)
+    statuses: list[IdempotencyClaimStatus] = []
+
+    def claim() -> None:
+        barrier.wait()
+        statuses.append(store.claim(record).status)
+
+    threads = [Thread(target=claim) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert statuses.count(IdempotencyClaimStatus.CLAIMED) == 1
+    assert statuses.count(IdempotencyClaimStatus.EXISTING) == 7

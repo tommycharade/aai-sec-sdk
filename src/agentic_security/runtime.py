@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field, replace
-from threading import RLock
+from threading import Event, RLock
 from typing import Any
 
 from .approvals import ApprovalProvider, action_hash
@@ -23,6 +23,13 @@ from .errors import (
     SecurityConfigurationError,
     WorkerCapacityError,
 )
+from .idempotency import (
+    IdempotencyClaimStatus,
+    IdempotencyState,
+    IdempotencyStore,
+    new_record,
+)
+from .isolation import IsolationVerifier, validate_attestation
 from .policies import PolicyDecision, PolicyEngine, PolicyResult
 from .tools import ToolRegistry
 from .types import (
@@ -31,6 +38,8 @@ from .types import (
     ExecutionContext,
     ExecutionResult,
     ExecutionStatus,
+    ReconciliationResult,
+    ReconciliationState,
     Resource,
 )
 
@@ -43,6 +52,8 @@ class RuntimeConfig:
     execution_timeout_seconds: float = 30.0
     max_timed_out_workers: int = 32
     redactor: Redactor = field(default=redact, repr=False, compare=False)
+    idempotency_store: IdempotencyStore | None = field(default=None, repr=False, compare=False)
+    isolation_verifier: IsolationVerifier | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Reject an unbounded or non-positive handler wait configuration."""
@@ -81,11 +92,14 @@ class GuardedRuntime:
         self._budget = BudgetState(self.config.budget)
         self._stopped = False
         self._stop_lock = RLock()
-        self._completed: dict[str, ExecutionResult] = {}
         self._active_tokens: dict[str, CancellationToken] = {}
+        self._budget_states: dict[str, list[bool]] = {}
+        self._handler_completion: dict[str, Event] = {}
         self._worker_lock = RLock()
         self._timed_out_workers = 0
         self._bounded_workers = 0
+        self._active_operations: dict[str, int] = {}
+        self._timed_out_by_operation: dict[str, int] = {}
         # A re-entrant lock makes the check-and-execute sequence atomic for
         # idempotent tools. This is intentionally conservative: a later
         # adapter can provide per-key locks without weakening the invariant.
@@ -115,6 +129,15 @@ class GuardedRuntime:
                 "stopped": self._stopped,
                 "active_actions": len(self._active_tokens),
                 "timed_out_workers": self._timed_out_workers,
+                "bounded_workers": self._bounded_workers,
+                **{
+                    f"active_{name.replace(' ', '_')}": count
+                    for name, count in self._active_operations.items()
+                },
+                **{
+                    f"timed_out_{name.replace(' ', '_')}": count
+                    for name, count in self._timed_out_by_operation.items()
+                },
             }
 
     def execute(self, proposal: ActionProposal) -> ExecutionResult:
@@ -131,7 +154,6 @@ class GuardedRuntime:
     def _execute_unlocked(self, proposal: ActionProposal) -> ExecutionResult:
         """Run one proposal while the caller owns any required idempotency lock."""
         request_id = str(uuid.uuid4())
-        idempotency_key: str | None = None
         validated_arguments: Any = None
         tool = self.registry.get(proposal.tool_name)
         if tool is None:
@@ -144,12 +166,17 @@ class GuardedRuntime:
                 request_id, proposal, "task budget exhausted or concurrency limit reached"
             )
         cancellation = CancellationToken()
-        budget_release_deferred = False
+        # Mutable because timeout callbacks run after the caller returns. A
+        # timed-out bounded operation owns the action lease until its worker
+        # exits, regardless of whether it is policy, credential, audit, or
+        # handler work.
+        budget_release_state = [False, False]
         with self._stop_lock:
             if self._stopped:
                 self._budget.release()
                 return self._deny(request_id, proposal, "runtime emergency stop is active")
             self._active_tokens[request_id] = cancellation
+            self._budget_states[request_id] = budget_release_state
         try:
             try:
                 arguments = tool.validator(proposal.arguments)
@@ -167,13 +194,40 @@ class GuardedRuntime:
             invariant_failure = self._validate_runtime_invariants(tool, resources)
             if invariant_failure is not None:
                 return self._deny(request_id, proposal, invariant_failure)
-            if tool.requires_isolation and not getattr(tool.handler, "isolated", False):
-                return self._deny(request_id, proposal, "tool requires an isolated handler")
+            isolation_nonce: str | None = None
+            if tool.requires_isolation:
+                isolation_nonce = str(uuid.uuid4())
+                verifier = self.config.isolation_verifier
+                provider = getattr(tool.handler, "get_isolation_attestation", None)
+                if verifier is None or not callable(provider):
+                    return self._deny(
+                        request_id,
+                        proposal,
+                        "tool requires a verifier-backed isolation attestation",
+                    )
+                try:
+                    attestation = provider(self.context, tool.name, resources, isolation_nonce)
+                    if not validate_attestation(
+                        attestation, self.context, tool.name, resources, isolation_nonce
+                    ) or not verifier.verify(
+                        attestation,
+                        self.context,
+                        tool.name,
+                        resources,
+                        isolation_nonce,
+                    ):
+                        return self._deny(request_id, proposal, "isolation attestation is invalid")
+                except Exception:
+                    return self._deny(request_id, proposal, "isolation attestation is invalid")
             try:
                 policy_result = self._run_bounded(
                     lambda: self.policy.decide(self.context, tool, arguments, resources),
                     "policy evaluation",
                     request_id=request_id,
+                    on_timeout_observed=lambda: self._defer_action_budget_release(
+                        budget_release_state
+                    ),
+                    on_timeout=lambda: self._release_action_budget_once(budget_release_state),
                 )
             except RuntimeOperationTimeoutError:
                 return self._deny(request_id, proposal, "policy evaluation timed out")
@@ -193,12 +247,76 @@ class GuardedRuntime:
                 fingerprint = action_hash(self.context, tool.name, arguments, resources)
             except Exception:
                 return self._deny(request_id, proposal, "action could not be fingerprinted")
-            idempotency_key = f"{tool.name}:{proposal.proposal_id}:{fingerprint}"
-            if tool.idempotency_required and idempotency_key is not None:
-                with self._idempotency_lock:
-                    prior = self._completed.get(idempotency_key)
-                    if prior is not None:
-                        return prior
+            if tool.idempotency_required and proposal.operation_key is not None:
+                store = self.config.idempotency_store
+                if store is None:
+                    return self._deny(request_id, proposal, "idempotency store is not configured")
+                try:
+                    existing = store.lookup(proposal.operation_key)
+                except Exception:
+                    return self._deny(request_id, proposal, "idempotency store failed")
+                if existing is not None:
+                    same_action = (
+                        existing.action_fingerprint == fingerprint
+                        and existing.tenant == self.context.tenant
+                        and existing.principal_id == self.context.principal.id
+                        and existing.tool_name == tool.name
+                        and existing.resource_ids == tuple(resource.id for resource in resources)
+                    )
+                    if not same_action:
+                        return self._deny(
+                            request_id, proposal, "operation key conflicts with another action"
+                        )
+                    if existing.state is IdempotencyState.COMPLETED:
+                        if isinstance(existing.result, ExecutionResult):
+                            return existing.result
+                        return self._deny(request_id, proposal, "idempotency record is malformed")
+            # An approval request is a non-executing response. Do not create an
+            # idempotency claim until the exact approval has been consumed.
+            if policy_result.decision is PolicyDecision.APPROVAL_REQUIRED and (
+                self.approvals is None or proposal.approval_id is None
+            ):
+                return self._approval_required(request_id, proposal, policy_result.reason)
+            if tool.idempotency_required:
+                if proposal.operation_key is None:
+                    return self._deny(
+                        request_id,
+                        proposal,
+                        "stable operation key is required for this tool",
+                    )
+                store = self.config.idempotency_store
+                if store is None:
+                    return self._deny(request_id, proposal, "idempotency store is not configured")
+                try:
+                    idempotency_record = new_record(
+                        operation_key=proposal.operation_key,
+                        action_fingerprint=fingerprint,
+                        tenant=self.context.tenant or "",
+                        principal_id=self.context.principal.id,
+                        tool_name=tool.name,
+                        resource_ids=tuple(resource.id for resource in resources),
+                    )
+                    claim = store.claim(idempotency_record)
+                except Exception:
+                    return self._deny(request_id, proposal, "idempotency store failed")
+                if claim.status is IdempotencyClaimStatus.CONFLICT:
+                    return self._deny(
+                        request_id,
+                        proposal,
+                        "operation key conflicts with another action",
+                    )
+                if claim.status is IdempotencyClaimStatus.EXISTING:
+                    if claim.record.state is IdempotencyState.COMPLETED:
+                        prior = claim.record.result
+                        if isinstance(prior, ExecutionResult):
+                            return prior
+                        return self._deny(request_id, proposal, "idempotency record is malformed")
+                    return self._deny(
+                        request_id,
+                        proposal,
+                        "operation outcome is still in progress or uncertain; "
+                        "reconcile before retrying",
+                    )
             if policy_result.decision is PolicyDecision.DENY:
                 return self._deny(
                     request_id,
@@ -248,6 +366,10 @@ class GuardedRuntime:
                         ),
                         "credential minting",
                         request_id=request_id,
+                        on_timeout_observed=lambda: self._defer_action_budget_release(
+                            budget_release_state
+                        ),
+                        on_timeout=lambda: self._release_action_budget_once(budget_release_state),
                     )
                     if not credential.valid_for(tool.name, resources):
                         return self._deny(request_id, proposal, "credential scope is invalid")
@@ -267,6 +389,7 @@ class GuardedRuntime:
                 arguments,
                 cancellation,
                 request_id,
+                budget_release_state,
             )
             try:
                 normalized_output = (
@@ -293,9 +416,13 @@ class GuardedRuntime:
                 )
                 if not recorded:
                     result = replace(result, audit_recorded=False)
-                if tool.idempotency_required:
-                    with self._idempotency_lock:
-                        self._completed[idempotency_key] = result
+                if not self._store_terminal(tool, proposal, result, uncertain=True):
+                    result = replace(
+                        result,
+                        status=ExecutionStatus.EXECUTED_UNRECORDED,
+                        reason="side effect result could not be durably recorded",
+                        audit_recorded=False,
+                    )
                 return result
             result = ExecutionResult(
                 ExecutionStatus.EXECUTED, tool.name, request_id, output=safe_output
@@ -319,9 +446,16 @@ class GuardedRuntime:
                     reason="action executed but audit recording failed",
                     audit_recorded=False,
                 )
-            if tool.idempotency_required and idempotency_key is not None:
-                with self._idempotency_lock:
-                    self._completed[idempotency_key] = result
+            if not self._store_terminal(tool, proposal, result):
+                # The handler has already run, so denying the action would be
+                # false. Do not claim successful durable idempotency: a retry
+                # must be treated as unsafe until the store is repaired.
+                result = replace(
+                    result,
+                    status=ExecutionStatus.EXECUTED_UNRECORDED,
+                    reason="side effect executed but idempotency result was not recorded",
+                    audit_recorded=False,
+                )
             return result
         except WorkerCapacityError:
             return self._deny(request_id, proposal, "bounded worker capacity exhausted")
@@ -331,13 +465,15 @@ class GuardedRuntime:
             # after the caller receives TIMED_OUT. Keep its concurrency slot
             # reserved until the worker exits so a timeout cannot create
             # overlapping side effects.
-            budget_release_deferred = True
+            budget_release_state[0] = True
             result = ExecutionResult(
                 ExecutionStatus.TIMED_OUT,
                 tool.name,
                 request_id,
                 reason="handler exceeded execution timeout; side-effect status is uncertain",
             )
+            reconciliation_state = ReconciliationState.STILL_RUNNING
+            completion = self._handler_completion.get(request_id)
             if tool.reconciliation is not None and validated_arguments is not None:
                 reconciliation = tool.reconciliation
                 try:
@@ -345,26 +481,39 @@ class GuardedRuntime:
                         lambda: reconciliation(handler_context, validated_arguments),
                         "side-effect reconciliation",
                         request_id=request_id,
+                        on_timeout_observed=lambda: self._defer_action_budget_release(
+                            budget_release_state
+                        ),
+                        on_timeout=lambda: self._release_action_budget_once(budget_release_state),
                     )
-                    if reconciled is True:
-                        # The original timed-out worker may still commit after
-                        # this callback returns. Keep the result uncertain.
-                        del reconciled
+                    if isinstance(reconciled, ReconciliationResult):
+                        if completion is not None and completion.is_set():
+                            reconciliation_state = reconciled.state
+                        else:
+                            # A reconciliation service cannot finalize an action
+                            # while its original worker is still capable of commit.
+                            reconciliation_state = ReconciliationState.STILL_RUNNING
+                    elif isinstance(reconciled, bool):
+                        # Compatibility with the old boolean callback: a boolean
+                        # cannot establish a safe final state while the worker lives.
+                        reconciliation_state = ReconciliationState.STILL_RUNNING
+                    else:
+                        reconciliation_state = ReconciliationState.FAILED
                 except Exception as exc:
+                    reconciliation_state = ReconciliationState.FAILED
                     self._record(
                         "reconciliation_failed",
                         request_id,
                         proposal,
                         {"error_type": type(exc).__name__},
                     )
+            result = replace(result, reconciliation_state=reconciliation_state)
             recorded = self._record(
                 "action_timed_out", request_id, proposal, {"reason": result.reason}
             )
             if not recorded:
                 result = replace(result, audit_recorded=False)
-            if tool.idempotency_required and idempotency_key is not None:
-                with self._idempotency_lock:
-                    self._completed[idempotency_key] = result
+            self._store_terminal(tool, proposal, result, uncertain=True)
             return result
         except RuntimeCancelledError:
             result = ExecutionResult(
@@ -390,15 +539,14 @@ class GuardedRuntime:
                 reason="tool execution failed",
                 audit_recorded=recorded,
             )
-            if tool.idempotency_required and idempotency_key is not None:
-                with self._idempotency_lock:
-                    self._completed[idempotency_key] = result
+            self._store_terminal(tool, proposal, result, uncertain=True)
             return result
         finally:
             with self._stop_lock:
                 self._active_tokens.pop(request_id, None)
-            if not budget_release_deferred:
-                self._budget.release()
+                self._budget_states.pop(request_id, None)
+            if not budget_release_state[0]:
+                self._release_action_budget_once(budget_release_state)
 
     def _run_handler(
         self,
@@ -407,14 +555,29 @@ class GuardedRuntime:
         arguments: Any,
         cancellation: CancellationToken,
         request_id: str,
+        budget_release_state: list[bool],
     ) -> Any:
         """Run a handler with a bounded wait and cooperative timeout signal."""
+        completion = Event()
+        with self._worker_lock:
+            self._handler_completion[request_id] = completion
+
+        def operation() -> Any:
+            try:
+                return handler(context, arguments)
+            finally:
+                completion.set()
+
+        def release_handler_budget() -> None:
+            self._release_action_budget_once(budget_release_state)
+
         try:
             return self._run_bounded(
-                lambda: handler(context, arguments),
+                operation,
                 "handler execution",
-                on_timeout=self._budget.release,
+                on_timeout=release_handler_budget,
                 request_id=request_id,
+                on_timeout_observed=lambda: self._defer_action_budget_release(budget_release_state),
             )
         except RuntimeOperationTimeoutError:
             cancellation.cancel()
@@ -426,6 +589,7 @@ class GuardedRuntime:
         operation_name: str,
         on_timeout: Callable[[], None] | None = None,
         request_id: str | None = None,
+        on_timeout_observed: Callable[[], None] | None = None,
     ) -> Any:
         """Run an operation with a bounded caller wait and lifecycle tracking.
 
@@ -433,7 +597,7 @@ class GuardedRuntime:
         kill an arbitrary running thread. Timed-out workers remain accounted
         for until they return, preventing unbounded accumulation.
         """
-        del request_id  # reserved for a future per-request worker registry
+        del request_id  # operation counters provide aggregate lifecycle evidence
         with self._worker_lock:
             # Every bounded operation occupies a tracked slot. This is
             # intentionally conservative: Python cannot kill a timed-out
@@ -442,6 +606,9 @@ class GuardedRuntime:
             if self._bounded_workers >= self.config.max_timed_out_workers:
                 raise WorkerCapacityError("bounded worker capacity exhausted")
             self._bounded_workers += 1
+            self._active_operations[operation_name] = (
+                self._active_operations.get(operation_name, 0) + 1
+            )
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agentic-security")
         future = executor.submit(operation)
         timed_out = False
@@ -454,8 +621,14 @@ class GuardedRuntime:
             callback_called = True
             with self._worker_lock:
                 self._bounded_workers -= 1
+                self._active_operations[operation_name] -= 1
+                if self._active_operations[operation_name] == 0:
+                    del self._active_operations[operation_name]
                 if timed_out:
                     self._timed_out_workers -= 1
+                    self._timed_out_by_operation[operation_name] -= 1
+                    if self._timed_out_by_operation[operation_name] == 0:
+                        del self._timed_out_by_operation[operation_name]
             if timed_out and on_timeout is not None:
                 on_timeout()
 
@@ -465,6 +638,11 @@ class GuardedRuntime:
             timed_out = True
             with self._worker_lock:
                 self._timed_out_workers += 1
+                self._timed_out_by_operation[operation_name] = (
+                    self._timed_out_by_operation.get(operation_name, 0) + 1
+                )
+            if on_timeout_observed is not None:
+                on_timeout_observed()
             future.add_done_callback(on_done)
             future.cancel()
             raise RuntimeOperationTimeoutError(f"{operation_name} timed out") from exc
@@ -472,6 +650,39 @@ class GuardedRuntime:
             if not timed_out:
                 future.add_done_callback(on_done)
             executor.shutdown(wait=not timed_out, cancel_futures=True)
+
+    @staticmethod
+    def _defer_action_budget_release(state: list[bool]) -> None:
+        """Mark the action lease for release only when the timed-out worker exits."""
+        state[0] = True
+
+    def _release_action_budget_once(self, state: list[bool]) -> None:
+        """Release one action lease exactly once after its worker exits."""
+        if len(state) > 1 and state[1]:
+            return
+        if len(state) > 1:
+            state[1] = True
+        self._budget.release()
+
+    def _store_terminal(
+        self, tool: Any, proposal: ActionProposal, result: ExecutionResult, uncertain: bool = False
+    ) -> bool:
+        """Persist idempotent outcomes and report whether persistence succeeded."""
+        if not tool.idempotency_required or proposal.operation_key is None:
+            return True
+        store = self.config.idempotency_store
+        if store is None:
+            return False
+        try:
+            if uncertain:
+                store.mark_uncertain(proposal.operation_key, result)
+            else:
+                store.complete(proposal.operation_key, result)
+        except Exception:
+            # The side effect has already happened; the caller must not receive
+            # an apparently successful result that can be replayed safely.
+            return False
+        return True
 
     def _validate_runtime_invariants(
         self, tool: Any, resources: tuple[Resource, ...]
@@ -546,9 +757,24 @@ class GuardedRuntime:
             )
         )
         try:
+            budget_state = self._budget_states.get(request_id)
+            # Denials before action admission still need bounded audit work,
+            # but they do not own an action budget lease. Never release a
+            # missing lease when that audit worker eventually exits.
+            release_budget = (
+                (lambda: self._release_action_budget_once(budget_state))
+                if budget_state is not None
+                else None
+            )
             self._run_bounded(
                 lambda: self.audit.append(event_type, request_id, safe_payload),
                 "audit persistence",
+                on_timeout_observed=(
+                    (lambda: self._defer_action_budget_release(budget_state))
+                    if budget_state is not None
+                    else None
+                ),
+                on_timeout=release_budget,
             )
         except Exception:
             return False
