@@ -7,15 +7,38 @@ from collections.abc import Callable
 from dataclasses import InitVar, dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
-from typing import Protocol, TypeVar
+from typing import Protocol
 from weakref import WeakKeyDictionary
 
 from .tools import ToolDefinition
 from .types import ExecutionContext, Resource
 
-T = TypeVar("T")
-TokenMinter = Callable[[ExecutionContext, ToolDefinition, tuple[Resource, ...]], str]
-"""Callback that obtains an already-authenticated provider token."""
+
+@dataclass(frozen=True, slots=True)
+class ProviderToken:
+    """Provider attestation for token material and its effective scope.
+
+    A token callback must return this object rather than a bare string. The
+    provider, not the model or SDK caller, attests the actual audience and
+    resource scope it granted. The runtime independently checks the requested
+    scope matches this attestation.
+    """
+
+    value: str
+    tool_name: str
+    resources: tuple[Resource, ...]
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        """Reject incomplete provider scope attestations."""
+        if not self.value or not self.tool_name or not self.resources:
+            raise ValueError("provider token value and scope are required")
+        if self.expires_at <= datetime.now(UTC):
+            raise ValueError("provider token is expired")
+
+
+TokenMinter = Callable[[ExecutionContext, ToolDefinition, tuple[Resource, ...]], ProviderToken]
+"""Callback that obtains an authenticated provider token with scope evidence."""
 
 _PROVIDER_REGISTRY: WeakKeyDictionary[object, Callable[[], str]] = WeakKeyDictionary()
 
@@ -64,12 +87,15 @@ class ScopedCredential:
             and resources == self.resources
         )
 
-    def with_secret(self, operation: Callable[[str], T], now: datetime | None = None) -> T:
-        """Invoke ``operation`` with live provider material without exposing it in results.
+    def with_secret(self, operation: Callable[[str], object], now: datetime | None = None) -> None:
+        """Pass live provider material to a non-returning provider operation.
 
         The callback must pass the material directly to the intended provider
-        client and must not log, persist, return, or capture it. This method
-        checks expiry immediately before use.
+        client and must not log, persist, return, or capture it. Returning a
+        value is rejected so a handler cannot accidentally place the secret in
+        a tool result. This is an in-process trust boundary: hostile handlers
+        still require :class:`~agentic_security.adapters.SubprocessToolHandler`
+        or a stronger OS/container sandbox.
         """
         current = now or datetime.now(UTC)
         if not self.issued_at <= current < self.expires_at:
@@ -77,7 +103,9 @@ class ScopedCredential:
         provider = _PROVIDER_REGISTRY.get(self)
         if provider is None:
             raise ValueError("credential material is unavailable")
-        return operation(provider())
+        result = operation(provider())
+        if result is not None:
+            raise ValueError("credential operation must not return provider material")
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,9 +193,9 @@ class TokenCredentialBroker:
     """Credential broker for an authenticated IAM/token-service callback.
 
     The callback is responsible for provider authentication and must return a
-    token scoped to the supplied tool and resources. The broker adds the SDK's
-    expiry and scope checks without exposing token material as a credential
-    attribute.
+    :class:`ProviderToken` attestation scoped to the supplied tool and
+    resources. A bare token string is rejected because the SDK cannot verify
+    provider-side scope from an opaque string.
     """
 
     def __init__(self, mint_token: TokenMinter) -> None:
@@ -184,12 +212,14 @@ class TokenCredentialBroker:
         """Mint one short-lived credential for the exact live action scope."""
         if ttl_seconds <= 0:
             raise ValueError("credential TTL must be positive")
-        token = self._mint_token(context, tool, resources)
-        if not isinstance(token, str) or not token:
-            raise ValueError("token service returned no token")
+        provider_token = self._mint_token(context, tool, resources)
+        if not isinstance(provider_token, ProviderToken):
+            raise ValueError("token service returned no scope attestation")
+        if provider_token.tool_name != tool.name or provider_token.resources != resources:
+            raise ValueError("token service returned an invalid scope")
         issued_at = datetime.now(UTC)
 
-        def provider(value: str = token) -> str:
+        def provider(value: str = provider_token.value) -> str:
             return value
 
         return ScopedCredential(
@@ -197,6 +227,6 @@ class TokenCredentialBroker:
             tool.name,
             resources,
             issued_at,
-            issued_at + timedelta(seconds=ttl_seconds),
+            min(issued_at + timedelta(seconds=ttl_seconds), provider_token.expires_at),
             provider,
         )

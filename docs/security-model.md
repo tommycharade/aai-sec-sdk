@@ -32,7 +32,8 @@ bounded, but deployment infrastructure must still provide its own IAM,
 network policy, durable audit controls, and OS/container sandboxing.
 
 Handlers may return arbitrary application values, but the runtime applies the
-optional tool output normalizer, redacts supported sensitive fields, and
+optional tool output normalizer, performs key and common-token content
+redaction, and
 enforces the configured serialized output-size limit before returning a result.
 Applications remain responsible for semantic output schemas and for handling
 untrusted tool content before sending it to a model.
@@ -52,7 +53,11 @@ missing broker, broker exception, expired credential, or scope mismatch fails
 closed and the handler is not called. Production implementations should use
 audience-bound provider tokens and avoid returning reusable raw secrets. The
 included `TokenCredentialBroker` wraps an authenticated token-service callback;
-the callback remains responsible for provider-side scope enforcement.
+the callback must return a `ProviderToken` scope attestation; the SDK rejects a
+bare string and mismatched tool/resource scope. The provider remains
+responsible for proving that the attested scope is enforced by its IAM system.
+An in-process callback cannot prevent a deliberately malicious trusted handler
+from copying a secret; process/container isolation is required for hostile code.
 
 ## Timeout and retry semantics
 
@@ -61,8 +66,24 @@ persistence, and handler invocation. A timeout in policy or credential minting
 denies without running the handler. A handler timeout returns `TIMED_OUT` and
 the runtime retains the concurrency slot until the worker exits. The side
 effect remains uncertain, so callers must reconcile before retrying. High-impact
-and external-egress tools must be idempotent or declare an explicit
-`reconciliation` contract at registration time.
+and external-egress tools must be idempotent or declare a reconciliation
+callback. After a handler timeout, the runtime invokes that callback and
+returns `RECONCILED` only when it returns `True`; otherwise the result remains
+uncertain.
+
+## Production readiness checklist
+
+- Use authenticated policy, approval, and IAM endpoints over HTTPS.
+- Require `ProviderToken` attestations and test provider-side scope contracts.
+- Treat in-process handlers as trusted; require `requires_isolation=True` for
+  hostile or model-generated code and deploy a real container/microVM/WASM
+  sandbox around the subprocess adapter.
+- Export local audit events to encrypted, access-controlled WORM/SIEM storage.
+- Alert on `GuardedRuntime.health()["timed_out_workers"]` before retrying
+  uncertain actions.
+- Configure rate, fan-out, cost, delegation, and action budgets per task.
+- Run the release verification, SBOM, provenance, and compatibility checks
+  described in `releasing.md` before depending on a published version.
 
 ## Deployment adapters and process boundaries
 

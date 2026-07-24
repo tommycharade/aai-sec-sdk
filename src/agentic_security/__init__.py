@@ -18,6 +18,7 @@ from .credentials import (
     CredentialBroker,
     CredentialMetadata,
     InMemoryCredentialBroker,
+    ProviderToken,
     ScopedCredential,
     TokenCredentialBroker,
 )
@@ -87,6 +88,7 @@ __all__ = [
     "ScopedCredential",
     "SubprocessToolHandler",
     "TokenCredentialBroker",
+    "ProviderToken",
     "SecurityConfigurationError",
     "ToolDefinition",
     "ToolRegistry",

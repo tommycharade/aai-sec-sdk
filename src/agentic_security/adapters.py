@@ -14,6 +14,11 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+try:  # pragma: no cover - platform import
+    import fcntl
+except ImportError:  # pragma: no cover - Windows deployments use remote audit
+    fcntl = None  # type: ignore[assignment]
+
 from .approvals import ApprovalProvider
 from .audit import AuditEvent, redact
 from .http import JsonHttpClient
@@ -79,6 +84,7 @@ class SubprocessToolHandler:
     timeout_seconds: float = 10.0
     max_output_bytes: int = 1_000_000
     environment: Mapping[str, str] = field(default_factory=dict)
+    isolated: bool = field(default=True, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Reject shell-like or unbounded subprocess configurations."""
@@ -125,13 +131,23 @@ class SubprocessToolHandler:
 
 
 class JsonlAuditSink:
-    """Durable append-only JSONL audit sink with fsync and hash chaining."""
+    """Durable JSONL audit sink with fsync, locking, and hash verification.
 
-    def __init__(self, path: str | Path) -> None:
+    This is a local evidence adapter, not a tamper-proof forensic service.
+    Production deployments should replicate events to an access-controlled
+    WORM/object-lock or SIEM destination. ``max_bytes`` fails closed before a
+    write so operators cannot silently lose the audit chain during rotation.
+    """
+
+    def __init__(self, path: str | Path, max_bytes: int = 100_000_000) -> None:
         """Open a deployment-selected audit path without creating parent trees."""
+        if max_bytes <= 0:
+            raise ValueError("audit maximum size must be positive")
         self.path = Path(path)
+        self.max_bytes = max_bytes
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
+        self._lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         self._previous_hash = self._read_previous_hash()
 
     def _read_previous_hash(self) -> str:
@@ -139,7 +155,8 @@ class JsonlAuditSink:
         if not self.path.exists() or self.path.stat().st_size == 0:
             return "0" * 64
         with self.path.open(encoding="utf-8") as stream:
-            last = stream.readlines()[-1]
+            lines = stream.readlines()
+        last = lines[-1]
         value = json.loads(last)
         previous = value.get("event_hash")
         if not isinstance(previous, str) or len(previous) != 64:
@@ -149,6 +166,8 @@ class JsonlAuditSink:
     def append(self, event_type: str, request_id: str, payload: dict[str, Any]) -> Any:
         """Append one redacted event atomically and flush it to durable storage."""
         with self._lock:
+            if self.path.exists() and self.path.stat().st_size >= self.max_bytes:
+                raise RuntimeError("audit sink is full; rotate or export before continuing")
             safe_payload = redact(payload)
             timestamp = datetime.now(UTC).isoformat()
             canonical = json.dumps(
@@ -160,22 +179,62 @@ class JsonlAuditSink:
             event = AuditEvent(
                 event_type, request_id, safe_payload, timestamp, self._previous_hash, event_hash
             )
-            with self.path.open("a", encoding="utf-8") as stream:
-                stream.write(
-                    json.dumps(
-                        {
-                            "event_type": event.event_type,
-                            "request_id": event.request_id,
-                            "payload": event.payload,
-                            "timestamp": event.timestamp,
-                            "previous_hash": event.previous_hash,
-                            "event_hash": event.event_hash,
-                        },
-                        sort_keys=True,
-                    )
-                    + "\n"
+            serialized = (
+                json.dumps(
+                    {
+                        "event_type": event.event_type,
+                        "request_id": event.request_id,
+                        "payload": event.payload,
+                        "timestamp": event.timestamp,
+                        "previous_hash": event.previous_hash,
+                        "event_hash": event.event_hash,
+                    },
+                    sort_keys=True,
                 )
-                stream.flush()
-                os.fsync(stream.fileno())
+                + "\n"
+            )
+            current_size = self.path.stat().st_size if self.path.exists() else 0
+            if current_size + len(serialized.encode()) > self.max_bytes:
+                raise RuntimeError("audit sink is full; rotate or export before continuing")
+            with self._lock_path.open("a+", encoding="utf-8") as lock_stream:
+                if fcntl is not None:
+                    fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+                try:
+                    with self.path.open("a", encoding="utf-8") as stream:
+                        stream.write(serialized)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                finally:
+                    if fcntl is not None:
+                        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
             self._previous_hash = event_hash
         return event
+
+    def verify(self) -> bool:
+        """Verify every JSONL event and return false for corruption."""
+        previous_hash = "0" * 64
+        try:
+            with self.path.open(encoding="utf-8") as stream:
+                for line in stream:
+                    value = json.loads(line)
+                    payload = value["payload"]
+                    canonical = json.dumps(
+                        [
+                            value["event_type"],
+                            value["request_id"],
+                            payload,
+                            value["timestamp"],
+                            previous_hash,
+                        ],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                    if (
+                        value["previous_hash"] != previous_hash
+                        or hashlib.sha256(canonical).hexdigest() != value["event_hash"]
+                    ):
+                        return False
+                    previous_hash = value["event_hash"]
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+        return True

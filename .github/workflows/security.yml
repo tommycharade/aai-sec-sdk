@@ -1,6 +1,9 @@
 name: dependency-security
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:

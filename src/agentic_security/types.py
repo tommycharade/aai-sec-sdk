@@ -31,6 +31,7 @@ class ExecutionStatus(StrEnum):
     EXECUTED_RESULT_REJECTED = "executed_result_rejected"
     TIMED_OUT = "timed_out"
     CANCELLED = "cancelled"
+    RECONCILED = "reconciled"
 
 
 class CancellationToken:
@@ -146,6 +147,19 @@ class ActionProposal:
     arguments: Mapping[str, Any]
     proposal_id: str
     approval_id: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject malformed model-originated proposals before registry lookup."""
+        if not isinstance(self.tool_name, str) or not self.tool_name.strip():
+            raise SecurityConfigurationError("proposal tool name is required")
+        if not isinstance(self.arguments, Mapping):
+            raise SecurityConfigurationError("proposal arguments must be a mapping")
+        if not isinstance(self.proposal_id, str) or not self.proposal_id.strip():
+            raise SecurityConfigurationError("proposal id is required")
+        if self.approval_id is not None and (
+            not isinstance(self.approval_id, str) or not self.approval_id.strip()
+        ):
+            raise SecurityConfigurationError("approval id must be a non-empty string")
 
 
 @dataclass(frozen=True, slots=True)

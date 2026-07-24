@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime, timedelta
 from math import inf, nan
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from agentic_security import (
     HttpOpaPolicyEngine,
     JsonlAuditSink,
     Principal,
+    ProviderToken,
     SubprocessToolHandler,
     TokenCredentialBroker,
 )
@@ -117,16 +119,65 @@ def test_jsonl_audit_sink_is_durable_redacted_and_restartable(tmp_path: Path) ->
     assert len(lines) == 2
     assert json.loads(lines[0])["payload"]["access_token"] == "[REDACTED]"  # noqa: S105
     assert next_event.previous_hash == event.event_hash
+    assert second.verify()
+    path.write_text(path.read_text() + "not-json\n")
+    with pytest.raises(json.JSONDecodeError):
+        JsonlAuditSink(path)
+
+
+def test_jsonl_audit_sink_fails_closed_when_full(tmp_path: Path) -> None:
+    path = tmp_path / "limited.jsonl"
+    sink = JsonlAuditSink(path, max_bytes=1)
+    with pytest.raises(RuntimeError, match="full"):
+        sink.append("action_denied", "request:full", {"value": "safe"})
 
 
 def test_token_credential_broker_keeps_material_out_of_credential_attributes() -> None:
-    broker = TokenCredentialBroker(lambda *_: "synthetic-token")
+    broker = TokenCredentialBroker(
+        lambda *_: ProviderToken(
+            "synthetic-token",
+            "read",
+            (Resource("record:1", "record", "tenant:test"),),
+            datetime.now(UTC) + timedelta(seconds=30),
+        )
+    )
     credential = broker.mint(
         context(), tool(), (Resource("record:1", "record", "tenant:test"),), 30
     )
 
     assert not hasattr(credential, "_secret")
-    assert credential.with_secret(lambda value: value) == "synthetic-token"
+    with pytest.raises(ValueError, match="must not return"):
+        credential.with_secret(lambda value: value)
+
+
+def test_token_credential_broker_rejects_provider_scope_mismatch() -> None:
+    broker = TokenCredentialBroker(
+        lambda *_: ProviderToken(
+            "synthetic-token",
+            "other",
+            (Resource("record:1", "record", "tenant:test"),),
+            datetime.now(UTC) + timedelta(seconds=30),
+        )
+    )
+    with pytest.raises(ValueError, match="invalid scope"):
+        broker.mint(context(), tool(), (Resource("record:1", "record", "tenant:test"),), 30)
+
+
+def test_provider_token_rejects_empty_or_expired_attestation() -> None:
+    with pytest.raises(ValueError, match="value and scope"):
+        ProviderToken(
+            "",
+            "read",
+            (Resource("record:1", "record", "tenant:test"),),
+            datetime.now(UTC) + timedelta(seconds=1),
+        )
+    with pytest.raises(ValueError, match="expired"):
+        ProviderToken(
+            "token",
+            "read",
+            (Resource("record:1", "record", "tenant:test"),),
+            datetime.now(UTC) - timedelta(seconds=1),
+        )
 
 
 def test_subprocess_handler_uses_json_boundary_and_no_shell() -> None:
@@ -156,3 +207,7 @@ def test_subprocess_handler_rejects_failure_and_oversized_output() -> None:
         SubprocessToolHandler((sys.executable, "-c", "pass"), timeout_seconds=inf)
     with pytest.raises(ValueError, match="finite and positive"):
         SubprocessToolHandler((sys.executable, "-c", "pass"), timeout_seconds=nan)
+    with pytest.raises(ValueError, match="non-empty"):
+        SubprocessToolHandler(())
+    with pytest.raises(ValueError, match="positive"):
+        SubprocessToolHandler((sys.executable, "-c", "pass"), max_output_bytes=0)

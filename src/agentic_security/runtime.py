@@ -9,12 +9,12 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import nullcontext
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from threading import RLock
 from typing import Any
 
 from .approvals import ApprovalProvider, action_hash
-from .audit import AuditSink, redact
+from .audit import AuditSink, Redactor, redact
 from .budgets import Budget, BudgetState
 from .credentials import CredentialBroker
 from .errors import (
@@ -40,11 +40,15 @@ class RuntimeConfig:
 
     budget: Budget = Budget()
     execution_timeout_seconds: float = 30.0
+    max_timed_out_workers: int = 32
+    redactor: Redactor = field(default=redact, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Reject an unbounded or non-positive handler wait configuration."""
         if not math.isfinite(self.execution_timeout_seconds) or self.execution_timeout_seconds <= 0:
             raise SecurityConfigurationError("execution timeout must be finite and positive")
+        if self.max_timed_out_workers <= 0:
+            raise SecurityConfigurationError("maximum timed-out workers must be positive")
 
 
 class GuardedRuntime:
@@ -78,6 +82,8 @@ class GuardedRuntime:
         self._stop_lock = RLock()
         self._completed: dict[str, ExecutionResult] = {}
         self._active_tokens: dict[str, CancellationToken] = {}
+        self._worker_lock = RLock()
+        self._timed_out_workers = 0
         # A re-entrant lock makes the check-and-execute sequence atomic for
         # idempotent tools. This is intentionally conservative: a later
         # adapter can provide per-key locks without weakening the invariant.
@@ -95,6 +101,20 @@ class GuardedRuntime:
         with self._stop_lock:
             return self._stopped
 
+    def health(self) -> dict[str, int | bool]:
+        """Return non-sensitive lifecycle counters for operational monitoring.
+
+        ``timed_out_workers`` counts workers that outlived the caller wait.
+        They remain tracked until their underlying operation returns because
+        Python cannot safely terminate an arbitrary running thread.
+        """
+        with self._stop_lock, self._worker_lock:
+            return {
+                "stopped": self._stopped,
+                "active_actions": len(self._active_tokens),
+                "timed_out_workers": self._timed_out_workers,
+            }
+
     def execute(self, proposal: ActionProposal) -> ExecutionResult:
         """Mediate and, if allowed, execute one untrusted action proposal."""
         tool = self.registry.get(proposal.tool_name)
@@ -110,13 +130,14 @@ class GuardedRuntime:
         """Run one proposal while the caller owns any required idempotency lock."""
         request_id = str(uuid.uuid4())
         idempotency_key: str | None = None
+        validated_arguments: Any = None
         tool = self.registry.get(proposal.tool_name)
         if tool is None:
             reason = "unknown tool" if isinstance(proposal.tool_name, str) else "malformed tool"
             return self._deny(request_id, proposal, reason)
         if self.is_stopped():
             return self._deny(request_id, proposal, "runtime emergency stop is active")
-        if not self._budget.acquire():
+        if not self._budget.acquire(tool.cost_units):
             return self._deny(
                 request_id, proposal, "task budget exhausted or concurrency limit reached"
             )
@@ -130,6 +151,7 @@ class GuardedRuntime:
         try:
             try:
                 arguments = tool.validator(proposal.arguments)
+                validated_arguments = arguments
             except Exception:
                 return self._deny(request_id, proposal, "invalid tool arguments")
             try:
@@ -140,10 +162,16 @@ class GuardedRuntime:
                     raise TypeError("resources must be a tuple of Resource objects")
             except Exception:
                 return self._deny(request_id, proposal, "invalid action resource")
+            invariant_failure = self._validate_runtime_invariants(tool, resources)
+            if invariant_failure is not None:
+                return self._deny(request_id, proposal, invariant_failure)
+            if tool.requires_isolation and not getattr(tool.handler, "isolated", False):
+                return self._deny(request_id, proposal, "tool requires an isolated handler")
             try:
                 policy_result = self._run_bounded(
                     lambda: self.policy.decide(self.context, tool, arguments, resources),
                     "policy evaluation",
+                    request_id=request_id,
                 )
             except RuntimeOperationTimeoutError:
                 return self._deny(request_id, proposal, "policy evaluation timed out")
@@ -153,6 +181,12 @@ class GuardedRuntime:
                 policy_result.decision, PolicyDecision
             ):
                 return self._deny(request_id, proposal, "policy returned an invalid decision")
+            if tool.requires_approval and policy_result.decision is PolicyDecision.ALLOW:
+                policy_result = replace(
+                    policy_result,
+                    decision=PolicyDecision.APPROVAL_REQUIRED,
+                    reason="tool declaration requires explicit approval",
+                )
             try:
                 fingerprint = action_hash(self.context, tool.name, arguments, resources)
             except Exception:
@@ -206,6 +240,7 @@ class GuardedRuntime:
                             tool.credential_ttl_seconds,
                         ),
                         "credential minting",
+                        request_id=request_id,
                     )
                     if not credential.valid_for(tool.name, resources):
                         return self._deny(request_id, proposal, "credential scope is invalid")
@@ -219,12 +254,13 @@ class GuardedRuntime:
                 handler_context,
                 arguments,
                 cancellation,
+                request_id,
             )
             try:
                 normalized_output = (
                     tool.output_validator(output) if tool.output_validator is not None else output
                 )
-                safe_output = redact(normalized_output)
+                safe_output = redact(self.config.redactor(normalized_output))
                 encoded_output = json.dumps(
                     safe_output, sort_keys=True, separators=(",", ":")
                 ).encode()
@@ -288,6 +324,27 @@ class GuardedRuntime:
                 request_id,
                 reason="handler exceeded execution timeout; side-effect status is uncertain",
             )
+            if tool.reconciliation is not None and validated_arguments is not None:
+                reconciliation = tool.reconciliation
+                try:
+                    reconciled = self._run_bounded(
+                        lambda: reconciliation(handler_context, validated_arguments),
+                        "side-effect reconciliation",
+                        request_id=request_id,
+                    )
+                    if reconciled is True:
+                        result = replace(
+                            result,
+                            status=ExecutionStatus.RECONCILED,
+                            reason="uncertain side effect was reconciled",
+                        )
+                except Exception as exc:
+                    self._record(
+                        "reconciliation_failed",
+                        request_id,
+                        proposal,
+                        {"error_type": type(exc).__name__},
+                    )
             recorded = self._record(
                 "action_timed_out", request_id, proposal, {"reason": result.reason}
             )
@@ -337,6 +394,7 @@ class GuardedRuntime:
         context: ExecutionContext,
         arguments: Any,
         cancellation: CancellationToken,
+        request_id: str,
     ) -> Any:
         """Run a handler with a bounded wait and cooperative timeout signal."""
         try:
@@ -344,6 +402,7 @@ class GuardedRuntime:
                 lambda: handler(context, arguments),
                 "handler execution",
                 on_timeout=self._budget.release,
+                request_id=request_id,
             )
         except RuntimeOperationTimeoutError:
             cancellation.cancel()
@@ -354,21 +413,59 @@ class GuardedRuntime:
         operation: Callable[[], Any],
         operation_name: str,
         on_timeout: Callable[[], None] | None = None,
+        request_id: str | None = None,
     ) -> Any:
-        """Run one integration operation with the runtime's bounded wait."""
+        """Run an operation with a bounded caller wait and lifecycle tracking.
+
+        The wait is not a hard termination guarantee: Python cannot safely
+        kill an arbitrary running thread. Timed-out workers remain accounted
+        for until they return, preventing unbounded accumulation.
+        """
+        del request_id  # reserved for a future per-request worker registry
+        with self._worker_lock:
+            if self._timed_out_workers >= self.config.max_timed_out_workers:
+                raise RuntimeOperationTimeoutError("timed-out worker limit reached")
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agentic-security")
         future = executor.submit(operation)
         timed_out = False
+        callback_called = False
+
+        def on_done(_future: Any) -> None:
+            nonlocal callback_called
+            if callback_called:
+                return
+            callback_called = True
+            with self._worker_lock:
+                if timed_out:
+                    self._timed_out_workers -= 1
+            if timed_out and on_timeout is not None:
+                on_timeout()
+
         try:
             return future.result(timeout=self.config.execution_timeout_seconds)
         except FutureTimeoutError as exc:
             timed_out = True
-            if on_timeout is not None:
-                future.add_done_callback(lambda _future: on_timeout())
+            with self._worker_lock:
+                self._timed_out_workers += 1
+            future.add_done_callback(on_done)
             future.cancel()
             raise RuntimeOperationTimeoutError(f"{operation_name} timed out") from exc
         finally:
+            if not timed_out:
+                future.add_done_callback(on_done)
             executor.shutdown(wait=not timed_out, cancel_futures=True)
+
+    def _validate_runtime_invariants(
+        self, tool: Any, resources: tuple[Resource, ...]
+    ) -> str | None:
+        """Enforce identity, tenant, and delegation invariants independently of policy."""
+        if self.context.principal.tenant != self.context.tenant:
+            return "principal tenant does not match task tenant"
+        if any(resource.tenant != self.context.tenant for resource in resources):
+            return "resource is outside the task tenant"
+        if tool.delegation_depth > self.config.budget.max_delegation_depth:
+            return "delegation depth exceeds configured limit"
+        return None
 
     def _deny(
         self,
@@ -417,16 +514,18 @@ class GuardedRuntime:
         else:
             safe_arguments = {"[invalid_arguments_type]": type(proposal.arguments).__name__}
         safe_payload = redact(
-            {
-                "agent_id": self.context.agent_id,
-                "principal_id": self.context.principal.id,
-                "task_id": self.context.task_id,
-                "purpose": self.context.purpose,
-                "tool_name": proposal.tool_name,
-                "proposal_id": proposal.proposal_id,
-                "arguments": safe_arguments,
-                **dict(payload),
-            }
+            self.config.redactor(
+                {
+                    "agent_id": self.context.agent_id,
+                    "principal_id": self.context.principal.id,
+                    "task_id": self.context.task_id,
+                    "purpose": self.context.purpose,
+                    "tool_name": proposal.tool_name,
+                    "proposal_id": proposal.proposal_id,
+                    "arguments": safe_arguments,
+                    **dict(payload),
+                }
+            )
         )
         try:
             self._run_bounded(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -162,11 +162,15 @@ def test_credential_material_is_only_available_inside_live_callback() -> None:
         _secret_provider=lambda: "synthetic-token",  # noqa: S106 - synthetic test material
     )
 
-    assert credential.with_secret(lambda value: value, issued) == "synthetic-token"
+    with pytest.raises(ValueError, match="must not return"):
+        credential.with_secret(lambda value: value, issued)
+    seen: list[str] = []
+    credential.with_secret(lambda value: seen.append(value), issued)
+    assert seen == ["synthetic-token"]
     assert not hasattr(credential, "_secret")
     assert not hasattr(credential, "_secret_provider")
     with pytest.raises(ValueError):
-        credential.with_secret(lambda value: value, issued + timedelta(seconds=10))
+        credential.with_secret(lambda value: seen.append(value), issued + timedelta(seconds=10))
 
 
 def test_credential_brokers_reject_invalid_ttl_and_token() -> None:
@@ -181,8 +185,8 @@ def test_credential_brokers_reject_invalid_ttl_and_token() -> None:
 
     from agentic_security.credentials import TokenCredentialBroker
 
-    token_broker = TokenCredentialBroker(lambda *_: "")
-    with pytest.raises(ValueError, match="no token"):
+    token_broker = TokenCredentialBroker(lambda *_: cast(Any, ""))
+    with pytest.raises(ValueError, match="scope attestation"):
         token_broker.mint(
             _context(),
             ToolDefinition("read", lambda *_: None, _validator, description="Read."),

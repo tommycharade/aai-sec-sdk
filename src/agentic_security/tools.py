@@ -18,8 +18,8 @@ ToolHandler: TypeAlias = Callable[[ExecutionContext, Any], Any]
 OutputValidator: TypeAlias = Callable[[Any], Any]
 """Callable that normalizes a handler result before it crosses the boundary."""
 
-ReconciliationHandler: TypeAlias = Callable[[ExecutionContext, Any], Any]
-"""Callable used by an application to reconcile an uncertain side effect."""
+ReconciliationHandler: TypeAlias = Callable[[ExecutionContext, Any], bool]
+"""Callable returning whether an uncertain side effect was reconciled."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +44,9 @@ class ToolDefinition:
     output_validator: OutputValidator | None = None
     max_output_bytes: int = 1_000_000
     reconciliation: ReconciliationHandler | None = None
+    cost_units: int = 1
+    delegation_depth: int = 0
+    requires_isolation: bool = False
     description: str = ""
 
     def __post_init__(self) -> None:
@@ -76,6 +79,10 @@ class ToolDefinition:
         if self.max_output_bytes <= 0:
             raise SecurityConfigurationError(
                 f"maximum output size for tool {self.name!r} must be positive"
+            )
+        if self.cost_units <= 0 or self.delegation_depth < 0:
+            raise SecurityConfigurationError(
+                f"tool {self.name!r} has invalid cost or delegation depth"
             )
 
 

@@ -12,6 +12,12 @@ from threading import Lock
 from typing import Any, Protocol
 
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
+_SECRET_PATTERNS = (
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b", re.IGNORECASE),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,}\b"),
+)
 _SECRET_KEYS = {
     "password",
     "secret",
@@ -29,24 +35,6 @@ _SECRET_KEYS = {
 }
 
 
-def redact(value: Any) -> Any:
-    """Return a JSON-shaped copy with common secrets and email addresses masked."""
-    if isinstance(value, Mapping):
-        return {
-            str(key): "[REDACTED]" if str(key).lower() in _SECRET_KEYS else redact(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, (list, tuple)):
-        return [redact(item) for item in value]
-    if isinstance(value, str):
-        return _EMAIL.sub("[EMAIL]", value)
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    # Audit must remain JSON-serializable even when an untrusted proposal
-    # contains bytes, custom objects, or another non-JSON value.
-    return f"[UNSERIALIZABLE:{type(value).__name__}]"
-
-
 @dataclass(frozen=True, slots=True)
 class AuditEvent:
     """Tamper-evident event describing one runtime decision or execution."""
@@ -57,6 +45,37 @@ class AuditEvent:
     timestamp: str
     previous_hash: str
     event_hash: str
+
+
+class Redactor(Protocol):
+    """Provider-neutral contract for redacting data before persistence."""
+
+    def __call__(self, value: Any) -> Any:
+        """Return a safe JSON-shaped representation of ``value``."""
+
+
+def _redact_string(value: str) -> str:
+    """Mask common secret formats even when they occur under innocuous keys."""
+    value = _EMAIL.sub("[EMAIL]", value)
+    for pattern in _SECRET_PATTERNS:
+        value = pattern.sub("[REDACTED]", value)
+    return value
+
+
+def redact(value: Any) -> Any:
+    """Return a JSON-shaped copy with key and content secret detection."""
+    if isinstance(value, Mapping):
+        return {
+            str(key): "[REDACTED]" if str(key).lower() in _SECRET_KEYS else redact(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [redact(item) for item in value]
+    if isinstance(value, str):
+        return _redact_string(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return f"[UNSERIALIZABLE:{type(value).__name__}]"
 
 
 class AuditSink(Protocol):

@@ -6,6 +6,16 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 
 ## Unreleased
 
+- Added provider-scope-attested credentials with non-returning secret use,
+  strict content-aware redaction, runtime-independent tenant/approval/isolation
+  invariants, automatic reconciliation outcomes, and tracked timed-out-worker
+  health limits.
+- Added action rate, fan-out, cost, and delegation budgets; fail-closed audit
+  size limits with multi-process locking and chain verification; and release
+  artifact/SBOM/checksum automation.
+- Added adversarial tests for custom policy bypasses, credential scope and
+  exfiltration attempts, timeout lifecycle, audit corruption/full conditions,
+  isolation requirements, and budget overruns.
 - Hardened action authorization by binding approvals to exact validated action
   hashes, scoping idempotency keys to the tool and action, rejecting malformed
   proposals safely, requiring complete tenant metadata, and enforcing approval

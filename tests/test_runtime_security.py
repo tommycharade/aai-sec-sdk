@@ -72,7 +72,7 @@ def make_runtime(
             risk=risk,
             requires_approval=requires_approval,
             idempotency_required=idempotency_required,
-            reconciliation=(lambda _context, _arguments: None)
+            reconciliation=(lambda _context, _arguments: True)
             if risk in {RiskLevel.HIGH, RiskLevel.CRITICAL}
             else None,
             resources=lambda _: (Resource("record:1", "record", "tenant:a"),),
@@ -280,15 +280,10 @@ def test_unknown_tool_is_denied_without_side_effect() -> None:
 def test_malformed_tool_and_arguments_fail_closed_without_audit_crash() -> None:
     runtime, audit = make_runtime()
 
-    malformed_tool = runtime.execute(ActionProposal([], {}, "proposal:bad-tool"))  # type: ignore[arg-type]
-    malformed_arguments = runtime.execute(
+    with pytest.raises(SecurityConfigurationError):
+        ActionProposal([], {}, "proposal:bad-tool")  # type: ignore[arg-type]
+    with pytest.raises(SecurityConfigurationError):
         ActionProposal("read_record", "not-a-mapping", "proposal:bad-args")  # type: ignore[arg-type]
-    )
-
-    assert malformed_tool.status == "denied"
-    assert malformed_tool.reason == "malformed tool"
-    assert malformed_arguments.status == "denied"
-    assert malformed_arguments.reason == "invalid tool arguments"
     assert audit.verify()
 
 
@@ -551,7 +546,7 @@ def test_high_impact_tool_requires_idempotency_or_reconciliation() -> None:
         validator=validator,
         risk=RiskLevel.HIGH,
         requires_approval=True,
-        reconciliation=lambda _context, _arguments: None,
+        reconciliation=lambda _context, _arguments: True,
         description="Synthetic reconciled high-impact action.",
     )
 
@@ -758,6 +753,177 @@ def test_audit_redacts_secret_keys_and_emails() -> None:
     assert audit.verify()
 
 
+def test_strict_redaction_masks_tokens_in_arbitrary_nested_content() -> None:
+    audit = InMemoryAuditSink()
+    event = audit.append(
+        "test",
+        "request:strict",
+        {"value": ["sk-live-123456789", {"content": "Bearer abcdefghijklmnop"}]},
+    )
+
+    assert event.payload == {"value": ["[REDACTED]", {"content": "[REDACTED]"}]}
+
+
+def test_runtime_invariants_cannot_be_bypassed_by_permissive_policy() -> None:
+    class AlwaysAllow:
+        def decide(self, *_: Any) -> PolicyResult:
+            return PolicyResult(PolicyDecision.ALLOW, "unsafe allow")
+
+    mismatched_context = ExecutionContext(
+        "agent:test",
+        Principal("user:alice", tenant="tenant:b"),
+        "task:1",
+        "test",
+        tenant="tenant:a",
+    )
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            "read_record",
+            lambda *_: {"unexpected": True},
+            validator,
+            requires_approval=True,
+            resources=lambda _: (Resource("record:1", "record", "tenant:a"),),
+            description="Invariant bypass test.",
+        )
+    )
+    runtime = GuardedRuntime(mismatched_context, registry, AlwaysAllow(), InMemoryAuditSink())
+
+    result = runtime.execute(proposal())
+
+    assert result.status is ExecutionStatus.DENIED
+    assert "tenant" in (result.reason or "")
+
+
+def test_tool_approval_cannot_be_bypassed_by_allow_policy() -> None:
+    class AlwaysAllow:
+        def decide(self, *_: Any) -> PolicyResult:
+            return PolicyResult(PolicyDecision.ALLOW, "unsafe allow")
+
+    runtime, _ = make_runtime(requires_approval=True, policy=AlwaysAllow())
+    result = runtime.execute(proposal())
+
+    assert result.status is ExecutionStatus.APPROVAL_REQUIRED
+
+
+def test_reconciliation_runs_after_timeout_and_reports_reconciled() -> None:
+    release = Event()
+    reconciled: list[bool] = []
+
+    def slow(_ctx: ExecutionContext, _args: Any) -> dict[str, bool]:
+        release.wait(1)
+        return {"ok": True}
+
+    def reconcile(_ctx: ExecutionContext, _args: Any) -> bool:
+        reconciled.append(True)
+        return True
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            "reconcile_action",
+            slow,
+            validator,
+            reconciliation=reconcile,
+            description="Synthetic reconciliation test.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"reconcile_action"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(execution_timeout_seconds=0.005),
+    )
+
+    result = runtime.execute(
+        ActionProposal("reconcile_action", {"value": "safe"}, "proposal:reconcile")
+    )
+    release.set()
+
+    assert result.status is ExecutionStatus.RECONCILED
+    assert reconciled == [True]
+
+
+def test_isolation_requirement_rejects_in_process_handler() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            "isolated_action",
+            lambda *_: {"unexpected": True},
+            validator,
+            requires_isolation=True,
+            description="Synthetic isolation test.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(), registry, AllowListPolicy({"isolated_action"}), InMemoryAuditSink()
+    )
+
+    result = runtime.execute(
+        ActionProposal("isolated_action", {"value": "safe"}, "proposal:isolation")
+    )
+
+    assert result.status is ExecutionStatus.DENIED
+    assert result.reason == "tool requires an isolated handler"
+
+
+def test_runtime_reports_timed_out_worker_health_until_release() -> None:
+    started = Event()
+    release = Event()
+
+    def slow(_ctx: ExecutionContext, _args: Any) -> dict[str, bool]:
+        started.set()
+        release.wait(1)
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registry.register(ToolDefinition("health_action", slow, validator, description="Health test."))
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"health_action"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(execution_timeout_seconds=0.005),
+    )
+
+    result = runtime.execute(ActionProposal("health_action", {"value": "safe"}, "proposal:health"))
+    assert result.status is ExecutionStatus.TIMED_OUT
+    assert started.is_set()
+    assert runtime.health()["timed_out_workers"] == 1
+    release.set()
+    for _ in range(100):
+        if runtime.health()["timed_out_workers"] == 0:
+            break
+        sleep(0.001)
+    assert runtime.health()["timed_out_workers"] == 0
+
+
+def test_budget_rejects_cost_and_rate_overruns() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            "expensive",
+            lambda *_: {"ok": True},
+            validator,
+            cost_units=2,
+            description="Budget test.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"expensive"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(Budget(max_actions=4, max_cost_units=2, max_actions_per_second=1)),
+    )
+    first = runtime.execute(ActionProposal("expensive", {"value": "safe"}, "proposal:cost-1"))
+    second = runtime.execute(ActionProposal("expensive", {"value": "safe"}, "proposal:cost-2"))
+
+    assert first.status is ExecutionStatus.EXECUTED
+    assert second.status is ExecutionStatus.DENIED
+
+
 def test_registry_rejects_duplicate_tool_names() -> None:
     registry = ToolRegistry()
     tool = ToolDefinition("one", lambda *_: None, validator, description="One tool.")
@@ -785,3 +951,34 @@ def test_budget_state_rejects_concurrent_over_allocation() -> None:
     assert not state.acquire()
     state.release()
     assert state.acquire()
+
+
+def test_budget_state_rejects_invalid_cost_and_rate_configuration() -> None:
+    with pytest.raises(ValueError):
+        BudgetState(Budget(max_actions_per_second=0))
+    state = BudgetState(Budget(max_actions=2, max_cost_units=1))
+    assert not state.acquire(0)
+    assert not state.acquire(2)
+
+
+def test_delegation_depth_is_enforced_by_runtime() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            "delegated",
+            lambda *_: {"unexpected": True},
+            validator,
+            delegation_depth=2,
+            description="Synthetic delegation test.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"delegated"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(Budget(max_delegation_depth=1)),
+    )
+    result = runtime.execute(ActionProposal("delegated", {"value": "safe"}, "proposal:delegated"))
+    assert result.status is ExecutionStatus.DENIED
+    assert "delegation" in (result.reason or "")

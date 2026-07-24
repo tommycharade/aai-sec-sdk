@@ -45,7 +45,7 @@ assert result.status == "executed"
 
 Expected outcomes use `ExecutionStatus.EXECUTED`, `DENIED`,
 `APPROVAL_REQUIRED`, `FAILED`, `EXECUTED_UNRECORDED`,
-`EXECUTED_RESULT_REJECTED`, `TIMED_OUT`, or `CANCELLED`; callers must not
+`EXECUTED_RESULT_REJECTED`, `TIMED_OUT`, `CANCELLED`, or `RECONCILED`; callers must not
 blindly retry `TIMED_OUT` or `EXECUTED_UNRECORDED` because side-effect or audit
 state may be uncertain. Policy decisions use `PolicyDecision`. The
 generated reference below is built from public docstrings and is checked in CI.
@@ -71,6 +71,12 @@ The example is synthetic and does not connect to a model or external service.
 
 ::: agentic_security.RuntimeConfig
 
+`RuntimeConfig.execution_timeout_seconds` is a caller-wait deadline. Python
+cannot forcibly terminate an arbitrary running thread, so non-cooperative
+workers remain tracked and count against `max_timed_out_workers` until they
+return. Use `GuardedRuntime.health()` for operational alerts. Configure a
+custom `redactor` for domain-specific secret or PII rules.
+
 ## Tools
 
 ::: agentic_security.tools.ToolDefinition
@@ -78,6 +84,10 @@ The example is synthetic and does not connect to a model or external service.
 `ToolDefinition` applies result redaction and a serialized size limit before a
 handler result crosses the runtime boundary. Use `output_validator` for an
 application-specific result schema or normalization step.
+High-impact and external-egress tools must be idempotent or provide a
+reconciliation callback returning `True` only after the side effect has been
+resolved. `requires_isolation=True` rejects ordinary in-process handlers and
+requires an adapter that explicitly advertises an isolated boundary.
 
 ::: agentic_security.tools.ToolRegistry
 
@@ -121,6 +131,8 @@ modified action.
 
 ::: agentic_security.audit.InMemoryAuditSink
 
+::: agentic_security.audit.Redactor
+
 ## Credential brokering
 
 ::: agentic_security.credentials.CredentialBroker
@@ -133,6 +145,15 @@ modified action.
 
 ::: agentic_security.credentials.TokenCredentialBroker
 
+::: agentic_security.credentials.ProviderToken
+
+Credential callbacks must return `ProviderToken`, not a bare string. The
+provider attests the effective tool/resource scope and expiry; the SDK checks
+that attestation against the live action. `ScopedCredential.with_secret()`
+accepts a non-returning operation, preventing accidental secret return through
+the handler result. In-process handlers remain trusted code; use process or
+container isolation for hostile code.
+
 ## Deployment adapters
 
 The package includes explicit adapters for common deployment infrastructure.
@@ -140,9 +161,12 @@ The package includes explicit adapters for common deployment infrastructure.
 uses a bounded timeout, and never invents authentication or retry behavior.
 `HttpOpaPolicyEngine`, `HttpCedarPolicyEngine`, and `HttpApprovalProvider` use
 that transport. `JsonlAuditSink` provides fsync-backed append-only audit
-storage, while `SubprocessToolHandler` provides a no-shell JSON process
-boundary with timeout and output limits. A subprocess is not a complete OS
-sandbox; production deployments should add container or platform isolation.
+storage, a multi-process lock, a size fail-closed limit, and verification. It
+is local evidence, not a forensic/WORM service: production deployments should
+replicate to access-controlled encrypted remote storage. `SubprocessToolHandler`
+provides a no-shell JSON process boundary with timeout and output limits. A
+subprocess is not a complete OS sandbox; production deployments should add
+container or platform isolation.
 
 ::: agentic_security.http.JsonHttpClient
 
