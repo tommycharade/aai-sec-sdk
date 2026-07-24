@@ -1,6 +1,6 @@
 {
   "tool": "mutmut",
-  "command": "python -m mutmut run --paths-to-mutate src/agentic_security --tests-dir tests --max-children 2",
+  "command": "python scripts/run_mutation_check.py",
   "time_limit_seconds": 120,
   "security_branch_targets": [
     "authorization deny/allow",
@@ -13,5 +13,6 @@
     "audit replication failure"
   ],
   "minimum_killed_percent": 80,
-  "status": "baseline-contract; run manually in a pinned tool environment"
+  "status": "enforced-bounded-run",
+  "results_file": ".mutmut-cache/results.txt"
 }

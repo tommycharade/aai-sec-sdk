@@ -13,12 +13,13 @@ package-check:
 security-check:
 	$(PYTHON) -m pip_audit --strict -r requirements-docs.txt
 	$(PYTHON) -m pip_audit --strict -r requirements-ci.txt
+	$(PYTHON) -m pip_audit --strict -r requirements-build.txt
 
 mutation-check:
 	$(PYTHON) scripts/check_mutation_baseline.py
 
 mutation:
-	$(PYTHON) -m mutmut run --paths-to-mutate src/agentic_security --tests-dir tests --max-children 2
+	$(PYTHON) scripts/run_mutation_check.py
 
 docs:
 	$(PYTHON) scripts/generate_readme.py

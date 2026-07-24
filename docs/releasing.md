@@ -13,6 +13,7 @@ the latest supported release line until a stable support policy is published.
 - [ ] `make security-check` reports no known dependency vulnerabilities.
 - [ ] `requirements-ci.txt` and `requirements-docs.txt` are reviewed when
       direct toolchain versions change; direct inputs are exact-pinned.
+- [ ] `requirements-build.txt` matches the exact PEP 517 build requirements.
 - [ ] `LICENSE` and `NOTICE` are present in both distributions.
 - [ ] `CHANGELOG.md` describes user-visible and security-relevant changes.
 - [ ] Public API and migration notes are up to date.
@@ -32,15 +33,19 @@ Do not describe a release as a security certification. The SDK provides implemen
 
 ## Supply-chain boundaries
 
-The repository pins direct development and documentation inputs, audits both
-constraint files with `pip-audit`, builds from a clean tag, generates a
-per-artifact CycloneDX SBOM for the clean release environment, writes SHA-256
-checksums, and requests GitHub artifact provenance for both wheel and source
-archive through the release workflow. Exact hashes for every platform wheel
-are intentionally not committed because the supported Python matrix selects
-different transitive wheels; releases retain the generated SBOM and
-provenance instead. PyPI publication, if enabled, must use repository trusted
-publishing and never a developer workstation token.
+The repository exact-pins direct development, documentation, and PEP 517 build
+inputs and audits all three input files with `pip-audit`. Release CI builds the
+wheel and source archive, then installs each actual artifact into a fresh
+virtual environment before generating one CycloneDX SBOM per artifact. It also
+writes SHA-256 checksums and requests GitHub provenance attestations for the
+same artifact subjects. Exact hashes for every platform wheel are not
+committed because the supported Python matrix selects different transitive
+wheels; artifact SBOMs, checksums, and provenance are the release evidence.
+PyPI publication, if enabled, must use repository trusted publishing and never
+a developer workstation token.
 
-The local `make mutation` command is separate from `make check`: it is bounded
-by the checked-in baseline, but mutation tooling is not a runtime dependency.
+`make check` validates the mutation contract; `make mutation` executes the
+mutmut run through `scripts/run_mutation_check.py`, enforces the declared 80%
+killed-mutant threshold, and fails on timeout or an unparseable result. The
+run is bounded to two workers and 120 seconds. No mutation score is claimed
+unless that command has completed successfully for the commit.

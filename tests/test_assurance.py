@@ -22,6 +22,7 @@ from agentic_security import (
     ExecutionContext,
     HttpApprovalProvider,
     HttpAuditExporter,
+    InMemoryApprovalProvider,
     InMemoryAuditExporter,
     InMemoryAuditSink,
     InMemoryIdempotencyStore,
@@ -34,8 +35,11 @@ from agentic_security import (
     ToolDefinition,
     ToolRegistry,
 )
+from agentic_security.adapters import JsonlAuditSink
 from agentic_security.approvals import action_hash
 from agentic_security.audit import redact
+from agentic_security.budgets import Budget, BudgetState
+from agentic_security.http import JsonHttpClient
 from agentic_security.idempotency import IdempotencyClaimStatus, new_record
 from agentic_security.policy_adapters import CedarPolicyEngine, OpaPolicyEngine
 
@@ -220,3 +224,23 @@ def test_runtime_contract_uses_host_owned_policy_and_tool() -> None:
         context(), registry, AllowListPolicy({"read"}), InMemoryAuditSink()
     ).execute(ActionProposal("read", {"id": "x"}, "proposal:1"))
     assert result.status.value == "executed"
+
+
+def test_security_defaults_are_regression_covered(tmp_path: Path) -> None:
+    """Mutation tests must detect drift in restrictive timeout and budget defaults."""
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    approval = InMemoryApprovalProvider(now=lambda: now)
+    grant = approval.issue("approval:test", context(), "read", "proposal:test", "approver", "hash")
+    assert grant.expires_at == now + timedelta(seconds=120)
+
+    client = JsonHttpClient("https://policy.example.test")
+    assert client.timeout_seconds == 5.0
+    with pytest.raises(SecurityConfigurationError):
+        JsonHttpClient("http://localhost:8080")
+
+    budget = BudgetState(Budget(max_cost_units=1))
+    assert budget.acquire() is True
+    assert not budget.acquire()
+
+    sink = JsonlAuditSink(tmp_path / "audit.jsonl")
+    assert sink.max_bytes == 100_000_000

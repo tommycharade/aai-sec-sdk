@@ -17,12 +17,14 @@ new boundary.
 
 ## Mutation testing
 
-`mutation-baseline.json` records the security branches and the bounded manual
-command. Run `make mutation` in a pinned development environment when changing
+`mutation-baseline.json` records the security branches and the bounded command.
+`make mutation` runs the actual tool in a pinned development environment and
+fails unless the declared threshold is met. Run it when changing
 authorization, approval, credential, idempotency, timeout, isolation, budget,
 or audit code. Require at least 80% killed mutants in the listed security
-branches. CI validates the baseline but does not run mutation analysis on every
-pull request because mutation runs are slower and tool-version sensitive.
+branches. CI validates the runner and baseline on every pull request; release
+automation or a security-sensitive change should run `make mutation`. No
+mutation score is claimed without the runner's parsed result file.
 
 ## Adapter contracts
 

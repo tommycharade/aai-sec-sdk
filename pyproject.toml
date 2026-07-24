@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools==83.0.0", "wheel==0.46.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -82,3 +82,24 @@ branch = true
 [tool.coverage.report]
 fail_under = 90
 show_missing = true
+
+[tool.mutmut]
+source_paths = ["src/agentic_security"]
+pytest_add_cli_args_test_selection = ["tests"]
+also_copy = [
+  "examples/",
+  "AGENTS.md",
+  "CONTRIBUTING.md",
+  "README.md",
+  "docs/",
+  "Makefile",
+  "LICENSE",
+  "NOTICE",
+  "TRADEMARKS.md",
+  "requirements-ci.txt",
+  "requirements-build.txt",
+  "mutation-baseline.json",
+]
+mutate_only_covered_lines = true
+timeout_constant = 1.0
+timeout_multiplier = 2.0

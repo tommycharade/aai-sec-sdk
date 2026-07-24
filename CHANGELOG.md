@@ -6,6 +6,11 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 
 ## Unreleased
 
+- Mutation enforcement now runs a bounded mutmut pass and enforces the 80%
+  killed-mutant threshold; configuration-only checks do not claim a score.
+- PEP 517 build inputs are exact-pinned and audited separately, and release CI
+  generates SBOMs from each installed wheel/source artifact with provenance
+  attestations for those subjects.
 - Hardened `JsonlAuditSink` restart and append recovery to verify the complete
   existing hash chain before extending it; corrupted local evidence now fails
   closed instead of being silently extended.

@@ -11,6 +11,7 @@ REQUIRED = (
     "pyproject.toml",
     "Makefile",
     "requirements-ci.txt",
+    "requirements-build.txt",
     "mutation-baseline.json",
     "docs/runbooks.md",
     "docs/testing.md",
