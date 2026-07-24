@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from time import monotonic
 
 BASELINE = Path("mutation-baseline.json")
 RESULTS = Path(".mutmut-cache/results.txt")
@@ -19,13 +20,14 @@ def main() -> int:
     subprocess.run([sys.executable, "scripts/check_mutation_baseline.py"], check=True)
     RESULTS.parent.mkdir(parents=True, exist_ok=True)
     command = [sys.executable, "-m", "mutmut", "run", "--max-children", "2"]
+    deadline = monotonic() + int(baseline["time_limit_seconds"])
     try:
         with RESULTS.open("w", encoding="utf-8") as stream:
             run_result = subprocess.run(  # noqa: S603 - fixed local mutmut argv
                 command,
                 stdout=stream,
                 stderr=subprocess.STDOUT,
-                timeout=int(baseline["time_limit_seconds"]),
+                timeout=max(0.1, deadline - monotonic()),
                 check=False,
             )
     except subprocess.TimeoutExpired:
@@ -35,12 +37,17 @@ def main() -> int:
         print("mutmut did not complete successfully; threshold not proven.")
         return 1
 
-    results = subprocess.run(
-        [sys.executable, "-m", "mutmut", "results", "--all", "true"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        results = subprocess.run(
+            [sys.executable, "-m", "mutmut", "results", "--all", "true"],
+            capture_output=True,
+            text=True,
+            timeout=max(0.1, deadline - monotonic()),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        print("Mutation result parsing exceeded its bounded time limit; threshold not proven.")
+        return 1
     output = results.stdout + results.stderr
     RESULTS.write_text(RESULTS.read_text(encoding="utf-8") + "\n" + output, encoding="utf-8")
     statuses = re.findall(

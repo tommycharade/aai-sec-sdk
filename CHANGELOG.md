@@ -8,6 +8,8 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 
 - Mutation enforcement now runs a bounded mutmut pass and enforces the 80%
   killed-mutant threshold; configuration-only checks do not claim a score.
+- Mutation result parsing now shares the hard deadline, so a hung results
+  command cannot bypass the bounded-run failure.
 - PEP 517 build inputs are exact-pinned and audited separately, and release CI
   generates SBOMs from each installed wheel/source artifact with provenance
   attestations for those subjects.
