@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from math import inf, nan
 from pathlib import Path
@@ -132,6 +133,21 @@ def test_jsonl_audit_sink_fails_closed_when_full(tmp_path: Path) -> None:
         sink.append("action_denied", "request:full", {"value": "safe"})
 
 
+def test_jsonl_audit_sink_refreshes_chain_head_under_lock(tmp_path: Path) -> None:
+    path = tmp_path / "concurrent.jsonl"
+    first = JsonlAuditSink(path)
+    second = JsonlAuditSink(path)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list(
+            executor.map(
+                lambda item: item[0].append("event", item[1], {"value": item[1]}),
+                ((first, "request:1"), (second, "request:2")),
+            )
+        )
+    assert first.verify()
+    assert second.verify()
+
+
 def test_token_credential_broker_keeps_material_out_of_credential_attributes() -> None:
     broker = TokenCredentialBroker(
         lambda *_: ProviderToken(
@@ -211,3 +227,11 @@ def test_subprocess_handler_rejects_failure_and_oversized_output() -> None:
         SubprocessToolHandler(())
     with pytest.raises(ValueError, match="positive"):
         SubprocessToolHandler((sys.executable, "-c", "pass"), max_output_bytes=0)
+
+
+def test_subprocess_handler_bounds_large_input_to_worker_that_does_not_read() -> None:
+    handler = SubprocessToolHandler(
+        (sys.executable, "-c", "import time; time.sleep(1)"), timeout_seconds=0.05
+    )
+    with pytest.raises(TimeoutError, match="timed out"):
+        handler(context(), {"value": "x" * 2_000_000})

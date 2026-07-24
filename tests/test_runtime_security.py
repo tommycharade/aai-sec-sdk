@@ -933,6 +933,37 @@ def test_runtime_reports_timed_out_worker_health_until_release() -> None:
     assert runtime.health()["timed_out_workers"] == 0
 
 
+def test_runtime_caps_bounded_workers_under_concurrent_timeouts() -> None:
+    release = Event()
+
+    def slow(_ctx: ExecutionContext, _args: Any) -> dict[str, bool]:
+        release.wait(1)
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registry.register(ToolDefinition("bounded_action", slow, validator, description="Bound test."))
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"bounded_action"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(execution_timeout_seconds=0.005, max_timed_out_workers=1),
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                runtime.execute,
+                ActionProposal("bounded_action", {"value": str(index)}, f"proposal:{index}"),
+            )
+            for index in range(2)
+        ]
+        results = [future.result(timeout=1) for future in futures]
+    release.set()
+
+    assert runtime.health()["timed_out_workers"] <= 1
+    assert sum(result.status is ExecutionStatus.TIMED_OUT for result in results) <= 1
+
+
 def test_budget_rejects_cost_and_rate_overruns() -> None:
     registry = ToolRegistry()
     registry.register(

@@ -84,6 +84,7 @@ class GuardedRuntime:
         self._active_tokens: dict[str, CancellationToken] = {}
         self._worker_lock = RLock()
         self._timed_out_workers = 0
+        self._bounded_workers = 0
         # A re-entrant lock makes the check-and-execute sequence atomic for
         # idempotent tools. This is intentionally conservative: a later
         # adapter can provide per-key locks without weakening the invariant.
@@ -433,8 +434,13 @@ class GuardedRuntime:
         """
         del request_id  # reserved for a future per-request worker registry
         with self._worker_lock:
-            if self._timed_out_workers >= self.config.max_timed_out_workers:
+            # Every bounded operation occupies a tracked slot. This is
+            # intentionally conservative: Python cannot kill a timed-out
+            # thread, so admission must reserve capacity before a race can
+            # create more lingering workers than the configured maximum.
+            if self._bounded_workers >= self.config.max_timed_out_workers:
                 raise RuntimeOperationTimeoutError("timed-out worker limit reached")
+            self._bounded_workers += 1
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agentic-security")
         future = executor.submit(operation)
         timed_out = False
@@ -446,6 +452,7 @@ class GuardedRuntime:
                 return
             callback_called = True
             with self._worker_lock:
+                self._bounded_workers -= 1
                 if timed_out:
                     self._timed_out_workers -= 1
             if timed_out and on_timeout is not None:

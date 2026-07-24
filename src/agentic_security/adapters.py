@@ -123,13 +123,16 @@ class SubprocessToolHandler:
         assert process.stdin is not None
         assert process.stdout is not None
         assert process.stderr is not None
-        process.stdin.write(payload)
-        process.stdin.close()
         output = bytearray()
         selector = selectors.DefaultSelector()
+        os.set_blocking(process.stdin.fileno(), False)
+        os.set_blocking(process.stdout.fileno(), False)
+        os.set_blocking(process.stderr.fileno(), False)
+        selector.register(process.stdin, selectors.EVENT_WRITE)
         selector.register(process.stdout, selectors.EVENT_READ)
         selector.register(process.stderr, selectors.EVENT_READ)
         deadline = datetime.now(UTC).timestamp() + self.timeout_seconds
+        input_offset = 0
         try:
             while selector.get_map():
                 remaining = deadline - datetime.now(UTC).timestamp()
@@ -139,6 +142,16 @@ class SubprocessToolHandler:
                     raise TimeoutError("sandbox worker timed out")
                 for key, _ in selector.select(remaining):
                     stream = cast(Any, key.fileobj)
+                    if stream is process.stdin:
+                        try:
+                            written = os.write(process.stdin.fileno(), payload[input_offset:])
+                        except (BlockingIOError, BrokenPipeError):
+                            written = 0
+                        input_offset += written
+                        if input_offset == len(payload) or process.poll() is not None:
+                            selector.unregister(process.stdin)
+                            process.stdin.close()
+                        continue
                     chunk = stream.read(65536)
                     if not chunk:
                         selector.unregister(stream)
@@ -196,49 +209,56 @@ class JsonlAuditSink:
     def append(self, event_type: str, request_id: str, payload: dict[str, Any]) -> Any:
         """Append one redacted event atomically and flush it to durable storage."""
         with self._lock:
-            if self.path.exists() and self.path.stat().st_size >= self.max_bytes:
-                raise RuntimeError("audit sink is full; rotate or export before continuing")
             safe_payload = redact(payload)
-            timestamp = datetime.now(UTC).isoformat()
-            canonical = json.dumps(
-                [event_type, request_id, safe_payload, timestamp, self._previous_hash],
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-            event_hash = hashlib.sha256(canonical).hexdigest()
-            event = AuditEvent(
-                event_type, request_id, safe_payload, timestamp, self._previous_hash, event_hash
-            )
-            serialized = (
-                json.dumps(
-                    {
-                        "event_type": event.event_type,
-                        "request_id": event.request_id,
-                        "payload": event.payload,
-                        "timestamp": event.timestamp,
-                        "previous_hash": event.previous_hash,
-                        "event_hash": event.event_hash,
-                    },
-                    sort_keys=True,
-                )
-                + "\n"
-            )
-            current_size = self.path.stat().st_size if self.path.exists() else 0
-            if current_size + len(serialized.encode()) > self.max_bytes:
-                raise RuntimeError("audit sink is full; rotate or export before continuing")
             with self._lock_path.open("a+", encoding="utf-8") as lock_stream:
                 if fcntl is not None:
                     fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
                 try:
+                    # Each instance may have opened before another process
+                    # appended. Refresh the chain head while holding the
+                    # interprocess lock, immediately before hashing/writing.
+                    self._previous_hash = self._read_previous_hash()
+                    timestamp = datetime.now(UTC).isoformat()
+                    canonical = json.dumps(
+                        [event_type, request_id, safe_payload, timestamp, self._previous_hash],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                    event_hash = hashlib.sha256(canonical).hexdigest()
+                    event = AuditEvent(
+                        event_type,
+                        request_id,
+                        safe_payload,
+                        timestamp,
+                        self._previous_hash,
+                        event_hash,
+                    )
+                    serialized = (
+                        json.dumps(
+                            {
+                                "event_type": event.event_type,
+                                "request_id": event.request_id,
+                                "payload": event.payload,
+                                "timestamp": event.timestamp,
+                                "previous_hash": event.previous_hash,
+                                "event_hash": event.event_hash,
+                            },
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
+                    current_size = self.path.stat().st_size if self.path.exists() else 0
+                    if current_size + len(serialized.encode()) > self.max_bytes:
+                        raise RuntimeError("audit sink is full; rotate or export before continuing")
                     with self.path.open("a", encoding="utf-8") as stream:
                         stream.write(serialized)
                         stream.flush()
                         os.fsync(stream.fileno())
+                    self._previous_hash = event_hash
                 finally:
                     if fcntl is not None:
                         fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
-            self._previous_hash = event_hash
-        return event
+            return event
 
     def verify(self) -> bool:
         """Verify every JSONL event and return false for corruption."""

@@ -20,6 +20,9 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
   switch immediately before credential minting and handler invocation, and
   enforced subprocess output limits during streaming reads rather than after
   unbounded buffering.
+- Fixed concurrent JSONL audit writers to refresh the hash chain under the
+  interprocess lock, bounded subprocess stdin writes by the execution timeout,
+  and made timed-out-worker capacity admission atomic.
 - Hardened action authorization by binding approvals to exact validated action
   hashes, scoping idempotency keys to the tool and action, rejecting malformed
   proposals safely, requiring complete tenant metadata, and enforcing approval
