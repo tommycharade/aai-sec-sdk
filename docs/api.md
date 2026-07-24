@@ -164,7 +164,8 @@ that transport. `JsonlAuditSink` provides fsync-backed append-only audit
 storage, a multi-process lock, a size fail-closed limit, and verification. It
 is local evidence, not a forensic/WORM service: production deployments should
 replicate to access-controlled encrypted remote storage. `SubprocessToolHandler`
-provides a no-shell JSON process boundary with timeout and output limits. A
+provides a no-shell JSON process boundary with timeout and streaming output
+limits enforced while the child process is being read. A
 subprocess is not a complete OS sandbox; production deployments should add
 container or platform isolation.
 

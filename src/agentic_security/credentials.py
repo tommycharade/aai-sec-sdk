@@ -43,7 +43,7 @@ TokenMinter = Callable[[ExecutionContext, ToolDefinition, tuple[Resource, ...]],
 _PROVIDER_REGISTRY: WeakKeyDictionary[object, Callable[[], str]] = WeakKeyDictionary()
 
 
-@dataclass(frozen=True, slots=True, weakref_slot=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True, eq=False)
 class ScopedCredential:
     """Short-lived credential bound to one tool and resource set.
 

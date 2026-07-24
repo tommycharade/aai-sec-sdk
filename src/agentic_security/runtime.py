@@ -226,6 +226,11 @@ class GuardedRuntime:
                     return self._deny(
                         request_id, proposal, "approval missing, expired, or out of scope"
                     )
+            # Policy and approval calls can be slow. Re-check the host-owned
+            # kill switch immediately before any credential capability is
+            # minted; model or adapter output cannot override this boundary.
+            if self.is_stopped():
+                return self._deny(request_id, proposal, "runtime emergency stop is active")
             handler_context = replace(self.context, cancellation=cancellation)
             if tool.requires_credential:
                 broker = self.credentials
@@ -249,6 +254,11 @@ class GuardedRuntime:
                 except Exception:
                     return self._deny(request_id, proposal, "credential broker failed")
                 handler_context = replace(handler_context, credential=credential)
+            # Credential minting is another externally controlled wait. Stop
+            # may have been activated while it was running, so do not invoke a
+            # side-effecting handler until the host state is checked again.
+            if self.is_stopped():
+                return self._deny(request_id, proposal, "runtime emergency stop is active")
             output = self._run_handler(
                 tool.handler,
                 handler_context,

@@ -173,6 +173,22 @@ def test_credential_material_is_only_available_inside_live_callback() -> None:
         credential.with_secret(lambda value: seen.append(value), issued + timedelta(seconds=10))
 
 
+def test_credential_capabilities_are_identity_keyed() -> None:
+    issued = datetime(2026, 1, 1, tzinfo=UTC)
+    first = ScopedCredential(
+        "same-id", "read_record", (), issued, issued + timedelta(seconds=10), lambda: "first"
+    )
+    second = ScopedCredential(
+        "same-id", "read_record", (), issued, issued + timedelta(seconds=10), lambda: "second"
+    )
+    seen: list[str] = []
+
+    first.with_secret(lambda value: seen.append(value), issued)
+    second.with_secret(lambda value: seen.append(value), issued)
+
+    assert seen == ["first", "second"]
+
+
 def test_credential_brokers_reject_invalid_ttl_and_token() -> None:
     broker = InMemoryCredentialBroker()
     with pytest.raises(ValueError, match="TTL"):

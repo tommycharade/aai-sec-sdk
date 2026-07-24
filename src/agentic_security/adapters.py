@@ -6,13 +6,14 @@ import hashlib
 import json
 import math
 import os
+import selectors
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, cast
 
 try:  # pragma: no cover - platform import
     import fcntl
@@ -111,23 +112,52 @@ class SubprocessToolHandler:
             sort_keys=True,
             separators=(",", ":"),
         ).encode()
+        process = subprocess.Popen(  # noqa: S603 - explicit configured argv, shell disabled
+            self.command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(self.environment),
+            shell=False,
+        )
+        assert process.stdin is not None
+        assert process.stdout is not None
+        assert process.stderr is not None
+        process.stdin.write(payload)
+        process.stdin.close()
+        output = bytearray()
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        selector.register(process.stderr, selectors.EVENT_READ)
+        deadline = datetime.now(UTC).timestamp() + self.timeout_seconds
         try:
-            completed = subprocess.run(  # noqa: S603 - explicit configured argv, shell disabled
-                self.command,
-                input=payload,
-                capture_output=True,
-                check=False,
-                env=dict(self.environment),
-                shell=False,
-                timeout=self.timeout_seconds,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise TimeoutError("sandbox worker timed out") from exc
-        if completed.returncode != 0:
+            while selector.get_map():
+                remaining = deadline - datetime.now(UTC).timestamp()
+                if remaining <= 0:
+                    process.kill()
+                    process.wait()
+                    raise TimeoutError("sandbox worker timed out")
+                for key, _ in selector.select(remaining):
+                    stream = cast(Any, key.fileobj)
+                    chunk = stream.read(65536)
+                    if not chunk:
+                        selector.unregister(stream)
+                        continue
+                    if stream is process.stdout:
+                        output.extend(chunk)
+                        if len(output) > self.max_output_bytes:
+                            process.kill()
+                            process.wait()
+                            raise ValueError("sandbox worker output exceeds configured size")
+            process.wait()
+        finally:
+            selector.close()
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        if process.returncode != 0:
             raise RuntimeError("sandbox worker failed")
-        if len(completed.stdout) > self.max_output_bytes:
-            raise ValueError("sandbox worker output exceeds configured size")
-        return json.loads(completed.stdout)
+        return json.loads(bytes(output))
 
 
 class JsonlAuditSink:

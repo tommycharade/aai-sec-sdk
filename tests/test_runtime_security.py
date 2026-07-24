@@ -474,6 +474,40 @@ def test_stop_requests_cancellation_for_cooperative_handler() -> None:
     assert result.status is ExecutionStatus.CANCELLED
 
 
+def test_stop_after_policy_returns_prevents_handler_invocation() -> None:
+    policy_ready = Event()
+    allow_policy = AllowListPolicy({"stoppable_action"})
+
+    class SlowPolicy:
+        def decide(self, *args: Any, **kwargs: Any) -> Any:
+            policy_ready.set()
+            sleep(0.05)
+            return allow_policy.decide(*args, **kwargs)
+
+    calls: list[bool] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="stoppable_action",
+            handler=lambda *_: calls.append(True),
+            validator=validator,
+            description="Synthetic stop-race action.",
+        )
+    )
+    runtime = GuardedRuntime(context(), registry, SlowPolicy(), InMemoryAuditSink())
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            runtime.execute,
+            ActionProposal("stoppable_action", {"value": "safe"}, "proposal:stop-race"),
+        )
+        assert policy_ready.wait(1)
+        runtime.stop()
+        result = future.result(timeout=1)
+
+    assert result.status is ExecutionStatus.DENIED
+    assert calls == []
+
+
 def test_default_policy_denies_cross_tenant_resource() -> None:
     registry = ToolRegistry()
     registry.register(
