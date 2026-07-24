@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from math import inf, nan
 from threading import Event
 from time import sleep
 from typing import Any
@@ -391,6 +392,13 @@ def test_handler_timeout_is_structured_and_signals_cancellation() -> None:
 
     assert observed.is_set()
     assert result.status is ExecutionStatus.TIMED_OUT
+
+
+def test_runtime_rejects_non_finite_timeout_configuration() -> None:
+    with pytest.raises(SecurityConfigurationError, match="finite and positive"):
+        RuntimeConfig(execution_timeout_seconds=inf)
+    with pytest.raises(SecurityConfigurationError, match="finite and positive"):
+        RuntimeConfig(execution_timeout_seconds=nan)
 
 
 def test_timed_out_handler_keeps_concurrency_slot_until_worker_exits() -> None:

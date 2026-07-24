@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -42,8 +43,8 @@ class RuntimeConfig:
 
     def __post_init__(self) -> None:
         """Reject an unbounded or non-positive handler wait configuration."""
-        if self.execution_timeout_seconds <= 0:
-            raise SecurityConfigurationError("execution timeout must be positive")
+        if not math.isfinite(self.execution_timeout_seconds) or self.execution_timeout_seconds <= 0:
+            raise SecurityConfigurationError("execution timeout must be finite and positive")
 
 
 class GuardedRuntime:

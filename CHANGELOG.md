@@ -22,6 +22,8 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
   or reconciliation for high-impact actions, and added concrete HTTPS policy,
   approval, durable-audit, token-broker, and subprocess process-boundary
   adapters.
+- Reject non-finite timeout configuration so the bounded-wait guarantee cannot
+  be disabled with `NaN` or infinity.
 - Made `make check` include package and dependency-security validation and
   enabled protected-main-branch review and status-check enforcement.
 - Improved audit redaction for common credential fields and prevented the
