@@ -221,17 +221,40 @@ class JsonlAuditSink:
         self._previous_hash = self._read_previous_hash()
 
     def _read_previous_hash(self) -> str:
-        """Recover the last event hash so a restart continues the chain."""
+        """Validate the existing chain and return its final event hash.
+
+        A final hash alone is not sufficient evidence: an earlier line may
+        have been altered while the last line remains untouched.  Refuse to
+        append to a chain that cannot be fully verified so operators cannot
+        accidentally extend corrupted evidence.
+        """
         if not self.path.exists() or self.path.stat().st_size == 0:
             return "0" * 64
         with self.path.open(encoding="utf-8") as stream:
-            lines = stream.readlines()
-        last = lines[-1]
-        value = json.loads(last)
-        previous = value.get("event_hash")
-        if not isinstance(previous, str) or len(previous) != 64:
-            raise ValueError("audit file has an invalid final event hash")
-        return previous
+            previous_hash = "0" * 64
+            for line in stream:
+                value = json.loads(line)
+                payload = value["payload"]
+                canonical = json.dumps(
+                    [
+                        value["event_type"],
+                        value["request_id"],
+                        payload,
+                        value["timestamp"],
+                        previous_hash,
+                    ],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+                event_hash = value["event_hash"]
+                if (
+                    value["previous_hash"] != previous_hash
+                    or not isinstance(event_hash, str)
+                    or hashlib.sha256(canonical).hexdigest() != event_hash
+                ):
+                    raise ValueError("audit file hash chain is corrupt")
+                previous_hash = event_hash
+            return previous_hash
 
     def append(self, event_type: str, request_id: str, payload: dict[str, Any]) -> Any:
         """Append one redacted event atomically and flush it to durable storage."""

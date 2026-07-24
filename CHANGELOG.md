@@ -6,6 +6,9 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 
 ## Unreleased
 
+- Hardened `JsonlAuditSink` restart and append recovery to verify the complete
+  existing hash chain before extending it; corrupted local evidence now fails
+  closed instead of being silently extended.
 - Added the SEC-006 durable audit exporter and fail-closed replication
   contract, SEC-007 operational runbooks, and SEC-008–SEC-010 assurance gates,
   bounded corpus tests, mutation baseline, and adapter contracts.

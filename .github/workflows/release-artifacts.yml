@@ -27,7 +27,12 @@ jobs:
       - name: Generate CycloneDX SBOM
         run: |
           python -m pip install cyclonedx-bom==7.2.1
-          cyclonedx-py environment --of JSON --output-file dist/sbom.json
+          # Keep one evidence file per published artifact. The SBOM describes
+          # the clean release build environment used to produce that artifact.
+          for artifact in dist/*.whl dist/*.tar.gz; do
+            base="$(basename "$artifact")"
+            cyclonedx-py environment --of JSON --output-file "dist/${base}.sbom.json"
+          done
       - name: Generate checksums
         run: sha256sum dist/* > dist/SHA256SUMS
       - name: Upload release evidence
@@ -38,4 +43,6 @@ jobs:
       - name: Attest release provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.2.0
         with:
-          subject-path: "dist/*.whl"
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz

@@ -197,7 +197,9 @@ uses a bounded timeout, and never invents authentication or retry behavior.
 that transport. `JsonlAuditSink` provides fsync-backed append-only audit
 storage, a multi-process lock, a size fail-closed limit, and verification. It
 is local evidence, not a forensic/WORM service: production deployments should
-replicate to access-controlled encrypted remote storage. `SubprocessToolHandler`
+replicate to access-controlled encrypted remote storage. On restart, the local
+sink verifies the complete existing chain before appending; corruption is a
+fail-closed error that must be preserved and investigated. `SubprocessToolHandler`
 provides a no-shell JSON process boundary with timeout and streaming output
 limits enforced while the child process is being read; input writes are also
 deadline-bounded. A

@@ -34,8 +34,9 @@ Do not describe a release as a security certification. The SDK provides implemen
 
 The repository pins direct development and documentation inputs, audits both
 constraint files with `pip-audit`, builds from a clean tag, generates a
-CycloneDX SBOM, writes SHA-256 checksums, and requests GitHub artifact
-provenance through the release workflow. Exact hashes for every platform wheel
+per-artifact CycloneDX SBOM for the clean release environment, writes SHA-256
+checksums, and requests GitHub artifact provenance for both wheel and source
+archive through the release workflow. Exact hashes for every platform wheel
 are intentionally not committed because the supported Python matrix selects
 different transitive wheels; releases retain the generated SBOM and
 provenance instead. PyPI publication, if enabled, must use repository trusted

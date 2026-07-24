@@ -133,6 +133,22 @@ def test_jsonl_audit_sink_fails_closed_when_full(tmp_path: Path) -> None:
         sink.append("action_denied", "request:full", {"value": "safe"})
 
 
+def test_jsonl_audit_sink_refuses_to_extend_a_corrupt_chain(tmp_path: Path) -> None:
+    """Appending cannot hide tampering that occurred before the chain head."""
+    path = tmp_path / "corrupt.jsonl"
+    sink = JsonlAuditSink(path)
+    sink.append("action_denied", "request:1", {"value": "safe"})
+    sink.append("action_denied", "request:2", {"value": "safe"})
+    lines = path.read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    first["payload"]["value"] = "tampered"
+    lines[0] = json.dumps(first, sort_keys=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="hash chain is corrupt"):
+        JsonlAuditSink(path)
+
+
 def test_jsonl_audit_sink_refreshes_chain_head_under_lock(tmp_path: Path) -> None:
     path = tmp_path / "concurrent.jsonl"
     first = JsonlAuditSink(path)
