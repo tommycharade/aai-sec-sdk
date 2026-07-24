@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import subprocess
 from collections.abc import Mapping
@@ -83,8 +84,12 @@ class SubprocessToolHandler:
         """Reject shell-like or unbounded subprocess configurations."""
         if not self.command or any(not isinstance(part, str) or not part for part in self.command):
             raise ValueError("sandbox command must be a non-empty argument tuple")
-        if self.timeout_seconds <= 0 or self.max_output_bytes <= 0:
-            raise ValueError("sandbox timeout and output limit must be positive")
+        if (
+            not math.isfinite(self.timeout_seconds)
+            or self.timeout_seconds <= 0
+            or self.max_output_bytes <= 0
+        ):
+            raise ValueError("sandbox timeout and output limit must be finite and positive")
 
     def __call__(self, context: Any, arguments: Any) -> Any:
         """Execute the worker and parse one bounded JSON result."""

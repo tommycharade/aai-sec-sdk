@@ -24,6 +24,8 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
   adapters.
 - Reject non-finite timeout configuration so the bounded-wait guarantee cannot
   be disabled with `NaN` or infinity.
+- Removed provider callbacks from the handler-visible credential object graph;
+  credential material is now held in an internal weak capability registry.
 - Made `make check` include package and dependency-security validation and
   enabled protected-main-branch review and status-check enforcement.
 - Improved audit redaction for common credential fields and prevented the

@@ -164,6 +164,7 @@ def test_credential_material_is_only_available_inside_live_callback() -> None:
 
     assert credential.with_secret(lambda value: value, issued) == "synthetic-token"
     assert not hasattr(credential, "_secret")
+    assert not hasattr(credential, "_secret_provider")
     with pytest.raises(ValueError):
         credential.with_secret(lambda value: value, issued + timedelta(seconds=10))
 

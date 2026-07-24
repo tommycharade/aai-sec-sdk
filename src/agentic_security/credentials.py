@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 from typing import Protocol, TypeVar
+from weakref import WeakKeyDictionary
 
 from .tools import ToolDefinition
 from .types import ExecutionContext, Resource
@@ -16,8 +17,10 @@ T = TypeVar("T")
 TokenMinter = Callable[[ExecutionContext, ToolDefinition, tuple[Resource, ...]], str]
 """Callback that obtains an already-authenticated provider token."""
 
+_PROVIDER_REGISTRY: WeakKeyDictionary[object, Callable[[], str]] = WeakKeyDictionary()
 
-@dataclass(frozen=True, slots=True)
+
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class ScopedCredential:
     """Short-lived credential bound to one tool and resource set.
 
@@ -33,14 +36,18 @@ class ScopedCredential:
     resources: tuple[Resource, ...]
     issued_at: datetime
     expires_at: datetime
-    _secret_provider: Callable[[], str] = field(default=lambda: "", repr=False, compare=False)
+    # InitVar accepts provider material during construction but does not store
+    # the callback on the credential object. The weak registry keeps it out of
+    # the handler-visible object graph while allowing expiry checks here.
+    _secret_provider: InitVar[Callable[[], str]]
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, _secret_provider: Callable[[], str]) -> None:
         """Prevent credentials with empty scopes or non-positive lifetimes."""
         if not self.credential_id or not self.tool_name:
             raise ValueError("credential identity and tool scope are required")
         if self.expires_at <= self.issued_at:
             raise ValueError("credential expiry must be after issue time")
+        _PROVIDER_REGISTRY[self] = _secret_provider
 
     def valid_for(
         self,
@@ -67,7 +74,10 @@ class ScopedCredential:
         current = now or datetime.now(UTC)
         if not self.issued_at <= current < self.expires_at:
             raise ValueError("credential is expired or not yet valid")
-        return operation(self._secret_provider())
+        provider = _PROVIDER_REGISTRY.get(self)
+        if provider is None:
+            raise ValueError("credential material is unavailable")
+        return operation(provider())
 
 
 @dataclass(frozen=True, slots=True)

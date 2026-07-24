@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -30,8 +31,8 @@ class JsonHttpClient:
         local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
         if parsed.scheme != "https" and not (allow_insecure_localhost and local):
             raise SecurityConfigurationError("integration endpoints must use HTTPS")
-        if timeout_seconds <= 0:
-            raise SecurityConfigurationError("HTTP timeout must be positive")
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise SecurityConfigurationError("HTTP timeout must be finite and positive")
         self.endpoint = endpoint
         self.headers = {"Content-Type": "application/json", **(headers or {})}
         self.timeout_seconds = timeout_seconds

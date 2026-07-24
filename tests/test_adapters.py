@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from math import inf, nan
 from pathlib import Path
 
 import pytest
@@ -72,6 +73,10 @@ def test_http_policy_and_approval_adapters_use_authenticated_transport() -> None
 def test_http_client_requires_https_or_explicit_localhost_test_mode() -> None:
     with pytest.raises(ValueError):
         JsonHttpClient("http://example.invalid/policy")
+    with pytest.raises(ValueError, match="finite and positive"):
+        JsonHttpClient("https://policy.example.test", timeout_seconds=inf)
+    with pytest.raises(ValueError, match="finite and positive"):
+        JsonHttpClient("https://policy.example.test", timeout_seconds=nan)
     JsonHttpClient("http://127.0.0.1:8080/policy", allow_insecure_localhost=True)
 
 
@@ -146,3 +151,8 @@ def test_subprocess_handler_rejects_failure_and_oversized_output() -> None:
     oversized = SubprocessToolHandler((sys.executable, "-c", "print('x' * 20)"), max_output_bytes=5)
     with pytest.raises(ValueError, match="output exceeds"):
         oversized(context(), {})
+
+    with pytest.raises(ValueError, match="finite and positive"):
+        SubprocessToolHandler((sys.executable, "-c", "pass"), timeout_seconds=inf)
+    with pytest.raises(ValueError, match="finite and positive"):
+        SubprocessToolHandler((sys.executable, "-c", "pass"), timeout_seconds=nan)
