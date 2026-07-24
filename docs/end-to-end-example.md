@@ -44,7 +44,8 @@ runtime boundary and tests.
 
 `stop()` prevents new actions and requests cooperative cancellation for an
 in-flight handler. The runtime also bounds how long the caller waits, but code
-blocked in a non-cooperative external call cannot be forcibly terminated.
+blocked in a non-cooperative external call cannot be forcibly terminated. A
+timed-out handler retains its concurrency slot until its worker exits.
 
 The example’s security-path tests are in
 `tests/test_support_agent.py` and are executed by `make check`.

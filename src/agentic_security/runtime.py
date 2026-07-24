@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as HandlerTimeoutError
 from contextlib import nullcontext
@@ -116,6 +116,7 @@ class GuardedRuntime:
                 request_id, proposal, "task budget exhausted or concurrency limit reached"
             )
         cancellation = CancellationToken()
+        budget_release_deferred = False
         with self._stop_lock:
             if self._stopped:
                 self._budget.release()
@@ -197,7 +198,13 @@ class GuardedRuntime:
                 except Exception:
                     return self._deny(request_id, proposal, "credential broker failed")
                 handler_context = replace(handler_context, credential=credential)
-            output = self._run_handler(tool.handler, handler_context, arguments, cancellation)
+            output = self._run_handler(
+                tool.handler,
+                handler_context,
+                arguments,
+                cancellation,
+                self._budget.release,
+            )
             try:
                 normalized_output = (
                     tool.output_validator(output) if tool.output_validator is not None else output
@@ -255,6 +262,11 @@ class GuardedRuntime:
             return result
         except HandlerTimeoutError:
             cancellation.cancel()
+            # A non-cooperative handler may still be performing a side effect
+            # after the caller receives TIMED_OUT. Keep its concurrency slot
+            # reserved until the worker exits so a timeout cannot create
+            # overlapping side effects.
+            budget_release_deferred = True
             result = ExecutionResult(
                 ExecutionStatus.TIMED_OUT,
                 tool.name,
@@ -301,7 +313,8 @@ class GuardedRuntime:
         finally:
             with self._stop_lock:
                 self._active_tokens.pop(request_id, None)
-            self._budget.release()
+            if not budget_release_deferred:
+                self._budget.release()
 
     def _run_handler(
         self,
@@ -309,6 +322,7 @@ class GuardedRuntime:
         context: ExecutionContext,
         arguments: Any,
         cancellation: CancellationToken,
+        on_timeout: Callable[[], None],
     ) -> Any:
         """Run a handler with a bounded wait and cooperative timeout signal."""
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agentic-tool")
@@ -319,6 +333,7 @@ class GuardedRuntime:
         except HandlerTimeoutError:
             timed_out = True
             cancellation.cancel()
+            future.add_done_callback(lambda _future: on_timeout())
             future.cancel()
             executor.shutdown(wait=False, cancel_futures=True)
             raise

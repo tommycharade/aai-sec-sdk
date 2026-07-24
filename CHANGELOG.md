@@ -14,6 +14,9 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
   bounded handler waits with cooperative cancellation, private credential
   material callbacks, redacted/size-limited tool results, and policy
   version/provenance evidence in execution audit events.
+- Ensured timed-out non-cooperative handlers retain their concurrency slot
+  until the worker exits, preventing timeout retries from overlapping side
+  effects beyond the configured concurrency limit.
 - Made `make check` include package and dependency-security validation and
   enabled protected-main-branch review and status-check enforcement.
 - Improved audit redaction for common credential fields and prevented the

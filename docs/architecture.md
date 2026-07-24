@@ -31,7 +31,9 @@ separate adapters without weakening the core execution invariant.
 
 The current runtime provides a bounded caller wait and cooperative cancellation
 for handlers that observe the context token; it cannot forcibly terminate a
-thread blocked in external code. It does not provide rate limits, fan-out
+thread blocked in external code. A timed-out non-cooperative handler keeps its
+reserved concurrency slot until its worker exits, preventing timeout retries
+from bypassing the configured concurrency boundary. It does not provide rate limits, fan-out
 limits, cost budgets, durable audit storage, or a network client for OPA/Cedar.
 The injected OPA/Cedar evaluators
 are decision-shape adapters, not full policy-server integrations. These are

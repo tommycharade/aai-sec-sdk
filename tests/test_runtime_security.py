@@ -270,6 +270,50 @@ def test_handler_timeout_is_structured_and_signals_cancellation() -> None:
     assert result.status is ExecutionStatus.TIMED_OUT
 
 
+def test_timed_out_handler_keeps_concurrency_slot_until_worker_exits() -> None:
+    started = Event()
+    release = Event()
+    calls: list[str] = []
+
+    def slow_handler(_context: ExecutionContext, _arguments: Any) -> dict[str, bool]:
+        started.set()
+        release.wait(1)
+        calls.append("slow-finished")
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            "slow_action",
+            slow_handler,
+            validator,
+            description="Synthetic non-cooperative timeout test.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"slow_action"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(Budget(max_actions=3, max_concurrent=1), 0.005),
+    )
+
+    first = runtime.execute(ActionProposal("slow_action", {"value": "safe"}, "proposal:slow-1"))
+    assert first.status is ExecutionStatus.TIMED_OUT
+    assert started.is_set()
+
+    second = runtime.execute(ActionProposal("slow_action", {"value": "safe"}, "proposal:slow-2"))
+    assert second.status is ExecutionStatus.DENIED
+    assert "concurrency" in (second.reason or "")
+
+    release.set()
+    for _ in range(100):
+        if calls:
+            break
+        sleep(0.001)
+    assert calls == ["slow-finished"]
+
+
 def test_stop_requests_cancellation_for_cooperative_handler() -> None:
     started = Event()
 
