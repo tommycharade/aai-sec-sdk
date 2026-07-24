@@ -6,13 +6,21 @@ output trustworthy. The public entry point is :class:`GuardedRuntime`.
 
 from .adapters import (
     HttpApprovalProvider,
+    HttpAuditExporter,
     HttpCedarPolicyEngine,
     HttpOpaPolicyEngine,
     JsonlAuditSink,
     SubprocessToolHandler,
 )
 from .approvals import ApprovalGrant, ApprovalProvider, InMemoryApprovalProvider, action_hash
-from .audit import AuditEvent, InMemoryAuditSink
+from .audit import (
+    AuditEvent,
+    AuditExporter,
+    AuditReplicationError,
+    InMemoryAuditExporter,
+    InMemoryAuditSink,
+    ReplicatedAuditSink,
+)
 from .budgets import Budget
 from .credentials import (
     CredentialBroker,
@@ -68,6 +76,10 @@ __all__ = [
     "action_hash",
     "AllowListPolicy",
     "AuditEvent",
+    "AuditExporter",
+    "AuditReplicationError",
+    "InMemoryAuditExporter",
+    "ReplicatedAuditSink",
     "CompositeAuditSink",
     "CredentialBroker",
     "CredentialMetadata",
@@ -88,6 +100,7 @@ __all__ = [
     "ExecutionStatus",
     "GuardedRuntime",
     "HttpApprovalProvider",
+    "HttpAuditExporter",
     "HttpCedarPolicyEngine",
     "HttpOpaPolicyEngine",
     "InMemoryApprovalProvider",

@@ -50,6 +50,13 @@ authoritative audit sink and emits one span per redacted security event.
 OpenTelemetry is optional; applications install `opentelemetry-api` and pass
 their configured tracer to the adapter.
 
+Durable audit is an explicit two-stage boundary. `JsonlAuditSink` provides
+local fsync, locking, size limits, and chain verification. `ReplicatedAuditSink`
+requires an `AuditExporter` acknowledgement and raises on remote failure, so
+the runtime cannot report a normally recorded consequential action when the
+configured replica is unavailable. WORM storage, retention, signing, and
+access control remain deployment responsibilities.
+
 The policy adapter layer provides `OpaPolicyEngine` and `CedarPolicyEngine`.
 They accept injected evaluators, serialize the same live identity/argument/
 resource request, and map only explicit external decisions. Transport errors,

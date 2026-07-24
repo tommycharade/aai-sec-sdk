@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover - Windows deployments use remote audit
     fcntl = None  # type: ignore[assignment]
 
 from .approvals import ApprovalProvider
-from .audit import AuditEvent, redact
+from .audit import AuditEvent, AuditExporter, redact
 from .http import JsonHttpClient
 from .policy_adapters import CedarPolicyEngine, OpaPolicyEngine
 
@@ -70,6 +70,34 @@ class HttpApprovalProvider(ApprovalProvider):
             }
         )
         return response.get("approved") is True
+
+
+class HttpAuditExporter(AuditExporter):
+    """Export redacted audit events to an authenticated remote collector.
+
+    The collector must return ``{"accepted": true}`` only after durable
+    acceptance.  HTTP failures, malformed responses, and negative
+    acknowledgements raise so :class:`ReplicatedAuditSink` fails closed.
+    """
+
+    def __init__(self, client: JsonHttpClient) -> None:
+        """Create an exporter using an explicitly configured HTTPS client."""
+        self.client = client
+
+    def export(self, event: AuditEvent) -> None:
+        """Send one complete event and require an explicit durable acknowledgement."""
+        response = self.client.post(
+            {
+                "event_type": event.event_type,
+                "request_id": event.request_id,
+                "payload": redact(event.payload),
+                "timestamp": event.timestamp,
+                "previous_hash": event.previous_hash,
+                "event_hash": event.event_hash,
+            }
+        )
+        if response.get("accepted") is not True:
+            raise RuntimeError("remote audit collector did not acknowledge durable acceptance")
 
 
 @dataclass(frozen=True, slots=True)

@@ -159,6 +159,12 @@ modified action.
 
 ::: agentic_security.audit.InMemoryAuditSink
 
+::: agentic_security.audit.AuditExporter
+
+::: agentic_security.audit.ReplicatedAuditSink
+
+::: agentic_security.audit.InMemoryAuditExporter
+
 ::: agentic_security.audit.Redactor
 
 ## Credential brokering
@@ -205,6 +211,8 @@ container or platform isolation.
 ::: agentic_security.adapters.HttpCedarPolicyEngine
 
 ::: agentic_security.adapters.HttpApprovalProvider
+
+::: agentic_security.adapters.HttpAuditExporter
 
 ::: agentic_security.adapters.JsonlAuditSink
 

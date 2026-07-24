@@ -85,6 +85,60 @@ class AuditSink(Protocol):
         """Append and return an immutable audit event."""
 
 
+class AuditExporter(Protocol):
+    """Durable remote replication contract for already-redacted events.
+
+    An exporter must not acknowledge until the event is durably accepted by
+    its destination.  Authentication, ordering, retries, retention, and
+    immutable storage are deployment responsibilities behind this boundary.
+    """
+
+    def export(self, event: AuditEvent) -> None:
+        """Persist ``event`` remotely or raise without claiming success."""
+
+
+class AuditReplicationError(RuntimeError):
+    """Raised when a required remote audit replica cannot acknowledge an event."""
+
+
+class ReplicatedAuditSink:
+    """Compose a local sink with a required remote audit exporter.
+
+    Local persistence happens first so a locally recoverable event exists if
+    the remote service is unavailable.  The exporter is still authoritative
+    for the configured deployment: an export failure raises, causing the
+    runtime to return its fail-closed unrecorded outcome for consequential
+    actions.  This class intentionally does not pretend that local JSONL or
+    memory storage is immutable forensic evidence.
+    """
+
+    def __init__(self, primary: AuditSink, exporter: AuditExporter) -> None:
+        """Create a sink whose append succeeds only after remote acknowledgement."""
+        self.primary = primary
+        self.exporter = exporter
+
+    def append(self, event_type: str, request_id: str, payload: dict[str, Any]) -> AuditEvent:
+        """Append locally, then require durable remote replication."""
+        event = self.primary.append(event_type, request_id, payload)
+        try:
+            self.exporter.export(event)
+        except Exception as exc:
+            raise AuditReplicationError("required audit replication failed") from exc
+        return event
+
+
+class InMemoryAuditExporter:
+    """Deterministic exporter used by tests and local contract examples."""
+
+    def __init__(self) -> None:
+        """Create an empty acknowledged-event collection."""
+        self.events: list[AuditEvent] = []
+
+    def export(self, event: AuditEvent) -> None:
+        """Record an event as if a remote test service acknowledged it."""
+        self.events.append(event)
+
+
 class InMemoryAuditSink:
     """Thread-safe hash-chain sink for tests and local development."""
 

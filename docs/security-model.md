@@ -31,6 +31,13 @@ handler can be forcibly cancelled by `stop()`. Runtime operation waits are
 bounded, but deployment infrastructure must still provide its own IAM,
 network policy, durable audit controls, and OS/container sandboxing.
 
+For consequential deployments, wrap the local sink in `ReplicatedAuditSink`
+with a required `AuditExporter`. The exporter must acknowledge only after
+durable remote acceptance; export failure raises and the runtime fails closed.
+`JsonlAuditSink` remains a local recovery/evidence adapter, not WORM or
+tamper-proof forensic storage. Follow the [operational runbooks](runbooks.md)
+for outages, corruption, rotation, and evidence preservation.
+
 Handlers may return arbitrary application values, but the runtime applies the
 optional tool output normalizer, performs key and common-token content
 redaction, and

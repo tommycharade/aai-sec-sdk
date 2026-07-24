@@ -37,6 +37,8 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Security model: security-model.md
+  - Operational runbooks: runbooks.md
+  - Testing and assurance: testing.md
   - Architecture: architecture.md
   - End-to-end example: end-to-end-example.md
   - API reference: api.md

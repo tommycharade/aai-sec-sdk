@@ -1,8 +1,8 @@
 PYTHON ?= python3
 
-.PHONY: check format lint type test coverage guardrails docs docs-check package-check security-check
+.PHONY: check format lint type test coverage guardrails docs docs-check package-check security-check mutation-check mutation
 
-check: format-check lint type test coverage guardrails docs-check package-check security-check
+check: format-check lint type test coverage guardrails docs-check package-check security-check mutation-check
 
 package-check:
 	rm -rf dist
@@ -12,6 +12,13 @@ package-check:
 
 security-check:
 	$(PYTHON) -m pip_audit --strict -r requirements-docs.txt
+	$(PYTHON) -m pip_audit --strict -r requirements-ci.txt
+
+mutation-check:
+	$(PYTHON) scripts/check_mutation_baseline.py
+
+mutation:
+	$(PYTHON) -m mutmut run --paths-to-mutate src/agentic_security --tests-dir tests --max-children 2
 
 docs:
 	$(PYTHON) scripts/generate_readme.py

@@ -6,6 +6,9 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 
 ## Unreleased
 
+- Added the SEC-006 durable audit exporter and fail-closed replication
+  contract, SEC-007 operational runbooks, and SEC-008–SEC-010 assurance gates,
+  bounded corpus tests, mutation baseline, and adapter contracts.
 - Added explicit reconciliation states that never finalize a side effect while
   a timed-out worker may still commit.
 - Added typed, verifier-backed isolation attestations; the legacy
