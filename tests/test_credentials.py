@@ -118,7 +118,12 @@ def test_invalid_broker_scope_is_denied_without_handler() -> None:
         ) -> ScopedCredential:
             now = datetime.now(UTC)
             return ScopedCredential(
-                "wrong", "different_tool", (), now, now + timedelta(minutes=1), "synthetic"
+                "wrong",
+                "different_tool",
+                (),
+                now,
+                now + timedelta(minutes=1),
+                lambda: "synthetic",
             )
 
     calls: list[bool] = []
@@ -139,7 +144,7 @@ def test_scoped_credential_expiry_is_enforced() -> None:
         (),
         issued,
         issued + timedelta(seconds=10),
-        "synthetic",
+        lambda: "synthetic",
     )
 
     assert credential.valid_for("read_record", (), issued + timedelta(seconds=9))
@@ -154,9 +159,32 @@ def test_credential_material_is_only_available_inside_live_callback() -> None:
         (),
         issued,
         issued + timedelta(seconds=10),
-        _secret="synthetic-token",  # noqa: S106 - synthetic test material
+        _secret_provider=lambda: "synthetic-token",  # noqa: S106 - synthetic test material
     )
 
     assert credential.with_secret(lambda value: value, issued) == "synthetic-token"
+    assert not hasattr(credential, "_secret")
     with pytest.raises(ValueError):
         credential.with_secret(lambda value: value, issued + timedelta(seconds=10))
+
+
+def test_credential_brokers_reject_invalid_ttl_and_token() -> None:
+    broker = InMemoryCredentialBroker()
+    with pytest.raises(ValueError, match="TTL"):
+        broker.mint(
+            _context(),
+            ToolDefinition("read", lambda *_: None, _validator, description="Read."),
+            (),
+            0,
+        )
+
+    from agentic_security.credentials import TokenCredentialBroker
+
+    token_broker = TokenCredentialBroker(lambda *_: "")
+    with pytest.raises(ValueError, match="no token"):
+        token_broker.mint(
+            _context(),
+            ToolDefinition("read", lambda *_: None, _validator, description="Read."),
+            (),
+            30,
+        )

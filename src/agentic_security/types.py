@@ -61,8 +61,8 @@ class Principal:
     """Authenticated identity on whose behalf an action is requested.
 
     The runtime accepts this object from application authentication context,
-    never from a model proposal. ``tenant`` is optional for single-tenant
-    deployments but should be supplied whenever tenant isolation matters.
+    never from a model proposal. Tenant identity is mandatory so authorization
+    cannot silently run without an isolation boundary.
     """
 
     id: str
@@ -78,15 +78,13 @@ class Principal:
             or not self.kind.strip()
         ):
             raise SecurityConfigurationError("principal id and kind are required")
-        if self.tenant is not None and (
-            not isinstance(self.tenant, str) or not self.tenant.strip()
-        ):
-            raise SecurityConfigurationError("principal tenant cannot be empty")
+        if not isinstance(self.tenant, str) or not self.tenant.strip():
+            raise SecurityConfigurationError("principal tenant is required")
 
 
 @dataclass(frozen=True, slots=True)
 class Resource:
-    """Resource targeted by an action, with an optional tenant association."""
+    """Resource targeted by an action with a mandatory tenant association."""
 
     id: str
     kind: str
@@ -101,10 +99,8 @@ class Resource:
             or not self.kind.strip()
         ):
             raise SecurityConfigurationError("resource id and kind are required")
-        if self.tenant is not None and (
-            not isinstance(self.tenant, str) or not self.tenant.strip()
-        ):
-            raise SecurityConfigurationError("resource tenant cannot be empty")
+        if not isinstance(self.tenant, str) or not self.tenant.strip():
+            raise SecurityConfigurationError("resource tenant is required")
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,10 +134,8 @@ class ExecutionContext:
             or not self.purpose.strip()
         ):
             raise SecurityConfigurationError("agent id, task id, and purpose are required")
-        if self.tenant is not None and (
-            not isinstance(self.tenant, str) or not self.tenant.strip()
-        ):
-            raise SecurityConfigurationError("task tenant cannot be empty")
+        if not isinstance(self.tenant, str) or not self.tenant.strip():
+            raise SecurityConfigurationError("task tenant is required")
 
 
 @dataclass(frozen=True, slots=True)

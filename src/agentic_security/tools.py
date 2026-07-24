@@ -18,6 +18,9 @@ ToolHandler: TypeAlias = Callable[[ExecutionContext, Any], Any]
 OutputValidator: TypeAlias = Callable[[Any], Any]
 """Callable that normalizes a handler result before it crosses the boundary."""
 
+ReconciliationHandler: TypeAlias = Callable[[ExecutionContext, Any], Any]
+"""Callable used by an application to reconcile an uncertain side effect."""
+
 
 @dataclass(frozen=True, slots=True)
 class ToolDefinition:
@@ -40,6 +43,7 @@ class ToolDefinition:
     credential_ttl_seconds: int = 120
     output_validator: OutputValidator | None = None
     max_output_bytes: int = 1_000_000
+    reconciliation: ReconciliationHandler | None = None
     description: str = ""
 
     def __post_init__(self) -> None:
@@ -55,6 +59,15 @@ class ToolDefinition:
         if self.external_egress and not self.requires_approval:
             raise SecurityConfigurationError(
                 f"external-egress tool {self.name!r} must require approval"
+            )
+        if (
+            (self.external_egress or self.risk in {RiskLevel.HIGH, RiskLevel.CRITICAL})
+            and not self.idempotency_required
+            and self.reconciliation is None
+        ):
+            raise SecurityConfigurationError(
+                f"high-impact or external-egress tool {self.name!r} must require idempotency "
+                "or declare reconciliation"
             )
         if self.requires_credential and self.credential_ttl_seconds <= 0:
             raise SecurityConfigurationError(

@@ -4,6 +4,13 @@ The package deliberately mediates actions rather than attempting to make model
 output trustworthy. The public entry point is :class:`GuardedRuntime`.
 """
 
+from .adapters import (
+    HttpApprovalProvider,
+    HttpCedarPolicyEngine,
+    HttpOpaPolicyEngine,
+    JsonlAuditSink,
+    SubprocessToolHandler,
+)
 from .approvals import ApprovalGrant, ApprovalProvider, InMemoryApprovalProvider, action_hash
 from .audit import AuditEvent, InMemoryAuditSink
 from .budgets import Budget
@@ -12,10 +19,12 @@ from .credentials import (
     CredentialMetadata,
     InMemoryCredentialBroker,
     ScopedCredential,
+    TokenCredentialBroker,
 )
 from .errors import (
     DuplicateToolError,
     RuntimeCancelledError,
+    RuntimeOperationTimeoutError,
     RuntimeStateError,
     SecurityConfigurationError,
 )
@@ -23,7 +32,7 @@ from .policies import AllowListPolicy, PolicyDecision, PolicyEngine, PolicyResul
 from .policy_adapters import CedarPolicyEngine, OpaPolicyEngine, PolicyRequest
 from .runtime import GuardedRuntime, RuntimeConfig
 from .telemetry import CompositeAuditSink, OpenTelemetryAuditSink
-from .tools import OutputValidator, ToolDefinition, ToolRegistry
+from .tools import OutputValidator, ReconciliationHandler, ToolDefinition, ToolRegistry
 from .types import (
     ActionProposal,
     CancellationToken,
@@ -53,11 +62,16 @@ __all__ = [
     "ExecutionResult",
     "ExecutionStatus",
     "GuardedRuntime",
+    "HttpApprovalProvider",
+    "HttpCedarPolicyEngine",
+    "HttpOpaPolicyEngine",
     "InMemoryApprovalProvider",
     "InMemoryAuditSink",
     "InMemoryCredentialBroker",
+    "JsonlAuditSink",
     "OpenTelemetryAuditSink",
     "OutputValidator",
+    "ReconciliationHandler",
     "OpaPolicyEngine",
     "PolicyDecision",
     "PolicyEngine",
@@ -69,7 +83,10 @@ __all__ = [
     "RuntimeConfig",
     "RuntimeStateError",
     "RuntimeCancelledError",
+    "RuntimeOperationTimeoutError",
     "ScopedCredential",
+    "SubprocessToolHandler",
+    "TokenCredentialBroker",
     "SecurityConfigurationError",
     "ToolDefinition",
     "ToolRegistry",

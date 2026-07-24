@@ -71,6 +71,9 @@ def make_runtime(
             risk=risk,
             requires_approval=requires_approval,
             idempotency_required=idempotency_required,
+            reconciliation=(lambda _context, _arguments: None)
+            if risk in {RiskLevel.HIGH, RiskLevel.CRITICAL}
+            else None,
             resources=lambda _: (Resource("record:1", "record", "tenant:a"),),
             description="Read one synthetic record.",
         )
@@ -120,6 +123,126 @@ def test_tool_results_are_redacted_before_crossing_runtime_boundary() -> None:
 
     assert result.status is ExecutionStatus.EXECUTED
     assert result.output == {"access_token": "[REDACTED]", "value": "safe"}
+
+
+def test_custom_audit_sink_receives_redacted_arguments() -> None:
+    class RecordingAudit:
+        def __init__(self) -> None:
+            self.payloads: list[dict[str, Any]] = []
+
+        def append(self, _event_type: str, _request_id: str, payload: dict[str, Any]) -> None:
+            self.payloads.append(payload)
+
+    audit = RecordingAudit()
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            "audit_secret",
+            lambda *_: {"ok": True},
+            lambda arguments: dict(arguments),
+            description="Synthetic audit-redaction test.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"audit_secret"}),
+        audit,  # type: ignore[arg-type]
+    )
+
+    result = runtime.execute(
+        ActionProposal(
+            "audit_secret",
+            {"value": "safe", "access_token": "synthetic-token"},
+            "proposal:audit-redaction",
+        )
+    )
+
+    assert result.status is ExecutionStatus.EXECUTED
+    assert audit.payloads[0]["arguments"]["access_token"] == "[REDACTED]"  # noqa: S105
+    assert "synthetic-token" not in str(audit.payloads)
+
+
+def test_policy_timeout_fails_closed() -> None:
+    blocked = Event()
+    release = Event()
+
+    class SlowPolicy:
+        def decide(self, *_: Any) -> PolicyResult:
+            blocked.set()
+            release.wait(1)
+            return PolicyResult(PolicyDecision.ALLOW, "late")
+
+    runtime, _ = make_runtime(policy=SlowPolicy())
+    runtime.config = RuntimeConfig(execution_timeout_seconds=0.005)
+    result = runtime.execute(proposal("safe", secret="synthetic"))  # noqa: S106
+
+    assert blocked.is_set()
+    assert result.status is ExecutionStatus.DENIED
+    assert result.reason == "policy evaluation timed out"
+    release.set()
+
+
+def test_credential_timeout_fails_closed_before_handler() -> None:
+    blocked = Event()
+    release = Event()
+
+    class SlowBroker:
+        def mint(self, *_: Any) -> Any:
+            blocked.set()
+            release.wait(1)
+            raise AssertionError("credential mint should have timed out")
+
+    calls: list[bool] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            "credential_action",
+            lambda *_: calls.append(True),
+            validator,
+            requires_credential=True,
+            description="Synthetic credential timeout test.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"credential_action"}),
+        InMemoryAuditSink(),
+        credentials=SlowBroker(),
+        config=RuntimeConfig(execution_timeout_seconds=0.005),
+    )
+
+    result = runtime.execute(
+        ActionProposal("credential_action", {"value": "safe"}, "proposal:cred-timeout")
+    )
+
+    assert blocked.is_set()
+    assert result.status is ExecutionStatus.DENIED
+    assert result.reason == "credential minting timed out"
+    assert calls == []
+    release.set()
+
+
+def test_audit_timeout_reports_unrecorded_execution() -> None:
+    blocked = Event()
+    release = Event()
+
+    class SlowAudit:
+        def append(self, *_: Any) -> None:
+            blocked.set()
+            release.wait(1)
+
+    runtime, _ = make_runtime()
+    runtime.audit = SlowAudit()  # type: ignore[assignment]
+    runtime.config = RuntimeConfig(execution_timeout_seconds=0.005)
+
+    result = runtime.execute(proposal())
+
+    assert blocked.is_set()
+    assert result.status is ExecutionStatus.EXECUTED_UNRECORDED
+    assert result.audit_recorded is False
+    release.set()
 
 
 def test_oversized_tool_results_are_rejected_after_side_effect() -> None:
@@ -377,30 +500,19 @@ def test_tenant_context_rejects_missing_tenant_metadata() -> None:
             name="unscoped_lookup",
             handler=lambda *_: {"unexpected": True},
             validator=validator,
-            resources=lambda _: (Resource("record:unscoped", "record"),),
+            resources=lambda _: (Resource("record:unscoped", "record", "tenant:a"),),
             description="Synthetic unscoped lookup.",
         )
     )
-    missing_principal_tenant = ExecutionContext(
-        agent_id="agent:test",
-        principal=Principal("user:alice"),
-        task_id="task:1",
-        purpose="test",
-        tenant="tenant:a",
-    )
-    runtime = GuardedRuntime(
-        missing_principal_tenant,
-        registry,
-        AllowListPolicy({"unscoped_lookup"}),
-        InMemoryAuditSink(),
-    )
-
-    result = runtime.execute(
-        ActionProposal("unscoped_lookup", {"value": "safe"}, "proposal:unscoped")
-    )
-
-    assert result.status == "denied"
-    assert result.reason == "principal tenant does not match task tenant"
+    with pytest.raises(SecurityConfigurationError, match="principal tenant is required"):
+        Principal("user:alice")
+    with pytest.raises(SecurityConfigurationError, match="task tenant is required"):
+        ExecutionContext(
+            "agent:test",
+            Principal("user:alice", tenant="tenant:a"),
+            "task:1",
+            "test",
+        )
 
 
 def test_high_impact_tool_requires_approval_at_configuration_time() -> None:
@@ -412,6 +524,28 @@ def test_high_impact_tool_requires_approval_at_configuration_time() -> None:
             risk=RiskLevel.HIGH,
             description="Synthetic funds movement.",
         )
+
+
+def test_high_impact_tool_requires_idempotency_or_reconciliation() -> None:
+    with pytest.raises(SecurityConfigurationError, match="idempotency or declare reconciliation"):
+        ToolDefinition(
+            name="non_idempotent_funds",
+            handler=lambda *_: None,
+            validator=validator,
+            risk=RiskLevel.HIGH,
+            requires_approval=True,
+            description="Synthetic non-idempotent high-impact action.",
+        )
+
+    ToolDefinition(
+        name="reconciled_funds",
+        handler=lambda *_: None,
+        validator=validator,
+        risk=RiskLevel.HIGH,
+        requires_approval=True,
+        reconciliation=lambda _context, _arguments: None,
+        description="Synthetic reconciled high-impact action.",
+    )
 
 
 def test_incomplete_host_identity_is_rejected() -> None:

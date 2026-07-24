@@ -41,6 +41,7 @@ def main() -> None:
         principal=Principal("user:example", tenant="tenant:example"),
         task_id="task:example",
         purpose="demonstrate guarded lookup",
+        tenant="tenant:example",
     )
     registry = ToolRegistry()
     registry.register(

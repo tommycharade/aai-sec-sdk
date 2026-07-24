@@ -21,23 +21,21 @@ No side effect or privileged credential mint may happen before applicable checks
 
 The current pre-release provides the framework-neutral core: explicit tool
 registration, deterministic argument validation, deny-by-default local policy,
-tenant/resource checks, scoped in-memory approvals for development and tests,
+mandatory tenant/resource checks, scoped in-memory approvals for development and tests,
 budgets, emergency stop, idempotency, and redaction-aware hash-chain audit
-events. The `CredentialBroker` contract and synthetic `InMemoryCredentialBroker`
-provide the first credential integration surface. Production deployments should
-implement that contract with an audience- and resource-bound provider; external
-policy engines, sandboxes, OpenTelemetry exporters, and MCP gateways remain
-separate adapters without weakening the core execution invariant.
+events. The `CredentialBroker` contract, synthetic broker, and
+`TokenCredentialBroker` provide development and deployment integration
+surfaces. `JsonlAuditSink`, bounded HTTP OPA/Cedar/approval adapters, and a
+no-shell subprocess process boundary are included as explicit adapters.
 
 The current runtime provides a bounded caller wait and cooperative cancellation
 for handlers that observe the context token; it cannot forcibly terminate a
 thread blocked in external code. A timed-out non-cooperative handler keeps its
 reserved concurrency slot until its worker exits, preventing timeout retries
 from bypassing the configured concurrency boundary. It does not provide rate limits, fan-out
-limits, cost budgets, durable audit storage, or a network client for OPA/Cedar.
-The injected OPA/Cedar evaluators
-are decision-shape adapters, not full policy-server integrations. These are
-deployment and roadmap concerns, not guarantees of the current package.
+limits, cost budgets, or full OS/container sandboxing. Durable JSONL audit and
+bounded HTTP policy/approval adapters are provided, but deployments must still
+configure authenticated endpoints and operational storage controls.
 When an evaluator returns `policy_version`/`version` or
 `provenance`/`source`, those values are retained in execution audit evidence.
 

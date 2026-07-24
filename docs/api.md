@@ -21,9 +21,10 @@ from agentic_security.policies import AllowListPolicy
 
 context = ExecutionContext(
     agent_id="agent:example",
-    principal=Principal("user:alice"),
+    principal=Principal("user:alice", tenant="tenant:example"),
     task_id="task:example",
     purpose="read one synthetic record",
+    tenant="tenant:example",
 )
 registry = ToolRegistry()
 registry.register(ToolDefinition(
@@ -43,7 +44,10 @@ assert result.status == "executed"
 ```
 
 Expected outcomes use `ExecutionStatus.EXECUTED`, `DENIED`,
-`APPROVAL_REQUIRED`, or `FAILED`; policy decisions use `PolicyDecision`. The
+`APPROVAL_REQUIRED`, `FAILED`, `EXECUTED_UNRECORDED`,
+`EXECUTED_RESULT_REJECTED`, `TIMED_OUT`, or `CANCELLED`; callers must not
+blindly retry `TIMED_OUT` or `EXECUTED_UNRECORDED` because side-effect or audit
+state may be uncertain. Policy decisions use `PolicyDecision`. The
 generated reference below is built from public docstrings and is checked in CI.
 The example is synthetic and does not connect to a model or external service.
 
@@ -78,6 +82,8 @@ application-specific result schema or normalization step.
 ::: agentic_security.tools.ToolRegistry
 
 ::: agentic_security.tools.OutputValidator
+
+::: agentic_security.tools.ReconciliationHandler
 
 ## Policies
 
@@ -124,6 +130,31 @@ modified action.
 ::: agentic_security.credentials.ScopedCredential
 
 ::: agentic_security.credentials.InMemoryCredentialBroker
+
+::: agentic_security.credentials.TokenCredentialBroker
+
+## Deployment adapters
+
+The package includes explicit adapters for common deployment infrastructure.
+`JsonHttpClient` requires HTTPS (except explicitly enabled localhost tests),
+uses a bounded timeout, and never invents authentication or retry behavior.
+`HttpOpaPolicyEngine`, `HttpCedarPolicyEngine`, and `HttpApprovalProvider` use
+that transport. `JsonlAuditSink` provides fsync-backed append-only audit
+storage, while `SubprocessToolHandler` provides a no-shell JSON process
+boundary with timeout and output limits. A subprocess is not a complete OS
+sandbox; production deployments should add container or platform isolation.
+
+::: agentic_security.http.JsonHttpClient
+
+::: agentic_security.adapters.HttpOpaPolicyEngine
+
+::: agentic_security.adapters.HttpCedarPolicyEngine
+
+::: agentic_security.adapters.HttpApprovalProvider
+
+::: agentic_security.adapters.JsonlAuditSink
+
+::: agentic_security.adapters.SubprocessToolHandler
 
 ## Telemetry
 

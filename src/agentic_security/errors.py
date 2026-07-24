@@ -15,3 +15,7 @@ class RuntimeStateError(RuntimeError):
 
 class RuntimeCancelledError(RuntimeError):
     """Raised cooperatively by a handler that observes runtime cancellation."""
+
+
+class RuntimeOperationTimeoutError(RuntimeError):
+    """Raised when a bounded policy, credential, audit, or handler call expires."""

@@ -6,7 +6,7 @@ import json
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as HandlerTimeoutError
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from threading import RLock
@@ -16,7 +16,11 @@ from .approvals import ApprovalProvider, action_hash
 from .audit import AuditSink, redact
 from .budgets import Budget, BudgetState
 from .credentials import CredentialBroker
-from .errors import RuntimeCancelledError, SecurityConfigurationError
+from .errors import (
+    RuntimeCancelledError,
+    RuntimeOperationTimeoutError,
+    SecurityConfigurationError,
+)
 from .policies import PolicyDecision, PolicyEngine, PolicyResult
 from .tools import ToolRegistry
 from .types import (
@@ -136,7 +140,12 @@ class GuardedRuntime:
             except Exception:
                 return self._deny(request_id, proposal, "invalid action resource")
             try:
-                policy_result = self.policy.decide(self.context, tool, arguments, resources)
+                policy_result = self._run_bounded(
+                    lambda: self.policy.decide(self.context, tool, arguments, resources),
+                    "policy evaluation",
+                )
+            except RuntimeOperationTimeoutError:
+                return self._deny(request_id, proposal, "policy evaluation timed out")
             except Exception:
                 return self._deny(request_id, proposal, "policy evaluation failed")
             if not isinstance(policy_result, PolicyResult) or not isinstance(
@@ -184,17 +193,23 @@ class GuardedRuntime:
                     )
             handler_context = replace(self.context, cancellation=cancellation)
             if tool.requires_credential:
-                if self.credentials is None:
+                broker = self.credentials
+                if broker is None:
                     return self._deny(request_id, proposal, "credential broker is not configured")
                 try:
-                    credential = self.credentials.mint(
-                        self.context,
-                        tool,
-                        resources,
-                        tool.credential_ttl_seconds,
+                    credential = self._run_bounded(
+                        lambda: broker.mint(
+                            self.context,
+                            tool,
+                            resources,
+                            tool.credential_ttl_seconds,
+                        ),
+                        "credential minting",
                     )
                     if not credential.valid_for(tool.name, resources):
                         return self._deny(request_id, proposal, "credential scope is invalid")
+                except RuntimeOperationTimeoutError:
+                    return self._deny(request_id, proposal, "credential minting timed out")
                 except Exception:
                     return self._deny(request_id, proposal, "credential broker failed")
                 handler_context = replace(handler_context, credential=credential)
@@ -203,7 +218,6 @@ class GuardedRuntime:
                 handler_context,
                 arguments,
                 cancellation,
-                self._budget.release,
             )
             try:
                 normalized_output = (
@@ -260,7 +274,7 @@ class GuardedRuntime:
                 with self._idempotency_lock:
                     self._completed[idempotency_key] = result
             return result
-        except HandlerTimeoutError:
+        except RuntimeOperationTimeoutError:
             cancellation.cancel()
             # A non-cooperative handler may still be performing a side effect
             # after the caller receives TIMED_OUT. Keep its concurrency slot
@@ -322,24 +336,38 @@ class GuardedRuntime:
         context: ExecutionContext,
         arguments: Any,
         cancellation: CancellationToken,
-        on_timeout: Callable[[], None],
     ) -> Any:
         """Run a handler with a bounded wait and cooperative timeout signal."""
-        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agentic-tool")
-        future = executor.submit(handler, context, arguments)
+        try:
+            return self._run_bounded(
+                lambda: handler(context, arguments),
+                "handler execution",
+                on_timeout=self._budget.release,
+            )
+        except RuntimeOperationTimeoutError:
+            cancellation.cancel()
+            raise
+
+    def _run_bounded(
+        self,
+        operation: Callable[[], Any],
+        operation_name: str,
+        on_timeout: Callable[[], None] | None = None,
+    ) -> Any:
+        """Run one integration operation with the runtime's bounded wait."""
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agentic-security")
+        future = executor.submit(operation)
         timed_out = False
         try:
             return future.result(timeout=self.config.execution_timeout_seconds)
-        except HandlerTimeoutError:
+        except FutureTimeoutError as exc:
             timed_out = True
-            cancellation.cancel()
-            future.add_done_callback(lambda _future: on_timeout())
+            if on_timeout is not None:
+                future.add_done_callback(lambda _future: on_timeout())
             future.cancel()
-            executor.shutdown(wait=False, cancel_futures=True)
-            raise
+            raise RuntimeOperationTimeoutError(f"{operation_name} timed out") from exc
         finally:
-            if not timed_out:
-                executor.shutdown(wait=True, cancel_futures=True)
+            executor.shutdown(wait=not timed_out, cancel_futures=True)
 
     def _deny(
         self,
@@ -387,20 +415,22 @@ class GuardedRuntime:
                 safe_arguments = {"[invalid_arguments]": type(proposal.arguments).__name__}
         else:
             safe_arguments = {"[invalid_arguments_type]": type(proposal.arguments).__name__}
+        safe_payload = redact(
+            {
+                "agent_id": self.context.agent_id,
+                "principal_id": self.context.principal.id,
+                "task_id": self.context.task_id,
+                "purpose": self.context.purpose,
+                "tool_name": proposal.tool_name,
+                "proposal_id": proposal.proposal_id,
+                "arguments": safe_arguments,
+                **dict(payload),
+            }
+        )
         try:
-            self.audit.append(
-                event_type,
-                request_id,
-                {
-                    "agent_id": self.context.agent_id,
-                    "principal_id": self.context.principal.id,
-                    "task_id": self.context.task_id,
-                    "purpose": self.context.purpose,
-                    "tool_name": proposal.tool_name,
-                    "proposal_id": proposal.proposal_id,
-                    "arguments": safe_arguments,
-                    **dict(payload),
-                },
+            self._run_bounded(
+                lambda: self.audit.append(event_type, request_id, safe_payload),
+                "audit persistence",
             )
         except Exception:
             return False

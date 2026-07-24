@@ -17,6 +17,11 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 - Ensured timed-out non-cooperative handlers retain their concurrency slot
   until the worker exits, preventing timeout retries from overlapping side
   effects beyond the configured concurrency limit.
+- Redacted audit payloads before they reach custom sinks, made tenant metadata
+  mandatory, bounded policy/credential/audit operations, required idempotency
+  or reconciliation for high-impact actions, and added concrete HTTPS policy,
+  approval, durable-audit, token-broker, and subprocess process-boundary
+  adapters.
 - Made `make check` include package and dependency-security validation and
   enabled protected-main-branch review and status-check enforcement.
 - Improved audit redaction for common credential fields and prevented the

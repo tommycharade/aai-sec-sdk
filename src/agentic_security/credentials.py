@@ -13,15 +13,19 @@ from .tools import ToolDefinition
 from .types import ExecutionContext, Resource
 
 T = TypeVar("T")
+TokenMinter = Callable[[ExecutionContext, ToolDefinition, tuple[Resource, ...]], str]
+"""Callback that obtains an already-authenticated provider token."""
 
 
 @dataclass(frozen=True, slots=True)
 class ScopedCredential:
     """Short-lived credential bound to one tool and resource set.
 
-    The raw provider material is private and can only be passed to a short-lived
-    callback through :meth:`with_secret`. Production brokers should return an
-    audience-bound token with equivalent scope and lifetime guarantees.
+    Provider material is held behind a callback capability and can only be
+    passed to a short-lived callback through :meth:`with_secret`. Production
+    brokers should return an audience-bound token with equivalent scope and
+    lifetime guarantees. No raw secret is stored as a readable credential
+    attribute.
     """
 
     credential_id: str
@@ -29,7 +33,7 @@ class ScopedCredential:
     resources: tuple[Resource, ...]
     issued_at: datetime
     expires_at: datetime
-    _secret: str = field(default="", repr=False, compare=False)
+    _secret_provider: Callable[[], str] = field(default=lambda: "", repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Prevent credentials with empty scopes or non-positive lifetimes."""
@@ -63,7 +67,7 @@ class ScopedCredential:
         current = now or datetime.now(UTC)
         if not self.issued_at <= current < self.expires_at:
             raise ValueError("credential is expired or not yet valid")
-        return operation(self._secret)
+        return operation(self._secret_provider())
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,13 +119,18 @@ class InMemoryCredentialBroker:
         with self._lock:
             self._sequence += 1
             sequence = self._sequence
+        secret = secrets.token_urlsafe(24)
+
+        def provider(value: str = secret) -> str:
+            return value
+
         credential = ScopedCredential(
             credential_id=f"cred:{context.task_id}:{sequence}",
             tool_name=tool.name,
             resources=resources,
             issued_at=issued_at,
             expires_at=issued_at + timedelta(seconds=ttl_seconds),
-            _secret=secrets.token_urlsafe(24),
+            _secret_provider=provider,
         )
         with self._lock:
             self._issued.append(credential)
@@ -140,3 +149,44 @@ class InMemoryCredentialBroker:
                 )
                 for credential in self._issued
             )
+
+
+class TokenCredentialBroker:
+    """Credential broker for an authenticated IAM/token-service callback.
+
+    The callback is responsible for provider authentication and must return a
+    token scoped to the supplied tool and resources. The broker adds the SDK's
+    expiry and scope checks without exposing token material as a credential
+    attribute.
+    """
+
+    def __init__(self, mint_token: TokenMinter) -> None:
+        """Create a broker around a deployment-owned token service callback."""
+        self._mint_token = mint_token
+
+    def mint(
+        self,
+        context: ExecutionContext,
+        tool: ToolDefinition,
+        resources: tuple[Resource, ...],
+        ttl_seconds: int,
+    ) -> ScopedCredential:
+        """Mint one short-lived credential for the exact live action scope."""
+        if ttl_seconds <= 0:
+            raise ValueError("credential TTL must be positive")
+        token = self._mint_token(context, tool, resources)
+        if not isinstance(token, str) or not token:
+            raise ValueError("token service returned no token")
+        issued_at = datetime.now(UTC)
+
+        def provider(value: str = token) -> str:
+            return value
+
+        return ScopedCredential(
+            f"cred:{context.task_id}:{secrets.token_urlsafe(8)}",
+            tool.name,
+            resources,
+            issued_at,
+            issued_at + timedelta(seconds=ttl_seconds),
+            provider,
+        )
