@@ -63,13 +63,21 @@ The example is synthetic and does not connect to a model or external service.
 
 ::: agentic_security.types.ExecutionStatus
 
+::: agentic_security.types.CancellationToken
+
 ::: agentic_security.RuntimeConfig
 
 ## Tools
 
 ::: agentic_security.tools.ToolDefinition
 
+`ToolDefinition` applies result redaction and a serialized size limit before a
+handler result crosses the runtime boundary. Use `output_validator` for an
+application-specific result schema or normalization step.
+
 ::: agentic_security.tools.ToolRegistry
+
+::: agentic_security.tools.OutputValidator
 
 ## Policies
 
@@ -86,6 +94,10 @@ The example is synthetic and does not connect to a model or external service.
 ::: agentic_security.policy_adapters.OpaPolicyEngine
 
 ::: agentic_security.policy_adapters.CedarPolicyEngine
+
+`PolicyResult` may carry an external policy version and provenance label. The
+runtime preserves both in execution audit evidence so operators can identify
+which policy decision point authorized an action.
 
 ## Approvals and audit
 

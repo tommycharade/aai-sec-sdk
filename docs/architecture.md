@@ -29,11 +29,15 @@ implement that contract with an audience- and resource-bound provider; external
 policy engines, sandboxes, OpenTelemetry exporters, and MCP gateways remain
 separate adapters without weakening the core execution invariant.
 
-The current runtime does not provide handler timeouts, cancellation of already
-running handlers, rate limits, fan-out limits, cost budgets, durable audit
-storage, or a network client for OPA/Cedar. The injected OPA/Cedar evaluators
+The current runtime provides a bounded caller wait and cooperative cancellation
+for handlers that observe the context token; it cannot forcibly terminate a
+thread blocked in external code. It does not provide rate limits, fan-out
+limits, cost budgets, durable audit storage, or a network client for OPA/Cedar.
+The injected OPA/Cedar evaluators
 are decision-shape adapters, not full policy-server integrations. These are
 deployment and roadmap concerns, not guarantees of the current package.
+When an evaluator returns `policy_version`/`version` or
+`provenance`/`source`, those values are retained in execution audit evidence.
 
 The first telemetry adapter is `OpenTelemetryAuditSink`. It wraps an
 authoritative audit sink and emits one span per redacted security event.

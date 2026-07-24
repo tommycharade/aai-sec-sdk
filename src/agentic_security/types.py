@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from threading import Event
 from typing import Any
 
 from .errors import SecurityConfigurationError
@@ -26,6 +27,33 @@ class ExecutionStatus(StrEnum):
     DENIED = "denied"
     APPROVAL_REQUIRED = "approval_required"
     FAILED = "failed"
+    EXECUTED_UNRECORDED = "executed_unrecorded"
+    EXECUTED_RESULT_REJECTED = "executed_result_rejected"
+    TIMED_OUT = "timed_out"
+    CANCELLED = "cancelled"
+
+
+class CancellationToken:
+    """Thread-safe cooperative cancellation signal for a running handler."""
+
+    def __init__(self) -> None:
+        """Create a token that is initially active."""
+        self._event = Event()
+
+    def cancel(self) -> None:
+        """Signal the handler to stop at its next cooperative checkpoint."""
+        self._event.set()
+
+    def is_cancelled(self) -> bool:
+        """Return whether cancellation has been requested."""
+        return self._event.is_set()
+
+    def raise_if_cancelled(self) -> None:
+        """Raise ``RuntimeCancelledError`` if cancellation has been requested."""
+        if self.is_cancelled():
+            from .errors import RuntimeCancelledError
+
+            raise RuntimeCancelledError("runtime cancellation requested")
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +125,7 @@ class ExecutionContext:
     # The runtime attaches a broker-issued credential only after authorization;
     # it is never populated from an untrusted action proposal.
     credential: Any = field(default=None, repr=False, compare=False)
+    cancellation: CancellationToken | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Reject incomplete host-owned context before it reaches policy."""
@@ -135,3 +164,4 @@ class ExecutionResult:
     reason: str | None = None
     output: Any = None
     approval_id: str | None = None
+    audit_recorded: bool = True

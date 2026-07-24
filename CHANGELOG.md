@@ -10,6 +10,12 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
   hashes, scoping idempotency keys to the tool and action, rejecting malformed
   proposals safely, requiring complete tenant metadata, and enforcing approval
   for external-egress tools.
+- Added strict policy-result validation, explicit audit-failure outcomes,
+  bounded handler waits with cooperative cancellation, private credential
+  material callbacks, redacted/size-limited tool results, and policy
+  version/provenance evidence in execution audit events.
+- Made `make check` include package and dependency-security validation and
+  enabled protected-main-branch review and status-check enforcement.
 - Improved audit redaction for common credential fields and prevented the
   development broker’s metadata inspection API from exposing secrets.
 - Corrected API and getting-started documentation to match the current runtime
@@ -17,6 +23,8 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
   server integrations.
 - Enabled repository Discussions, private vulnerability reporting, GitHub Pages,
   Dependabot configuration, and immutable GitHub Actions references.
+- Protected the `main` branch with required code-owner review, quality and
+  documentation checks, linear history, and force-push/deletion protection.
 - Clarified that the SDK source is fully Apache-2.0 licensed and may be used
   commercially without separate permission; branding and endorsement remain
   subject to the trademark policy.

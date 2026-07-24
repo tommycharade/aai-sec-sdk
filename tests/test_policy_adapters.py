@@ -75,6 +75,21 @@ def test_cedar_adapter_maps_explicit_deny_result() -> None:
     assert result.reason == "closed period"
 
 
+def test_external_policy_metadata_is_preserved() -> None:
+    engine = CedarPolicyEngine(
+        lambda _: {
+            "decision": "Allow",
+            "policy_version": "policy-42",
+            "provenance": "cedar-production",
+        }
+    )
+
+    result = engine.decide(context(), tool(), {"record_id": "record:1"}, ())
+
+    assert result.policy_version == "policy-42"
+    assert result.provenance == "cedar-production"
+
+
 def test_external_policy_errors_fail_closed() -> None:
     engine = OpaPolicyEngine(lambda _: {"result": {"decision": "maybe"}})
     result = engine.decide(context(), tool(), {"record_id": "record:1"}, ())

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from examples.support_agent import build_demo_application
 
-from agentic_security import ActionProposal, action_hash
+from agentic_security import ActionProposal, Resource, action_hash
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -65,7 +65,10 @@ def test_support_agent_requires_approval_before_credential_backed_side_effect() 
                 "destination": "alice@customer.test",
                 "body": "Synthetic update.",
             },
-            (store.resource_for("ticket_001"),),
+            (
+                store.resource_for("ticket_001"),
+                Resource("alice@customer.test", "external_destination", "tenant:acme"),
+            ),
         ),
     )
     executed = runtime.execute(

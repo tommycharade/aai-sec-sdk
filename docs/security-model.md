@@ -30,10 +30,11 @@ business authorization can be inferred automatically, that an in-flight
 handler can be cancelled by `stop()`, or that infrastructure such as IAM,
 network controls, timeouts, and sandboxes is unnecessary.
 
-Handlers may return arbitrary application values; the core does not impose an
-output schema, output-size limit, or result-content policy. Applications must
-validate and redact tool results before returning them to a model or exporting
-them to another system.
+Handlers may return arbitrary application values, but the runtime applies the
+optional tool output normalizer, redacts supported sensitive fields, and
+enforces the configured serialized output-size limit before returning a result.
+Applications remain responsible for semantic output schemas and for handling
+untrusted tool content before sending it to a model.
 
 ## Credential-brokering threat model
 

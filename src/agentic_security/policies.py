@@ -24,6 +24,18 @@ class PolicyResult:
 
     decision: PolicyDecision
     reason: str
+    policy_version: str | None = None
+    provenance: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject ambiguous policy evidence before it reaches the runtime."""
+        for field_name, value in (
+            ("reason", self.reason),
+            ("policy_version", self.policy_version),
+            ("provenance", self.provenance),
+        ):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"policy {field_name} must be a non-empty string")
 
 
 class PolicyEngine(Protocol):

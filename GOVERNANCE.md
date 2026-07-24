@@ -18,8 +18,9 @@ fail-closed invariants in `AGENTS.md` and `docs/guardrails.md`.
 Normal changes should be submitted as pull requests with the required tests,
 documentation, threat-model updates, and `make check` evidence. Security
 boundary changes require maintainer review. At least one maintainer approval is
-required before merging a security-sensitive change once branch protection is
-enabled.
+required before merging any change. The protected `main` branch requires
+code-owner review, quality and documentation checks, linear history, and
+protection against force-pushes and deletions.
 
 ## Releases
 

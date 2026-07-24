@@ -15,6 +15,9 @@ ArgumentValidator: TypeAlias = Callable[[Mapping[str, Any]], Any]
 ToolHandler: TypeAlias = Callable[[ExecutionContext, Any], Any]
 """Callable that executes a validated action using application-owned context."""
 
+OutputValidator: TypeAlias = Callable[[Any], Any]
+"""Callable that normalizes a handler result before it crosses the boundary."""
+
 
 @dataclass(frozen=True, slots=True)
 class ToolDefinition:
@@ -35,6 +38,8 @@ class ToolDefinition:
     external_egress: bool = False
     requires_credential: bool = False
     credential_ttl_seconds: int = 120
+    output_validator: OutputValidator | None = None
+    max_output_bytes: int = 1_000_000
     description: str = ""
 
     def __post_init__(self) -> None:
@@ -54,6 +59,10 @@ class ToolDefinition:
         if self.requires_credential and self.credential_ttl_seconds <= 0:
             raise SecurityConfigurationError(
                 f"credential TTL for tool {self.name!r} must be positive"
+            )
+        if self.max_output_bytes <= 0:
+            raise SecurityConfigurationError(
+                f"maximum output size for tool {self.name!r} must be positive"
             )
 
 

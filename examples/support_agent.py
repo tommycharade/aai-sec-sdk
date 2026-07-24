@@ -132,7 +132,12 @@ def build_demo_application() -> tuple[
 
     def ticket_resource(arguments: Mapping[str, Any]) -> tuple[Resource, ...]:
         """Extract the live ticket resource used by policy authorization."""
-        return (store.resource_for(arguments["ticket_id"]),)
+        ticket = store.resource_for(arguments["ticket_id"])
+        resources = [ticket]
+        destination = arguments.get("destination")
+        if isinstance(destination, str):
+            resources.append(Resource(destination, "external_destination", ticket.tenant))
+        return tuple(resources)
 
     def read_ticket(_: ExecutionContext, arguments: Mapping[str, Any]) -> dict[str, str]:
         """Execute an authorized synthetic ticket read."""
@@ -233,7 +238,10 @@ def main() -> None:
             runtime.context,
             email_proposal.tool_name,
             email_proposal.arguments,
-            (store.resource_for("ticket_001"),),
+            (
+                store.resource_for("ticket_001"),
+                Resource("alice@customer.test", "external_destination", "tenant:acme"),
+            ),
         ),
     )
     email = runtime.execute(

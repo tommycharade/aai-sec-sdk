@@ -13,14 +13,20 @@ from .credentials import (
     InMemoryCredentialBroker,
     ScopedCredential,
 )
-from .errors import DuplicateToolError, RuntimeStateError, SecurityConfigurationError
+from .errors import (
+    DuplicateToolError,
+    RuntimeCancelledError,
+    RuntimeStateError,
+    SecurityConfigurationError,
+)
 from .policies import AllowListPolicy, PolicyDecision, PolicyEngine, PolicyResult
 from .policy_adapters import CedarPolicyEngine, OpaPolicyEngine, PolicyRequest
 from .runtime import GuardedRuntime, RuntimeConfig
 from .telemetry import CompositeAuditSink, OpenTelemetryAuditSink
-from .tools import ToolDefinition, ToolRegistry
+from .tools import OutputValidator, ToolDefinition, ToolRegistry
 from .types import (
     ActionProposal,
+    CancellationToken,
     ExecutionContext,
     ExecutionResult,
     ExecutionStatus,
@@ -31,6 +37,7 @@ from .types import (
 
 __all__ = [
     "ActionProposal",
+    "CancellationToken",
     "ApprovalGrant",
     "ApprovalProvider",
     "action_hash",
@@ -50,6 +57,7 @@ __all__ = [
     "InMemoryAuditSink",
     "InMemoryCredentialBroker",
     "OpenTelemetryAuditSink",
+    "OutputValidator",
     "OpaPolicyEngine",
     "PolicyDecision",
     "PolicyEngine",
@@ -60,6 +68,7 @@ __all__ = [
     "RiskLevel",
     "RuntimeConfig",
     "RuntimeStateError",
+    "RuntimeCancelledError",
     "ScopedCredential",
     "SecurityConfigurationError",
     "ToolDefinition",

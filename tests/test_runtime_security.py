@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from time import sleep
 from typing import Any
 
@@ -11,6 +12,7 @@ import pytest
 from agentic_security import (
     ActionProposal,
     ExecutionContext,
+    ExecutionStatus,
     GuardedRuntime,
     InMemoryApprovalProvider,
     InMemoryAuditSink,
@@ -100,6 +102,47 @@ def test_allowed_action_executes_with_application_principal() -> None:
     assert audit.verify()
 
 
+def test_tool_results_are_redacted_before_crossing_runtime_boundary() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="secret_result",
+            handler=lambda *_: {"access_token": "synthetic", "value": "safe"},
+            validator=validator,
+            description="Synthetic result containing a secret-shaped field.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(), registry, AllowListPolicy({"secret_result"}), InMemoryAuditSink()
+    )
+
+    result = runtime.execute(ActionProposal("secret_result", {"value": "safe"}, "proposal:result"))
+
+    assert result.status is ExecutionStatus.EXECUTED
+    assert result.output == {"access_token": "[REDACTED]", "value": "safe"}
+
+
+def test_oversized_tool_results_are_rejected_after_side_effect() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="large_result",
+            handler=lambda *_: {"value": "x" * 100},
+            validator=validator,
+            max_output_bytes=10,
+            description="Synthetic oversized result.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(), registry, AllowListPolicy({"large_result"}), InMemoryAuditSink()
+    )
+
+    result = runtime.execute(ActionProposal("large_result", {"value": "safe"}, "proposal:large"))
+
+    assert result.status is ExecutionStatus.EXECUTED_RESULT_REJECTED
+    assert result.output is None
+
+
 def test_unknown_tool_is_denied_without_side_effect() -> None:
     runtime, audit = make_runtime()
 
@@ -152,6 +195,113 @@ def test_policy_is_evaluated_per_action_with_live_resource() -> None:
 
     assert result.status == "denied"
     assert observed == [("user:alice", "record:1")]
+
+
+def test_malformed_policy_decision_fails_closed() -> None:
+    calls: list[dict[str, Any]] = []
+
+    class MalformedPolicy:
+        def decide(self, *_: Any) -> Any:
+            return PolicyResult("deny", "malformed decision")  # type: ignore[arg-type]
+
+    runtime, _ = make_runtime(policy=MalformedPolicy(), calls=calls)
+
+    result = runtime.execute(proposal())
+
+    assert result.status is ExecutionStatus.DENIED
+    assert result.reason == "policy returned an invalid decision"
+    assert calls == []
+
+
+def test_audit_failure_returns_explicit_unrecorded_outcome_after_handler() -> None:
+    class BrokenAudit:
+        def append(self, *_: Any) -> Any:
+            raise RuntimeError("audit unavailable")
+
+    calls: list[bool] = []
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="write_record",
+            handler=lambda *_: calls.append(True),
+            validator=validator,
+            description="Synthetic write for audit failure testing.",
+        )
+    )
+    runtime = GuardedRuntime(context(), registry, AllowListPolicy({"write_record"}), BrokenAudit())
+
+    result = runtime.execute(
+        ActionProposal("write_record", {"value": "safe"}, "proposal:audit-failure")
+    )
+
+    assert result.status is ExecutionStatus.EXECUTED_UNRECORDED
+    assert result.audit_recorded is False
+    assert calls == [True]
+
+
+def test_handler_timeout_is_structured_and_signals_cancellation() -> None:
+    observed = Event()
+
+    def slow_handler(ctx: ExecutionContext, _: Any) -> Any:
+        observed.set()
+        sleep(0.05)
+        return {"cancelled": ctx.cancellation.is_cancelled() if ctx.cancellation else False}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="slow_action",
+            handler=slow_handler,
+            validator=validator,
+            description="Synthetic slow action.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"slow_action"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(execution_timeout_seconds=0.005),
+    )
+
+    result = runtime.execute(ActionProposal("slow_action", {"value": "safe"}, "proposal:timeout"))
+
+    assert observed.is_set()
+    assert result.status is ExecutionStatus.TIMED_OUT
+
+
+def test_stop_requests_cancellation_for_cooperative_handler() -> None:
+    started = Event()
+
+    def cancellable_handler(ctx: ExecutionContext, _: Any) -> Any:
+        started.set()
+        while True:
+            if ctx.cancellation is not None:
+                ctx.cancellation.raise_if_cancelled()
+            sleep(0.001)
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="cancellable_action",
+            handler=cancellable_handler,
+            validator=validator,
+            description="Synthetic cancellable action.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(), registry, AllowListPolicy({"cancellable_action"}), InMemoryAuditSink()
+    )
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            runtime.execute,
+            ActionProposal("cancellable_action", {"value": "safe"}, "proposal:cancel"),
+        )
+        assert started.wait(1)
+        runtime.stop()
+        result = future.result(timeout=1)
+
+    assert result.status is ExecutionStatus.CANCELLED
 
 
 def test_default_policy_denies_cross_tenant_resource() -> None:

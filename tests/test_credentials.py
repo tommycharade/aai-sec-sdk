@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
+
 from agentic_security import (
     ActionProposal,
     ExecutionContext,
@@ -75,8 +77,8 @@ def test_runtime_mints_scoped_credential_only_after_authorization() -> None:
     assert result.status == "executed"
     assert len(seen) == 1
     assert seen[0].valid_for("read_record", (Resource("record:1", "record", "tenant:a"),))
-    assert seen[0].secret not in repr(seen[0])
-    assert seen[0].secret not in str(audit.events())
+    assert "_secret" not in repr(seen[0])
+    assert "secret" not in str(audit.events()).lower()
     assert broker.issued()[0].credential_id == seen[0].credential_id
     assert not hasattr(broker.issued()[0], "secret")
 
@@ -142,3 +144,19 @@ def test_scoped_credential_expiry_is_enforced() -> None:
 
     assert credential.valid_for("read_record", (), issued + timedelta(seconds=9))
     assert not credential.valid_for("read_record", (), issued + timedelta(seconds=10))
+
+
+def test_credential_material_is_only_available_inside_live_callback() -> None:
+    issued = datetime(2026, 1, 1, tzinfo=UTC)
+    credential = ScopedCredential(
+        "cred:test",
+        "read_record",
+        (),
+        issued,
+        issued + timedelta(seconds=10),
+        _secret="synthetic-token",  # noqa: S106 - synthetic test material
+    )
+
+    assert credential.with_secret(lambda value: value, issued) == "synthetic-token"
+    with pytest.raises(ValueError):
+        credential.with_secret(lambda value: value, issued + timedelta(seconds=10))

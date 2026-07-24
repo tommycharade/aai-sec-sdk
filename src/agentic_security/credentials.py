@@ -7,20 +7,21 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from threading import Lock
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 from .tools import ToolDefinition
 from .types import ExecutionContext, Resource
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
 class ScopedCredential:
     """Short-lived credential bound to one tool and resource set.
 
-    ``secret`` is excluded from representations and equality so normal logs,
-    debugging, and comparisons cannot accidentally expose or depend on it.
-    Production brokers should return an audience-bound token with equivalent
-    scope and lifetime guarantees.
+    The raw provider material is private and can only be passed to a short-lived
+    callback through :meth:`with_secret`. Production brokers should return an
+    audience-bound token with equivalent scope and lifetime guarantees.
     """
 
     credential_id: str
@@ -28,7 +29,7 @@ class ScopedCredential:
     resources: tuple[Resource, ...]
     issued_at: datetime
     expires_at: datetime
-    secret: str = field(default="", repr=False, compare=False)
+    _secret: str = field(default="", repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Prevent credentials with empty scopes or non-positive lifetimes."""
@@ -51,6 +52,18 @@ class ScopedCredential:
             and tool_name == self.tool_name
             and resources == self.resources
         )
+
+    def with_secret(self, operation: Callable[[str], T], now: datetime | None = None) -> T:
+        """Invoke ``operation`` with live provider material without exposing it in results.
+
+        The callback must pass the material directly to the intended provider
+        client and must not log, persist, return, or capture it. This method
+        checks expiry immediately before use.
+        """
+        current = now or datetime.now(UTC)
+        if not self.issued_at <= current < self.expires_at:
+            raise ValueError("credential is expired or not yet valid")
+        return operation(self._secret)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +121,7 @@ class InMemoryCredentialBroker:
             resources=resources,
             issued_at=issued_at,
             expires_at=issued_at + timedelta(seconds=ttl_seconds),
-            secret=secrets.token_urlsafe(24),
+            _secret=secrets.token_urlsafe(24),
         )
         with self._lock:
             self._issued.append(credential)
