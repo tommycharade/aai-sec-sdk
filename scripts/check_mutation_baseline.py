@@ -27,6 +27,7 @@ def main() -> int:
         and 0 < value["minimum_killed_percent"] <= 100
         and bool(value["security_branch_targets"])
         and bool(value["source_scope"])
+        and value["source_scope"] == ["src/agentic_security"]
         and str(value["results_file"]).endswith("results.txt")
         and str(value["evidence_file"]).endswith("evidence.json")
     )

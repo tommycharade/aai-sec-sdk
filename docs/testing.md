@@ -29,8 +29,9 @@ claimed without the runner's parsed result file. One deliberately timing-heavy
 worker stress test is excluded from mutmut's baseline selection because
 mutation process overhead makes it nondeterministic; it remains mandatory in
 the normal unit/adversarial suite and is not excluded from `make check`.
-The declared mutation source scope is the five core security modules listed in
-`mutation-baseline.json`; provider-specific adapters remain deployment-owned.
+The declared mutation source scope is the complete `src/agentic_security`
+package configured in `pyproject.toml`; provider-specific external deployments
+remain deployment-owned.
 
 ## Adapter contracts
 
