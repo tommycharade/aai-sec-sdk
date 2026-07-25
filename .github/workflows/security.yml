@@ -29,3 +29,4 @@ jobs:
           name: mutation-evidence
           path: .mutmut-cache/
           if-no-files-found: error
+          include-hidden-files: true
