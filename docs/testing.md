@@ -39,7 +39,11 @@ worker stress test is excluded from mutmut's baseline selection because
 mutation process overhead makes it nondeterministic; it remains mandatory in
 the normal unit/adversarial suite and is not excluded from `make check`.
 Provider-specific external deployments remain deployment-owned and are outside
-this mutation scope.
+this mutation scope. The bounded mutation gate does not claim coverage of the
+central `runtime.py` execution boundary, approval, policy, budget, idempotency,
+or type modules; those remain covered by unit, adversarial, and contract tests.
+High-impact adoption must treat runtime mutation assurance as an open
+deployment-readiness requirement.
 
 `scripts/verify_mutation_evidence.py` independently rechecks the uploaded
 evidence against the current commit, `pyproject.toml`, the baseline threshold,
