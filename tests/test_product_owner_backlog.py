@@ -36,6 +36,7 @@ from agentic_security.budgets import Budget, BudgetState
 from agentic_security.idempotency import IdempotencyClaimStatus, new_record
 from agentic_security.isolation import validate_attestation
 from agentic_security.policies import PolicyDecision, PolicyResult
+from agentic_security.runtime import _ActionBudgetReleaseState
 
 
 def _context() -> ExecutionContext:
@@ -557,10 +558,59 @@ def test_action_budget_release_is_idempotent() -> None:
         _context(), ToolRegistry(), AllowListPolicy(set()), InMemoryAuditSink()
     )
     assert runtime._budget.acquire() is True
-    state = [False, False]
-    runtime._release_action_budget_once(state)
-    runtime._release_action_budget_once(state)
-    assert state == [False, True]
+    state = _ActionBudgetReleaseState()
+    assert runtime._release_action_budget_once(state) is True
+    assert runtime._release_action_budget_once(state) is False
+    assert state.released is True
+    assert runtime._budget._active == 0
+    assert runtime._budget._fan_out == 0
+
+
+def test_action_budget_release_callbacks_are_atomic_under_concurrency() -> None:
+    """Timeout and reconciliation callbacks cannot double-release one lease."""
+    runtime = GuardedRuntime(
+        _context(), ToolRegistry(), AllowListPolicy(set()), InMemoryAuditSink()
+    )
+    assert runtime._budget.acquire() is True
+    state = _ActionBudgetReleaseState()
+    runtime._defer_action_budget_release(state)
+    barrier = Barrier(64)
+
+    def release_from_callback(_: int) -> bool:
+        barrier.wait()
+        return runtime._release_action_budget_once(state)
+
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        releases = list(executor.map(release_from_callback, range(64)))
+
+    assert sum(releases) == 1
+    assert state.released is True
+    assert state.deferred is True
+    assert runtime._budget._active == 0
+    assert runtime._budget._fan_out == 0
+    assert runtime._budget.acquire() is True
+    assert runtime._budget.acquire() is False
+    assert runtime._budget.release() is True
+
+
+def test_budget_release_rejects_concurrent_duplicate_releases_without_underflow() -> None:
+    """The primitive itself remains safe even if callers violate lease ownership."""
+    state = BudgetState(Budget(max_concurrent=1))
+    assert state.acquire() is True
+    barrier = Barrier(64)
+
+    def release(_: int) -> bool:
+        barrier.wait()
+        return state.release()
+
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        releases = list(executor.map(release, range(64)))
+
+    assert sum(releases) == 1
+    assert state._active == 0
+    assert state._fan_out == 0
+    assert state.release() is False
+    assert state.acquire() is True
 
 
 def test_handler_completion_is_local_and_stress_timeouts_do_not_retain_registry() -> None:

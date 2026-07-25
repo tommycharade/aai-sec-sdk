@@ -11,7 +11,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
-from threading import Event, RLock
+from threading import Event, Lock, RLock
 from typing import Any
 
 from .approvals import (
@@ -76,6 +76,20 @@ class _AuditOutcome:
         return self.recorded
 
 
+@dataclass(slots=True)
+class _ActionBudgetReleaseState:
+    """Thread-safe lease state shared by timeout and worker-exit callbacks.
+
+    A single action can have several bounded workers over its lifetime, such
+    as a timed-out handler followed by reconciliation. Their callbacks may
+    race on different threads, so release and defer state are synchronized.
+    """
+
+    deferred: bool = False
+    released: bool = False
+    lock: Lock = field(default_factory=Lock, repr=False)
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeConfig:
     """Runtime-wide safety settings."""
@@ -131,7 +145,7 @@ class GuardedRuntime:
         self._stopped = False
         self._stop_lock = RLock()
         self._active_tokens: dict[str, CancellationToken] = {}
-        self._budget_states: dict[str, list[bool]] = {}
+        self._budget_states: dict[str, _ActionBudgetReleaseState] = {}
         self._worker_lock = RLock()
         self._timed_out_workers = 0
         self._bounded_workers = 0
@@ -207,7 +221,7 @@ class GuardedRuntime:
         # timed-out bounded operation owns the action lease until its worker
         # exits, regardless of whether it is policy, credential, audit, or
         # handler work.
-        budget_release_state = [False, False]
+        budget_release_state = _ActionBudgetReleaseState()
         with self._stop_lock:
             if self._stopped:
                 self._budget.release()
@@ -577,7 +591,7 @@ class GuardedRuntime:
             # after the caller receives TIMED_OUT. Keep its concurrency slot
             # reserved until the worker exits so a timeout cannot create
             # overlapping side effects.
-            budget_release_state[0] = True
+            self._defer_action_budget_release(budget_release_state)
             result = ExecutionResult(
                 ExecutionStatus.TIMED_OUT,
                 tool.name,
@@ -666,7 +680,9 @@ class GuardedRuntime:
             with self._stop_lock:
                 self._active_tokens.pop(request_id, None)
                 self._budget_states.pop(request_id, None)
-            if not budget_release_state[0]:
+            with budget_release_state.lock:
+                deferred = budget_release_state.deferred
+            if not deferred:
                 self._release_action_budget_once(budget_release_state)
 
     def _run_handler(
@@ -676,7 +692,7 @@ class GuardedRuntime:
         arguments: Any,
         cancellation: CancellationToken,
         request_id: str,
-        budget_release_state: list[bool],
+        budget_release_state: _ActionBudgetReleaseState,
     ) -> Any:
         """Run a handler with a bounded wait and cooperative timeout signal."""
         completion = Event()
@@ -711,7 +727,7 @@ class GuardedRuntime:
         proposal_id: str,
         fingerprint: str,
         request_id: str,
-        budget_release_state: list[bool],
+        budget_release_state: _ActionBudgetReleaseState,
     ) -> ApprovalConsumption:
         """Consume approval through the bounded worker and host stop boundary.
 
@@ -744,7 +760,7 @@ class GuardedRuntime:
         self,
         operation: Callable[[], Any],
         operation_name: str,
-        on_timeout: Callable[[], None] | None = None,
+        on_timeout: Callable[[], Any] | None = None,
         request_id: str | None = None,
         on_timeout_observed: Callable[[], None] | None = None,
         timeout_phase: TimeoutPhase | None = None,
@@ -812,17 +828,19 @@ class GuardedRuntime:
             executor.shutdown(wait=not timed_out, cancel_futures=True)
 
     @staticmethod
-    def _defer_action_budget_release(state: list[bool]) -> None:
+    def _defer_action_budget_release(state: _ActionBudgetReleaseState) -> None:
         """Mark the action lease for release only when the timed-out worker exits."""
-        state[0] = True
+        with state.lock:
+            state.deferred = True
 
-    def _release_action_budget_once(self, state: list[bool]) -> None:
+    def _release_action_budget_once(self, state: _ActionBudgetReleaseState) -> bool:
         """Release one action lease exactly once after its worker exits."""
-        if len(state) > 1 and state[1]:
-            return
-        if len(state) > 1:
-            state[1] = True
-        self._budget.release()
+        with state.lock:
+            if state.released:
+                return False
+            state.released = True
+            self._budget.release()
+            return True
 
     def _store_terminal(
         self, tool: Any, proposal: ActionProposal, result: ExecutionResult, uncertain: bool = False

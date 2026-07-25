@@ -76,11 +76,19 @@ class BudgetState:
                 self._timestamps.append(now)
             return True
 
-    def release(self) -> None:
-        """Release an active slot after execution or denial handling."""
+    def release(self) -> bool:
+        """Release one active slot, returning ``False`` on duplicate release.
+
+        The lock protects both the underflow check and the counter updates.
+        A stale timeout callback therefore cannot create negative active or
+        fan-out counts, or make capacity appear available twice.
+        """
         with self._lock:
+            if self._active <= 0 or self._fan_out <= 0:
+                return False
             self._active -= 1
             self._fan_out -= 1
+            return True
 
     @property
     def actions(self) -> int:

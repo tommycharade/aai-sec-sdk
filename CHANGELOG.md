@@ -6,6 +6,10 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 
 ## Unreleased
 
+- Made action-budget lease release atomic and single-use across concurrent
+  timeout, reconciliation, audit, and worker-exit callbacks; duplicate
+  releases are rejected without counter underflow, with adversarial stress
+  coverage and operational guidance.
 - Routed approval consumption through the same bounded worker, timeout,
   capacity, and emergency-stop lifecycle as other external security
   dependencies; added an approval stop-race regression test.

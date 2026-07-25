@@ -75,6 +75,14 @@ resume only below the documented alert threshold.
 **Escalate:** service owner for repeated saturation or any non-cooperative
 handler that can commit external state.
 
+Action-budget leases are released by an atomic, single-use guard. Timeout,
+reconciliation, audit, and worker-exit callbacks may race, but only the first
+callback can release the lease; duplicate callbacks cannot decrement active or
+fan-out counters below zero. Do not repair counters manually or restart merely
+to clear a suspected duplicate release. Capture the request ID and runtime
+health snapshot, and escalate if counters do not return to zero after all
+workers exit.
+
 ## Reconciliation and uncertain side effects
 
 **Detect:** `TIMED_OUT` with `STILL_RUNNING`, `UNKNOWN`, `FAILED`, or an
