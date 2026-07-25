@@ -6,6 +6,15 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 
 ## Unreleased
 
+- Added typed phase-specific timeout outcomes for policy, approval, credential,
+  audit, handler, and reconciliation work, including handler-started and
+  side-effect-state fields.
+- Removed the runtime-wide handler-completion registry; handler completion
+  evidence is now scoped to the timeout signal and lifecycle stress-tested.
+- Enforced idempotency TTLs with injectable clocks and observable GC. Expired
+  completed records may be reclaimed, while expired in-progress or uncertain
+  records remain retained and fail closed with `EXPIRED`.
+
 - Mutation enforcement now runs a bounded mutmut pass and enforces the 80%
   killed-mutant threshold; configuration-only checks do not claim a score.
 - Mutation result parsing now shares the hard deadline, so a hung results

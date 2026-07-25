@@ -21,6 +21,8 @@ from agentic_security import (
     Principal,
     Resource,
     RiskLevel,
+    SideEffectState,
+    TimeoutPhase,
     ToolDefinition,
     ToolRegistry,
     action_hash,
@@ -189,6 +191,9 @@ def test_policy_timeout_fails_closed() -> None:
     assert blocked.is_set()
     assert result.status is ExecutionStatus.DENIED
     assert result.reason == "policy evaluation timed out"
+    assert result.timeout_phase is TimeoutPhase.POLICY
+    assert result.handler_started is False
+    assert result.side_effect_state is SideEffectState.NOT_STARTED
     release.set()
 
 
@@ -229,6 +234,8 @@ def test_credential_timeout_fails_closed_before_handler() -> None:
     assert blocked.is_set()
     assert result.status is ExecutionStatus.DENIED
     assert result.reason == "credential minting timed out"
+    assert result.timeout_phase is TimeoutPhase.CREDENTIAL
+    assert result.handler_started is False
     assert calls == []
     release.set()
 
@@ -251,6 +258,9 @@ def test_audit_timeout_reports_unrecorded_execution() -> None:
     assert blocked.is_set()
     assert result.status is ExecutionStatus.EXECUTED_UNRECORDED
     assert result.audit_recorded is False
+    assert result.timeout_phase is TimeoutPhase.AUDIT
+    assert result.handler_started is True
+    assert result.side_effect_state is SideEffectState.EXECUTED
     release.set()
 
 
@@ -395,6 +405,9 @@ def test_handler_timeout_is_structured_and_signals_cancellation() -> None:
 
     assert observed.is_set()
     assert result.status is ExecutionStatus.TIMED_OUT
+    assert result.timeout_phase is TimeoutPhase.HANDLER
+    assert result.handler_started is True
+    assert result.side_effect_state is SideEffectState.UNCERTAIN
 
 
 def test_runtime_rejects_non_finite_timeout_configuration() -> None:
@@ -905,6 +918,8 @@ def test_reconciliation_runs_after_timeout_and_reports_reconciled() -> None:
     release.set()
 
     assert result.status is ExecutionStatus.TIMED_OUT
+    assert result.timeout_phase is TimeoutPhase.HANDLER
+    assert result.side_effect_state is SideEffectState.UNCERTAIN
     assert reconciled == [True]
 
 

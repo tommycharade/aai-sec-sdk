@@ -52,6 +52,11 @@ current runtime. Callers must not blindly retry `TIMED_OUT` or
 `ExecutionResult.reconciliation_state` independently
 reports `STILL_RUNNING`, `CONFIRMED_COMPLETE`, `CONFIRMED_ABSENT`, `UNKNOWN`, or
 `FAILED`. A live timed-out worker always keeps the primary status `TIMED_OUT`.
+`ExecutionResult.timeout_phase` identifies `POLICY`, `APPROVAL`, `CREDENTIAL`,
+`AUDIT`, `HANDLER`, or `RECONCILIATION`. `handler_started` and
+`side_effect_state` distinguish pre-handler denials from actions whose effect
+is uncertain; policy, approval, and credential timeouts never invoke the
+handler.
 Policy decisions use `PolicyDecision`. The
 generated reference below is built from public docstrings and is checked in CI.
 The example is synthetic and does not connect to a model or external service.
@@ -106,6 +111,11 @@ not a generated proposal ID. Configure `RuntimeConfig.idempotency_store`;
 durable production storage. If terminal persistence fails after a handler has
 run, the runtime returns `EXECUTED_UNRECORDED` and leaves the operation unsafe
 to retry until the store is repaired or the side effect is reconciled.
+`RuntimeConfig.idempotency_ttl_seconds` defaults to one day. Expired completed
+records may be reclaimed; expired in-progress or uncertain records remain
+retained and return `EXPIRED` until explicitly reconciled. Call `store.gc()`
+and retain its `IdempotencyGCReport`; GC never silently deletes active or
+uncertain records.
 
 ::: agentic_security.tools.ToolRegistry
 
@@ -116,6 +126,8 @@ to retry until the store is repaired or the side effect is reconciled.
 ::: agentic_security.idempotency.IdempotencyStore
 
 ::: agentic_security.idempotency.InMemoryIdempotencyStore
+
+::: agentic_security.idempotency.IdempotencyGCReport
 
 ::: agentic_security.isolation.IsolationAttestation
 

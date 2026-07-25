@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field, replace
+from datetime import UTC, datetime
 from threading import Event, RLock
 from typing import Any
 
@@ -41,7 +42,32 @@ from .types import (
     ReconciliationResult,
     ReconciliationState,
     Resource,
+    SideEffectState,
+    TimeoutPhase,
 )
+
+
+class _PhaseTimeout(RuntimeOperationTimeoutError):
+    """Internal timeout carrying the public phase and optional completion event."""
+
+    def __init__(
+        self, operation_name: str, phase: TimeoutPhase, completion: Event | None = None
+    ) -> None:
+        super().__init__(f"{operation_name} timed out")
+        self.phase = phase
+        self.completion = completion
+
+
+@dataclass(frozen=True, slots=True)
+class _AuditOutcome:
+    """Internal audit write result that distinguishes timeout from other failure."""
+
+    recorded: bool
+    timed_out: bool = False
+
+    def __bool__(self) -> bool:
+        """Preserve the historical truthiness contract for private callers."""
+        return self.recorded
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +80,10 @@ class RuntimeConfig:
     redactor: Redactor = field(default=redact, repr=False, compare=False)
     idempotency_store: IdempotencyStore | None = field(default=None, repr=False, compare=False)
     isolation_verifier: IsolationVerifier | None = field(default=None, repr=False, compare=False)
+    idempotency_ttl_seconds: int = 86_400
+    clock: Callable[[], datetime] = field(
+        default=lambda: datetime.now(UTC), repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         """Reject an unbounded or non-positive handler wait configuration."""
@@ -61,6 +91,8 @@ class RuntimeConfig:
             raise SecurityConfigurationError("execution timeout must be finite and positive")
         if self.max_timed_out_workers <= 0:
             raise SecurityConfigurationError("maximum timed-out workers must be positive")
+        if self.idempotency_ttl_seconds <= 0:
+            raise SecurityConfigurationError("idempotency TTL must be positive")
 
 
 class GuardedRuntime:
@@ -94,7 +126,6 @@ class GuardedRuntime:
         self._stop_lock = RLock()
         self._active_tokens: dict[str, CancellationToken] = {}
         self._budget_states: dict[str, list[bool]] = {}
-        self._handler_completion: dict[str, Event] = {}
         self._worker_lock = RLock()
         self._timed_out_workers = 0
         self._bounded_workers = 0
@@ -228,9 +259,15 @@ class GuardedRuntime:
                         budget_release_state
                     ),
                     on_timeout=lambda: self._release_action_budget_once(budget_release_state),
+                    timeout_phase=TimeoutPhase.POLICY,
                 )
-            except RuntimeOperationTimeoutError:
-                return self._deny(request_id, proposal, "policy evaluation timed out")
+            except _PhaseTimeout:
+                return self._deny(
+                    request_id,
+                    proposal,
+                    "policy evaluation timed out",
+                    timeout_phase=TimeoutPhase.POLICY,
+                )
             except Exception:
                 return self._deny(request_id, proposal, "policy evaluation failed")
             if not isinstance(policy_result, PolicyResult) or not isinstance(
@@ -295,6 +332,8 @@ class GuardedRuntime:
                         principal_id=self.context.principal.id,
                         tool_name=tool.name,
                         resource_ids=tuple(resource.id for resource in resources),
+                        ttl_seconds=self.config.idempotency_ttl_seconds,
+                        now=self.config.clock(),
                     )
                     claim = store.claim(idempotency_record)
                 except Exception:
@@ -304,6 +343,12 @@ class GuardedRuntime:
                         request_id,
                         proposal,
                         "operation key conflicts with another action",
+                    )
+                if claim.status is IdempotencyClaimStatus.EXPIRED:
+                    return self._deny(
+                        request_id,
+                        proposal,
+                        "expired in-progress or uncertain operation requires reconciliation",
                     )
                 if claim.status is IdempotencyClaimStatus.EXISTING:
                     if claim.record.state is IdempotencyState.COMPLETED:
@@ -332,13 +377,30 @@ class GuardedRuntime:
             if policy_result.decision is PolicyDecision.APPROVAL_REQUIRED:
                 if self.approvals is None or proposal.approval_id is None:
                     return self._approval_required(request_id, proposal, policy_result.reason)
+                approval_provider = self.approvals
                 try:
-                    approved = self.approvals.consume(
-                        proposal.approval_id,
-                        self.context,
-                        tool.name,
-                        proposal.proposal_id,
-                        fingerprint,
+                    approved = self._run_bounded(
+                        lambda: approval_provider.consume(
+                            proposal.approval_id or "",
+                            self.context,
+                            tool.name,
+                            proposal.proposal_id,
+                            fingerprint,
+                        ),
+                        "approval consumption",
+                        request_id=request_id,
+                        on_timeout_observed=lambda: self._defer_action_budget_release(
+                            budget_release_state
+                        ),
+                        on_timeout=lambda: self._release_action_budget_once(budget_release_state),
+                        timeout_phase=TimeoutPhase.APPROVAL,
+                    )
+                except _PhaseTimeout:
+                    return self._deny(
+                        request_id,
+                        proposal,
+                        "approval consumption timed out",
+                        timeout_phase=TimeoutPhase.APPROVAL,
                     )
                 except Exception:
                     approved = False
@@ -370,11 +432,17 @@ class GuardedRuntime:
                             budget_release_state
                         ),
                         on_timeout=lambda: self._release_action_budget_once(budget_release_state),
+                        timeout_phase=TimeoutPhase.CREDENTIAL,
                     )
                     if not credential.valid_for(tool.name, resources):
                         return self._deny(request_id, proposal, "credential scope is invalid")
-                except RuntimeOperationTimeoutError:
-                    return self._deny(request_id, proposal, "credential minting timed out")
+                except _PhaseTimeout:
+                    return self._deny(
+                        request_id,
+                        proposal,
+                        "credential minting timed out",
+                        timeout_phase=TimeoutPhase.CREDENTIAL,
+                    )
                 except Exception:
                     return self._deny(request_id, proposal, "credential broker failed")
                 handler_context = replace(handler_context, credential=credential)
@@ -407,6 +475,8 @@ class GuardedRuntime:
                     tool.name,
                     request_id,
                     reason=f"side effect executed but result was rejected: {type(exc).__name__}",
+                    handler_started=True,
+                    side_effect_state=SideEffectState.EXECUTED,
                 )
                 recorded = self._record(
                     "action_result_rejected",
@@ -416,6 +486,8 @@ class GuardedRuntime:
                 )
                 if not recorded:
                     result = replace(result, audit_recorded=False)
+                if recorded.timed_out:
+                    result = replace(result, timeout_phase=TimeoutPhase.AUDIT)
                 if not self._store_terminal(tool, proposal, result, uncertain=True):
                     result = replace(
                         result,
@@ -425,7 +497,12 @@ class GuardedRuntime:
                     )
                 return result
             result = ExecutionResult(
-                ExecutionStatus.EXECUTED, tool.name, request_id, output=safe_output
+                ExecutionStatus.EXECUTED,
+                tool.name,
+                request_id,
+                output=safe_output,
+                handler_started=True,
+                side_effect_state=SideEffectState.EXECUTED,
             )
             recorded = self._record(
                 "action_executed",
@@ -446,6 +523,8 @@ class GuardedRuntime:
                     reason="action executed but audit recording failed",
                     audit_recorded=False,
                 )
+            if recorded.timed_out:
+                result = replace(result, timeout_phase=TimeoutPhase.AUDIT)
             if not self._store_terminal(tool, proposal, result):
                 # The handler has already run, so denying the action would be
                 # false. Do not claim successful durable idempotency: a retry
@@ -459,7 +538,7 @@ class GuardedRuntime:
             return result
         except WorkerCapacityError:
             return self._deny(request_id, proposal, "bounded worker capacity exhausted")
-        except RuntimeOperationTimeoutError:
+        except _PhaseTimeout as timeout_error:
             cancellation.cancel()
             # A non-cooperative handler may still be performing a side effect
             # after the caller receives TIMED_OUT. Keep its concurrency slot
@@ -471,9 +550,12 @@ class GuardedRuntime:
                 tool.name,
                 request_id,
                 reason="handler exceeded execution timeout; side-effect status is uncertain",
+                timeout_phase=timeout_error.phase,
+                handler_started=True,
+                side_effect_state=SideEffectState.UNCERTAIN,
             )
             reconciliation_state = ReconciliationState.STILL_RUNNING
-            completion = self._handler_completion.get(request_id)
+            completion = timeout_error.completion
             if tool.reconciliation is not None and validated_arguments is not None:
                 reconciliation = tool.reconciliation
                 try:
@@ -485,6 +567,7 @@ class GuardedRuntime:
                             budget_release_state
                         ),
                         on_timeout=lambda: self._release_action_budget_once(budget_release_state),
+                        timeout_phase=TimeoutPhase.RECONCILIATION,
                     )
                     if isinstance(reconciled, ReconciliationResult):
                         if completion is not None and completion.is_set():
@@ -501,6 +584,7 @@ class GuardedRuntime:
                         reconciliation_state = ReconciliationState.FAILED
                 except Exception as exc:
                     reconciliation_state = ReconciliationState.FAILED
+                    result = replace(result, timeout_phase=TimeoutPhase.RECONCILIATION)
                     self._record(
                         "reconciliation_failed",
                         request_id,
@@ -521,6 +605,8 @@ class GuardedRuntime:
                 tool.name,
                 request_id,
                 reason="handler observed runtime cancellation",
+                handler_started=True,
+                side_effect_state=SideEffectState.UNCERTAIN,
             )
             recorded = self._record(
                 "action_cancelled", request_id, proposal, {"reason": result.reason}
@@ -537,7 +623,9 @@ class GuardedRuntime:
                 tool.name,
                 request_id,
                 reason="tool execution failed",
-                audit_recorded=recorded,
+                audit_recorded=bool(recorded),
+                handler_started=True,
+                side_effect_state=SideEffectState.UNCERTAIN,
             )
             self._store_terminal(tool, proposal, result, uncertain=True)
             return result
@@ -559,8 +647,6 @@ class GuardedRuntime:
     ) -> Any:
         """Run a handler with a bounded wait and cooperative timeout signal."""
         completion = Event()
-        with self._worker_lock:
-            self._handler_completion[request_id] = completion
 
         def operation() -> Any:
             try:
@@ -578,10 +664,11 @@ class GuardedRuntime:
                 on_timeout=release_handler_budget,
                 request_id=request_id,
                 on_timeout_observed=lambda: self._defer_action_budget_release(budget_release_state),
+                timeout_phase=TimeoutPhase.HANDLER,
             )
-        except RuntimeOperationTimeoutError:
+        except _PhaseTimeout as exc:
             cancellation.cancel()
-            raise
+            raise _PhaseTimeout("handler execution", TimeoutPhase.HANDLER, completion) from exc
 
     def _run_bounded(
         self,
@@ -590,6 +677,7 @@ class GuardedRuntime:
         on_timeout: Callable[[], None] | None = None,
         request_id: str | None = None,
         on_timeout_observed: Callable[[], None] | None = None,
+        timeout_phase: TimeoutPhase | None = None,
     ) -> Any:
         """Run an operation with a bounded caller wait and lifecycle tracking.
 
@@ -645,7 +733,9 @@ class GuardedRuntime:
                 on_timeout_observed()
             future.add_done_callback(on_done)
             future.cancel()
-            raise RuntimeOperationTimeoutError(f"{operation_name} timed out") from exc
+            if timeout_phase is None:
+                raise RuntimeOperationTimeoutError(f"{operation_name} timed out") from exc
+            raise _PhaseTimeout(operation_name, timeout_phase) from exc
         finally:
             if not timed_out:
                 future.add_done_callback(on_done)
@@ -702,6 +792,7 @@ class GuardedRuntime:
         proposal: ActionProposal,
         reason: str,
         details: Mapping[str, Any] | None = None,
+        timeout_phase: TimeoutPhase | None = None,
     ) -> ExecutionResult:
         """Record and return a safe denial without executing a handler."""
         recorded = self._record(
@@ -713,7 +804,8 @@ class GuardedRuntime:
             tool_name,
             request_id,
             reason=reason,
-            audit_recorded=recorded,
+            audit_recorded=bool(recorded),
+            timeout_phase=timeout_phase or (TimeoutPhase.AUDIT if recorded.timed_out else None),
         )
 
     def _approval_required(
@@ -728,12 +820,13 @@ class GuardedRuntime:
             request_id,
             reason=reason,
             approval_id=proposal.approval_id,
-            audit_recorded=recorded,
+            audit_recorded=bool(recorded),
+            timeout_phase=TimeoutPhase.AUDIT if recorded.timed_out else None,
         )
 
     def _record(
         self, event_type: str, request_id: str, proposal: ActionProposal, payload: Mapping[str, Any]
-    ) -> bool:
+    ) -> _AuditOutcome:
         """Write a redaction-aware audit event and report whether it was stored."""
         if isinstance(proposal.arguments, Mapping):
             try:
@@ -775,7 +868,10 @@ class GuardedRuntime:
                     else None
                 ),
                 on_timeout=release_budget,
+                timeout_phase=TimeoutPhase.AUDIT,
             )
+        except _PhaseTimeout:
+            return _AuditOutcome(False, timed_out=True)
         except Exception:
-            return False
-        return True
+            return _AuditOutcome(False)
+        return _AuditOutcome(True)

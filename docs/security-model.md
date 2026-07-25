@@ -82,6 +82,16 @@ original worker remains capable of committing, and the runtime reports
 `STILL_RUNNING` instead. Callers must reconcile before retrying an uncertain
 operation.
 
+Every bounded phase reports its timeout phase through
+`ExecutionResult.timeout_phase`: policy, approval, credential, audit, handler,
+or reconciliation. Policy, approval, and credential timeouts have
+`handler_started=False` and `side_effect_state=NOT_STARTED`. Handler and
+reconciliation timeouts have `handler_started=True` and
+`side_effect_state=UNCERTAIN`; callers must not retry them without
+reconciliation. Audit timeout after a handler runs reports `AUDIT` while the
+side effect remains `EXECUTED`, because the uncertainty is in evidence rather
+than execution.
+
 ## Idempotency and restart safety
 
 Idempotent tools require a stable caller-supplied `ActionProposal.operation_key`.
@@ -93,6 +103,10 @@ reference implementation. Without a configured store, the runtime fails
 closed. If terminal persistence fails after execution, the runtime returns
 `EXECUTED_UNRECORDED` rather than claiming a durable success. The SDK does not
 claim restart or multi-process safety for local memory.
+TTL applies to completed records. GC may remove expired completed records only;
+expired `IN_PROGRESS` and `UNCERTAIN` records are retained and surfaced as
+`EXPIRED` so expiry cannot become an unsafe replay path. GC returns an
+`IdempotencyGCReport` for metrics and audit evidence.
 
 ## Isolation attestation
 

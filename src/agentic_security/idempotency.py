@@ -7,6 +7,7 @@ whose claim operation is atomic across processes and survives restarts.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -28,6 +29,17 @@ class IdempotencyClaimStatus(StrEnum):
     CLAIMED = "claimed"
     EXISTING = "existing"
     CONFLICT = "conflict"
+    EXPIRED = "expired"
+
+
+@dataclass(frozen=True, slots=True)
+class IdempotencyGCReport:
+    """Observable result of a safe garbage-collection pass."""
+
+    scanned: int
+    removed_completed: int
+    retained_active: int
+    at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +86,9 @@ class IdempotencyStore(Protocol):
     def mark_uncertain(self, operation_key: str, result: Any) -> IdempotencyRecord:
         """Persist an outcome that requires reconciliation before retry."""
 
+    def gc(self, now: datetime | None = None) -> IdempotencyGCReport:
+        """Remove only expired completed records and report retained records."""
+
 
 class InMemoryIdempotencyStore:
     """Thread-safe local reference store for tests and development only.
@@ -83,10 +98,11 @@ class InMemoryIdempotencyStore:
     it must not be presented as durable production idempotency.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, now: Callable[[], datetime] | None = None) -> None:
         """Create an empty process-local store."""
         self._records: dict[str, IdempotencyRecord] = {}
         self._lock = Lock()
+        self._now = now or (lambda: datetime.now(UTC))
 
     def claim(self, record: IdempotencyRecord) -> IdempotencyClaim:
         """Atomically claim a key, detect identity collisions, and reuse state."""
@@ -97,6 +113,13 @@ class InMemoryIdempotencyStore:
             if existing is None:
                 self._records[record.operation_key] = record
                 return IdempotencyClaim(IdempotencyClaimStatus.CLAIMED, record)
+            now = self._now()
+            if existing.expires_at is not None and existing.expires_at <= now:
+                if existing.state is IdempotencyState.COMPLETED:
+                    del self._records[record.operation_key]
+                    self._records[record.operation_key] = record
+                    return IdempotencyClaim(IdempotencyClaimStatus.CLAIMED, record)
+                return IdempotencyClaim(IdempotencyClaimStatus.EXPIRED, existing)
             identity = (
                 existing.action_fingerprint,
                 existing.tenant,
@@ -118,7 +141,16 @@ class InMemoryIdempotencyStore:
     def lookup(self, operation_key: str) -> IdempotencyRecord | None:
         """Return a snapshot for replay detection before approval consumption."""
         with self._lock:
-            return self._records.get(operation_key)
+            existing = self._records.get(operation_key)
+            if (
+                existing is not None
+                and existing.state is IdempotencyState.COMPLETED
+                and existing.expires_at is not None
+                and existing.expires_at <= self._now()
+            ):
+                del self._records[operation_key]
+                return None
+            return existing
 
     def _update(
         self, operation_key: str, state: IdempotencyState, result: Any
@@ -151,6 +183,25 @@ class InMemoryIdempotencyStore:
         """Store an uncertain result that must not be blindly retried."""
         return self._update(operation_key, IdempotencyState.UNCERTAIN, result)
 
+    def gc(self, now: datetime | None = None) -> IdempotencyGCReport:
+        """Remove expired completed records, retaining active/uncertain records."""
+        at = now or self._now()
+        with self._lock:
+            records = tuple(self._records.values())
+            removed = 0
+            retained_active = 0
+            for record in records:
+                if (
+                    record.state is IdempotencyState.COMPLETED
+                    and record.expires_at is not None
+                    and record.expires_at <= at
+                ):
+                    del self._records[record.operation_key]
+                    removed += 1
+                else:
+                    retained_active += 1
+            return IdempotencyGCReport(len(records), removed, retained_active, at)
+
 
 def new_record(
     *,
@@ -161,11 +212,12 @@ def new_record(
     tool_name: str,
     resource_ids: tuple[str, ...],
     ttl_seconds: int | None = None,
+    now: datetime | None = None,
 ) -> IdempotencyRecord:
     """Build a normalized record for a live action."""
     if not operation_key.strip() or not action_fingerprint.strip():
         raise ValueError("operation and action fingerprint are required")
-    now = datetime.now(UTC)
+    created_at = now or datetime.now(UTC)
     return IdempotencyRecord(
         operation_key=operation_key,
         action_fingerprint=action_fingerprint,
@@ -174,14 +226,15 @@ def new_record(
         tool_name=tool_name,
         resource_ids=resource_ids,
         state=IdempotencyState.IN_PROGRESS,
-        created_at=now,
-        expires_at=None if ttl_seconds is None else now + timedelta(seconds=ttl_seconds),
+        created_at=created_at,
+        expires_at=(None if ttl_seconds is None else created_at + timedelta(seconds=ttl_seconds)),
     )
 
 
 __all__ = [
     "IdempotencyClaim",
     "IdempotencyClaimStatus",
+    "IdempotencyGCReport",
     "IdempotencyRecord",
     "IdempotencyState",
     "IdempotencyStore",

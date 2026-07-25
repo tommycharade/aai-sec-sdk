@@ -40,6 +40,7 @@ from .errors import (
 from .idempotency import (
     IdempotencyClaim,
     IdempotencyClaimStatus,
+    IdempotencyGCReport,
     IdempotencyRecord,
     IdempotencyState,
     IdempotencyStore,
@@ -66,6 +67,8 @@ from .types import (
     ReconciliationState,
     Resource,
     RiskLevel,
+    SideEffectState,
+    TimeoutPhase,
 )
 
 __all__ = [
@@ -86,6 +89,7 @@ __all__ = [
     "Budget",
     "IdempotencyClaim",
     "IdempotencyClaimStatus",
+    "IdempotencyGCReport",
     "IdempotencyRecord",
     "IdempotencyState",
     "IdempotencyStore",
@@ -98,6 +102,8 @@ __all__ = [
     "ExecutionContext",
     "ExecutionResult",
     "ExecutionStatus",
+    "SideEffectState",
+    "TimeoutPhase",
     "GuardedRuntime",
     "HttpApprovalProvider",
     "HttpAuditExporter",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Barrier, Event, Thread
 from time import sleep
@@ -23,6 +24,8 @@ from agentic_security import (
     ReconciliationState,
     Resource,
     RuntimeConfig,
+    SideEffectState,
+    TimeoutPhase,
     ToolDefinition,
     ToolRegistry,
 )
@@ -219,6 +222,40 @@ def test_policy_timeout_retains_action_capacity_until_worker_exit() -> None:
     assert timed_out.status is ExecutionStatus.DENIED
     assert "timed out" in (timed_out.reason or "")
     assert blocked.status is ExecutionStatus.DENIED
+    assert timed_out.timeout_phase is TimeoutPhase.POLICY
+    assert timed_out.handler_started is False
+    assert timed_out.side_effect_state is SideEffectState.NOT_STARTED
+
+
+def test_approval_timeout_is_typed_and_does_not_start_handler() -> None:
+    release = Event()
+
+    class SlowApproval:
+        def consume(self, *_: Any) -> bool:
+            release.wait(1)
+            return True
+
+    calls: list[bool] = []
+    registry = ToolRegistry()
+    registry.register(_tool("approved", lambda *_: calls.append(True), requires_approval=True))
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"approved"}),
+        InMemoryAuditSink(),
+        approvals=SlowApproval(),
+        config=RuntimeConfig(execution_timeout_seconds=0.005),
+    )
+    result = runtime.execute(
+        ActionProposal("approved", {}, "proposal:approval", approval_id="approval:1")
+    )
+    release.set()
+
+    assert result.status is ExecutionStatus.DENIED
+    assert result.timeout_phase is TimeoutPhase.APPROVAL
+    assert result.handler_started is False
+    assert result.side_effect_state is SideEffectState.NOT_STARTED
+    assert calls == []
 
 
 def test_zero_delegation_budget_is_valid_and_denies_delegating_tools() -> None:
@@ -384,6 +421,9 @@ def test_idempotency_claim_failure_and_worker_limit_are_fail_closed() -> None:
         def mark_uncertain(self, _operation_key: str, _result: Any) -> Any:
             raise AssertionError("unreachable")
 
+        def gc(self, now: Any = None) -> Any:
+            raise AssertionError("unreachable")
+
     registry = ToolRegistry()
     registry.register(_tool("write", lambda *_: {"ok": True}, idempotency_required=True))
     runtime = GuardedRuntime(
@@ -409,6 +449,110 @@ def test_action_budget_release_is_idempotent() -> None:
     runtime._release_action_budget_once(state)
     runtime._release_action_budget_once(state)
     assert state == [False, True]
+
+
+def test_handler_completion_is_local_and_stress_timeouts_do_not_retain_registry() -> None:
+    release = Event()
+
+    def slow(_context: ExecutionContext, _arguments: Any) -> dict[str, bool]:
+        release.wait(1)
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registry.register(_tool("slow", slow))
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"slow"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(
+            Budget(max_concurrent=8), execution_timeout_seconds=0.01, max_timed_out_workers=32
+        ),
+    )
+
+    proposals = [ActionProposal("slow", {}, f"proposal:{index}") for index in range(8)]
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(runtime.execute, proposals))
+    release.set()
+    sleep(0.05)
+
+    assert any(result.timeout_phase is TimeoutPhase.HANDLER for result in results)
+    assert all(
+        result.status in {ExecutionStatus.TIMED_OUT, ExecutionStatus.DENIED} for result in results
+    )
+    assert not hasattr(runtime, "_handler_completion")
+    assert runtime.health()["bounded_workers"] == 0
+
+
+def test_idempotency_ttl_expiry_and_gc_never_delete_uncertain_records() -> None:
+    now = [datetime(2026, 1, 1, tzinfo=UTC)]
+    store = InMemoryIdempotencyStore(lambda: now[0])
+    completed = new_record(
+        operation_key="op:completed",
+        action_fingerprint="fingerprint:1",
+        tenant="tenant:test",
+        principal_id="user:test",
+        tool_name="write",
+        resource_ids=(),
+        ttl_seconds=10,
+        now=now[0],
+    )
+    uncertain = new_record(
+        operation_key="op:uncertain",
+        action_fingerprint="fingerprint:2",
+        tenant="tenant:test",
+        principal_id="user:test",
+        tool_name="write",
+        resource_ids=(),
+        ttl_seconds=10,
+        now=now[0],
+    )
+    store.claim(completed)
+    store.complete("op:completed", {"ok": True})
+    store.claim(uncertain)
+    store.mark_uncertain("op:uncertain", {"unknown": True})
+    now[0] += timedelta(seconds=11)
+
+    report = store.gc()
+
+    assert report.scanned == 2
+    assert report.removed_completed == 1
+    assert report.retained_active == 1
+    assert store.lookup("op:completed") is None
+    assert store.lookup("op:uncertain") is not None
+    retry = store.claim(uncertain)
+    assert retry.status is IdempotencyClaimStatus.EXPIRED
+
+
+def test_expired_in_progress_claims_are_consistently_rejected_under_concurrency() -> None:
+    now = [datetime(2026, 1, 1, tzinfo=UTC)]
+    store = InMemoryIdempotencyStore(lambda: now[0])
+    record = new_record(
+        operation_key="op:active",
+        action_fingerprint="fingerprint",
+        tenant="tenant:test",
+        principal_id="user:test",
+        tool_name="write",
+        resource_ids=(),
+        ttl_seconds=1,
+        now=now[0],
+    )
+    store.claim(record)
+    now[0] += timedelta(seconds=2)
+    barrier = Barrier(6)
+    statuses: list[IdempotencyClaimStatus] = []
+
+    def retry() -> None:
+        barrier.wait()
+        statuses.append(store.claim(record).status)
+
+    threads = [Thread(target=retry) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert statuses == [IdempotencyClaimStatus.EXPIRED] * 6
 
 
 def test_timed_out_audit_for_pre_admission_denial_never_releases_missing_lease() -> None:

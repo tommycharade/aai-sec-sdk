@@ -34,6 +34,25 @@ class ExecutionStatus(StrEnum):
     RECONCILED = "reconciled"
 
 
+class TimeoutPhase(StrEnum):
+    """Bounded operation phase that exceeded its caller deadline."""
+
+    POLICY = "policy"
+    APPROVAL = "approval"
+    CREDENTIAL = "credential"
+    AUDIT = "audit"
+    HANDLER = "handler"
+    RECONCILIATION = "reconciliation"
+
+
+class SideEffectState(StrEnum):
+    """Safety-relevant knowledge about whether a handler side effect is settled."""
+
+    NOT_STARTED = "not_started"
+    EXECUTED = "executed"
+    UNCERTAIN = "uncertain"
+
+
 class ReconciliationState(StrEnum):
     """Independent evidence state for a timed-out side effect."""
 
@@ -202,3 +221,6 @@ class ExecutionResult:
     approval_id: str | None = None
     audit_recorded: bool = True
     reconciliation_state: ReconciliationState | None = None
+    timeout_phase: TimeoutPhase | None = None
+    handler_started: bool = False
+    side_effect_state: SideEffectState = SideEffectState.NOT_STARTED
