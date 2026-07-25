@@ -85,7 +85,8 @@ The example is synthetic and does not connect to a model or external service.
 
 ::: agentic_security.RuntimeConfig
 
-`RuntimeConfig.execution_timeout_seconds` is a caller-wait deadline. Python
+`RuntimeConfig.execution_timeout_seconds` is a caller-wait deadline for policy,
+approval, credential, audit, handler, and reconciliation operations. Python
 cannot forcibly terminate an arbitrary running thread, so non-cooperative
 workers remain tracked and count against `max_timed_out_workers` until they
 return. Use `GuardedRuntime.health()` for operational alerts. Configure a

@@ -284,6 +284,8 @@ class GuardedRuntime:
                 fingerprint = action_hash(self.context, tool.name, arguments, resources)
             except Exception:
                 return self._deny(request_id, proposal, "action could not be fingerprinted")
+            if self.is_stopped():
+                return self._deny(request_id, proposal, "runtime emergency stop is active")
             if tool.idempotency_required and proposal.operation_key is not None:
                 store = self.config.idempotency_store
                 if store is None:
@@ -379,21 +381,14 @@ class GuardedRuntime:
                     return self._approval_required(request_id, proposal, policy_result.reason)
                 approval_provider = self.approvals
                 try:
-                    approved = self._run_bounded(
-                        lambda: approval_provider.consume(
-                            proposal.approval_id or "",
-                            self.context,
-                            tool.name,
-                            proposal.proposal_id,
-                            fingerprint,
-                        ),
-                        "approval consumption",
-                        request_id=request_id,
-                        on_timeout_observed=lambda: self._defer_action_budget_release(
-                            budget_release_state
-                        ),
-                        on_timeout=lambda: self._release_action_budget_once(budget_release_state),
-                        timeout_phase=TimeoutPhase.APPROVAL,
+                    approved = self._consume_approval_bounded(
+                        approval_provider,
+                        proposal.approval_id,
+                        tool.name,
+                        proposal.proposal_id,
+                        fingerprint,
+                        request_id,
+                        budget_release_state,
                     )
                 except _PhaseTimeout:
                     return self._deny(
@@ -669,6 +664,43 @@ class GuardedRuntime:
         except _PhaseTimeout as exc:
             cancellation.cancel()
             raise _PhaseTimeout("handler execution", TimeoutPhase.HANDLER, completion) from exc
+
+    def _consume_approval_bounded(
+        self,
+        provider: ApprovalProvider,
+        approval_id: str,
+        tool_name: str,
+        proposal_id: str,
+        fingerprint: str,
+        request_id: str,
+        budget_release_state: list[bool],
+    ) -> bool:
+        """Consume approval through the bounded worker and host stop boundary.
+
+        Approval services are external security dependencies. They must have
+        the same deadline, worker-capacity, action-lease, and lifecycle
+        accounting as policy and credential providers. The pre-call stop check
+        prevents a queued approval operation from starting after emergency
+        stop; the caller rechecks stop again before any handler invocation.
+        """
+        if self.is_stopped():
+            return False
+        return bool(
+            self._run_bounded(
+                lambda: provider.consume(
+                    approval_id,
+                    self.context,
+                    tool_name,
+                    proposal_id,
+                    fingerprint,
+                ),
+                "approval consumption",
+                request_id=request_id,
+                on_timeout_observed=lambda: self._defer_action_budget_release(budget_release_state),
+                on_timeout=lambda: self._release_action_budget_once(budget_release_state),
+                timeout_phase=TimeoutPhase.APPROVAL,
+            )
+        )
 
     def _run_bounded(
         self,

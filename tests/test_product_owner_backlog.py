@@ -258,6 +258,43 @@ def test_approval_timeout_is_typed_and_does_not_start_handler() -> None:
     assert calls == []
 
 
+def test_stop_during_approval_denies_without_starting_handler() -> None:
+    started = Event()
+    release = Event()
+    calls: list[bool] = []
+
+    class SlowApproval:
+        def consume(self, *_: Any) -> bool:
+            started.set()
+            release.wait(1)
+            return True
+
+    registry = ToolRegistry()
+    registry.register(_tool("approved", lambda *_: calls.append(True), requires_approval=True))
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"approved"}),
+        InMemoryAuditSink(),
+        approvals=SlowApproval(),
+        config=RuntimeConfig(execution_timeout_seconds=0.05),
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            runtime.execute,
+            ActionProposal("approved", {}, "proposal:stop-approval", approval_id="approval:1"),
+        )
+        assert started.wait(1)
+        runtime.stop()
+        release.set()
+        result = future.result(timeout=1)
+
+    assert result.status is ExecutionStatus.DENIED
+    assert result.reason == "runtime emergency stop is active"
+    assert calls == []
+
+
 def test_zero_delegation_budget_is_valid_and_denies_delegating_tools() -> None:
     state = BudgetState(Budget(max_delegation_depth=0))
     assert state.budget.max_delegation_depth == 0

@@ -68,9 +68,10 @@ from copying a secret; process/container isolation is required for hostile code.
 
 ## Timeout and retry semantics
 
-The runtime timeout bounds policy evaluation, credential minting, audit
-persistence, and handler invocation. A timeout in policy or credential minting
-denies without running the handler. A handler timeout returns `TIMED_OUT` and
+The runtime timeout bounds policy evaluation, approval consumption, credential
+minting, audit persistence, handler invocation, and reconciliation. A timeout
+in policy, approval, or credential minting denies without running the handler.
+A handler timeout returns `TIMED_OUT` and
 the runtime retains the concurrency slot until the worker exits. The side
 effect remains uncertain, so callers must reconcile before retrying. A
 reconciliation callback is evidence only while the original worker may still
