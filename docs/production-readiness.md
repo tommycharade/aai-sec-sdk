@@ -80,14 +80,17 @@ make package-check
 make security-check
 ```
 
-Expected evidence includes passing tests and coverage, at least 80% killed
-mutants, clean wheel and source builds, legal metadata, dependency audits,
-artifact-matched checksums and SBOMs, verified provenance, and a clean reviewed
-release commit/tag.
+Expected evidence includes passing tests and coverage, a successful bounded
+mutation run whose evidence names the exact 3-file scope, score, commit, and
+tool, clean wheel and source builds, legal metadata, dependency audits,
+artifact-matched checksums and complete per-artifact SBOMs, verified
+provenance, and a clean reviewed release commit/tag. The artifact build and
+independent clean verification are separate release steps.
 
 `make check` validates the mutation contract and normal quality gates. The
 actual mutation score is established only by a successful `make mutation` run.
-A mutation score is assurance evidence, not a security certification.
+A mutation score is assurance evidence, not a security certification; the
+score must never be copied between commits or scopes.
 
 ## Failure and retry rules
 

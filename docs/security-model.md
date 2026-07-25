@@ -136,6 +136,9 @@ handling hostile code.
 - Configure rate, fan-out, cost, delegation, and action budgets per task.
 - Run the release verification, SBOM, provenance, and compatibility checks
   described in `releasing.md` before depending on a published version.
+- Treat mutation evidence as commit- and scope-bound assurance: the checked
+  evidence must name the exact tool, score, commit, and three-file security
+  scope. It is not portable evidence for another source revision.
 
 ## Deployment adapters and process boundaries
 

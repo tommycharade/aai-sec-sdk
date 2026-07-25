@@ -46,20 +46,43 @@ wheels; artifact SBOMs, checksums, and provenance are the release evidence.
 PyPI publication, if enabled, must use repository trusted publishing and never
 a developer workstation token.
 
-The workflow creates checksums from inside `dist` (`cd dist && sha256sum * >
-SHA256SUMS`) so the manifest uses artifact-local filenames.
+The build job creates checksums with `scripts/write_checksums.py`, excluding the
+checksum file itself and using artifact-local filenames. A separate clean
+verification job consumes the uploaded bundle.
 
-`verify_release_evidence.py` independently checks that every wheel and source
+`verify_release_evidence.py` is run in a separate clean-verification job. It
+independently checks that every wheel and source
 archive has a matching SHA-256 entry, a matching SBOM manifest entry, and an
 SBOM containing the artifact filename and digest. It also checks the clean
 checkout commit and exact tag against `RELEASE-METADATA.json`. The workflow
-then runs `gh attestation verify` for every subject, constraining the signer
-workflow and source ref. These checks verify artifact identity and provenance
-bindings; they do not certify the package's runtime behavior or external
-provider deployments.
+then runs `gh attestation verify` for every subject in that same clean job,
+constraining the signer workflow and source ref. These checks verify artifact
+identity and provenance bindings; they do not certify the package's runtime
+behavior or external provider deployments.
+
+### Standalone adopter verification
+
+Adopters can verify downloaded release evidence without trusting the build
+workspace:
+
+```bash
+git clone https://github.com/tommycharade/aai-sec-sdk.git
+cd aai-sec-sdk
+git checkout --detach vX.Y.Z
+# Copy the published release-evidence bundle into ./dist first.
+python scripts/verify_release_evidence.py dist \
+  --commit "$(git rev-parse HEAD)" --tag "vX.Y.Z"
+gh attestation verify dist/*.whl --repo tommycharade/aai-sec-sdk \
+  --signer-workflow tommycharade/aai-sec-sdk/.github/workflows/release-artifacts.yml \
+  --source-ref vX.Y.Z
+```
+
+Do not use `--allow-untagged` for a published release; that option is only for
+local pre-tag verification.
 
 `make check` validates the mutation contract; `make mutation` executes the
 mutmut run through `scripts/run_mutation_check.py`, enforces the declared 80%
-killed-mutant threshold, and fails on timeout or an unparseable result. The
-run is bounded to two workers and 120 seconds. No mutation score is claimed
-unless that command has completed successfully for the commit.
+killed-mutant threshold, and fails on stale/missing/truncated/timeout,
+unparseable, or other-commit evidence. The run is bounded to two workers and
+120 seconds. No mutation score is claimed unless that command has completed
+successfully for the commit.

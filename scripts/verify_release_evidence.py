@@ -62,14 +62,23 @@ def main() -> int:
     entries = {entry["artifact"]: entry for entry in manifest.get("subjects", [])}
     if set(entries) != {path.name for path in artifacts}:
         fail("SBOM manifest does not cover exactly the release subjects")
+    sbom_files = {path.name for path in directory.iterdir() if path.name.endswith(".sbom.json")}
+    if {entry["sbom"] for entry in entries.values()} != sbom_files:
+        fail("SBOM manifest has missing or unassociated SBOM files")
     for artifact in artifacts:
         entry = entries[artifact.name]
         sbom = directory / entry["sbom"]
+        if sbom.parent != directory:
+            fail(f"SBOM path escapes release directory: {sbom.name}")
         if not sbom.is_file() or entry["artifact_sha256"] != digest(artifact):
             fail(f"SBOM subject hash mismatch: {artifact.name}")
         if entry["sbom_sha256"] != digest(sbom):
             fail(f"SBOM hash mismatch: {sbom.name}")
         document = json.loads(sbom.read_text(encoding="utf-8"))
+        if document.get("bomFormat") != "CycloneDX" or not document.get("specVersion"):
+            fail(f"SBOM is not a complete CycloneDX document: {sbom.name}")
+        if not isinstance(document.get("components"), list):
+            fail(f"SBOM has no component inventory: {sbom.name}")
         properties = document.get("metadata", {}).get("properties", [])
         bound = {item.get("name"): item.get("value") for item in properties}
         if bound.get("release:artifact-filename") != artifact.name:

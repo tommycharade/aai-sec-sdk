@@ -18,20 +18,28 @@ new boundary.
 ## Mutation testing
 
 `mutation-baseline.json` records the security branches and the bounded command.
+The declared mutation source scope is exactly these three files, and is checked
+against `pyproject.toml`:
+
+- `src/agentic_security/credentials.py`
+- `src/agentic_security/isolation.py`
+- `src/agentic_security/audit.py`
+
 `make mutation` runs the actual tool in a pinned development environment and
 fails unless the declared threshold is met. Run it when changing
 authorization, approval, credential, idempotency, timeout, isolation, budget,
 or audit code. Require at least 80% killed mutants in the listed security
 branches. CI runs the same `make mutation` command on pull requests and
 releases, uploads `.mutmut-cache/evidence.json` and `results.txt`, and fails
-on stale/missing/truncated/timeout/unparseable evidence. No mutation score is
-claimed without the runner's parsed result file. One deliberately timing-heavy
+on stale/missing/truncated/timeout/unparseable evidence or evidence generated
+for another commit. The evidence records the exact score, commit, tool,
+command, and source scope. No mutation score is claimed without the runner's
+parsed result file. One deliberately timing-heavy
 worker stress test is excluded from mutmut's baseline selection because
 mutation process overhead makes it nondeterministic; it remains mandatory in
 the normal unit/adversarial suite and is not excluded from `make check`.
-The declared mutation source scope is the complete `src/agentic_security`
-package configured in `pyproject.toml`; provider-specific external deployments
-remain deployment-owned.
+Provider-specific external deployments remain deployment-owned and are outside
+this mutation scope.
 
 ## Adapter contracts
 

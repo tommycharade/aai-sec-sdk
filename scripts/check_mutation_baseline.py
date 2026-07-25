@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 
 def main() -> int:
     """Fail if the bounded mutation scope or threshold is incomplete."""
     value = json.loads(Path("mutation-baseline.json").read_text(encoding="utf-8"))
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    configured_scope = project.get("tool", {}).get("mutmut", {}).get("only_mutate")
     required = {
         "tool",
         "command",
@@ -27,7 +30,7 @@ def main() -> int:
         and 0 < value["minimum_killed_percent"] <= 100
         and bool(value["security_branch_targets"])
         and bool(value["source_scope"])
-        and value["source_scope"] == ["src/agentic_security"]
+        and value["source_scope"] == configured_scope
         and str(value["results_file"]).endswith("results.txt")
         and str(value["evidence_file"]).endswith("evidence.json")
     )

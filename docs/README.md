@@ -38,4 +38,8 @@ make docs       # regenerate README and build the site
 make check      # run all quality and documentation gates
 ```
 
+For release adoption, use the standalone checksum, SBOM, commit/tag, and
+provenance verification procedure in [Releasing](releasing.md); build success
+alone is not release evidence.
+
 The root `README.md` is generated from this page. Do not edit the generated file directly.

@@ -53,6 +53,19 @@ def main() -> int:
 
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     subprocess.run([sys.executable, "scripts/check_mutation_baseline.py"], check=True)
+    scope = list(baseline["source_scope"])
+    commit = subprocess.run(  # noqa: S603, S607 - fixed local git argv
+        ["git", "rev-parse", "HEAD"],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    evidence_context = {
+        "tool": baseline["tool"],
+        "command": baseline["command"],
+        "commit": commit,
+        "source_scope": scope,
+    }
     # Mutmut keeps generated state outside the evidence file. Remove it so a
     # prior run cannot make a partial or stale result appear current.
     for generated in (Path("mutants"), RESULTS.parent):
@@ -61,14 +74,9 @@ def main() -> int:
     started_at = datetime.now(UTC)
     started_monotonic = monotonic()
     write_evidence(
+        **evidence_context,
         status="running",
         started_at=started_at.isoformat(),
-        commit=subprocess.run(  # noqa: S603, S607 - fixed local git argv
-            ["git", "rev-parse", "HEAD"],  # noqa: S607
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip(),
     )
     command = [sys.executable, "-m", "mutmut", "run", "--max-children", "2"]
     deadline = monotonic() + int(baseline["time_limit_seconds"])
@@ -77,12 +85,20 @@ def main() -> int:
             run_code = run_process(command, stream, max(0.1, deadline - monotonic()))
     except subprocess.TimeoutExpired:
         write_evidence(
-            status="failed", reason="mutation_timeout", started_at=started_at.isoformat()
+            **evidence_context,
+            status="failed",
+            reason="mutation_timeout",
+            started_at=started_at.isoformat(),
         )
         print("Mutation run exceeded its bounded time limit; threshold not proven.")
         return 1
     if run_code != 0:
-        write_evidence(status="failed", reason="mutmut_nonzero", started_at=started_at.isoformat())
+        write_evidence(
+            **evidence_context,
+            status="failed",
+            reason="mutmut_nonzero",
+            started_at=started_at.isoformat(),
+        )
         print("mutmut did not complete successfully; threshold not proven.")
         return 1
 
@@ -95,14 +111,22 @@ def main() -> int:
             check=False,
         )
     except subprocess.TimeoutExpired:
-        write_evidence(status="failed", reason="result_timeout", started_at=started_at.isoformat())
+        write_evidence(
+            **evidence_context,
+            status="failed",
+            reason="result_timeout",
+            started_at=started_at.isoformat(),
+        )
         print("Mutation result parsing exceeded its bounded time limit; threshold not proven.")
         return 1
     output = results.stdout + results.stderr
     existing = RESULTS.read_text(encoding="utf-8")
     if not output.endswith("\n") or not existing:
         write_evidence(
-            status="failed", reason="truncated_results", started_at=started_at.isoformat()
+            **evidence_context,
+            status="failed",
+            reason="truncated_results",
+            started_at=started_at.isoformat(),
         )
         print("Mutation results were missing or truncated; threshold not proven.")
         return 1
@@ -112,7 +136,10 @@ def main() -> int:
     )
     if not statuses:
         write_evidence(
-            status="failed", reason="unparseable_results", started_at=started_at.isoformat()
+            **evidence_context,
+            status="failed",
+            reason="unparseable_results",
+            started_at=started_at.isoformat(),
         )
         print("Mutation results did not contain a parseable killed/total summary.")
         print(output[-2000:])
@@ -121,9 +148,25 @@ def main() -> int:
     total = len(statuses)
     percentage = 100.0 * killed / total if total else 0.0
     required = float(baseline["minimum_killed_percent"])
+    current_commit = subprocess.run(  # noqa: S603, S607 - fixed local git argv
+        ["git", "rev-parse", "HEAD"],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if current_commit != commit:
+        write_evidence(
+            **evidence_context,
+            status="failed",
+            reason="commit_changed",
+            started_at=started_at.isoformat(),
+        )
+        print("Mutation evidence was produced for a different commit; threshold not proven.")
+        return 1
     disallowed = [status for status in statuses if status.lower() != "killed"]
     status = "passed" if total and percentage >= required else "failed"
     write_evidence(
+        **evidence_context,
         status=status,
         started_at=started_at.isoformat(),
         finished_at=datetime.now(UTC).isoformat(),
