@@ -39,7 +39,7 @@ jobs:
       - name: Write release metadata
         run: python scripts/write_release_metadata.py dist --commit "$GITHUB_SHA" --tag "$GITHUB_REF_NAME"
       - name: Generate checksums
-        run: (cd dist && sha256sum * > SHA256SUMS)
+        run: python scripts/write_checksums.py dist
       - name: Verify release evidence independently
         run: python scripts/verify_release_evidence.py dist --commit "$GITHUB_SHA" --tag "$GITHUB_REF_NAME"
       - name: Upload release evidence
