@@ -7,6 +7,7 @@ from math import inf, nan
 from threading import Event
 from time import sleep
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -114,6 +115,89 @@ def test_allowed_action_executes_with_application_principal() -> None:
     assert result.status == "executed"
     assert calls == [{"principal": "user:alice", "arguments": {"value": "safe"}}]
     assert audit.verify()
+
+
+def test_denial_request_ids_and_reasons_are_auditable() -> None:
+    """Every host denial keeps one request identity and its exact reason."""
+    runtime, audit = make_runtime()
+    unknown = runtime.execute(ActionProposal("missing", {"value": "safe"}, "proposal:unknown"))
+
+    assert unknown.status is ExecutionStatus.DENIED
+    UUID(unknown.request_id)
+    unknown_event = audit.events()[-1]
+    assert unknown_event.request_id == unknown.request_id
+    assert unknown_event.payload["reason"] == "unknown tool"
+
+    runtime.stop()
+    stopped = runtime.execute(proposal())
+
+    assert stopped.status is ExecutionStatus.DENIED
+    stopped_event = audit.events()[-1]
+    assert stopped_event.request_id == stopped.request_id
+    assert stopped_event.payload["reason"] == "runtime emergency stop is active"
+
+
+def test_malformed_tool_denial_preserves_reason_and_request_identity() -> None:
+    """Malformed model-selected tool names are distinct from unknown tools."""
+    runtime, audit = make_runtime()
+
+    malformed = object.__new__(ActionProposal)
+    object.__setattr__(malformed, "tool_name", 123)
+    object.__setattr__(malformed, "arguments", {"value": "safe"})
+    object.__setattr__(malformed, "proposal_id", "proposal:malformed")
+    object.__setattr__(malformed, "approval_id", None)
+    object.__setattr__(malformed, "operation_key", None)
+    result = runtime.execute(malformed)
+
+    assert result.status is ExecutionStatus.DENIED
+    UUID(result.request_id)
+    event = audit.events()[-1]
+    assert event.request_id == result.request_id
+    assert event.payload["reason"] == "malformed tool"
+
+
+def test_approval_required_result_and_audit_are_host_bound() -> None:
+    """An approval request is non-executing and retains its approval binding."""
+    runtime, audit = make_runtime(
+        risk=RiskLevel.HIGH,
+        requires_approval=True,
+    )
+    candidate = ActionProposal(
+        "read_record",
+        {"value": "safe"},
+        "proposal:approval-required",
+        approval_id="approval:1",
+    )
+
+    result = runtime.execute(candidate)
+
+    assert result.status is ExecutionStatus.APPROVAL_REQUIRED
+    assert result.approval_id == "approval:1"
+    assert result.handler_started is False
+    event = audit.events()[-1]
+    assert event.event_type == "approval_required"
+    assert event.request_id == result.request_id
+    assert event.payload["reason"] == "explicit approval is required"
+
+
+def test_success_audit_binds_request_and_live_policy_provenance() -> None:
+    """Execution evidence includes the host decision and its provenance."""
+
+    class VersionedPolicy:
+        def decide(self, *_: Any) -> PolicyResult:
+            return PolicyResult(PolicyDecision.ALLOW, "approved", "policy-7", "test-policy")
+
+    runtime, audit = make_runtime(policy=VersionedPolicy())
+    result = runtime.execute(proposal())
+
+    assert result.status is ExecutionStatus.EXECUTED
+    event = audit.events()[-1]
+    assert event.event_type == "action_executed"
+    assert event.request_id == result.request_id
+    assert event.payload["status"] == ExecutionStatus.EXECUTED.value
+    assert event.payload["policy_decision"] == PolicyDecision.ALLOW.value
+    assert event.payload["policy_version"] == "policy-7"
+    assert event.payload["policy_provenance"] == "test-policy"
 
 
 def test_tool_results_are_redacted_before_crossing_runtime_boundary() -> None:

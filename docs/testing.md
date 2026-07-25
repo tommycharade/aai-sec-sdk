@@ -43,7 +43,7 @@ this mutation scope. The bounded mutation gate does not claim coverage of the
 central `runtime.py` execution boundary, approval, policy, budget, idempotency,
 or type modules; those remain covered by unit, adversarial, and contract tests.
 High-impact adoption must treat runtime mutation assurance as an open
-deployment-readiness requirement.
+production-readiness requirement.
 
 `scripts/verify_mutation_evidence.py` independently rechecks the uploaded
 evidence against the current commit, `pyproject.toml`, the baseline threshold,

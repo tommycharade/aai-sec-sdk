@@ -6,12 +6,14 @@
 
 ## Evidence reviewed
 
-- 113 tests passed.
-- 90.52% coverage.
+- Targeted runtime security tests were added for denial identity/reasons,
+  approval binding, and policy provenance.
 - `make check` passed.
 - GitHub CI passed on Python 3.11, 3.12, and 3.13.
-- Actual bounded mutation run passed: 180/218 mutants killed, 82.57% on the
-  declared three-file scope.
+- The passing bounded gate remains 180/218 mutants killed, 82.57% on the
+  declared three-file scope. A widened runtime-plus-controls attempt after
+  targeted tests completed at 808/1308 (61.8%) and failed closed at the 80%
+  threshold.
 - Mutation evidence was commit-bound and independently verified.
 
 ## Recommendation
@@ -22,21 +24,15 @@
 
 ## P1 findings and status
 
-### Action-budget release is not thread-safe
+### Action-budget release is resolved by `103bf6d`
 
-`_release_action_budget_once()` in `src/agentic_security/runtime.py` uses an
-unsynchronized check/set sequence. Multiple timeout callbacks can invoke it
-concurrently, particularly when both a handler and reconciliation operation
-time out.
+`103bf6d` makes `_release_action_budget_once()` atomic with the existing
+per-action lock and protects `BudgetState.release()` from underflow. Multiple
+timeout callbacks can no longer release the same lease twice.
 
-`BudgetState.release()` in `src/agentic_security/budgets.py` decrements
-counters without underflow protection. A double release could make the
-active/concurrency count negative and allow more concurrent work than
-configured.
-
-The existing test calls the method sequentially in
-`tests/test_product_owner_backlog.py`.
-This requires a lock or atomic lease and a concurrent stress test.
+Evidence includes `test_action_budget_release_callbacks_are_atomic_under_concurrency`
+and `test_budget_release_rejects_concurrent_duplicate_releases_without_underflow`
+in `tests/test_product_owner_backlog.py`, plus the full `make check` run.
 
 ### Mutation assurance scope corrected; central runtime remains open
 
@@ -50,15 +46,15 @@ only:
 The central `src/agentic_security/runtime.py` implementation and the
 approval/policy/budget/idempotency/type modules are outside the actual mutmut
 scope. A bounded experiment widening the scope to runtime plus the existing
-three modules completed but scored only 862/1310 (65.8%), so it correctly
+three modules completed but scored only 808/1308 (61.8%), so it correctly
 failed the 80% gate. The project now explicitly makes no mutation-coverage
 claim for the runtime boundary.
 
 The passing score is valid only for the three listed modules. It does not
 establish mutation assurance for the central execution boundary or the
-action-budget race above. This finding is resolved as a claims-correction,
-not as evidence that the runtime is mutation-tested; runtime mutation
-assurance remains a production-readiness requirement for high-impact use.
+action-budget race above. This P1 remains open. Runtime mutation assurance
+remains a production-readiness requirement for high-impact use; the passing
+three-file gate must not be presented as runtime assurance.
 
 ## P2 issues
 
@@ -152,9 +148,7 @@ reference implementations should remain open source.
 
 Before high-impact production adoption:
 
-1. Make action-budget release atomic and prove it under concurrent
-   timeout/reconciliation callbacks.
-2. Extend mutation testing to runtime authorization, timeout, budget,
+1. Extend mutation testing to runtime authorization, timeout, budget,
    approval, and idempotency paths before high-impact production adoption;
    the current bounded gate intentionally does not claim that coverage.
 
