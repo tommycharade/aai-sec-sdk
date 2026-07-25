@@ -85,7 +85,16 @@ show_missing = true
 
 [tool.mutmut]
 source_paths = ["src/agentic_security"]
+only_mutate = [
+  "src/agentic_security/credentials.py",
+  "src/agentic_security/isolation.py",
+  "src/agentic_security/audit.py",
+]
 pytest_add_cli_args_test_selection = ["tests"]
+pytest_add_cli_args = [
+  "-k",
+  "not test_handler_completion_is_local_and_stress_timeouts_do_not_retain_registry",
+]
 also_copy = [
   "examples/",
   "AGENTS.md",

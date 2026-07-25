@@ -12,7 +12,13 @@
     "timeout and reconciliation",
     "audit replication failure"
   ],
+  "source_scope": [
+    "src/agentic_security/credentials.py",
+    "src/agentic_security/isolation.py",
+    "src/agentic_security/audit.py"
+  ],
   "minimum_killed_percent": 80,
   "status": "enforced-bounded-run",
-  "results_file": ".mutmut-cache/results.txt"
+  "results_file": ".mutmut-cache/results.txt",
+  "evidence_file": ".mutmut-cache/evidence.json"
 }

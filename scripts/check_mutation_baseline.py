@@ -14,8 +14,10 @@ def main() -> int:
         "command",
         "time_limit_seconds",
         "security_branch_targets",
+        "source_scope",
         "minimum_killed_percent",
         "results_file",
+        "evidence_file",
     }
     missing = required - value.keys()
     valid = (
@@ -24,7 +26,9 @@ def main() -> int:
         and 1 <= value["time_limit_seconds"] <= 120
         and 0 < value["minimum_killed_percent"] <= 100
         and bool(value["security_branch_targets"])
+        and bool(value["source_scope"])
         and str(value["results_file"]).endswith("results.txt")
+        and str(value["evidence_file"]).endswith("evidence.json")
     )
     if not valid:
         print(f"Invalid mutation baseline: missing={sorted(missing)}")

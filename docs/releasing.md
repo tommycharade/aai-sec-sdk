@@ -9,6 +9,8 @@ and 3.13 are the supported CI versions. Security fixes are backported only to
 the latest supported release line until a stable support policy is published.
 
 - [ ] `make check` passes on the release commit.
+- [ ] `make mutation` passes within its 120-second bound and its evidence
+      artifact is retained.
 - [ ] `make package-check` builds and validates wheel and source distributions.
 - [ ] `make security-check` reports no known dependency vulnerabilities.
 - [ ] `requirements-ci.txt` and `requirements-docs.txt` are reviewed when
@@ -21,8 +23,8 @@ the latest supported release line until a stable support policy is published.
 - [ ] The release is tagged from a clean, reviewed commit.
 - [ ] The package is published through trusted CI credentials, not a developer workstation token.
 - [ ] Release artifacts and checksums are retained.
-- [ ] An SBOM is generated for each artifact and dependency provenance is
-      attached by trusted CI.
+- [ ] An independently verified SBOM is generated and hash-bound for each
+      artifact; dependency provenance is attached by trusted CI.
 - [ ] GitHub Actions provenance attestation is present for release artifacts.
 - [ ] Wheel installation is tested in clean Python 3.11, 3.12, and 3.13
       environments.
@@ -43,6 +45,18 @@ committed because the supported Python matrix selects different transitive
 wheels; artifact SBOMs, checksums, and provenance are the release evidence.
 PyPI publication, if enabled, must use repository trusted publishing and never
 a developer workstation token.
+
+The workflow creates checksums from inside `dist` (`cd dist && sha256sum * >
+SHA256SUMS`) so the manifest uses artifact-local filenames.
+
+`verify_release_evidence.py` independently checks that every wheel and source
+archive has a matching SHA-256 entry, a matching SBOM manifest entry, and an
+SBOM containing the artifact filename and digest. It also checks the clean
+checkout commit and exact tag against `RELEASE-METADATA.json`. The workflow
+then runs `gh attestation verify` for every subject, constraining the signer
+workflow and source ref. These checks verify artifact identity and provenance
+bindings; they do not certify the package's runtime behavior or external
+provider deployments.
 
 `make check` validates the mutation contract; `make mutation` executes the
 mutmut run through `scripts/run_mutation_check.py`, enforces the declared 80%

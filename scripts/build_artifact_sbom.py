@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import subprocess
 import sys
 import tempfile
@@ -21,6 +23,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("artifacts", nargs="+", type=Path)
     args = parser.parse_args()
+    manifest: list[dict[str, str]] = []
     with tempfile.TemporaryDirectory(prefix="agentic-security-sbom-") as directory:
         root = Path(directory)
         for artifact in args.artifacts:
@@ -60,6 +63,32 @@ def main() -> int:
                 "--output-file",
                 str(output),
             )
+            document = json.loads(output.read_text(encoding="utf-8"))
+            properties = document.setdefault("metadata", {}).setdefault("properties", [])
+            properties.extend(
+                [
+                    {"name": "release:artifact-filename", "value": artifact.name},
+                    {
+                        "name": "release:artifact-sha256",
+                        "value": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+                    },
+                ]
+            )
+            output.write_text(
+                json.dumps(document, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+            )
+            manifest.append(
+                {
+                    "artifact": artifact.name,
+                    "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+                    "sbom": output.name,
+                    "sbom_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
+                }
+            )
+    (args.artifacts[0].parent / "SBOM-MANIFEST.json").write_text(
+        json.dumps({"schema": 1, "subjects": manifest}, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return 0
 
 

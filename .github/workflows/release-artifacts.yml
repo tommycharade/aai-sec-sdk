@@ -25,10 +25,23 @@ jobs:
           python -m pip install -e . --no-deps
           make check
           make package-check
+      - name: Run bounded mutation gate
+        run: make mutation
+      - name: Upload mutation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-mutation-evidence
+          path: .mutmut-cache/
+          if-no-files-found: error
       - name: Generate artifact-specific CycloneDX SBOMs
         run: python scripts/build_artifact_sbom.py dist/*.whl dist/*.tar.gz
+      - name: Write release metadata
+        run: python scripts/write_release_metadata.py dist --commit "$GITHUB_SHA" --tag "$GITHUB_REF_NAME"
       - name: Generate checksums
-        run: sha256sum dist/* > dist/SHA256SUMS
+        run: (cd dist && sha256sum * > SHA256SUMS)
+      - name: Verify release evidence independently
+        run: python scripts/verify_release_evidence.py dist --commit "$GITHUB_SHA" --tag "$GITHUB_REF_NAME"
       - name: Upload release evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -40,3 +53,13 @@ jobs:
           subject-path: |
             dist/*.whl
             dist/*.tar.gz
+      - name: Verify cryptographic provenance subjects
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for artifact in dist/*.whl dist/*.tar.gz; do
+            gh attestation verify "$artifact" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
+              --source-ref "$GITHUB_REF_NAME"
+          done

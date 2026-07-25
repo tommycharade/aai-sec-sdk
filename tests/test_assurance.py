@@ -25,6 +25,7 @@ from agentic_security import (
     InMemoryApprovalProvider,
     InMemoryAuditExporter,
     InMemoryAuditSink,
+    InMemoryCredentialBroker,
     InMemoryIdempotencyStore,
     Principal,
     ProviderToken,
@@ -244,3 +245,12 @@ def test_security_defaults_are_regression_covered(tmp_path: Path) -> None:
 
     sink = JsonlAuditSink(tmp_path / "audit.jsonl")
     assert sink.max_bytes == 100_000_000
+
+    broker = InMemoryCredentialBroker(now=lambda: now)
+    tool = ToolDefinition(
+        "read", lambda *_: {"ok": True}, lambda args: dict(args), description="read"
+    )
+    first = broker.mint(context(), tool, resource(), 1)
+    second = broker.mint(context(), tool, resource(), 1)
+    assert first.credential_id.endswith(":1")
+    assert second.credential_id.endswith(":2")
