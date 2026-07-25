@@ -9,6 +9,9 @@ The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public AP
 - Routed approval consumption through the same bounded worker, timeout,
   capacity, and emergency-stop lifecycle as other external security
   dependencies; added an approval stop-race regression test.
+- Added typed `ApprovalConsumption` outcomes with explicit `UNKNOWN` handling,
+  action-bound audit evidence, and operational guidance for stop-after-consume
+  approval races.
 
 - Added typed phase-specific timeout outcomes for policy, approval, credential,
   audit, handler, and reconciliation work, including handler-started and

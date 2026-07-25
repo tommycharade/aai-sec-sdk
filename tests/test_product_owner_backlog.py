@@ -11,6 +11,8 @@ from typing import Any
 from agentic_security import (
     ActionProposal,
     AllowListPolicy,
+    ApprovalConsumption,
+    ApprovalOutcome,
     CallbackIsolationVerifier,
     ExecutionContext,
     ExecutionStatus,
@@ -29,6 +31,7 @@ from agentic_security import (
     ToolDefinition,
     ToolRegistry,
 )
+from agentic_security.approvals import normalize_approval_result
 from agentic_security.budgets import Budget, BudgetState
 from agentic_security.idempotency import IdempotencyClaimStatus, new_record
 from agentic_security.isolation import validate_attestation
@@ -271,11 +274,12 @@ def test_stop_during_approval_denies_without_starting_handler() -> None:
 
     registry = ToolRegistry()
     registry.register(_tool("approved", lambda *_: calls.append(True), requires_approval=True))
+    audit = InMemoryAuditSink()
     runtime = GuardedRuntime(
         _context(),
         registry,
         AllowListPolicy({"approved"}),
-        InMemoryAuditSink(),
+        audit,
         approvals=SlowApproval(),
         config=RuntimeConfig(execution_timeout_seconds=0.05),
     )
@@ -293,6 +297,43 @@ def test_stop_during_approval_denies_without_starting_handler() -> None:
     assert result.status is ExecutionStatus.DENIED
     assert result.reason == "runtime emergency stop is active"
     assert calls == []
+    event = audit.events()[-1]
+    assert event.payload["approval_outcome"] == ApprovalOutcome.CONSUMED.value
+    assert event.payload["approval_stop_after_consume"] is True
+    assert event.payload["approval_action_hash"]
+
+
+def test_approval_outcomes_are_typed_and_unknown_fails_closed() -> None:
+    assert normalize_approval_result(True).outcome is ApprovalOutcome.CONSUMED
+    assert normalize_approval_result(False).outcome is ApprovalOutcome.NOT_CONSUMED
+    assert normalize_approval_result(object()).outcome is ApprovalOutcome.UNKNOWN
+
+    calls: list[bool] = []
+
+    class UnknownApproval:
+        def consume(self, *_: Any) -> ApprovalConsumption:
+            return ApprovalConsumption(ApprovalOutcome.UNKNOWN, "commit uncertain")
+
+    registry = ToolRegistry()
+    registry.register(_tool("unknown", lambda *_: calls.append(True), requires_approval=True))
+    audit = InMemoryAuditSink()
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"unknown"}),
+        audit,
+        approvals=UnknownApproval(),
+        config=RuntimeConfig(execution_timeout_seconds=0.05),
+    )
+    result = runtime.execute(
+        ActionProposal("unknown", {}, "proposal:unknown", approval_id="approval:unknown")
+    )
+
+    assert result.status is ExecutionStatus.DENIED
+    assert result.reason == "approval outcome is unknown; reconcile before retrying"
+    assert result.handler_started is False
+    assert calls == []
+    assert audit.events()[-1].payload["approval_outcome"] == ApprovalOutcome.UNKNOWN.value
 
 
 def test_zero_delegation_budget_is_valid_and_denies_delegating_tools() -> None:

@@ -14,7 +14,13 @@ from datetime import UTC, datetime
 from threading import Event, RLock
 from typing import Any
 
-from .approvals import ApprovalProvider, action_hash
+from .approvals import (
+    ApprovalConsumption,
+    ApprovalOutcome,
+    ApprovalProvider,
+    action_hash,
+    normalize_approval_result,
+)
 from .audit import AuditSink, Redactor, redact
 from .budgets import Budget, BudgetState
 from .credentials import CredentialBroker
@@ -380,8 +386,12 @@ class GuardedRuntime:
                 if self.approvals is None or proposal.approval_id is None:
                     return self._approval_required(request_id, proposal, policy_result.reason)
                 approval_provider = self.approvals
+                approval_details = {
+                    "approval_id": proposal.approval_id,
+                    "approval_action_hash": fingerprint,
+                }
                 try:
-                    approved = self._consume_approval_bounded(
+                    approval_result = self._consume_approval_bounded(
                         approval_provider,
                         proposal.approval_id,
                         tool.name,
@@ -395,13 +405,41 @@ class GuardedRuntime:
                         request_id,
                         proposal,
                         "approval consumption timed out",
+                        details={
+                            **approval_details,
+                            "approval_outcome": ApprovalOutcome.UNKNOWN.value,
+                        },
                         timeout_phase=TimeoutPhase.APPROVAL,
                     )
                 except Exception:
-                    approved = False
-                if not approved:
+                    approval_result = ApprovalConsumption(
+                        ApprovalOutcome.UNKNOWN, "approval provider failed"
+                    )
+                approval_details["approval_outcome"] = approval_result.outcome.value
+                if self.is_stopped():
                     return self._deny(
-                        request_id, proposal, "approval missing, expired, or out of scope"
+                        request_id,
+                        proposal,
+                        "runtime emergency stop is active",
+                        details={
+                            **approval_details,
+                            "approval_stop_after_consume": approval_result.outcome
+                            is ApprovalOutcome.CONSUMED,
+                        },
+                    )
+                if approval_result.outcome is ApprovalOutcome.UNKNOWN:
+                    return self._deny(
+                        request_id,
+                        proposal,
+                        "approval outcome is unknown; reconcile before retrying",
+                        details=approval_details,
+                    )
+                if approval_result.outcome is not ApprovalOutcome.CONSUMED:
+                    return self._deny(
+                        request_id,
+                        proposal,
+                        "approval missing, expired, or out of scope",
+                        details=approval_details,
                     )
             # Policy and approval calls can be slow. Re-check the host-owned
             # kill switch immediately before any credential capability is
@@ -674,7 +712,7 @@ class GuardedRuntime:
         fingerprint: str,
         request_id: str,
         budget_release_state: list[bool],
-    ) -> bool:
+    ) -> ApprovalConsumption:
         """Consume approval through the bounded worker and host stop boundary.
 
         Approval services are external security dependencies. They must have
@@ -684,8 +722,8 @@ class GuardedRuntime:
         stop; the caller rechecks stop again before any handler invocation.
         """
         if self.is_stopped():
-            return False
-        return bool(
+            return ApprovalConsumption(ApprovalOutcome.NOT_CONSUMED, "runtime stopped")
+        return normalize_approval_result(
             self._run_bounded(
                 lambda: provider.consume(
                     approval_id,

@@ -12,7 +12,14 @@ from .adapters import (
     JsonlAuditSink,
     SubprocessToolHandler,
 )
-from .approvals import ApprovalGrant, ApprovalProvider, InMemoryApprovalProvider, action_hash
+from .approvals import (
+    ApprovalConsumption,
+    ApprovalGrant,
+    ApprovalOutcome,
+    ApprovalProvider,
+    InMemoryApprovalProvider,
+    action_hash,
+)
 from .audit import (
     AuditEvent,
     AuditExporter,
@@ -75,6 +82,8 @@ __all__ = [
     "ActionProposal",
     "CancellationToken",
     "ApprovalGrant",
+    "ApprovalConsumption",
+    "ApprovalOutcome",
     "ApprovalProvider",
     "action_hash",
     "AllowListPolicy",

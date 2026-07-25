@@ -127,6 +127,16 @@ a new action-bound approval if required.
 **Escalate:** policy owner for unexpected allow/deny behavior or provenance
 drift.
 
+Approval consumption has three states: `CONSUMED`, `NOT_CONSUMED`, and
+`UNKNOWN`. A timeout or transport failure after an approval request may be
+`UNKNOWN`; do not retry the side effect or assume the approval remains unused.
+Inspect the action-bound audit event (`approval_id`, `approval_action_hash`,
+`approval_outcome`) and reconcile with the approval service before deciding
+whether a new approval is required. If emergency stop occurs after a provider
+reports `CONSUMED`, the runtime records `approval_stop_after_consume=true` and
+does not start the handler; treat that approval as consumed until the provider
+proves otherwise.
+
 ## Idempotency-store outage or corruption
 
 **Detect:** claim failure, collision, unavailable store, or

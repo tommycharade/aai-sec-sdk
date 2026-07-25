@@ -7,10 +7,46 @@ import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from threading import Lock
 from typing import Protocol
 
 from .types import ExecutionContext, Resource
+
+
+class ApprovalOutcome(StrEnum):
+    """Authoritative state returned by an approval consumption attempt."""
+
+    CONSUMED = "consumed"
+    NOT_CONSUMED = "not_consumed"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalConsumption:
+    """Typed approval result with safe boolean compatibility."""
+
+    outcome: ApprovalOutcome
+    reason: str = ""
+
+    def __bool__(self) -> bool:
+        """Preserve legacy truthiness without treating unknown as success."""
+        return self.outcome is ApprovalOutcome.CONSUMED
+
+
+def normalize_approval_result(
+    value: ApprovalConsumption | bool | object,
+) -> ApprovalConsumption:
+    """Normalize typed providers and legacy booleans without unsafe inference."""
+    if isinstance(value, ApprovalConsumption):
+        return value
+    if value is True:
+        return ApprovalConsumption(ApprovalOutcome.CONSUMED, "legacy provider consumed approval")
+    if value is False:
+        return ApprovalConsumption(ApprovalOutcome.NOT_CONSUMED, "legacy provider did not consume")
+    return ApprovalConsumption(
+        ApprovalOutcome.UNKNOWN, "approval provider returned invalid outcome"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,8 +73,12 @@ class ApprovalProvider(Protocol):
         tool_name: str,
         proposal_id: str,
         action_hash: str,
-    ) -> bool:
-        """Atomically consume a valid approval bound to exact action data."""
+    ) -> ApprovalConsumption | bool:
+        """Atomically consume a valid approval bound to exact action data.
+
+        Legacy providers may return ``bool``; new providers should return
+        :class:`ApprovalConsumption` so unknown commit state is explicit.
+        """
 
 
 class InMemoryApprovalProvider:
@@ -90,22 +130,24 @@ class InMemoryApprovalProvider:
         tool_name: str,
         proposal_id: str,
         action_hash: str,
-    ) -> bool:
+    ) -> ApprovalConsumption:
         """Consume one approval matching the exact validated action fingerprint."""
         with self._lock:
             grant = self._grants.get(approval_id)
             if grant is None or grant.used or self._now() >= grant.expires_at:
-                return False
+                return ApprovalConsumption(
+                    ApprovalOutcome.NOT_CONSUMED, "missing, used, or expired"
+                )
             if (grant.task_id, grant.tool_name, grant.proposal_id) != (
                 context.task_id,
                 tool_name,
                 proposal_id,
             ):
-                return False
+                return ApprovalConsumption(ApprovalOutcome.NOT_CONSUMED, "action binding mismatch")
             if grant.action_hash != action_hash:
-                return False
+                return ApprovalConsumption(ApprovalOutcome.NOT_CONSUMED, "action hash mismatch")
             self._grants[approval_id] = replace(grant, used=True)
-            return True
+            return ApprovalConsumption(ApprovalOutcome.CONSUMED, "approval consumed")
 
 
 def action_hash(

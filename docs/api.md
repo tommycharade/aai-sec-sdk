@@ -164,6 +164,10 @@ modified action.
 
 ::: agentic_security.approvals.ApprovalProvider
 
+::: agentic_security.approvals.ApprovalConsumption
+
+::: agentic_security.approvals.ApprovalOutcome
+
 ::: agentic_security.approvals.ApprovalGrant
 
 ::: agentic_security.approvals.action_hash

@@ -20,7 +20,7 @@ try:  # pragma: no cover - platform import
 except ImportError:  # pragma: no cover - Windows deployments use remote audit
     fcntl = None  # type: ignore[assignment]
 
-from .approvals import ApprovalProvider
+from .approvals import ApprovalConsumption, ApprovalOutcome, ApprovalProvider
 from .audit import AuditEvent, AuditExporter, redact
 from .http import JsonHttpClient
 from .policy_adapters import CedarPolicyEngine, OpaPolicyEngine
@@ -56,7 +56,7 @@ class HttpApprovalProvider(ApprovalProvider):
         tool_name: str,
         proposal_id: str,
         action_hash: str,
-    ) -> bool:
+    ) -> ApprovalConsumption:
         """Atomically ask the service to consume the exact live action grant."""
         response = self.client.post(
             {
@@ -69,7 +69,13 @@ class HttpApprovalProvider(ApprovalProvider):
                 "action_hash": action_hash,
             }
         )
-        return response.get("approved") is True
+        if response.get("approved") is True:
+            return ApprovalConsumption(ApprovalOutcome.CONSUMED, "approval service consumed grant")
+        if response.get("approved") is False:
+            return ApprovalConsumption(
+                ApprovalOutcome.NOT_CONSUMED, "approval service rejected grant"
+            )
+        return ApprovalConsumption(ApprovalOutcome.UNKNOWN, "approval service returned no decision")
 
 
 class HttpAuditExporter(AuditExporter):
