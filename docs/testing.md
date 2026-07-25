@@ -41,6 +41,11 @@ the normal unit/adversarial suite and is not excluded from `make check`.
 Provider-specific external deployments remain deployment-owned and are outside
 this mutation scope.
 
+`scripts/verify_mutation_evidence.py` independently rechecks the uploaded
+evidence against the current commit, `pyproject.toml`, the baseline threshold,
+and the results-file hash. It fails closed for missing, stale, cross-commit,
+scope-mismatched, malformed, or tampered evidence.
+
 ## Adapter contracts
 
 The local contract suite uses synthetic fakes for OPA, Cedar, approval, IAM,

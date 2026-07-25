@@ -20,6 +20,7 @@ mutation-check:
 
 mutation:
 	$(PYTHON) scripts/run_mutation_check.py
+	$(PYTHON) scripts/verify_mutation_evidence.py
 
 docs:
 	$(PYTHON) scripts/generate_readme.py
