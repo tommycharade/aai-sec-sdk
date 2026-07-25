@@ -91,6 +91,40 @@ def test_reconciliation_cannot_finalize_a_live_timed_out_worker() -> None:
     assert result.reconciliation_state is ReconciliationState.STILL_RUNNING
 
 
+def test_reconciliation_timeout_is_typed_and_remains_uncertain() -> None:
+    """A reconciliation deadline is observable without implying side-effect success."""
+    handler_release = Event()
+    reconciliation_release = Event()
+
+    def handler(_context: ExecutionContext, _arguments: Any) -> dict[str, bool]:
+        handler_release.wait(1)
+        return {"complete": True}
+
+    def reconciliation(_context: ExecutionContext, _arguments: Any) -> ReconciliationResult:
+        reconciliation_release.wait(1)
+        return ReconciliationResult(ReconciliationState.CONFIRMED_COMPLETE)
+
+    registry = ToolRegistry()
+    registry.register(_tool("reconcile_timeout", handler, reconciliation=reconciliation))
+    runtime = GuardedRuntime(
+        _context(),
+        registry,
+        AllowListPolicy({"reconcile_timeout"}),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(execution_timeout_seconds=0.005),
+    )
+
+    result = runtime.execute(ActionProposal("reconcile_timeout", {}, "proposal:reconcile-timeout"))
+    handler_release.set()
+    reconciliation_release.set()
+
+    assert result.status is ExecutionStatus.TIMED_OUT
+    assert result.timeout_phase is TimeoutPhase.RECONCILIATION
+    assert result.handler_started is True
+    assert result.side_effect_state is SideEffectState.UNCERTAIN
+    assert result.reconciliation_state is ReconciliationState.FAILED
+
+
 def test_isolation_requires_verifier_bound_attestation_not_a_boolean_marker() -> None:
     class ClaimedWorker:
         def __call__(self, _context: ExecutionContext, _arguments: Any) -> dict[str, bool]:
