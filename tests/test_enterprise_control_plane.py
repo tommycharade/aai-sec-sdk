@@ -215,12 +215,12 @@ def test_postgres_adapter_connection_failure_is_normalized(
     """Optional driver loading and connection failures abort before serving traffic."""
     fake_psycopg = types.ModuleType("psycopg")
     fake_rows = types.ModuleType("psycopg.rows")
-    setattr(fake_rows, "dict_row", object())
+    fake_rows.dict_row = object()  # type: ignore[attr-defined]
 
     def connect(**_kwargs: Any) -> Any:
         raise OSError("database unavailable")
 
-    setattr(fake_psycopg, "connect", connect)
+    fake_psycopg.connect = connect  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
     monkeypatch.setitem(sys.modules, "psycopg.rows", fake_rows)
     with pytest.raises(FleetConfigurationError):
