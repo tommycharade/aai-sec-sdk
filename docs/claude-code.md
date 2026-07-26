@@ -14,6 +14,34 @@ The hook does not execute actions. It returns Claude Code's native `allow`,
 the SDK must own the operation and provide credentials, idempotency, timeout,
 reconciliation, or result validation.
 
+## Claude Code onboarding checklist
+
+Use this sequence when onboarding a new project:
+
+1. Install the SDK and confirm the project root you want Claude Code to work
+   in.
+2. Configure the project-scoped `PreToolUse` hook in
+   `.claude/settings.json`.
+3. Register the SDK-owned MCP gateway with `claude mcp add`.
+4. Start Claude Code from the same project root and confirm `/mcp` shows the
+   gateway.
+5. Run the synthetic verification commands below and inspect the audit file.
+6. Replace the synthetic identity, policy, approval, audit, credential, and
+   isolation adapters before enabling consequential work.
+
+The hook configuration and MCP configuration are separate Claude Code host
+boundaries. Put the `hooks` object in `.claude/settings.json`; put the
+`mcpServers` object in `.mcp.json` or register it with `claude mcp add`. Do not
+merge them into one file unless the Claude Code version you are using explicitly
+documents that format.
+
+If you are using the optional management UI, open **Integrations → Claude Code**
+to configure the project root, hook command, MCP command, tool allow-lists, and
+command approval rules. Save the configuration, download the generated host
+configuration, then apply the two objects to their respective Claude Code
+files. The UI control plane must be authenticated and connected to a live
+runtime authority; its localhost reference adapter is for development only.
+
 ## 1. Install the SDK
 
 From the project you want Claude Code to work on:

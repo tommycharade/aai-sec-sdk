@@ -6,6 +6,12 @@ manage the SDK's restrictive runtime controls.
 
 ## Claude Code integration
 
+For a step-by-step onboarding procedure, see the [Claude Code onboarding
+guide](claude-code.md). The short version is: configure the hook in
+`.claude/settings.json`, register the MCP gateway with `claude mcp add`, start
+Claude from the project root, verify `/mcp`, and run the synthetic denial and
+approval checks.
+
 The UI configures both boundaries required for a complete Claude Code setup:
 
 - a `PreToolUse` hook for Claude's built-in tools such as `Bash`, `Read`,
