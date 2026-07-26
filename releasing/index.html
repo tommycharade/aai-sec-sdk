@@ -16,7 +16,7 @@
         <link rel="prev" href="../contributing/">
       
       
-        <link rel="next" href="../critical-adopter-review-2026-07-25/">
+        <link rel="next" href="../deployment-evidence/">
       
       
         
@@ -699,6 +699,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
         
   
@@ -706,7 +733,34 @@
   <span class="md-ellipsis">
     
   
-    Critical adopter review
+    Critical adopter review (2026-07-25)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-26/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-26)
   
 
     
@@ -848,16 +902,20 @@ committed because the supported Python matrix selects different transitive
 wheels; artifact SBOMs, checksums, and provenance are the release evidence.
 PyPI publication, if enabled, must use repository trusted publishing and never
 a developer workstation token.</p>
-<p>The build job creates checksums with <code>scripts/write_checksums.py</code>, excluding the
-checksum file itself and using artifact-local filenames. A separate clean
-verification job consumes the uploaded bundle.</p>
+<p>The build job adds the raw mutation evidence to <code>dist/</code> before creating
+checksums with <code>scripts/write_checksums.py</code>, excluding only the checksum file
+itself. A separate publish job creates the GitHub Release from that exact
+bundle, and a clean verification job downloads the published assets rather
+than trusting the pre-publication workspace.</p>
 <p><code>verify_release_evidence.py</code> is run in a separate clean-verification job. It
 independently checks that every wheel and source
 archive has a matching SHA-256 entry, a matching SBOM manifest entry, and an
-SBOM containing the artifact filename and digest. It also checks the clean
-checkout commit and exact tag against <code>RELEASE-METADATA.json</code>. The workflow
-then runs <code>gh attestation verify</code> for every subject in that same clean job,
-constraining the signer workflow and source ref. These checks verify artifact
+SBOM containing the artifact filename and digest. It also checks the mutation
+evidence files, clean checkout commit, and exact tag against
+<code>RELEASE-METADATA.json</code>. The workflow then runs <code>gh attestation verify</code> for
+every subject in that same clean job, constraining the signer workflow and full
+<code>refs/tags/...</code> source ref. Release CI runs only for pushed version tags; it
+does not permit an independently selected source ref and release tag. These checks verify artifact
 identity and provenance bindings; they do not certify the package's runtime
 behavior or external provider deployments.</p>
 <h3 id="standalone-adopter-verification">Standalone adopter verification</h3>
@@ -871,7 +929,7 @@ python scripts/verify_release_evidence.py dist \
   --commit &quot;$(git rev-parse HEAD)&quot; --tag &quot;vX.Y.Z&quot;
 gh attestation verify dist/*.whl --repo tommycharade/aai-sec-sdk \
   --signer-workflow tommycharade/aai-sec-sdk/.github/workflows/release-artifacts.yml \
-  --source-ref vX.Y.Z
+  --source-ref refs/tags/vX.Y.Z
 </code></pre>
 <p>Do not use <code>--allow-untagged</code> for a published release; that option is only for
 local pre-tag verification.</p>
@@ -879,7 +937,7 @@ local pre-tag verification.</p>
 mutmut run through <code>scripts/run_mutation_check.py</code>, enforces the declared 80%
 killed-mutant threshold, and fails on stale/missing/truncated/timeout,
 unparseable, or other-commit evidence. The run is bounded to two workers and
-120 seconds. No mutation score is claimed unless that command has completed
+600 seconds (10 minutes). No mutation score is claimed unless that command has completed
 successfully for the commit.</p>
 
 

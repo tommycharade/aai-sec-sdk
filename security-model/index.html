@@ -759,6 +759,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
         
   
@@ -766,7 +793,34 @@
   <span class="md-ellipsis">
     
   
-    Critical adopter review
+    Critical adopter review (2026-07-25)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-26/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-26)
   
 
     
@@ -929,8 +983,10 @@
 <p>Model output is untrusted input. Tool names, arguments, retrieved text, memory, tool results, and inter-agent messages are also untrusted. The SDK’s security boundary sits between a proposed action and the side effect that would execute it.</p>
 <p>The boundary is represented explicitly by <code>ActionFacts</code> -&gt;
 <code>PreExecutionAuthorizer</code> -&gt; <code>ExecutionPermit</code> -&gt; <code>ExecutionLifecycle</code>. Facts
-are immutable host-derived values, the authorizer is the centralized final
-decision point, and lifecycle is the permit-gated handler invocation path.
+are immutable host-derived values, including recursively frozen validated
+argument containers; the authorizer is the centralized final decision point,
+and lifecycle is the permit-gated handler invocation path. Handlers receive a
+defensive copy rather than the authorization snapshot.
 Permit issuer identity is kept in an internal registry rather than permit
 fields, so <code>object.__new__</code> objects and copied fields cannot authorize a
 handler call. This protects the SDK boundary from accidental forgery; code
