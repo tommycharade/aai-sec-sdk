@@ -486,9 +486,7 @@ def test_startup_reconciles_persisted_authority_state_fail_closed(tmp_path: Path
     restarted = EnterpriseFleetStore(database, authorities={"deploy-a": restarted_authority})
     EnterpriseFleetApplication(
         restarted,
-        authenticator=StaticFleetAuthenticator(
-            {"fleet-admin-token-1234": identity("org-a")}
-        ),
+        authenticator=StaticFleetAuthenticator({"fleet-admin-token-1234": identity("org-a")}),
     )
     assert restarted_authority.status()["configuration_active"] is True
 
@@ -496,9 +494,7 @@ def test_startup_reconciles_persisted_authority_state_fail_closed(tmp_path: Path
     with pytest.raises(FleetConfigurationError):
         EnterpriseFleetApplication(
             EnterpriseFleetStore(database, authorities={"deploy-a": FailingAuthority()}),
-            authenticator=StaticFleetAuthenticator(
-                {"fleet-admin-token-1234": identity("org-a")}
-            ),
+            authenticator=StaticFleetAuthenticator({"fleet-admin-token-1234": identity("org-a")}),
         )
 
 

@@ -239,9 +239,7 @@ def validate_fleet_configuration(configuration: Mapping[str, Any]) -> dict[str, 
             unknown = set(value) - _FLEET_GOVERNANCE_KEYS[key_text]
             if unknown:
                 fields = ", ".join(sorted(map(str, unknown)))
-                raise FleetConfigurationError(
-                    f"{key_text} contains unsupported fields: {fields}"
-                )
+                raise FleetConfigurationError(f"{key_text} contains unsupported fields: {fields}")
             normalized[key_text] = dict(value)
         else:
             # Preserve legacy extension sections; the recursive bounded and
