@@ -165,6 +165,9 @@ def test_agent_registration_heartbeat_expiry_and_disconnect_are_secret_safe(tmp_
 
     assert agent["status"] == "connected"
     assert session_id not in store.list_inventory(identity("org-a"), "agents").items[0]
+    sessions = store.list_inventory(identity("org-a"), "sessions").items
+    assert sessions[0]["status"] == "active"
+    assert "sessionId" not in sessions[0]
     with pytest.raises(FleetAuthorizationError):
         store.register_agent(
             FleetIdentity("different-agent", "org-a", frozenset({"agent"})),
@@ -586,6 +589,10 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
     assert status.startswith("201")
     assert registered["sessionId"]
     assert "sessionId" not in call_api(app, "GET", "/api/enterprise/agents")[1]["items"][0]
+    status, sessions = call_api(app, "GET", "/api/enterprise/sessions")
+    assert status.startswith("200")
+    assert sessions["items"][0]["status"] == "active"
+    assert "sessionId" not in sessions["items"][0]
     status, heartbeat = call_api(
         app,
         "POST",

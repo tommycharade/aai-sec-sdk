@@ -424,8 +424,8 @@ class EnterpriseFleetStore:
     def list_inventory(
         self, identity: FleetIdentity, resource: str, *, organization_id: str | None = None
     ) -> FleetPage:
-        """Return tenant-scoped organizations, projects, deployments, or agents."""
-        if resource not in {"organizations", "projects", "deployments", "agents"}:
+        """Return tenant-scoped inventory without exposing agent session secrets."""
+        if resource not in {"organizations", "projects", "deployments", "agents", "sessions"}:
             raise FleetConfigurationError("unknown inventory resource")
         org = organization_id or identity.organization_id
         if org != identity.organization_id and "admin" not in identity.roles:
@@ -463,7 +463,7 @@ class EnterpriseFleetStore:
                     query += f" AND project_id IN ({placeholders})"
                     params += tuple(identity.project_ids)
                 rows = self._connection.execute(query, params).fetchall()
-            else:
+            elif resource == "agents":
                 self._expire_agents()
                 rows = self._connection.execute(
                     "SELECT id,organization_id,project_id,deployment_id,host,project_root,"
@@ -471,6 +471,21 @@ class EnterpriseFleetStore:
                     "WHERE organization_id=? ORDER BY last_heartbeat DESC",
                     (org,),
                 ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    "SELECT s.agent_id,s.deployment_id,a.organization_id,a.project_id,"
+                    "s.created_at,s.expires_at,"
+                    "CASE WHEN s.expires_at<=? THEN 'expired' ELSE 'active' END AS status "
+                    "FROM agent_sessions s JOIN agents a ON a.id=s.agent_id "
+                    "AND a.deployment_id=s.deployment_id WHERE a.organization_id=? "
+                    "ORDER BY s.created_at DESC",
+                    (self._now(), org),
+                ).fetchall()
+                rows = [
+                    row
+                    for row in rows
+                    if not identity.project_ids or row["project_id"] in identity.project_ids
+                ]
             items = tuple(dict(row) for row in rows)
         return FleetPage(items, None)
 
@@ -1580,7 +1595,7 @@ class EnterpriseFleetApplication:
                         200,
                         {"items": list(page.items), "nextCursor": page.next_cursor},
                     )
-                if resource in {"organizations", "projects", "deployments", "agents"}:
+                if resource in {"organizations", "projects", "deployments", "agents", "sessions"}:
                     self._authorize(identity, "read")
                     query = parse_qs(str(environ.get("QUERY_STRING", "")))
                     requested_org = query.get("organizationId", [None])[0]

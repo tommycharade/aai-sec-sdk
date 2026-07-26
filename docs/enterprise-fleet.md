@@ -37,6 +37,7 @@ The reference WSGI application exposes these authenticated endpoints:
 | `GET /api/enterprise/projects` | Project inventory |
 | `GET /api/enterprise/deployments` | SDK deployment inventory |
 | `GET /api/enterprise/agents` | Claude and other agent presence |
+| `GET /api/enterprise/sessions` | Active/expired session inventory without session tokens |
 | `GET /api/enterprise/drift` | Desired/applied configuration drift |
 | `GET /api/enterprise/templates` | Tenant-scoped configuration templates |
 | `GET /api/enterprise/deployment-config` | Current desired/applied configuration state |
@@ -60,9 +61,10 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/slo/sample` | Record one redaction-safe health sample for an authorized deployment |
 
 Agent registration returns one opaque, expiring session. It is accepted only
-for the authenticated deployment/agent scope and is never included in fleet
-inventory responses. Expired heartbeats are marked offline and lifecycle
-events are written to the configured audit sink.
+for the authenticated deployment/agent scope. Session inventory exposes only
+agent/deployment scope, timestamps, and active/expired status; the opaque
+session token is never returned. Expired heartbeats are marked offline and
+lifecycle events are written to the configured audit sink.
 
 ## Configuration governance
 
