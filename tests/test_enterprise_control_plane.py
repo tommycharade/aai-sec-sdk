@@ -394,6 +394,10 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
         allowed_origin="http://localhost:5174",
     )
 
+    status, preflight = call_api(app, "OPTIONS", "/api/enterprise/deployments")
+    assert status.startswith("204")
+    assert preflight == {}
+
     status, unauthorized = call_api(
         app,
         "GET",

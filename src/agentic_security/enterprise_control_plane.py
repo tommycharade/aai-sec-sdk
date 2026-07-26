@@ -1159,6 +1159,11 @@ class EnterpriseFleetApplication:
         """Handle one bounded JSON request and return a JSON response."""
         method = str(environ.get("REQUEST_METHOD", "GET"))
         path = str(environ.get("PATH_INFO", "/"))
+        # Browser preflight carries no bearer token. It is only a transport
+        # negotiation; the actual request below still authenticates and
+        # authorizes against the live identity and route.
+        if method == "OPTIONS":
+            return self._respond(start_response, 204, {}, preflight=True)
         identity = self.authenticator.authenticate(environ.get("HTTP_AUTHORIZATION"))
         if identity is None:
             return self._respond(start_response, 401, {"error": "authentication required"})
@@ -1392,10 +1397,16 @@ class EnterpriseFleetApplication:
         return _text(parts[0], "deploymentId"), _text(parts[1], "agentId")
 
     def _respond(
-        self, start_response: Any, status_code: int, payload: Mapping[str, Any]
+        self,
+        start_response: Any,
+        status_code: int,
+        payload: Mapping[str, Any],
+        *,
+        preflight: bool = False,
     ) -> list[bytes]:
         """Return compact JSON with explicit browser-origin headers."""
         statuses = {
+            204: "No Content",
             200: "OK",
             201: "Created",
             400: "Bad Request",
@@ -1410,6 +1421,13 @@ class EnterpriseFleetApplication:
             headers.extend(
                 [("Access-Control-Allow-Origin", self.allowed_origin), ("Vary", "Origin")]
             )
+            if preflight:
+                headers.extend(
+                    [
+                        ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                        ("Access-Control-Allow-Headers", "Authorization, Content-Type"),
+                    ]
+                )
         start_response(f"{status_code} {statuses[status_code]}", headers)
         return [body]
 
