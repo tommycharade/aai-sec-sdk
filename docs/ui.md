@@ -30,8 +30,10 @@ organizations, projects, SDK deployments, connected Claude agents, and
 configuration drift. It supports tenant-scoped deployment filtering across
 team, environment, region, and ID; safe template creation with one-level
 parent inheritance; assignment and staged configuration; canary rollout;
-history rollback; deployment registration; health/alert inspection; alert
-acknowledgement/delivery; and deployment emergency stop/recovery. It
+history rollback; deployment registration; current health and sample-based
+availability SLO inspection; alert acknowledgement/delivery; and deployment
+emergency stop/recovery. Operators can request redaction-safe samples, while
+production schedulers should call the same API at a controlled frequency. It
 also allows an authorized operator to register projects within the
 authenticated organization; organization roots remain enterprise identity
 provisioning objects.

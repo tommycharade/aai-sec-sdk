@@ -42,6 +42,7 @@ The reference WSGI application exposes these authenticated endpoints:
 | `GET /api/enterprise/deployment-config` | Current desired/applied configuration state |
 | `GET /api/enterprise/deployment-config/history` | Bounded prior configuration versions |
 | `GET /api/enterprise/health` | Deployment health and rollout indicators |
+| `GET /api/enterprise/slo` | Sample-based availability and SLO status in the bounded window |
 | `GET /api/enterprise/alerts` | Derived fleet alerts |
 | `POST /api/enterprise/agents/register` | Register an authenticated agent |
 | `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence |
@@ -56,6 +57,7 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/emergency-stop` | Stop or clear one deployment through its authority |
 | `POST /api/enterprise/alerts/{alertId}/ack` | Acknowledge an alert without deleting evidence |
 | `POST /api/enterprise/alerts/dispatch` | Deliver unacknowledged alerts through an alert adapter |
+| `POST /api/enterprise/slo/sample` | Record one redaction-safe health sample for an authorized deployment |
 
 Agent registration returns one opaque, expiring session. It is accepted only
 for the authenticated deployment/agent scope and is never included in fleet
@@ -86,6 +88,12 @@ claim activation.
 The fleet store rejects secret-like configuration keys and stores only JSON
 configuration and hashes. It does not provision OPA/Cedar, IAM, approvals,
 credentials, sandboxes, or telemetry backends; those remain explicit adapters.
+Health is intentionally split into current state and explicit SLO samples.
+Schedulers or telemetry adapters call the sample endpoint at a controlled
+frequency; the read-only SLO endpoint computes availability over the bounded
+configured window and reports `meeting`, `breach`, or `no_data`. Samples contain
+only status and counts, never credentials, sessions, or configuration values.
+
 Alerts are derived from current authoritative state. Incident commanders can
 acknowledge them, while a provider-neutral `FleetAlertSink` can deliver
 redacted alert records to an enterprise notification or incident system.

@@ -169,16 +169,24 @@ class EnterpriseFleetStore:
         audit: AuditSink | None = None,
         now: Callable[[], float] | None = None,
         heartbeat_ttl_seconds: int = 90,
+        slo_window_seconds: int = 86_400,
+        slo_target: float = 0.99,
         authorities: Mapping[str, FleetDeploymentAuthority] | None = None,
         alert_sink: FleetAlertSink | None = None,
     ) -> None:
         """Open or create a migrated fleet database with bounded heartbeat TTL."""
         if heartbeat_ttl_seconds < 15 or heartbeat_ttl_seconds > 86_400:
             raise FleetConfigurationError("heartbeat TTL must be between 15 and 86400 seconds")
+        if slo_window_seconds < 300 or slo_window_seconds > 31_536_000:
+            raise FleetConfigurationError("SLO window must be between 300 and 31536000 seconds")
+        if not 0.5 <= slo_target <= 1.0:
+            raise FleetConfigurationError("SLO target must be between 0.5 and 1.0")
         self.path = str(path)
         self.audit = audit
         self._now = now or time.time
         self.heartbeat_ttl_seconds = heartbeat_ttl_seconds
+        self.slo_window_seconds = slo_window_seconds
+        self.slo_target = slo_target
         self.authorities = dict(authorities or {})
         self.alert_sink = alert_sink
         self._lock = RLock()
@@ -736,6 +744,74 @@ class EnterpriseFleetStore:
             )
         return FleetPage(items, None)
 
+    def record_slo_sample(self, identity: FleetIdentity, deployment_id: str) -> dict[str, Any]:
+        """Persist a redaction-safe health sample for one authorized deployment.
+
+        Samples are explicit rather than hidden inside ``health`` reads so a
+        scheduler or telemetry adapter controls sampling frequency and the
+        read path remains side-effect free.
+        """
+        deployment = self._deployment(_text(deployment_id, "deploymentId"))
+        self._assert_identity_scope(identity, deployment["organizationId"], deployment["projectId"])
+        with self._lock:
+            sample = self._deployment_health(deployment_id)
+            observed_at = self._now()
+            self._connection.execute(
+                "INSERT INTO fleet_health_samples(deployment_id,observed_at,status,"
+                "connected_agents,offline_agents,drifted,emergency_stop) VALUES(?,?,?,?,?,?,?)",
+                (
+                    deployment_id,
+                    observed_at,
+                    sample["status"],
+                    sample["connectedAgents"],
+                    sample["offlineAgents"],
+                    int(sample["drifted"]),
+                    int(sample["emergencyStop"]),
+                ),
+            )
+            self._connection.commit()
+        result = {"deploymentId": deployment_id, "observedAt": observed_at, **sample}
+        self._audit("fleet_health_sample_recorded", identity.subject, result)
+        return result
+
+    def slo(self, identity: FleetIdentity) -> FleetPage:
+        """Return bounded sample-based availability for each visible deployment."""
+        cutoff = self._now() - self.slo_window_seconds
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT d.id,d.project_id,COUNT(s.observed_at) AS samples,"
+                "SUM(CASE WHEN s.status='healthy' THEN 1 ELSE 0 END) AS healthy_samples "
+                "FROM deployments d LEFT JOIN fleet_health_samples s "
+                "ON s.deployment_id=d.id AND s.observed_at>=? "
+                "WHERE d.organization_id=? GROUP BY d.id,d.project_id ORDER BY d.id",
+                (cutoff, identity.organization_id),
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            if identity.project_ids and row["project_id"] not in identity.project_ids:
+                continue
+            samples = int(row["samples"])
+            healthy = int(row["healthy_samples"] or 0)
+            availability = healthy / samples if samples else None
+            items.append(
+                {
+                    "deploymentId": row["id"],
+                    "windowSeconds": self.slo_window_seconds,
+                    "sampleCount": samples,
+                    "healthySamples": healthy,
+                    "availability": availability,
+                    "target": self.slo_target,
+                    "status": (
+                        "no_data"
+                        if availability is None
+                        else "meeting"
+                        if availability >= self.slo_target
+                        else "breach"
+                    ),
+                }
+            )
+        return FleetPage(tuple(items), None)
+
     def alerts(self, identity: FleetIdentity) -> FleetPage:
         """Return deterministic alerts derived from authoritative fleet state."""
         alerts: list[dict[str, Any]] = []
@@ -995,6 +1071,13 @@ class EnterpriseFleetStore:
                     alert_id TEXT NOT NULL, subject TEXT NOT NULL,
                     acknowledged_at REAL NOT NULL,
                     PRIMARY KEY(organization_id,alert_id));
+                CREATE TABLE IF NOT EXISTS fleet_health_samples(
+                    deployment_id TEXT NOT NULL REFERENCES deployments(id),
+                    observed_at REAL NOT NULL, status TEXT NOT NULL,
+                    connected_agents INTEGER NOT NULL, offline_agents INTEGER NOT NULL,
+                    drifted INTEGER NOT NULL, emergency_stop INTEGER NOT NULL);
+                CREATE INDEX IF NOT EXISTS idx_fleet_health_samples_window
+                    ON fleet_health_samples(deployment_id,observed_at);
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(1);
                 """
             )
@@ -1006,6 +1089,7 @@ class EnterpriseFleetStore:
                     "ALTER TABLE deployments ADD COLUMN team TEXT NOT NULL DEFAULT ''"
                 )
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(2)")
+            self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(3)")
             self._connection.commit()
 
     @staticmethod
@@ -1325,11 +1409,13 @@ class EnterpriseFleetApplication:
             inventory_prefix = "/api/enterprise/"
             if method == "GET" and path.startswith(inventory_prefix):
                 resource = path[len(inventory_prefix) :]
-                if resource in {"health", "alerts"}:
+                if resource in {"health", "slo", "alerts"}:
                     self._authorize(identity, "read")
                     page = (
                         self.store.health(identity)
                         if resource == "health"
+                        else self.store.slo(identity)
+                        if resource == "slo"
                         else self.store.alerts(identity)
                     )
                     return self._respond(
@@ -1374,6 +1460,12 @@ class EnterpriseFleetApplication:
                         {"items": list(page.items), "nextCursor": page.next_cursor},
                     )
             body = self._body(environ)
+            if method == "POST" and path == "/api/enterprise/slo/sample":
+                self._authorize(identity, "manage_inventory")
+                deployment_id = _text(body.get("deploymentId"), "deploymentId")
+                return self._respond(
+                    start_response, 201, self.store.record_slo_sample(identity, deployment_id)
+                )
             if method == "POST" and path == "/api/enterprise/templates/validate":
                 self._authorize(identity, "manage_configuration")
                 configuration = body.get("configuration")

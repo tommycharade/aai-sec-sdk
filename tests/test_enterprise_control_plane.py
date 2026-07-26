@@ -198,6 +198,21 @@ def test_agent_registration_heartbeat_expiry_and_disconnect_are_secret_safe(tmp_
     }
 
 
+def test_slo_samples_are_bounded_scoped_and_fail_closed(tmp_path: Path) -> None:
+    """Availability uses explicit samples, excludes stale data, and isolates tenants."""
+    clock = Clock()
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite", now=clock, slo_window_seconds=300)
+    seed(store)
+
+    first = store.record_slo_sample(identity("org-a"), "deploy-a")
+    assert first["status"] == "healthy"
+    assert store.slo(identity("org-a")).items[0]["status"] == "meeting"
+    clock.value += 301
+    assert store.slo(identity("org-a")).items[0]["status"] == "no_data"
+    with pytest.raises(FleetAuthorizationError):
+        store.record_slo_sample(identity("org-b"), "deploy-a")
+
+
 def test_store_rejects_unsafe_metadata_and_invalid_configuration_limits(tmp_path: Path) -> None:
     """Metadata and template configuration never become an unbounded secret store."""
     store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
@@ -584,6 +599,12 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
     assert call_api(app, "POST", f"/api/enterprise/alerts/{alert_id}/ack")[0].startswith("200")
     assert call_api(app, "POST", "/api/enterprise/alerts/dispatch")[0].startswith("400")
     assert call_api(app, "GET", "/api/enterprise/health")[1]["items"][0]["status"] == "critical"
+    status, sample = call_api(
+        app, "POST", "/api/enterprise/slo/sample", {"deploymentId": "deploy-a"}
+    )
+    assert status.startswith("201") and sample["deploymentId"] == "deploy-a"
+    status, slo = call_api(app, "GET", "/api/enterprise/slo")
+    assert status.startswith("200") and slo["items"][0]["sampleCount"] == 1
     status, drift = call_api(app, "GET", "/api/enterprise/drift")
     assert status.startswith("200") and drift["items"]
     status, disconnected = call_api(
