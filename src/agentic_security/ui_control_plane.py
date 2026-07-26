@@ -20,8 +20,10 @@ import hmac
 import json
 import os
 import re
+import secrets
 import shlex
 import tempfile
+import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -29,7 +31,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any, Final, Protocol
-from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlsplit
+from urllib.request import Request, urlopen
 
 try:  # pragma: no cover - platform branch; control-plane reference targets Unix hosts.
     import fcntl
@@ -156,6 +160,8 @@ class StaticBearerAuthenticator:
             return bool(identity.roles & {"operator", "admin"})
         if action == "emergency_stop":
             return bool(identity.roles & {"incident_commander", "admin"})
+        if action in {"agent_register", "agent_heartbeat", "agent_disconnect"}:
+            return bool(identity.roles & {"agent", "admin"})
         return False
 
 
@@ -229,6 +235,243 @@ class InMemoryControlPlaneAuthority:
     def status(self) -> Mapping[str, Any]:
         """Return synthetic status and whether configuration was activated."""
         return {"stopped": self._stopped, "configuration_active": self._configuration is not None}
+
+
+@dataclass(slots=True)
+class AgentPresence:
+    """Authenticated Claude/MCP presence tracked by the control plane."""
+
+    agent_id: str
+    host: str
+    project_root: str
+    principal_id: str
+    session_id: str
+    connected_at: float
+    last_heartbeat: float
+    expires_at: float
+    status: str = "connected"
+
+
+class AgentPresenceStore:
+    """Bounded live agent registry with heartbeat expiry and audit events."""
+
+    def __init__(
+        self,
+        *,
+        ttl_seconds: float = 90,
+        clock: Callable[[], float] = time.time,
+        audit: AuditSink | None = None,
+        max_agents: int = 1_000,
+    ) -> None:
+        """Create a registry that fails closed when heartbeats expire."""
+        if ttl_seconds <= 0 or max_agents <= 0:
+            raise ValueError("agent presence limits must be positive")
+        self.ttl_seconds = ttl_seconds
+        self.clock = clock
+        self.audit = audit
+        self.max_agents = max_agents
+        self._agents: dict[str, AgentPresence] = {}
+        self._lock = RLock()
+
+    def register(
+        self,
+        *,
+        agent_id: str,
+        host: str,
+        project_root: str,
+        principal_id: str,
+        actor_id: str,
+    ) -> JsonObject:
+        """Register one authenticated agent and return its opaque session."""
+        self._validate_text(agent_id, "agent_id")
+        self._validate_text(host, "host")
+        self._validate_text(project_root, "project_root")
+        self._validate_text(principal_id, "principal_id")
+        self._validate_text(actor_id, "actor_id")
+        with self._lock:
+            self.reap()
+            if agent_id not in self._agents and len(self._agents) >= self.max_agents:
+                raise ControlPlaneDependencyError("agent presence capacity is exhausted")
+            now = self.clock()
+            previous = self._agents.get(agent_id)
+            if previous is not None and previous.status == "connected":
+                self._audit("agent_disconnected", previous.agent_id, {"reason": "replaced"})
+            presence = AgentPresence(
+                agent_id=agent_id,
+                host=host,
+                project_root=project_root,
+                principal_id=principal_id,
+                session_id=secrets.token_urlsafe(24),
+                connected_at=now,
+                last_heartbeat=now,
+                expires_at=now + self.ttl_seconds,
+            )
+            self._agents[agent_id] = presence
+            self._audit(
+                "agent_registered",
+                agent_id,
+                {"actor_id": actor_id, "host": host, "project_root": project_root},
+            )
+            return self._snapshot_entry(presence, include_session=True)
+
+    def heartbeat(self, *, agent_id: str, session_id: str, actor_id: str) -> JsonObject:
+        """Refresh one session only when its opaque registration token matches."""
+        self._validate_text(agent_id, "agent_id")
+        self._validate_text(session_id, "session_id")
+        self._validate_text(actor_id, "actor_id")
+        with self._lock:
+            self.reap()
+            presence = self._agents.get(agent_id)
+            if presence is None or presence.status != "connected":
+                raise ControlPlaneConfigurationError("agent session is not connected")
+            if not hmac.compare_digest(presence.session_id, session_id):
+                raise ControlPlaneConfigurationError("agent session is invalid")
+            now = self.clock()
+            presence.last_heartbeat = now
+            presence.expires_at = now + self.ttl_seconds
+            self._audit("agent_heartbeat", agent_id, {"actor_id": actor_id})
+            return self._snapshot_entry(presence, include_session=True)
+
+    def reap(self) -> int:
+        """Mark expired sessions offline and audit each lifecycle transition."""
+        now = self.clock()
+        expired = 0
+        for presence in self._agents.values():
+            if presence.status == "connected" and presence.expires_at <= now:
+                presence.status = "offline"
+                expired += 1
+                self._audit(
+                    "agent_disconnected", presence.agent_id, {"reason": "heartbeat_expired"}
+                )
+        return expired
+
+    def disconnect(self, *, agent_id: str, session_id: str, actor_id: str) -> JsonObject:
+        """Mark a matching session offline and record an explicit disconnect."""
+        self._validate_text(agent_id, "agent_id")
+        self._validate_text(session_id, "session_id")
+        self._validate_text(actor_id, "actor_id")
+        with self._lock:
+            presence = self._agents.get(agent_id)
+            if presence is None or presence.status != "connected":
+                raise ControlPlaneConfigurationError("agent session is not connected")
+            if not hmac.compare_digest(presence.session_id, session_id):
+                raise ControlPlaneConfigurationError("agent session is invalid")
+            presence.status = "offline"
+            self._audit("agent_disconnected", agent_id, {"actor_id": actor_id, "reason": "client"})
+            return self._snapshot_entry(presence, include_session=True)
+
+    def snapshot(self) -> list[JsonObject]:
+        """Return bounded, non-secret agent presence records."""
+        with self._lock:
+            self.reap()
+            return [self._snapshot_entry(presence) for presence in self._agents.values()]
+
+    def _audit(self, event_type: str, subject: str, metadata: Mapping[str, Any]) -> None:
+        """Record lifecycle evidence without exposing the session bearer."""
+        if self.audit is not None:
+            self.audit.append(event_type, subject, dict(metadata))
+
+    @staticmethod
+    def _validate_text(value: str, name: str) -> None:
+        """Reject empty or oversized identity and project metadata."""
+        if not isinstance(value, str) or not value.strip() or len(value) > 512:
+            raise ControlPlaneConfigurationError(f"{name} must be bounded non-empty text")
+
+    @staticmethod
+    def _snapshot_entry(presence: AgentPresence, *, include_session: bool = False) -> JsonObject:
+        """Expose status metadata and return the bearer only to its agent."""
+        snapshot: JsonObject = {
+            "id": presence.agent_id,
+            "name": (
+                f"{presence.host} / {Path(presence.project_root).name or presence.project_root}"
+            ),
+            "host": presence.host,
+            "projectRoot": presence.project_root,
+            "principalId": presence.principal_id,
+            "connectedAt": datetime.fromtimestamp(presence.connected_at, UTC).isoformat(),
+            "lastHeartbeat": datetime.fromtimestamp(presence.last_heartbeat, UTC).isoformat(),
+            "expiresAt": datetime.fromtimestamp(presence.expires_at, UTC).isoformat(),
+            "status": presence.status,
+            "lastSeen": datetime.fromtimestamp(presence.last_heartbeat, UTC).isoformat(),
+            "tools": 0,
+        }
+        if include_session:
+            snapshot["sessionId"] = presence.session_id
+        return snapshot
+
+
+class ControlPlaneAgentClient:
+    """Minimal authenticated client for an MCP process presence lifecycle."""
+
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        *,
+        agent_id: str,
+        project_root: str,
+        timeout_seconds: float = 5,
+    ) -> None:
+        """Bind one agent token to one explicit project registration."""
+        parsed = urlsplit(base_url.rstrip("/"))
+        local_http = parsed.scheme == "http" and parsed.hostname in {
+            "localhost",
+            "127.0.0.1",
+            "::1",
+        }
+        if not parsed.hostname or parsed.scheme != "https" and not local_http:
+            raise ValueError("control-plane agent URL must use HTTPS outside localhost")
+        if not token or len(token) < 16 or not agent_id or not project_root:
+            raise ValueError("agent client requires a token, agent ID, and project root")
+        if timeout_seconds <= 0:
+            raise ValueError("agent client timeout must be positive")
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.agent_id = agent_id
+        self.project_root = project_root
+        self.timeout_seconds = timeout_seconds
+
+    def register(self) -> str:
+        """Register the MCP process and return its opaque heartbeat session."""
+        response = self._request(
+            "/agents/register",
+            {"agentId": self.agent_id, "host": "claude-code", "projectRoot": self.project_root},
+        )
+        session_id = response.get("sessionId")
+        if not isinstance(session_id, str) or not session_id:
+            raise ControlPlaneDependencyError("control plane returned no agent session")
+        return session_id
+
+    def heartbeat(self, session_id: str) -> JsonObject:
+        """Refresh the registered process presence."""
+        return self._request(
+            f"/agents/{quote(self.agent_id, safe='')}/heartbeat", {"sessionId": session_id}
+        )
+
+    def disconnect(self, session_id: str) -> JsonObject:
+        """Mark the agent offline during an orderly MCP process shutdown."""
+        return self._request(
+            f"/agents/{quote(self.agent_id, safe='')}/disconnect", {"sessionId": session_id}
+        )
+
+    def _request(self, path: str, body: JsonObject) -> JsonObject:
+        """Send one bounded JSON request without logging the bearer token."""
+        request = Request(  # noqa: S310 - URL scheme is validated above.
+            f"{self.base_url}{path}",
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:  # noqa: S310
+                value = json.loads(response.read(1_000_000))
+        except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
+            raise ControlPlaneDependencyError("control-plane agent request failed") from exc
+        return dict(_mapping(value, "control-plane agent response"))
 
 
 def _now() -> str:
@@ -520,11 +763,13 @@ class ControlPlaneStore:
         *,
         authority: ControlPlaneAuthority | None = None,
         audit: AuditSink | None = None,
+        presence: AgentPresenceStore | None = None,
     ) -> None:
         """Load state and optionally bind mutations to a live runtime authority."""
         self.path = Path(path)
         self.authority = authority
         self.audit = audit
+        self.presence = presence
         self._lock = RLock()
         self._emergency_stop = False
         self._state = self._load()
@@ -752,16 +997,18 @@ class ControlPlaneStore:
         if self.authority is not None:
             authority_status = self.authority.status()
             stopped = stopped or bool(authority_status.get("stopped", False))
+        agents = self.presence.snapshot() if self.presence is not None else []
+        active_sessions = sum(1 for agent in agents if agent.get("status") == "connected")
         return {
             "generatedAt": _now(),
             "posture": "critical" if stopped else "healthy",
-            "activeSessions": 0 if stopped else 1,
+            "activeSessions": 0 if stopped else active_sessions,
             "decisionsToday": 0,
             "deniedToday": 0,
             "approvalQueue": 0,
             "timedOutWorkers": 0,
             "emergencyStop": stopped,
-            "agents": [],
+            "agents": agents,
             "recentAudit": [],
             "runtimeStatus": dict(authority_status),
         }
@@ -872,6 +1119,76 @@ class ControlPlaneApplication:
                 if not self.authenticator.authorize(identity, "read"):
                     return self._respond(start_response, 403, {"error": "forbidden"}, cors)
                 return self._respond(start_response, 200, self.store.snapshot(), cors)
+            if method == "GET" and path in {"/api/agents", "/agents"}:
+                if not self.authenticator.authorize(identity, "read"):
+                    return self._respond(start_response, 403, {"error": "forbidden"}, cors)
+                return self._respond(start_response, 200, {"agents": self._agents()}, cors)
+            if method == "POST" and path in {"/api/agents/register", "/agents/register"}:
+                if not self.authenticator.authorize(identity, "agent_register"):
+                    return self._respond(start_response, 403, {"error": "forbidden"}, cors)
+                body = self._body(environ)
+                agent_id = _text(body.get("agentId"), "agentId", allow_empty=False)
+                if agent_id != identity.subject:
+                    raise ControlPlaneConfigurationError(
+                        "agentId must match the authenticated agent identity"
+                    )
+                host = _text(body.get("host"), "host", allow_empty=False)
+                if host != "claude-code":
+                    raise ControlPlaneConfigurationError("host must be claude-code")
+                return self._respond(
+                    start_response,
+                    200,
+                    self._presence().register(
+                        agent_id=agent_id,
+                        host=host,
+                        project_root=_text(
+                            body.get("projectRoot"), "projectRoot", allow_empty=False
+                        ),
+                        principal_id=identity.subject,
+                        actor_id=identity.subject,
+                    ),
+                    cors,
+                )
+            if method == "POST" and path.startswith("/api/agents/") and path.endswith("/heartbeat"):
+                if not self.authenticator.authorize(identity, "agent_heartbeat"):
+                    return self._respond(start_response, 403, {"error": "forbidden"}, cors)
+                agent_id = path[len("/api/agents/") : -len("/heartbeat")].strip("/")
+                if not agent_id or agent_id != identity.subject:
+                    raise ControlPlaneConfigurationError("agent identity does not match the route")
+                body = self._body(environ)
+                session_id = _text(body.get("sessionId"), "sessionId", allow_empty=False)
+                return self._respond(
+                    start_response,
+                    200,
+                    self._presence().heartbeat(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        actor_id=identity.subject,
+                    ),
+                    cors,
+                )
+            if (
+                method == "POST"
+                and path.startswith("/api/agents/")
+                and path.endswith("/disconnect")
+            ):
+                if not self.authenticator.authorize(identity, "agent_disconnect"):
+                    return self._respond(start_response, 403, {"error": "forbidden"}, cors)
+                agent_id = path[len("/api/agents/") : -len("/disconnect")].strip("/")
+                if not agent_id or agent_id != identity.subject:
+                    raise ControlPlaneConfigurationError("agent identity does not match the route")
+                body = self._body(environ)
+                session_id = _text(body.get("sessionId"), "sessionId", allow_empty=False)
+                return self._respond(
+                    start_response,
+                    200,
+                    self._presence().disconnect(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        actor_id=identity.subject,
+                    ),
+                    cors,
+                )
             if method == "POST" and path in {"/api/emergency-stop", "/emergency-stop"}:
                 if not self.authenticator.authorize(identity, "emergency_stop"):
                     return self._respond(start_response, 403, {"error": "forbidden"}, cors)
@@ -931,6 +1248,16 @@ class ControlPlaneApplication:
             raise ControlPlaneConfigurationError("request is not valid JSON") from exc
         return dict(_mapping(value, "request"))
 
+    def _presence(self) -> AgentPresenceStore:
+        """Require a live agent registry for registration and heartbeat calls."""
+        if self.store.presence is None:
+            raise ControlPlaneDependencyError("agent presence registry is unavailable")
+        return self.store.presence
+
+    def _agents(self) -> list[JsonObject]:
+        """Return the current non-secret agent presence snapshot."""
+        return self._presence().snapshot()
+
     def _cors_headers(self, origin: object) -> list[tuple[str, str]]:
         """Allow only the explicitly configured development origin."""
         if self.allowed_origin is not None and origin == self.allowed_origin:
@@ -974,6 +1301,9 @@ __all__ = [
     "ControlPlaneDependencyError",
     "ControlPlaneConfigurationError",
     "ControlPlaneStore",
+    "AgentPresence",
+    "AgentPresenceStore",
+    "ControlPlaneAgentClient",
     "InMemoryControlPlaneAuthority",
     "OperatorAuthenticator",
     "OperatorIdentity",

@@ -268,6 +268,12 @@ audit, or isolation services.
 
 ::: agentic_security.InMemoryControlPlaneAuthority
 
+::: agentic_security.AgentPresence
+
+::: agentic_security.AgentPresenceStore
+
+::: agentic_security.ControlPlaneAgentClient
+
 ::: agentic_security.ControlPlaneConfigurationError
 
 ::: agentic_security.validate_configuration

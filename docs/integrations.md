@@ -124,6 +124,24 @@ configuration documentation for the final location:
 - [GitHub Copilot hooks and MCP](https://docs.github.com/en/copilot/concepts/agents/hooks)
 - [Codex CLI MCP](https://github.com/openai/codex/blob/main/codex-rs/README.md)
 
+## Live Claude presence
+
+The optional control-plane integration can show a Claude Code project as a
+live agent. The MCP entry must provide the control-plane URL and inherit an
+agent token from the launching environment:
+
+```bash
+export AAI_SEC_AGENT_TOKEN="short-lived-agent-token"
+export AAI_SEC_CONTROL_PLANE_URL="https://control.example.test/api"
+claude
+```
+
+The gateway registers its authenticated agent identity and project root,
+sends bounded heartbeats, and marks itself offline on orderly shutdown or
+heartbeat expiry. The control plane never accepts a principal from MCP JSON;
+the authenticated token identity must match the registration identity. The
+UI shows only live presence records and never displays the heartbeat bearer.
+
 ## Native actions and complete coverage
 
 An MCP gateway governs only tools exposed through the gateway. It does not

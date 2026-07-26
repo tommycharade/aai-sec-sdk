@@ -32,6 +32,8 @@ conditions are met:
   authoritative audit sink;
 - persisted configuration and emergency-stop state are reconciled into the
   live runtime before the API serves traffic;
+- Claude/MCP presence uses separate short-lived agent credentials, project
+  registration, bounded heartbeats, expiry, and audited disconnect events;
 - configuration changes are versioned, audited, and recoverable through a
   tested rollback procedure; and
 - the UI is deployed without durable bearer tokens in browser assets, with

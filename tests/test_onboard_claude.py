@@ -9,7 +9,13 @@ from scripts.onboard_claude import onboard
 
 
 def test_onboard_creates_separate_hook_and_mcp_configuration(tmp_path: Path) -> None:
-    onboard(tmp_path, Path.cwd(), python="python3", dry_run=False)
+    onboard(
+        tmp_path,
+        Path.cwd(),
+        python="python3",
+        dry_run=False,
+        control_plane_url="http://localhost:8000/api",
+    )
 
     settings = json.loads((tmp_path / ".claude/settings.json").read_text())
     policy = json.loads((tmp_path / ".claude/aai-sec-config.json").read_text())
@@ -19,6 +25,10 @@ def test_onboard_creates_separate_hook_and_mcp_configuration(tmp_path: Path) -> 
         "examples/claude_code_hook.py"
     )
     assert mcp["mcpServers"]["agentic-security"]["args"][0].endswith("examples/mcp_gateway.py")
+    assert mcp["mcpServers"]["agentic-security"]["env"] == {
+        "AAI_SEC_CONTROL_PLANE_URL": "http://localhost:8000/api",
+        "AAI_SEC_AGENT_ID": "claude-code-local",
+    }
     assert policy["allowedTools"] == ["Read", "Glob", "Grep"]
     assert "rm\\s+-rf" in policy["deniedCommandPatterns"][0]
 

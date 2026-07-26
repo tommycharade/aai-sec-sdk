@@ -59,6 +59,26 @@ durable remote acceptance; export failure raises and the runtime fails closed.
 tamper-proof forensic storage. Follow the [operational runbooks](runbooks.md)
 for outages, corruption, rotation, and evidence preservation.
 
+## Claude presence and control-plane threat model
+
+The optional Claude/MCP presence bridge is a separate authenticated boundary.
+An MCP process registers with a short-lived agent credential, and the control
+plane binds the submitted agent identifier to the authenticated token subject.
+Project root and host metadata are bounded input; they never grant policy,
+principal, credential, or tool authority. Heartbeat session identifiers are
+opaque bearer values and are returned only to the registering process, never
+to the operator dashboard.
+
+The registry expires missing heartbeats, records registration, heartbeat, and
+disconnect transitions through the configured audit sink, and the example MCP
+gateway stops its guarded runtime when heartbeat delivery fails. The control
+plane does not infer that a process is safe merely because it is connected:
+operator authentication, runtime policy, tool registration, approvals, IAM,
+audit durability, and isolation remain independent requirements. The client
+uses HTTPS outside explicitly permitted localhost development URLs and bounds
+responses; deployments must still provide TLS termination, token rotation,
+network policy, and monitoring.
+
 Handlers may return arbitrary application values, but the runtime applies the
 optional tool output normalizer, performs key and common-token content
 redaction, and

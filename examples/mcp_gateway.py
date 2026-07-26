@@ -7,11 +7,15 @@ in any supported host. The host profile can be changed to another
 
 from __future__ import annotations
 
+import os
+import threading
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from agentic_security import (
     AgentHost,
+    ControlPlaneAgentClient,
     ExecutionContext,
     GuardedRuntime,
     InMemoryAuditSink,
@@ -69,4 +73,48 @@ def build_runtime() -> GuardedRuntime:
 
 
 if __name__ == "__main__":
-    integration_for(AgentHost.CLAUDE_CODE, build_runtime()).serve_stdio()
+    runtime = build_runtime()
+    control_plane_url = os.environ.get("AAI_SEC_CONTROL_PLANE_URL")
+    heartbeat_stop = threading.Event()
+    heartbeat_thread: threading.Thread | None = None
+    client: ControlPlaneAgentClient | None = None
+    session_id: str | None = None
+    if control_plane_url:
+        agent_token = os.environ.get("AAI_SEC_AGENT_TOKEN")
+        if not agent_token:
+            raise SystemExit("AAI_SEC_AGENT_TOKEN is required when agent registration is enabled")
+        agent_client = ControlPlaneAgentClient(
+            control_plane_url,
+            agent_token,
+            agent_id=os.environ.get("AAI_SEC_AGENT_ID", "claude-code-local"),
+            project_root=os.environ.get("CLAUDE_PROJECT_DIR", str(Path.cwd())),
+        )
+        registered_session = agent_client.register()
+        client = agent_client
+        session_id = registered_session
+        interval = float(os.environ.get("AAI_SEC_AGENT_HEARTBEAT_SECONDS", "30"))
+        if interval <= 0:
+            raise SystemExit("AAI_SEC_AGENT_HEARTBEAT_SECONDS must be positive")
+
+        def heartbeat() -> None:
+            """Keep presence live and stop the runtime if the control plane is lost."""
+            while not heartbeat_stop.wait(interval):
+                try:
+                    agent_client.heartbeat(registered_session)
+                except Exception:
+                    runtime.stop()
+                    return
+
+        heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+        heartbeat_thread.start()
+    try:
+        integration_for(AgentHost.CLAUDE_CODE, runtime).serve_stdio()
+    finally:
+        heartbeat_stop.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join(timeout=2)
+        if client is not None and session_id is not None:
+            try:
+                client.disconnect(session_id)
+            except Exception:
+                runtime.stop()

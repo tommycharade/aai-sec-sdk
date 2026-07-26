@@ -123,7 +123,10 @@ from .types import (
     TimeoutPhase,
 )
 from .ui_control_plane import (
+    AgentPresence,
+    AgentPresenceStore,
     CallbackControlPlaneAuthority,
+    ControlPlaneAgentClient,
     ControlPlaneApplication,
     ControlPlaneAuthority,
     ControlPlaneConfigurationError,
@@ -198,6 +201,9 @@ __all__ = [
     "IsolationVerifier",
     "CallbackIsolationVerifier",
     "ControlPlaneApplication",
+    "AgentPresence",
+    "AgentPresenceStore",
+    "ControlPlaneAgentClient",
     "ControlPlaneAuthority",
     "ControlPlaneConfigurationError",
     "ControlPlaneDependencyError",

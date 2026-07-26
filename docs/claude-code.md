@@ -35,7 +35,8 @@ From the project you want Claude Code to use, run:
 
 ```bash
 python3 /absolute/path/to/aai-sec-sdk/scripts/onboard_claude.py \
-  --project-root "$PWD"
+  --project-root "$PWD" \
+  --control-plane-url http://localhost:8000/api
 ```
 
 The script creates or updates `.claude/settings.json` and `.mcp.json`, keeps
@@ -50,6 +51,19 @@ only explicitly allowed native tools; read-only/status/test commands are
 allowed; publishing, commits, pushes, and deployments require approval; and
 destructive shell commands are denied. Edit the project policy only after
 reviewing the security impact and adding tests.
+
+For the local reference control plane, export the synthetic agent token before
+starting Claude:
+
+```bash
+export AAI_SEC_AGENT_TOKEN=synthetic-agent-token-1234
+claude
+```
+
+The MCP process then registers the project as `claude-code-local`, sends
+heartbeats, and stops its guarded runtime if the control plane becomes
+unavailable. The UI shows the connected project under **Agents**; heartbeat
+expiry changes it to `offline` and records an audited lifecycle event.
 
 The hook configuration and MCP configuration are separate Claude Code host
 boundaries. Put the `hooks` object in `.claude/settings.json`; put the

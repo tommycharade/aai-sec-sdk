@@ -10,9 +10,12 @@ from typing import Any
 import pytest
 
 from agentic_security import (
+    AgentPresenceStore,
     CallbackControlPlaneAuthority,
+    ControlPlaneAgentClient,
     ControlPlaneApplication,
     ControlPlaneConfigurationError,
+    ControlPlaneDependencyError,
     ControlPlaneStore,
     InMemoryAuditSink,
     InMemoryControlPlaneAuthority,
@@ -156,6 +159,226 @@ def test_operator_roles_separate_read_from_configuration_and_stop(tmp_path: Path
     assert configuration["configVersion"] == 1
     assert status.startswith("403") and configure_payload["error"] == "forbidden"
     assert stop_status.startswith("403") and stop_payload["error"] == "forbidden"
+
+
+def test_authenticated_agent_registration_heartbeat_and_expiry_are_live_and_audited(
+    tmp_path: Path,
+) -> None:
+    now = [100.0]
+    audit = InMemoryAuditSink()
+    presence = AgentPresenceStore(clock=lambda: now[0], ttl_seconds=10, audit=audit)
+    agent_token = "agent-session-token-1234"  # noqa: S105 - synthetic test credential
+    operator_token = "operator-session-token-1234"  # noqa: S105 - synthetic test credential
+    app = ControlPlaneApplication(
+        ControlPlaneStore(
+            tmp_path / "config.json",
+            authority=InMemoryControlPlaneAuthority(),
+            audit=audit,
+            presence=presence,
+        ),
+        authenticator=StaticBearerAuthenticator(
+            {
+                agent_token: OperatorIdentity("claude-code-local", frozenset({"agent"})),
+                operator_token: OperatorIdentity("operator-1", frozenset({"viewer"})),
+            }
+        ),
+    )
+
+    status, registered = request(
+        app,
+        "POST",
+        "/api/agents/register",
+        {
+            "agentId": "claude-code-local",
+            "host": "claude-code",
+            "projectRoot": "/workspace/kratos",
+        },
+        token=agent_token,
+    )
+    assert status.startswith("200")
+    assert registered["status"] == "connected"
+    session_id = registered["sessionId"]
+
+    heartbeat_status, heartbeat = request(
+        app,
+        "POST",
+        "/api/agents/claude-code-local/heartbeat",
+        {"sessionId": session_id},
+        token=agent_token,
+    )
+    assert heartbeat_status.startswith("200")
+    assert heartbeat["sessionId"] == session_id
+
+    dashboard_status, dashboard = request(app, "GET", "/api/dashboard", token=operator_token)
+    assert dashboard_status.startswith("200")
+    assert dashboard["agents"][0]["projectRoot"] == "/workspace/kratos"
+    assert "sessionId" not in dashboard["agents"][0]
+
+    now[0] = 111.0
+    expired_status, expired = request(app, "GET", "/api/agents", token=operator_token)
+    assert expired_status.startswith("200")
+    assert expired["agents"][0]["status"] == "offline"
+    assert [event.event_type for event in audit.events()] == [
+        "agent_registered",
+        "agent_heartbeat",
+        "agent_disconnected",
+    ]
+
+
+def test_agent_registration_rejects_identity_mismatch_and_bad_heartbeat(
+    tmp_path: Path,
+) -> None:
+    token = "agent-session-token-1234"  # noqa: S105 - synthetic test credential
+    app = ControlPlaneApplication(
+        ControlPlaneStore(
+            tmp_path / "config.json",
+            authority=InMemoryControlPlaneAuthority(),
+            audit=InMemoryAuditSink(),
+            presence=AgentPresenceStore(),
+        ),
+        authenticator=StaticBearerAuthenticator(
+            {token: OperatorIdentity("claude-code-local", frozenset({"agent"}))}
+        ),
+    )
+    status, payload = request(
+        app,
+        "POST",
+        "/api/agents/register",
+        {"agentId": "other-agent", "host": "claude-code", "projectRoot": "/workspace"},
+        token=token,
+    )
+    assert status.startswith("400")
+    assert "authenticated agent identity" in payload["error"]
+
+    status, payload = request(
+        app,
+        "POST",
+        "/api/agents/claude-code-local/heartbeat",
+        {"sessionId": "not-a-session"},
+        token=token,
+    )
+    assert status.startswith("400")
+    assert "not connected" in payload["error"]
+
+
+def test_agent_can_disconnect_explicitly_with_its_session(tmp_path: Path) -> None:
+    token = "agent-session-token-1234"  # noqa: S105 - synthetic test credential
+    app = ControlPlaneApplication(
+        ControlPlaneStore(
+            tmp_path / "config.json",
+            authority=InMemoryControlPlaneAuthority(),
+            audit=InMemoryAuditSink(),
+            presence=AgentPresenceStore(),
+        ),
+        authenticator=StaticBearerAuthenticator(
+            {token: OperatorIdentity("claude-code-local", frozenset({"agent"}))}
+        ),
+    )
+    _, registered = request(
+        app,
+        "POST",
+        "/api/agents/register",
+        {
+            "agentId": "claude-code-local",
+            "host": "claude-code",
+            "projectRoot": "/workspace",
+        },
+        token=token,
+    )
+    status, disconnected = request(
+        app,
+        "POST",
+        "/api/agents/claude-code-local/disconnect",
+        {"sessionId": registered["sessionId"]},
+        token=token,
+    )
+    assert status.startswith("200")
+    assert disconnected["status"] == "offline"
+
+
+def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentic_security.ui_control_plane as control_plane
+
+    requests: list[tuple[str, dict[str, str], dict[str, object]]] = []
+
+    class Response:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.payload = json.dumps(payload).encode()
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return self.payload
+
+    def fake_urlopen(request: Any, *, timeout: float) -> Response:
+        requests.append((request.full_url, dict(request.headers), json.loads(request.data)))
+        if request.full_url.endswith("/register"):
+            return Response({"sessionId": "opaque-session"})
+        return Response({"status": "connected"})
+
+    monkeypatch.setattr(control_plane, "urlopen", fake_urlopen)
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-code-local",
+        project_root="/workspace/kratos",
+    )
+
+    assert client.register() == "opaque-session"
+    assert client.heartbeat("opaque-session") == {"status": "connected"}
+    assert client.disconnect("opaque-session") == {"status": "connected"}
+    assert requests[0][0].endswith("/agents/register")
+    assert requests[2][0].endswith("/agents/claude-code-local/disconnect")
+    assert requests[0][2]["projectRoot"] == "/workspace/kratos"
+    assert requests[0][1]["Authorization"] == f"Bearer {TOKEN}"
+
+
+def test_agent_client_rejects_unsafe_endpoints_and_transport_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(ValueError):
+        ControlPlaneAgentClient(
+            "http://control.example.test/api",
+            TOKEN,
+            agent_id="agent",
+            project_root="/workspace",
+        )
+    with pytest.raises(ValueError):
+        ControlPlaneAgentClient(
+            "https://control.example.test/api",
+            "short",
+            agent_id="agent",
+            project_root="/workspace",
+        )
+    with pytest.raises(ValueError):
+        ControlPlaneAgentClient(
+            "https://control.example.test/api",
+            TOKEN,
+            agent_id="agent",
+            project_root="/workspace",
+            timeout_seconds=0,
+        )
+
+    import agentic_security.ui_control_plane as control_plane
+
+    def failing_urlopen(_request: Any, *, timeout: float) -> Any:
+        raise OSError("synthetic network outage")
+
+    monkeypatch.setattr(control_plane, "urlopen", failing_urlopen)
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="agent",
+        project_root="/workspace",
+    )
+    with pytest.raises(ControlPlaneDependencyError):
+        client.register()
 
 
 def test_static_authenticator_cannot_be_used_for_non_localhost_origin(tmp_path: Path) -> None:

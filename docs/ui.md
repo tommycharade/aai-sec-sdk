@@ -51,6 +51,12 @@ bounded rollback history. On startup the adapter must reconcile persisted
 configuration and emergency-stop state into the live authority before serving
 requests; a failed reconciliation must prevent the service from starting.
 
+Claude presence is separate from configuration: the MCP process must be
+started with `AAI_SEC_CONTROL_PLANE_URL` and an agent token, then it registers
+and heartbeats through the authenticated agent endpoints. The dashboard shows
+only those live registrations; writing `.mcp.json` alone does not create a
+presence record.
+
 ## Local development
 
 ```bash
@@ -65,6 +71,7 @@ free reference adapter, run this from the SDK repository in another terminal:
 
 ```bash
 AAI_SEC_UI_TOKEN=synthetic-local-token-1234 \
+AAI_SEC_AGENT_TOKEN=synthetic-agent-token-1234 \
   python examples/ui_control_plane.py
 ```
 
