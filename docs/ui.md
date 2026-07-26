@@ -27,9 +27,13 @@ runtime for application side effects.
 
 The Enterprise Fleet page provides the first fleet-management surface for
 organizations, projects, SDK deployments, connected Claude agents, and
-configuration drift. It is backed by the authenticated `/api/enterprise/*`
-contracts described in [Enterprise fleet](enterprise-fleet.md). Inventory is
-tenant-scoped; it does not expose heartbeat sessions or secrets.
+configuration drift. It supports tenant-scoped deployment filtering across
+team, environment, region, and ID; safe template creation with one-level
+parent inheritance; assignment and staged configuration; canary rollout;
+history rollback; health/alert inspection; and deployment emergency stop. It
+is backed by the authenticated `/api/enterprise/*` contracts described in
+[Enterprise fleet](enterprise-fleet.md). Inventory is tenant-scoped; it does
+not expose heartbeat sessions or secrets.
 
 The UI's Runtime settings page maps to the SDK's explicit configuration
 surfaces:

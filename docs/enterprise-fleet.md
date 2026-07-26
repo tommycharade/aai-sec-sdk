@@ -13,7 +13,7 @@ Every resource belongs to one organization:
 ```text
 organization
 └── project
-    └── deployment
+    └── deployment (team / environment / region)
         └── Claude Code agents and sessions
 ```
 
@@ -21,6 +21,11 @@ An authenticated identity carries an organization and optional project scope.
 The API checks that scope on every read, registration, configuration, and
 rollout operation. The UI never receives bearer tokens, agent heartbeat
 sessions, credentials, or raw secrets.
+
+Deployments carry team, environment, and region dimensions so operators can
+filter and compare the same SDK policy across platform groups and geographic
+rollouts. The team field is inventory metadata, not an authorization grant;
+authorization remains organization/project/RBAC based.
 
 ## Inventory API
 
@@ -33,13 +38,22 @@ The reference WSGI application exposes these authenticated endpoints:
 | `GET /api/enterprise/deployments` | SDK deployment inventory |
 | `GET /api/enterprise/agents` | Claude and other agent presence |
 | `GET /api/enterprise/drift` | Desired/applied configuration drift |
+| `GET /api/enterprise/templates` | Tenant-scoped configuration templates |
+| `GET /api/enterprise/deployment-config` | Current desired/applied configuration state |
+| `GET /api/enterprise/deployment-config/history` | Bounded prior configuration versions |
+| `GET /api/enterprise/health` | Deployment health and rollout indicators |
+| `GET /api/enterprise/alerts` | Derived fleet alerts |
 | `POST /api/enterprise/agents/register` | Register an authenticated agent |
 | `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence |
 | `POST /api/enterprise/agents/{deployment}/{agent}/disconnect` | Mark offline |
 | `POST /api/enterprise/templates` | Create a configuration template |
+| `POST /api/enterprise/templates/validate` | Validate safe configuration without persisting it |
 | `POST /api/enterprise/deployment-config` | Assign desired configuration |
 | `POST /api/enterprise/deployment-config/rollout` | Stage, canary, pause, activate, or rollback |
+| `POST /api/enterprise/deployment-config/batch-rollout` | Apply one rollout command to up to 200 deployments |
+| `POST /api/enterprise/deployment-config/rollback` | Restore a known prior version as a new staged version |
 | `POST /api/enterprise/deployment-config/applied` | Record an applied configuration hash |
+| `POST /api/enterprise/emergency-stop` | Stop or clear one deployment through its authority |
 
 Agent registration returns one opaque, expiring session. It is accepted only
 for the authenticated deployment/agent scope and is never included in fleet
@@ -54,6 +68,12 @@ creates a desired configuration hash and starts in `staged` state. Operators
 can move it through `canary`, `active`, `paused`, or `rollback` with an
 explicit percentage. A deployment is drifted when its applied hash is absent
 or differs from the desired hash.
+
+The management UI provides tenant-scoped template creation, parent selection,
+deployment filtering, template assignment, canary rollout, rollback to the
+latest known history version, and emergency stop. Invalid JSON remains in the
+editor for correction; the control plane performs the authoritative secret and
+shape validation before persistence.
 
 Rollout and emergency operations are not database-only claims. A deployment
 can be bound to a `FleetDeploymentAuthority` adapter. Active/canary rollout,
@@ -81,6 +101,17 @@ use a durable multi-process database adapter, put the API behind TLS, and
 connect each deployment to an authoritative runtime and immutable audit
 service. The SQLite/reference implementation is suitable for development and
 contract testing, not an enterprise production HA deployment.
+
+## Smoke-test evidence
+
+With the reference server on port `8001` and the UI on port `5175`, set
+`VITE_USE_MOCKS=false`, `VITE_API_BASE_URL=http://localhost:8001/api`, and a
+synthetic `VITE_API_TOKEN`. Open the UI, select **Enterprise fleet**, verify
+the seeded `Safe default` template and `Local development` deployment, filter
+by `platform`, and exercise template assignment, canary, rollback, and stop
+with synthetic data. Confirm the resulting notice, health state, and alert;
+then clear the stop only through an authorized API call. Do not use production
+tokens in Vite variables or screenshots.
 
 ::: agentic_security.enterprise_control_plane
     options:

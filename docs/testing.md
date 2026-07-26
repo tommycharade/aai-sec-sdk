@@ -3,7 +3,10 @@
 `make check` is the required local and CI quality gate. It runs formatting,
 linting, strict typing, unit and adversarial tests, 90% branch coverage,
 guardrail checks, a strict documentation build, package validation, dependency
-audits, and mutation-baseline validation.
+audits, mutation-baseline validation, and the nested React UI typecheck,
+contract tests, and production build. The browser smoke path for the live
+reference server is documented in the enterprise fleet runbook and is used
+before release evidence is accepted.
 
 ## Deterministic property/fuzz coverage
 

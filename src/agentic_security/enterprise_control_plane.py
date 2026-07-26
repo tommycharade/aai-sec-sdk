@@ -232,6 +232,7 @@ class EnterpriseFleetStore:
         environment: str,
         region: str,
         sdk_version: str | None = None,
+        team: str | None = None,
     ) -> dict[str, Any]:
         """Register one independently managed SDK control-plane deployment."""
         values = tuple(
@@ -246,13 +247,14 @@ class EnterpriseFleetStore:
             )
         )
         sdk_version = _optional_text(sdk_version, "sdkVersion")
+        team = _optional_text(team, "team") or ""
         with self._lock:
             self._require_project(values[0], values[1])
             try:
                 self._connection.execute(
                     """INSERT INTO deployments
-                    (id,organization_id,project_id,name,environment,region,sdk_version,created_at)
-                    VALUES(?,?,?,?,?,?,?,?)""",
+                    (id,organization_id,project_id,name,environment,region,sdk_version,team,created_at)
+                    VALUES(?,?,?,?,?,?,?,?,?)""",
                     (
                         values[2],
                         values[0],
@@ -261,6 +263,7 @@ class EnterpriseFleetStore:
                         values[4],
                         values[5],
                         sdk_version,
+                        team,
                         self._now(),
                     ),
                 )
@@ -302,7 +305,7 @@ class EnterpriseFleetStore:
                     ).fetchall()
             elif resource == "deployments":
                 query = (
-                    "SELECT id,organization_id,project_id,name,environment,region,sdk_version,"
+                    "SELECT id,organization_id,project_id,name,environment,region,sdk_version,team,"
                     "created_at FROM deployments WHERE organization_id=?"
                 )
                 params: tuple[Any, ...] = (org,)
@@ -360,6 +363,28 @@ class EnterpriseFleetStore:
             except sqlite3.IntegrityError as exc:
                 raise FleetConfigurationError("template already exists") from exc
         return self._template(template_id)
+
+    def list_templates(self, identity: FleetIdentity) -> FleetPage:
+        """Return tenant-scoped templates without exposing secret material."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT id FROM templates WHERE organization_id=? ORDER BY name, id",
+                (identity.organization_id,),
+            ).fetchall()
+            items = tuple(self._template(row["id"]) for row in rows)
+        return FleetPage(items, None)
+
+    def validate_template_configuration(
+        self, identity: FleetIdentity, configuration: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Validate a proposed template without persisting it or changing authority."""
+        self._assert_identity_org(identity, identity.organization_id)
+        normalized = json.loads(self._configuration_json(configuration))
+        return {
+            "valid": True,
+            "configuration": normalized,
+            "configurationHash": self._configuration_hash(normalized),
+        }
 
     def assign_template(
         self, identity: FleetIdentity, deployment_id: str, template_id: str
@@ -557,6 +582,61 @@ class EnterpriseFleetStore:
             result = self._deployment_configuration(deployment_id)
         self._audit("fleet_configuration_rollback", identity.subject, result)
         return result
+
+    def list_configurations(
+        self, identity: FleetIdentity, deployment_id: str | None = None
+    ) -> FleetPage:
+        """Return desired/applied configuration state for scoped deployments."""
+        with self._lock:
+            query = (
+                "SELECT d.id AS deployment_id, d.project_id FROM deployments d "
+                "JOIN deployment_configs c ON c.deployment_id=d.id "
+                "WHERE d.organization_id=?"
+            )
+            params: list[Any] = [identity.organization_id]
+            if deployment_id is not None:
+                query += " AND d.id=?"
+                params.append(_text(deployment_id, "deploymentId"))
+            rows = self._connection.execute(query, params).fetchall()
+            items = tuple(
+                self._deployment_configuration(row["deployment_id"])
+                for row in rows
+                if not identity.project_ids or row["project_id"] in identity.project_ids
+            )
+        return FleetPage(items, None)
+
+    def list_configuration_history(
+        self, identity: FleetIdentity, deployment_id: str | None = None
+    ) -> FleetPage:
+        """Return bounded, tenant-scoped prior configuration versions."""
+        with self._lock:
+            query = (
+                "SELECT h.deployment_id,h.version,h.template_id,h.desired_hash,"
+                "h.applied_hash,h.rollout_state,h.rollout_percentage,h.created_at,"
+                "d.project_id FROM deployment_config_history h "
+                "JOIN deployments d ON d.id=h.deployment_id WHERE d.organization_id=?"
+            )
+            params: list[Any] = [identity.organization_id]
+            if deployment_id is not None:
+                query += " AND h.deployment_id=?"
+                params.append(_text(deployment_id, "deploymentId"))
+            query += " ORDER BY h.created_at DESC LIMIT 2000"
+            rows = self._connection.execute(query, params).fetchall()
+        items = tuple(
+            {
+                "deploymentId": row["deployment_id"],
+                "version": row["version"],
+                "templateId": row["template_id"],
+                "desiredHash": row["desired_hash"],
+                "appliedHash": row["applied_hash"],
+                "rolloutState": row["rollout_state"],
+                "rolloutPercentage": row["rollout_percentage"],
+                "createdAt": row["created_at"],
+            }
+            for row in rows
+            if not identity.project_ids or row["project_id"] in identity.project_ids
+        )
+        return FleetPage(items, None)
 
     def record_applied_configuration(
         self, identity: FleetIdentity, deployment_id: str, configuration_hash: str
@@ -818,6 +898,7 @@ class EnterpriseFleetStore:
                     id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
                     project_id TEXT NOT NULL REFERENCES projects(id), name TEXT NOT NULL,
                     environment TEXT NOT NULL, region TEXT NOT NULL, sdk_version TEXT,
+                    team TEXT NOT NULL DEFAULT '',
                     created_at REAL NOT NULL, UNIQUE(project_id,name));
                 CREATE TABLE IF NOT EXISTS agents(
                     id TEXT NOT NULL, organization_id TEXT NOT NULL REFERENCES organizations(id),
@@ -855,6 +936,14 @@ class EnterpriseFleetStore:
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(1);
                 """
             )
+            deployment_columns = {
+                row["name"] for row in self._connection.execute("PRAGMA table_info(deployments)")
+            }
+            if "team" not in deployment_columns:
+                self._connection.execute(
+                    "ALTER TABLE deployments ADD COLUMN team TEXT NOT NULL DEFAULT ''"
+                )
+            self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(2)")
             self._connection.commit()
 
     @staticmethod
@@ -1023,6 +1112,7 @@ class EnterpriseFleetStore:
         return {
             "deploymentId": deployment_id,
             "projectId": deployment["projectId"],
+            "team": deployment["team"],
             "environment": deployment["environment"],
             "region": deployment["region"],
             "status": status,
@@ -1059,7 +1149,8 @@ class EnterpriseFleetStore:
     def _deployment(self, deployment_id: str) -> dict[str, Any]:
         """Return a normalized deployment or a generic not-found error."""
         row = self._connection.execute(
-            "SELECT id,organization_id,project_id,name,environment,region,sdk_version,created_at"
+            "SELECT id,organization_id,project_id,name,environment,region,sdk_version,team,"
+            "created_at"
             " FROM deployments WHERE id=?",
             (deployment_id,),
         ).fetchone()
@@ -1073,6 +1164,7 @@ class EnterpriseFleetStore:
             "environment": row["environment"],
             "region": row["region"],
             "sdkVersion": row["sdk_version"],
+            "team": row["team"],
             "createdAt": row["created_at"],
         }
 
@@ -1191,6 +1283,22 @@ class EnterpriseFleetApplication:
                         200,
                         {"items": list(page.items), "nextCursor": page.next_cursor},
                     )
+                if resource in {"templates", "deployment-config", "deployment-config/history"}:
+                    self._authorize(identity, "read")
+                    query = parse_qs(str(environ.get("QUERY_STRING", "")))
+                    requested_deployment = query.get("deploymentId", [None])[0]
+                    page = (
+                        self.store.list_templates(identity)
+                        if resource == "templates"
+                        else self.store.list_configuration_history(identity, requested_deployment)
+                        if resource == "deployment-config/history"
+                        else self.store.list_configurations(identity, requested_deployment)
+                    )
+                    return self._respond(
+                        start_response,
+                        200,
+                        {"items": list(page.items), "nextCursor": page.next_cursor},
+                    )
                 if resource in {"organizations", "projects", "deployments", "agents"}:
                     self._authorize(identity, "read")
                     query = parse_qs(str(environ.get("QUERY_STRING", "")))
@@ -1204,6 +1312,16 @@ class EnterpriseFleetApplication:
                         {"items": list(page.items), "nextCursor": page.next_cursor},
                     )
             body = self._body(environ)
+            if method == "POST" and path == "/api/enterprise/templates/validate":
+                self._authorize(identity, "manage_configuration")
+                configuration = body.get("configuration")
+                if not isinstance(configuration, Mapping):
+                    raise FleetConfigurationError("configuration must be an object")
+                return self._respond(
+                    start_response,
+                    200,
+                    self.store.validate_template_configuration(identity, configuration),
+                )
             if method == "POST" and path == "/api/enterprise/organizations":
                 self._authorize(identity, "manage_inventory")
                 organization_id = _text(body.get("organizationId"), "organizationId")
@@ -1235,6 +1353,7 @@ class EnterpriseFleetApplication:
                     environment=_text(body.get("environment"), "environment"),
                     region=_text(body.get("region"), "region"),
                     sdk_version=_optional_text(body.get("sdkVersion"), "sdkVersion"),
+                    team=_optional_text(body.get("team"), "team"),
                 )
                 return self._respond(start_response, 201, result)
             if method == "POST" and path == "/api/enterprise/agents/register":

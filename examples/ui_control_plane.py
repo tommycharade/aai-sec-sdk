@@ -82,9 +82,38 @@ def main() -> None:
             environment="development",
             region="local",
             sdk_version="1.1.0",
+            team="platform",
         )
     except ValueError:
         # The seed is idempotent for the local reference database.
+        pass
+    try:
+        fleet.create_template(
+            fleet_identity,
+            template_id="template-safe-default",
+            name="Safe default",
+            configuration={
+                "runtime": {
+                    "allowedTools": ["read_repository"],
+                    "maxActions": 25,
+                    "maxConcurrent": 2,
+                    "maxFanOut": 2,
+                    "maxCostUnits": 25,
+                    "maxDelegationDepth": 1,
+                    "credentialsEnabled": False,
+                    "isolationRequiredForHighRisk": True,
+                    "redactSensitiveData": True,
+                    "captureToolContent": False,
+                },
+                "rollout": {"requireApproval": True},
+            },
+        )
+    except ValueError:
+        pass
+    try:
+        fleet.assign_template(fleet_identity, "deployment-local", "template-safe-default")
+    except ValueError:
+        # Re-applying the same local seed is intentionally harmless.
         pass
     enterprise_application = EnterpriseFleetApplication(
         fleet,

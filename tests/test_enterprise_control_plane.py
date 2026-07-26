@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -46,7 +47,13 @@ def seed(store: EnterpriseFleetStore) -> None:
     store.create_project("org-a", "project-a", "Payments")
     store.create_project("org-b", "project-b", "Research")
     store.create_deployment(
-        "org-a", "project-a", "deploy-a", "Production", environment="prod", region="eu-west-2"
+        "org-a",
+        "project-a",
+        "deploy-a",
+        "Production",
+        environment="prod",
+        region="eu-west-2",
+        team="platform",
     )
 
 
@@ -66,6 +73,42 @@ def test_migrates_inventory_and_enforces_organization_scope(tmp_path: Path) -> N
             host="claude-code",
             project_root="/workspace/payments",
         )
+
+
+def test_migrates_legacy_deployments_with_team_dimension(tmp_path: Path) -> None:
+    """The schema migration preserves legacy deployments and adds team metadata."""
+    database = tmp_path / "legacy.sqlite"
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        """
+        CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY);
+        INSERT INTO schema_migrations(version) VALUES(1);
+        CREATE TABLE organizations(
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at REAL NOT NULL
+        );
+        CREATE TABLE projects(
+            id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, name TEXT NOT NULL,
+            created_at REAL NOT NULL
+        );
+        CREATE TABLE deployments(
+            id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT NOT NULL,
+            name TEXT NOT NULL, environment TEXT NOT NULL, region TEXT NOT NULL,
+            sdk_version TEXT, created_at REAL NOT NULL
+        );
+        INSERT INTO organizations VALUES('org-a', 'Alpha', 1);
+        INSERT INTO projects VALUES('project-a', 'org-a', 'Platform', 1);
+        INSERT INTO deployments VALUES(
+            'deploy-a', 'org-a', 'project-a', 'Legacy', 'prod', 'eu', '1.0.0', 1
+        );
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    store = EnterpriseFleetStore(database)
+    items = store.list_inventory(identity("org-a"), "deployments").items
+
+    assert items[0]["team"] == ""
 
 
 def test_fleet_validation_and_roles_fail_closed() -> None:
@@ -472,6 +515,17 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
         "/api/enterprise/deployment-config/rollout",
         {"deploymentId": "deploy-a", "state": "canary", "percentage": 10},
     )[0].startswith("200")
+    status, templates = call_api(app, "GET", "/api/enterprise/templates")
+    assert status.startswith("200") and templates["items"][0]["id"] == "template-prod"
+    status, configurations = call_api(app, "GET", "/api/enterprise/deployment-config")
+    assert status.startswith("200") and configurations["items"][0]["version"] == 1
+    status, validation = call_api(
+        app,
+        "POST",
+        "/api/enterprise/templates/validate",
+        {"configuration": {"runtime": {"maxActions": 8}}},
+    )
+    assert status.startswith("200") and validation["valid"] is True
     assert call_api(
         app,
         "POST",
@@ -488,6 +542,8 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
         "/api/enterprise/deployment-config",
         {"deploymentId": "deploy-a", "templateId": "template-v2"},
     )[0].startswith("200")
+    status, history = call_api(app, "GET", "/api/enterprise/deployment-config/history")
+    assert status.startswith("200") and history["items"][0]["deploymentId"] == "deploy-a"
     assert call_api(
         app,
         "POST",
