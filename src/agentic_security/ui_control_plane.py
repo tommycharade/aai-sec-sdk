@@ -828,7 +828,14 @@ class ControlPlaneApplication:
         if authenticator is None:
             if not token or len(token) < 16:
                 raise ValueError("control-plane token must contain at least 16 characters")
-            if allowed_origin not in {"http://localhost:5173", "http://127.0.0.1:5173"}:
+            parsed_origin = urlsplit(allowed_origin or "")
+            if (
+                parsed_origin.scheme != "http"
+                or parsed_origin.hostname not in {"localhost", "127.0.0.1", "::1"}
+                or parsed_origin.path not in {"", "/"}
+                or parsed_origin.username is not None
+                or parsed_origin.password is not None
+            ):
                 raise ValueError("static bearer authentication is permitted only for localhost")
             authenticator = StaticBearerAuthenticator(
                 {token: OperatorIdentity("local-operator", frozenset({"admin"}))}
