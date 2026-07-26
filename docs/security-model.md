@@ -205,3 +205,8 @@ short-lived, scoped to one deployment and agent, and excluded from inventory
 responses. Every lifecycle and rollout mutation is auditable. Provider-backed
 authentication, policy, IAM, approval, audit retention, isolation, and runtime
 activation remain explicit adapters and are not simulated by the UI.
+Fleet collection reads use bounded continuation cursors. Cursors carry no
+identity, role, or credential material and are treated as untrusted offsets;
+tenant and project authorization is re-evaluated on every page, and malformed,
+repeated, or excessive pagination fails closed rather than returning an
+unbounded response.
