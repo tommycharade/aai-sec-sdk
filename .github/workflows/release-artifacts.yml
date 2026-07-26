@@ -90,5 +90,5 @@ jobs:
             gh attestation verify "$artifact" \
               --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
-              --source-ref "$GITHUB_REF_NAME"
+              --source-ref "$GITHUB_REF"
           done
