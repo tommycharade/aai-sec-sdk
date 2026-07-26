@@ -67,6 +67,8 @@ def test_webhook_alert_sink_is_bounded_and_fail_closed() -> None:
 
     with pytest.raises(FleetConfigurationError):
         WebhookFleetAlertSink("http://alerts.example.test/hook")
+    with pytest.raises(FleetConfigurationError):
+        WebhookFleetAlertSink("https://alerts.example.test/hook", timeout_seconds=0)
 
     def failed_opener(_request: Any, *, timeout: float) -> Response:
         raise OSError("synthetic outage")
@@ -75,6 +77,15 @@ def test_webhook_alert_sink_is_bounded_and_fail_closed() -> None:
         WebhookFleetAlertSink("https://alerts.example.test/hook", opener=failed_opener).publish(
             {"id": "alert-1"}
         )
+
+    class RejectedResponse:
+        status = 503
+
+    with pytest.raises(FleetConfigurationError):
+        WebhookFleetAlertSink(
+            "https://alerts.example.test/hook",
+            opener=lambda _request, *, timeout: RejectedResponse(),
+        ).publish({"id": "alert-1"})
 
 
 def test_callback_iam_adapter_fails_closed_and_preserves_verified_scope() -> None:
