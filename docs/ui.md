@@ -30,6 +30,12 @@ surfaces:
 - credential and high-risk isolation requirements; and
 - sensitive-data redaction and optional content capture.
 
+Executable tool handlers, argument validators, resource extractors, and
+credential implementations remain application-owned code. The UI manages
+allow-lists and runtime controls for registered tools; it deliberately does
+not create dynamic function lookups or accept executable policy from model
+output.
+
 The browser submits a complete typed configuration to an authenticated
 control-plane API. It must not connect directly to the Python runtime or be
 treated as an authority boundary. The API must authenticate the operator,
