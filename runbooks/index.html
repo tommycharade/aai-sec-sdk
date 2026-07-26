@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/releasing/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/runbooks/">
       
       
-        <link rel="prev" href="../contributing/">
+        <link rel="prev" href="../security-model/">
       
       
-        <link rel="next" href="../critical-adopter-review-2026-07-25/">
+        <link rel="next" href="../testing/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Releasing - Agentic AI Security SDK</title>
+        <title>Operational runbooks - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#releasing" class="md-skip">
+        <a href="#operational-runbooks" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Releasing
+              Operational runbooks
             
           </span>
         </div>
@@ -340,10 +340,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../runbooks/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operational runbooks
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -359,6 +386,147 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#common-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#emergency-stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Emergency stop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#audit-failure-full-or-corruption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit failure, full, or corruption
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#timed-out-worker-saturation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timed-out worker saturation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reconciliation-and-uncertain-side-effects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reconciliation and uncertain side effects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#credential-provider-outage-or-scope-mismatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Credential provider outage or scope mismatch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#policy-or-approval-outage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy or approval outage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#idempotency-store-outage-or-corruption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Idempotency-store outage or corruption
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isolation-attestation-failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Isolation-attestation failure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rotation-and-evidence-preservation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotation and evidence preservation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tabletop-exercise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tabletop exercise
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -583,37 +751,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Releasing
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
         
   
   
@@ -629,65 +770,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#stable-release-checklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stable-release checklist
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#supply-chain-boundaries" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Supply-chain boundaries
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Supply-chain boundaries">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#standalone-adopter-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Standalone adopter verification
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -746,10 +828,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#stable-release-checklist" class="md-nav__link">
+  <a href="#common-rules" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Stable-release checklist
+        Common rules
       
     </span>
   </a>
@@ -757,30 +839,112 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#supply-chain-boundaries" class="md-nav__link">
+  <a href="#emergency-stop" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Supply-chain boundaries
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Supply-chain boundaries">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#standalone-adopter-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Standalone adopter verification
+        Emergency stop
       
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#audit-failure-full-or-corruption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit failure, full, or corruption
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#timed-out-worker-saturation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timed-out worker saturation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reconciliation-and-uncertain-side-effects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reconciliation and uncertain side effects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#credential-provider-outage-or-scope-mismatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Credential provider outage or scope mismatch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#policy-or-approval-outage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy or approval outage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#idempotency-store-outage-or-corruption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Idempotency-store outage or corruption
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isolation-attestation-failure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Isolation-attestation failure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rotation-and-evidence-preservation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotation and evidence preservation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tabletop-exercise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tabletop exercise
+      
+    </span>
+  </a>
   
 </li>
       
@@ -804,83 +968,146 @@
   
 
 
-<h1 id="releasing">Releasing</h1>
-<h2 id="stable-release-checklist">Stable-release checklist</h2>
-<p>The <code>1.x</code> compatibility policy follows Semantic Versioning: public API
-breaking changes require a major version, and every breaking change must be
-called out in <code>CHANGELOG.md</code> with a migration note. Python 3.11, 3.12, and
-3.13 are the supported CI versions. Security fixes are backported only to the
-latest supported release line.</p>
-<ul>
-<li>[ ] <code>make check</code> passes on the release commit.</li>
-<li>[ ] <code>make mutation</code> passes within its declared bound and its raw evidence
-      proves &gt;=80% overall, &gt;=75% per component, 100% critical mutants, and
-      zero timeout/suspicious/skipped/not-checked results; retain the artifact.</li>
-<li>[ ] <code>make package-check</code> builds and validates wheel and source distributions.</li>
-<li>[ ] <code>make security-check</code> reports no known dependency vulnerabilities.</li>
-<li>[ ] <code>requirements-ci.txt</code> and <code>requirements-docs.txt</code> are reviewed when
-      direct toolchain versions change; direct inputs are exact-pinned.</li>
-<li>[ ] <code>requirements-build.txt</code> matches the exact PEP 517 build requirements.</li>
-<li>[ ] <code>LICENSE</code> and <code>NOTICE</code> are present in both distributions.</li>
-<li>[ ] <code>CHANGELOG.md</code> describes user-visible and security-relevant changes.</li>
-<li>[ ] Public API and migration notes are up to date.</li>
-<li>[ ] Security regressions and known limitations are documented.</li>
-<li>[ ] The release is tagged from a clean, reviewed commit.</li>
-<li>[ ] The package is published through trusted CI credentials, not a developer workstation token.</li>
-<li>[ ] Release artifacts and checksums are retained.</li>
-<li>[ ] An independently verified SBOM is generated and hash-bound for each
-      artifact; dependency provenance is attached by trusted CI.</li>
-<li>[ ] GitHub Actions provenance attestation is present for release artifacts.</li>
-<li>[ ] Wheel installation is tested in clean Python 3.11, 3.12, and 3.13
-      environments.</li>
-<li>[ ] The compatibility policy and migration notes are published.</li>
-<li>[ ] At least two maintainers/code owners review security-sensitive changes.</li>
-</ul>
-<p>Do not describe a release as a security certification. The SDK provides implementation controls; adopters remain responsible for configuring policy, identity, infrastructure, and domain authorization.</p>
-<h2 id="supply-chain-boundaries">Supply-chain boundaries</h2>
-<p>The repository exact-pins direct development, documentation, and PEP 517 build
-inputs and audits all three input files with <code>pip-audit</code>. Release CI builds the
-wheel and source archive, then installs each actual artifact into a fresh
-virtual environment before generating one CycloneDX SBOM per artifact. It also
-writes SHA-256 checksums and requests GitHub provenance attestations for the
-same artifact subjects. Exact hashes for every platform wheel are not
-committed because the supported Python matrix selects different transitive
-wheels; artifact SBOMs, checksums, and provenance are the release evidence.
-PyPI publication, if enabled, must use repository trusted publishing and never
-a developer workstation token.</p>
-<p>The build job creates checksums with <code>scripts/write_checksums.py</code>, excluding the
-checksum file itself and using artifact-local filenames. A separate clean
-verification job consumes the uploaded bundle.</p>
-<p><code>verify_release_evidence.py</code> is run in a separate clean-verification job. It
-independently checks that every wheel and source
-archive has a matching SHA-256 entry, a matching SBOM manifest entry, and an
-SBOM containing the artifact filename and digest. It also checks the clean
-checkout commit and exact tag against <code>RELEASE-METADATA.json</code>. The workflow
-then runs <code>gh attestation verify</code> for every subject in that same clean job,
-constraining the signer workflow and source ref. These checks verify artifact
-identity and provenance bindings; they do not certify the package's runtime
-behavior or external provider deployments.</p>
-<h3 id="standalone-adopter-verification">Standalone adopter verification</h3>
-<p>Adopters can verify downloaded release evidence without trusting the build
-workspace:</p>
-<pre><code class="language-bash">git clone https://github.com/tommycharade/aai-sec-sdk.git
-cd aai-sec-sdk
-git checkout --detach vX.Y.Z
-# Copy the published release-evidence bundle into ./dist first.
-python scripts/verify_release_evidence.py dist \
-  --commit &quot;$(git rev-parse HEAD)&quot; --tag &quot;vX.Y.Z&quot;
-gh attestation verify dist/*.whl --repo tommycharade/aai-sec-sdk \
-  --signer-workflow tommycharade/aai-sec-sdk/.github/workflows/release-artifacts.yml \
-  --source-ref vX.Y.Z
-</code></pre>
-<p>Do not use <code>--allow-untagged</code> for a published release; that option is only for
-local pre-tag verification.</p>
-<p><code>make check</code> validates the mutation contract; <code>make mutation</code> executes the
-mutmut run through <code>scripts/run_mutation_check.py</code>, enforces the declared 80%
-killed-mutant threshold, and fails on stale/missing/truncated/timeout,
-unparseable, or other-commit evidence. The run is bounded to two workers and
-120 seconds. No mutation score is claimed unless that command has completed
-successfully for the commit.</p>
+<h1 id="operational-runbooks">Operational runbooks</h1>
+<p>These runbooks are for operators deploying the SDK with real policy, identity,
+approval, audit, idempotency, and isolation services. The SDK exposes signals
+and fail-closed outcomes; it does not operate customer infrastructure. Use
+synthetic identifiers in tickets and examples, and preserve restricted
+evidence according to the organisation's incident policy.</p>
+<h2 id="common-rules">Common rules</h2>
+<ol>
+<li>Freeze consequential retries while the outcome is <code>TIMED_OUT</code>, <code>UNKNOWN</code>,
+   <code>FAILED</code>, or <code>EXECUTED_UNRECORDED</code>.</li>
+<li>Do not bypass the runtime, disable audit, broaden credentials, or replay a
+   proposal to “see what happened”.</li>
+<li>Record the request ID, operation key, tool, tenant, runtime health snapshot,
+   and relevant audit hashes—never credentials or raw arguments containing
+   secrets.</li>
+<li>Escalate to the security owner when integrity, identity, or isolation is
+   uncertain.</li>
+</ol>
+<h2 id="emergency-stop">Emergency stop</h2>
+<p><strong>Detect:</strong> the kill switch is active, an incident commander declares an
+emergency, or <code>health()</code> shows unsafe worker saturation.</p>
+<p><strong>Safe actions:</strong> activate the application-owned stop control; prevent new
+admissions; preserve the last audit hash and health snapshot; reconcile
+already-started side effects through the domain system; notify the incident
+commander.</p>
+<p><strong>Unsafe actions:</strong> deleting the audit file, restarting repeatedly to clear
+worker state, rotating away evidence, or re-enabling execution without a
+recorded approval.</p>
+<p><strong>Recover:</strong> verify policy, credentials, audit replication, idempotency, and
+isolation health; run a synthetic read-only probe; obtain two-person approval;
+then clear the stop control and monitor gradually.</p>
+<p><strong>Escalate:</strong> security owner and service owner for any side effect that started
+before the stop.</p>
+<h2 id="audit-failure-full-or-corruption">Audit failure, full, or corruption</h2>
+<p><strong>Detect:</strong> <code>AuditReplicationError</code>, an <code>EXECUTED_UNRECORDED</code> result, a full
+<code>JsonlAuditSink</code>, <code>verify() is False</code>, or exporter health failure.</p>
+<p><strong>Safe actions:</strong> stop consequential actions; retain the local file and lock
+file; copy it to restricted evidence storage; verify the last known hash;
+restore the remote exporter or rotate only after preserving the chain.</p>
+<p><strong>Unsafe actions:</strong> truncating a corrupt file, ignoring a negative remote
+acknowledgement, or treating local JSONL as immutable forensic evidence.</p>
+<p><strong>Recover:</strong> repair the collector or storage quota, replay only from a
+verified, deduplicating export process, and confirm remote acknowledgement.</p>
+<p><strong>Escalate:</strong> security and compliance owners when an event cannot be proven
+replicated or the chain has been altered. Local JSONL is not WORM storage.</p>
+<h2 id="timed-out-worker-saturation">Timed-out worker saturation</h2>
+<p><strong>Detect:</strong> <code>health()</code> reports timed-out workers at capacity, increasing
+per-operation timeout counters, or an old lingering worker.</p>
+<p><strong>Safe actions:</strong> stop new consequential work; wait for cooperative workers;
+move non-cooperative work to an isolated process; inspect policy/provider
+latency and resource limits.</p>
+<p><strong>Unsafe actions:</strong> raising <code>max_timed_out_workers</code> during an incident,
+force-retrying an uncertain side effect, or assuming a Python thread stopped.</p>
+<p><strong>Recover:</strong> drain workers, repair the dependency, run bounded probes, and
+resume only below the documented alert threshold.</p>
+<p><strong>Escalate:</strong> service owner for repeated saturation or any non-cooperative
+handler that can commit external state.</p>
+<p>Action-budget leases are released by an atomic, single-use guard. Timeout,
+reconciliation, audit, and worker-exit callbacks may race, but only the first
+callback can release the lease; duplicate callbacks cannot decrement active or
+fan-out counters below zero. Do not repair counters manually or restart merely
+to clear a suspected duplicate release. Capture the request ID and runtime
+health snapshot, and escalate if counters do not return to zero after all
+workers exit.</p>
+<h2 id="reconciliation-and-uncertain-side-effects">Reconciliation and uncertain side effects</h2>
+<p><strong>Detect:</strong> <code>TIMED_OUT</code> with <code>STILL_RUNNING</code>, <code>UNKNOWN</code>, <code>FAILED</code>, or an
+<code>EXECUTED_UNRECORDED</code> result.</p>
+<p><strong>Safe actions:</strong> query the domain idempotency/reconciliation system using the
+stable operation key; compare the exact action fingerprint; record the
+outcome; retry only after <code>CONFIRMED_ABSENT</code> or an explicit domain override.</p>
+<p><strong>Unsafe actions:</strong> retrying with a new proposal ID, changing arguments under
+the same operation key, or interpreting a live worker as cancelled.</p>
+<p><strong>Recover:</strong> persist <code>COMPLETED</code> or <code>UNCERTAIN</code> in the idempotency store and
+follow the domain compensating-action procedure.</p>
+<p><strong>Escalate:</strong> domain owner for payments, messages, deletion, or other
+irreversible effects.</p>
+<h2 id="credential-provider-outage-or-scope-mismatch">Credential provider outage or scope mismatch</h2>
+<p><strong>Detect:</strong> credential timeout, provider error, expired <code>ProviderToken</code>, or
+tool/resource scope mismatch.</p>
+<p><strong>Safe actions:</strong> deny the action; verify provider health and attestation
+configuration; rotate affected credentials through the normal IAM process.</p>
+<p><strong>Unsafe actions:</strong> accepting a raw token, broadening the requested scope, or
+using a cached credential outside its expiry.</p>
+<p><strong>Recover:</strong> restore the provider, validate a synthetic least-privilege token,
+and resume with normal policy and approval checks.</p>
+<p><strong>Escalate:</strong> IAM and security owners for any scope mismatch or suspected
+credential exposure.</p>
+<h2 id="policy-or-approval-outage">Policy or approval outage</h2>
+<p><strong>Detect:</strong> timeout, transport failure, malformed decision, stale policy
+version, or approval rejection.</p>
+<p><strong>Safe actions:</strong> fail closed; preserve the request ID and policy provenance;
+check service health and deployment configuration.</p>
+<p><strong>Unsafe actions:</strong> replacing the service with an allow-all callback, reusing
+an expired approval, or approving modified arguments.</p>
+<p><strong>Recover:</strong> restore the service, verify the current policy version, and issue
+a new action-bound approval if required.</p>
+<p><strong>Escalate:</strong> policy owner for unexpected allow/deny behavior or provenance
+drift.</p>
+<p>Approval consumption has three states: <code>CONSUMED</code>, <code>NOT_CONSUMED</code>, and
+<code>UNKNOWN</code>. A timeout or transport failure after an approval request may be
+<code>UNKNOWN</code>; do not retry the side effect or assume the approval remains unused.
+Inspect the action-bound audit event (<code>approval_id</code>, <code>approval_action_hash</code>,
+<code>approval_outcome</code>) and reconcile with the approval service before deciding
+whether a new approval is required. If emergency stop occurs after a provider
+reports <code>CONSUMED</code>, the runtime records <code>approval_stop_after_consume=true</code> and
+does not start the handler; treat that approval as consumed until the provider
+proves otherwise.</p>
+<h2 id="idempotency-store-outage-or-corruption">Idempotency-store outage or corruption</h2>
+<p><strong>Detect:</strong> claim failure, collision, unavailable store, or
+<code>EXECUTED_UNRECORDED</code> after terminal persistence failure.</p>
+<p><strong>Safe actions:</strong> deny new required-idempotency actions; preserve operation
+keys and fingerprints; inspect the store without mutating records.</p>
+<p><strong>Unsafe actions:</strong> deleting <code>IN_PROGRESS</code> records, generating replacement
+keys, or replaying a side effect without reconciliation.</p>
+<p><strong>Recover:</strong> restore a transactional store, verify claims and fingerprints,
+reconcile uncertain operations, then run a concurrent claim test.</p>
+<p><strong>Escalate:</strong> data and domain owners when state cannot be reconstructed.</p>
+<h2 id="isolation-attestation-failure">Isolation-attestation failure</h2>
+<p><strong>Detect:</strong> missing, expired, replayed, wrong-profile, wrong-tenant, or
+unverifiable attestation.</p>
+<p><strong>Safe actions:</strong> deny execution; quarantine the workload; inspect verifier and
+platform evidence; preserve the nonce and request ID.</p>
+<p><strong>Unsafe actions:</strong> setting <code>isolated=True</code>, accepting a stale attestation, or
+falling back to an in-process handler for hostile code.</p>
+<p><strong>Recover:</strong> repair the platform verifier/sandbox, issue fresh bound evidence,
+and run a synthetic restricted workload.</p>
+<p><strong>Escalate:</strong> platform security owner for any forged or downgraded evidence.</p>
+<h2 id="rotation-and-evidence-preservation">Rotation and evidence preservation</h2>
+<p>Rotate signing keys, IAM credentials, policy versions, and audit destinations
+through an approved change. Keep old verification material available for the
+retention period. Before rotation, capture the last verified event hash and
+remote export receipt; after rotation, run a synthetic append, verification,
+and export test. Preserve original files read-only, access logs, deployment
+manifests, health snapshots, and relevant provider responses. Do not include
+secrets in incident artifacts.</p>
+<h2 id="tabletop-exercise">Tabletop exercise</h2>
+<p>At least once per release line, simulate a remote audit outage during a timed
+handler and an idempotency-store failure. The expected result is no blind
+retry, a fail-closed runtime outcome, preserved local evidence, an operator
+alert, and a documented reconciliation decision.</p>
 
 
 

@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/releasing/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/production-readiness/">
       
       
-        <link rel="prev" href="../contributing/">
+        <link rel="prev" href="../testing/">
       
       
-        <link rel="next" href="../critical-adopter-review-2026-07-25/">
+        <link rel="next" href="../architecture/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Releasing - Agentic AI Security SDK</title>
+        <title>Production readiness - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#releasing" class="md-skip">
+        <a href="#production-readiness" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Releasing
+              Production readiness
             
           </span>
         </div>
@@ -394,10 +394,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../production-readiness/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production readiness
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -413,6 +440,142 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#current-recommendation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current recommendation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capability-and-responsibility-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Capability and responsibility matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-controls-by-workload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required controls by workload
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Required controls by workload">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#low-risk-read-only-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Low-risk read-only actions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#credentialed-or-state-changing-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Credentialed or state-changing actions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hostile-or-model-generated-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hostile or model-generated code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#release-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-and-retry-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure and retry rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adoption-evidence-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adoption evidence checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commercial-edition-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commercial edition boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -583,37 +746,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Releasing
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
         
   
   
@@ -629,65 +765,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#stable-release-checklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stable-release checklist
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#supply-chain-boundaries" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Supply-chain boundaries
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Supply-chain boundaries">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#standalone-adopter-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Standalone adopter verification
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -746,10 +823,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#stable-release-checklist" class="md-nav__link">
+  <a href="#current-recommendation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Stable-release checklist
+        Current recommendation
       
     </span>
   </a>
@@ -757,22 +834,55 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#supply-chain-boundaries" class="md-nav__link">
+  <a href="#capability-and-responsibility-matrix" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Supply-chain boundaries
+        Capability and responsibility matrix
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Supply-chain boundaries">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-controls-by-workload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required controls by workload
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Required controls by workload">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#standalone-adopter-verification" class="md-nav__link">
+  <a href="#low-risk-read-only-actions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Standalone adopter verification
+        Low-risk read-only actions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#credentialed-or-state-changing-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Credentialed or state-changing actions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hostile-or-model-generated-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hostile or model-generated code
       
     </span>
   </a>
@@ -781,6 +891,50 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#release-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-and-retry-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure and retry rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adoption-evidence-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adoption evidence checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commercial-edition-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commercial edition boundary
+      
+    </span>
+  </a>
   
 </li>
       
@@ -804,83 +958,158 @@
   
 
 
-<h1 id="releasing">Releasing</h1>
-<h2 id="stable-release-checklist">Stable-release checklist</h2>
-<p>The <code>1.x</code> compatibility policy follows Semantic Versioning: public API
-breaking changes require a major version, and every breaking change must be
-called out in <code>CHANGELOG.md</code> with a migration note. Python 3.11, 3.12, and
-3.13 are the supported CI versions. Security fixes are backported only to the
-latest supported release line.</p>
+<h1 id="production-readiness">Production readiness</h1>
+<p>This page is the adoption decision guide for the current <code>1.x</code> SDK. It is
+explicit about what the open-source runtime enforces locally and what must be
+supplied and verified by a deployment.</p>
+<h2 id="current-recommendation">Current recommendation</h2>
+<p>The SDK is currently suitable only for low-risk pilot use with trusted handlers
+and read-only actions when the deployment supplies authenticated policy,
+approval, IAM, audit, idempotency, and isolation infrastructure.</p>
+<p>The current source-level mutation gate passes: 1,974/2,372 mutants killed
+(83.22%), every declared component is above threshold, and all 205 exact
+critical-symbol mutants are killed with independently verified metadata. High-
+impact production use remains conditional on deployment evidence and durable
+adapter validation; the source score is not a security certification.</p>
+<p>It is not, by itself, a sufficient security boundary for payments, destructive
+operations, hostile or model-generated code, or regulated workloads.</p>
+<p>The SDK is a security-runtime framework. It is not an LLM safety oracle, IAM
+replacement, sandbox, compliance certification, business authorization system,
+or guarantee that an external side effect can be cancelled after a timeout.</p>
+<h2 id="capability-and-responsibility-matrix">Capability and responsibility matrix</h2>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>SDK provides</th>
+<th>Deployment must provide</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tool authorization</td>
+<td>Typed runtime boundary, deny-by-default checks, policy and approval contracts</td>
+<td>Authenticated policy and approval services, domain authorization</td>
+</tr>
+<tr>
+<td>Identity and tenancy</td>
+<td>Application-owned context, principal/resource consistency checks</td>
+<td>Authentication, principal lifecycle, tenant policy</td>
+</tr>
+<tr>
+<td>Credentials</td>
+<td>Scoped credential contracts, provider-token attestation checks, secret-use boundary</td>
+<td>IAM enforcement, token service, rotation, revocation, provider-side scope proof</td>
+</tr>
+<tr>
+<td>Idempotency</td>
+<td>Stable operation keys, collision checks, atomic store protocol, safe in-memory reference</td>
+<td>Transactional multi-process store, retention, recovery, domain reconciliation</td>
+</tr>
+<tr>
+<td>Timeouts</td>
+<td>Phase-specific outcomes, bounded waits, lifecycle accounting, health signals</td>
+<td>Cooperative cancellation or isolated workers, dependency capacity and alerting</td>
+</tr>
+<tr>
+<td>Isolation</td>
+<td>Typed nonce-bound attestation contract and verifier interface</td>
+<td>Real container, microVM, WASM, or equivalent sandbox and trusted verifier</td>
+</tr>
+<tr>
+<td>Audit</td>
+<td>Redaction, hash-chain verification, fsync/local sink, remote exporter contract</td>
+<td>Immutable/WORM retention, access control, replication, legal hold, monitoring</td>
+</tr>
+<tr>
+<td>Supply chain</td>
+<td>Checksums, artifact SBOMs, provenance verification workflow</td>
+<td>Promotion policy, independent verification, registry controls, release approval</td>
+</tr>
+</tbody>
+</table>
+<h2 id="required-controls-by-workload">Required controls by workload</h2>
+<h3 id="low-risk-read-only-actions">Low-risk read-only actions</h3>
+<p>At minimum:</p>
 <ul>
-<li>[ ] <code>make check</code> passes on the release commit.</li>
-<li>[ ] <code>make mutation</code> passes within its declared bound and its raw evidence
-      proves &gt;=80% overall, &gt;=75% per component, 100% critical mutants, and
-      zero timeout/suspicious/skipped/not-checked results; retain the artifact.</li>
-<li>[ ] <code>make package-check</code> builds and validates wheel and source distributions.</li>
-<li>[ ] <code>make security-check</code> reports no known dependency vulnerabilities.</li>
-<li>[ ] <code>requirements-ci.txt</code> and <code>requirements-docs.txt</code> are reviewed when
-      direct toolchain versions change; direct inputs are exact-pinned.</li>
-<li>[ ] <code>requirements-build.txt</code> matches the exact PEP 517 build requirements.</li>
-<li>[ ] <code>LICENSE</code> and <code>NOTICE</code> are present in both distributions.</li>
-<li>[ ] <code>CHANGELOG.md</code> describes user-visible and security-relevant changes.</li>
-<li>[ ] Public API and migration notes are up to date.</li>
-<li>[ ] Security regressions and known limitations are documented.</li>
-<li>[ ] The release is tagged from a clean, reviewed commit.</li>
-<li>[ ] The package is published through trusted CI credentials, not a developer workstation token.</li>
-<li>[ ] Release artifacts and checksums are retained.</li>
-<li>[ ] An independently verified SBOM is generated and hash-bound for each
-      artifact; dependency provenance is attached by trusted CI.</li>
-<li>[ ] GitHub Actions provenance attestation is present for release artifacts.</li>
-<li>[ ] Wheel installation is tested in clean Python 3.11, 3.12, and 3.13
-      environments.</li>
-<li>[ ] The compatibility policy and migration notes are published.</li>
-<li>[ ] At least two maintainers/code owners review security-sensitive changes.</li>
+<li>explicit tool allow-list;</li>
+<li>authenticated principal and tenant context;</li>
+<li>argument and resource validation;</li>
+<li>bounded steps, time, concurrency, rate, fan-out, and cost;</li>
+<li>redacted audit sink;</li>
+<li>tested denial and timeout handling.</li>
 </ul>
-<p>Do not describe a release as a security certification. The SDK provides implementation controls; adopters remain responsible for configuring policy, identity, infrastructure, and domain authorization.</p>
-<h2 id="supply-chain-boundaries">Supply-chain boundaries</h2>
-<p>The repository exact-pins direct development, documentation, and PEP 517 build
-inputs and audits all three input files with <code>pip-audit</code>. Release CI builds the
-wheel and source archive, then installs each actual artifact into a fresh
-virtual environment before generating one CycloneDX SBOM per artifact. It also
-writes SHA-256 checksums and requests GitHub provenance attestations for the
-same artifact subjects. Exact hashes for every platform wheel are not
-committed because the supported Python matrix selects different transitive
-wheels; artifact SBOMs, checksums, and provenance are the release evidence.
-PyPI publication, if enabled, must use repository trusted publishing and never
-a developer workstation token.</p>
-<p>The build job creates checksums with <code>scripts/write_checksums.py</code>, excluding the
-checksum file itself and using artifact-local filenames. A separate clean
-verification job consumes the uploaded bundle.</p>
-<p><code>verify_release_evidence.py</code> is run in a separate clean-verification job. It
-independently checks that every wheel and source
-archive has a matching SHA-256 entry, a matching SBOM manifest entry, and an
-SBOM containing the artifact filename and digest. It also checks the clean
-checkout commit and exact tag against <code>RELEASE-METADATA.json</code>. The workflow
-then runs <code>gh attestation verify</code> for every subject in that same clean job,
-constraining the signer workflow and source ref. These checks verify artifact
-identity and provenance bindings; they do not certify the package's runtime
-behavior or external provider deployments.</p>
-<h3 id="standalone-adopter-verification">Standalone adopter verification</h3>
-<p>Adopters can verify downloaded release evidence without trusting the build
-workspace:</p>
-<pre><code class="language-bash">git clone https://github.com/tommycharade/aai-sec-sdk.git
-cd aai-sec-sdk
-git checkout --detach vX.Y.Z
-# Copy the published release-evidence bundle into ./dist first.
-python scripts/verify_release_evidence.py dist \
-  --commit &quot;$(git rev-parse HEAD)&quot; --tag &quot;vX.Y.Z&quot;
-gh attestation verify dist/*.whl --repo tommycharade/aai-sec-sdk \
-  --signer-workflow tommycharade/aai-sec-sdk/.github/workflows/release-artifacts.yml \
-  --source-ref vX.Y.Z
+<h3 id="credentialed-or-state-changing-actions">Credentialed or state-changing actions</h3>
+<p>Add:</p>
+<ul>
+<li>a transactional <code>IdempotencyStore</code>;</li>
+<li>stable caller-supplied <code>operation_key</code> values;</li>
+<li>action-bound approvals for high-impact operations;</li>
+<li>provider-side IAM scope verification;</li>
+<li>remote immutable audit export;</li>
+<li>reconciliation procedures for every uncertain outcome;</li>
+<li>operational alerts for worker saturation and dependency outages.</li>
+</ul>
+<h3 id="hostile-or-model-generated-code">Hostile or model-generated code</h3>
+<p>Add all of the above plus:</p>
+<ul>
+<li><code>requires_isolation=True</code>;</li>
+<li>a trusted, nonce-bound <code>IsolationVerifier</code>;</li>
+<li>a real OS/container/microVM/WASM sandbox;</li>
+<li>restricted filesystem, network, identity, and resource policy;</li>
+<li>no direct credential exposure to the worker;</li>
+<li>adversarial sandbox escape and downgrade tests.</li>
+</ul>
+<p>The included <code>SubprocessToolHandler</code> is only a no-shell process boundary. A
+Python callable or <code>isolated=True</code> attribute is not isolation evidence.</p>
+<h2 id="release-evidence">Release evidence</h2>
+<p>Before adopting a release, run:</p>
+<pre><code class="language-bash">make check
+make mutation
+make package-check
+make security-check
 </code></pre>
-<p>Do not use <code>--allow-untagged</code> for a published release; that option is only for
-local pre-tag verification.</p>
-<p><code>make check</code> validates the mutation contract; <code>make mutation</code> executes the
-mutmut run through <code>scripts/run_mutation_check.py</code>, enforces the declared 80%
-killed-mutant threshold, and fails on stale/missing/truncated/timeout,
-unparseable, or other-commit evidence. The run is bounded to two workers and
-120 seconds. No mutation score is claimed unless that command has completed
-successfully for the commit.</p>
+<p>Expected evidence includes passing tests and coverage, a successful bounded
+mutation run whose raw evidence names the complete security scope, aggregate
+and per-component scores, critical-mutant results, negative controls, commit,
+and tool, clean wheel and source builds, legal metadata, dependency audits,
+artifact-matched checksums and complete per-artifact SBOMs, verified
+provenance, and a clean reviewed release commit/tag. The artifact build and
+independent clean verification are separate release steps.</p>
+<p><code>make check</code> validates the mutation contract and normal quality gates. The
+actual mutation score is established only by a successful <code>make mutation</code> run.
+A mutation score is assurance evidence, not a security certification; the
+score must never be copied between commits or scopes.</p>
+<h2 id="failure-and-retry-rules">Failure and retry rules</h2>
+<p>Do not blindly retry a result with <code>timeout_phase=HANDLER</code> or
+<code>RECONCILIATION</code>, <code>side_effect_state=UNCERTAIN</code>, reconciliation state
+<code>STILL_RUNNING</code>/<code>UNKNOWN</code>/<code>FAILED</code>, <code>EXECUTED_UNRECORDED</code>, idempotency state
+<code>IN_PROGRESS</code>/<code>UNCERTAIN</code>/<code>EXPIRED</code>, audit replication failure, or missing,
+expired, or unverifiable isolation or credential attestation.</p>
+<p>Use the stable operation key and the domain reconciliation system to determine
+whether the side effect completed. See <a href="../runbooks/">Operational runbooks</a>.</p>
+<h2 id="adoption-evidence-checklist">Adoption evidence checklist</h2>
+<p>Before production approval, retain:</p>
+<ul>
+<li>threat model and data-flow review;</li>
+<li>policy, approval, and IAM contract tests;</li>
+<li>durable idempotency restart and concurrency tests;</li>
+<li>isolation attestation and sandbox escape tests;</li>
+<li>remote audit replication and corruption-recovery tests;</li>
+<li>worker saturation and emergency-stop tabletop evidence;</li>
+<li>release checksums, SBOM, and provenance verification output;</li>
+<li>incident contacts, escalation rules, retention requirements, and rollback plan.</li>
+</ul>
+<p>Passing repository checks does not replace these deployment acceptance artifacts.</p>
+<h2 id="commercial-edition-boundary">Commercial edition boundary</h2>
+<p>The Apache-2.0 core should remain open and usable. Commercial value belongs in
+operational assurance and managed infrastructure: hosted policy and approval,
+durable idempotency, immutable audit and SIEM integrations, managed IAM and
+attestation, hardened sandbox execution, fleet-wide emergency stop and health
+dashboards, compliance evidence, support SLAs, and maintained enterprise
+adapters.</p>
+<p>Paid functionality must not be required for the core’s fail-closed behavior,
+public contracts, security fixes, or documentation.</p>
 
 
 

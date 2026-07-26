@@ -16,7 +16,7 @@
         <link rel="prev" href="../getting-started/">
       
       
-        <link rel="next" href="../architecture/">
+        <link rel="next" href="../runbooks/">
       
       
         
@@ -419,10 +419,146 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#timeout-and-retry-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timeout and retry semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#idempotency-and-restart-safety" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Idempotency and restart safety
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isolation-attestation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Isolation attestation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#production-readiness-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Production readiness checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-adapters-and-process-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment adapters and process boundaries
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operational runbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../production-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -616,6 +752,33 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -686,6 +849,61 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#timeout-and-retry-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timeout and retry semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#idempotency-and-restart-safety" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Idempotency and restart safety
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isolation-attestation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Isolation attestation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#production-readiness-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Production readiness checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-adapters-and-process-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment adapters and process boundaries
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -709,6 +927,23 @@
 <h1 id="security-model">Security model</h1>
 <h2 id="trust-boundary">Trust boundary</h2>
 <p>Model output is untrusted input. Tool names, arguments, retrieved text, memory, tool results, and inter-agent messages are also untrusted. The SDK’s security boundary sits between a proposed action and the side effect that would execute it.</p>
+<p>The boundary is represented explicitly by <code>ActionFacts</code> -&gt;
+<code>PreExecutionAuthorizer</code> -&gt; <code>ExecutionPermit</code> -&gt; <code>ExecutionLifecycle</code>. Facts
+are immutable host-derived values, the authorizer is the centralized final
+decision point, and lifecycle is the permit-gated handler invocation path.
+Permit issuer identity is kept in an internal registry rather than permit
+fields, so <code>object.__new__</code> objects and copied fields cannot authorize a
+handler call. This protects the SDK boundary from accidental forgery; code
+with authority to modify the running Python interpreter remains trusted.</p>
+<p>Bounded provider and handler waits are admitted through
+<code>BoundedOperationTracker</code>. A timeout retains its worker slot until completion;
+<code>BoundedOperationExecutor</code> emits the typed timeout phase, while
+<code>ActionBudgetLease</code> prevents timeout and worker-exit callbacks from releasing
+the same action budget twice.
+The runtime does not expose a public operation that invokes a registered
+handler from a proposal without a permit. This is an in-process architectural
+guarantee, not a sandbox claim: trusted application code can still call its
+own handler directly outside the SDK.</p>
 <h2 id="required-decision-inputs">Required decision inputs</h2>
 <p>An authorization decision should include, at minimum:</p>
 <ul>
@@ -728,13 +963,22 @@ trusted identity, policy, and resource extraction. Security decisions are
 observable through the configured audit sink. The default audit sink is an
 in-memory development chain, not durable forensic storage.</p>
 <p>The SDK does not guarantee that every prompt injection is detected, that
-business authorization can be inferred automatically, that an in-flight
-handler can be cancelled by <code>stop()</code>, or that infrastructure such as IAM,
-network controls, timeouts, and sandboxes is unnecessary.</p>
-<p>Handlers may return arbitrary application values; the core does not impose an
-output schema, output-size limit, or result-content policy. Applications must
-validate and redact tool results before returning them to a model or exporting
-them to another system.</p>
+business authorization can be inferred automatically, or that a non-cooperative
+handler can be forcibly cancelled by <code>stop()</code>. Runtime operation waits are
+bounded, but deployment infrastructure must still provide its own IAM,
+network policy, durable audit controls, and OS/container sandboxing.</p>
+<p>For consequential deployments, wrap the local sink in <code>ReplicatedAuditSink</code>
+with a required <code>AuditExporter</code>. The exporter must acknowledge only after
+durable remote acceptance; export failure raises and the runtime fails closed.
+<code>JsonlAuditSink</code> remains a local recovery/evidence adapter, not WORM or
+tamper-proof forensic storage. Follow the <a href="../runbooks/">operational runbooks</a>
+for outages, corruption, rotation, and evidence preservation.</p>
+<p>Handlers may return arbitrary application values, but the runtime applies the
+optional tool output normalizer, performs key and common-token content
+redaction, and
+enforces the configured serialized output-size limit before returning a result.
+Applications remain responsible for semantic output schemas and for handling
+untrusted tool content before sending it to a model.</p>
 <h2 id="credential-brokering-threat-model">Credential-brokering threat model</h2>
 <p>Credential minting is a privileged operation. The runtime therefore invokes a
 <code>CredentialBroker</code> only after argument validation, resource extraction, live
@@ -746,7 +990,92 @@ tenant, or authorization.</p>
 not included in <code>ActionProposal</code>, <code>ExecutionResult</code>, or audit payloads. A
 missing broker, broker exception, expired credential, or scope mismatch fails
 closed and the handler is not called. Production implementations should use
-audience-bound provider tokens and avoid returning reusable raw secrets.</p>
+audience-bound provider tokens and avoid returning reusable raw secrets. The
+included <code>TokenCredentialBroker</code> wraps an authenticated token-service callback;
+the callback must return a <code>ProviderToken</code> scope attestation; the SDK rejects a
+bare string and mismatched tool/resource scope. The provider remains
+responsible for proving that the attested scope is enforced by its IAM system.
+An in-process callback cannot prevent a deliberately malicious trusted handler
+from copying a secret; process/container isolation is required for hostile code.</p>
+<h2 id="timeout-and-retry-semantics">Timeout and retry semantics</h2>
+<p>The runtime timeout bounds policy evaluation, approval consumption, credential
+minting, audit persistence, handler invocation, and reconciliation. A timeout
+in policy, approval, or credential minting denies without running the handler.
+A handler timeout returns <code>TIMED_OUT</code> and
+the runtime retains the concurrency slot until the worker exits. The side
+effect remains uncertain, so callers must reconcile before retrying. A
+reconciliation callback is evidence only while the original worker may still
+commit; it cannot make the immediate result final. High-impact and
+external-egress tools must be idempotent or declare a reconciliation
+callback. <code>ExecutionResult.reconciliation_state</code> is separate evidence: a
+callback cannot claim <code>CONFIRMED_COMPLETE</code> or <code>CONFIRMED_ABSENT</code> while the
+original worker remains capable of committing, and the runtime reports
+<code>STILL_RUNNING</code> instead. Callers must reconcile before retrying an uncertain
+operation.</p>
+<p>Every bounded phase reports its timeout phase through
+<code>ExecutionResult.timeout_phase</code>: policy, approval, credential, audit, handler,
+or reconciliation. Policy, approval, and credential timeouts have
+<code>handler_started=False</code> and <code>side_effect_state=NOT_STARTED</code>. Handler and
+reconciliation timeouts have <code>handler_started=True</code> and
+<code>side_effect_state=UNCERTAIN</code>; callers must not retry them without
+reconciliation. Audit timeout after a handler runs reports <code>AUDIT</code> while the
+side effect remains <code>EXECUTED</code>, because the uncertainty is in evidence rather
+than execution.</p>
+<h2 id="idempotency-and-restart-safety">Idempotency and restart safety</h2>
+<p>Idempotent tools require a stable caller-supplied <code>ActionProposal.operation_key</code>.
+The key is atomically bound to the exact action fingerprint, tenant, principal,
+tool, and resource IDs. A changed action under an existing key is denied. An
+<code>IdempotencyStore</code> implementation must provide atomic claims and persist
+completed/uncertain states; <code>InMemoryIdempotencyStore</code> is only a process-local
+reference implementation. Without a configured store, the runtime fails
+closed. If terminal persistence fails after execution, the runtime returns
+<code>EXECUTED_UNRECORDED</code> rather than claiming a durable success. The SDK does not
+claim restart or multi-process safety for local memory.
+<code>TerminalRecorder</code> owns lookup, identity collision checks, claim, terminal
+state persistence, and observable GC at the runtime boundary. Recording is
+valid only after the caller has claimed the key; missing-claim or transition
+errors remain fail closed.
+TTL applies to completed records. GC may remove expired completed records only;
+expired <code>IN_PROGRESS</code> and <code>UNCERTAIN</code> records are retained and surfaced as
+<code>EXPIRED</code> so expiry cannot become an unsafe replay path. GC returns an
+<code>IdempotencyGCReport</code> for metrics and audit evidence.</p>
+<h2 id="isolation-attestation">Isolation attestation</h2>
+<p><code>requires_isolation=True</code> does not accept a handler boolean or trust a Python
+attribute. The handler must provide a nonce-bound <code>IsolationAttestation</code>, and a
+configured trusted <code>IsolationVerifier</code> must validate its issuer, workload,
+profile, expiry, action binding, and capabilities. The verifier is the adapter
+boundary for containers, microVMs, WASM runtimes, or platform attestation.
+<code>SubprocessToolHandler</code> intentionally makes no isolation claim: it is a
+no-shell process boundary and must be deployed inside a real sandbox when
+handling hostile code.</p>
+<h2 id="production-readiness-checklist">Production readiness checklist</h2>
+<ul>
+<li>Use authenticated policy, approval, and IAM endpoints over HTTPS.</li>
+<li>Require <code>ProviderToken</code> attestations and test provider-side scope contracts.</li>
+<li>Treat in-process handlers as trusted; require <code>requires_isolation=True</code> for
+  hostile or model-generated code and deploy a real container/microVM/WASM
+  sandbox around the subprocess adapter.</li>
+<li>Export local audit events to encrypted, access-controlled WORM/SIEM storage.</li>
+<li>Alert on <code>GuardedRuntime.health()["timed_out_workers"]</code> before retrying
+  uncertain actions.</li>
+<li>Monitor the per-operation timeout counters in <code>GuardedRuntime.health()</code>;
+  policy, credential, audit, reconciliation, and handler workers all retain
+  lifecycle accounting until they exit.</li>
+<li>Configure rate, fan-out, cost, delegation, and action budgets per task.</li>
+<li>Run the release verification, SBOM, provenance, and compatibility checks
+  described in <code>releasing.md</code> before depending on a published version.</li>
+<li>Treat mutation evidence as commit- and scope-bound assurance: the checked
+  evidence must name the exact tool, score, commit, and complete 11-file security
+  scope. It is not portable evidence for another source revision.</li>
+</ul>
+<h2 id="deployment-adapters-and-process-boundaries">Deployment adapters and process boundaries</h2>
+<p><code>JsonlAuditSink</code>, HTTP OPA/Cedar and approval adapters, and
+<code>SubprocessToolHandler</code> are concrete integration surfaces. The HTTP client
+requires HTTPS, explicit headers, and bounded transport waits. The subprocess
+adapter never invokes a shell and passes only a JSON context/argument payload;
+it is a process boundary, not a complete sandbox. Deployments handling hostile
+code must place that worker in an OS/container sandbox with a restricted
+filesystem, network, identity, and resource policy.</p>
 
 
 

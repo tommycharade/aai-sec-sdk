@@ -2,42 +2,58 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/</loc>
-         <lastmod>2026-07-23</lastmod>
+         <lastmod>2026-07-26</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/api/</loc>
-         <lastmod>2026-07-23</lastmod>
+         <lastmod>2026-07-26</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/architecture/</loc>
-         <lastmod>2026-07-23</lastmod>
+         <lastmod>2026-07-26</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/contributing/</loc>
-         <lastmod>2026-07-23</lastmod>
+         <lastmod>2026-07-26</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/critical-adopter-review-2026-07-25/</loc>
+         <lastmod>2026-07-26</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/end-to-end-example/</loc>
-         <lastmod>2026-07-23</lastmod>
+         <lastmod>2026-07-26</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/getting-started/</loc>
-         <lastmod>2026-07-23</lastmod>
+         <lastmod>2026-07-26</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/guardrails/</loc>
-         <lastmod>2026-07-23</lastmod>
+         <lastmod>2026-07-26</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/license/</loc>
-         <lastmod>2026-07-23</lastmod>
+         <lastmod>2026-07-26</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/production-readiness/</loc>
+         <lastmod>2026-07-26</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/releasing/</loc>
-         <lastmod>2026-07-23</lastmod>
+         <lastmod>2026-07-26</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/runbooks/</loc>
+         <lastmod>2026-07-26</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/security-model/</loc>
-         <lastmod>2026-07-23</lastmod>
+         <lastmod>2026-07-26</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/testing/</loc>
+         <lastmod>2026-07-26</lastmod>
     </url>
 </urlset>

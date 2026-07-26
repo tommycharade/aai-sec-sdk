@@ -401,6 +401,87 @@
   
   
     <li class="md-nav__item">
+      <a href="../runbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operational runbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../production-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../architecture/" class="md-nav__link">
         
   
@@ -583,6 +664,33 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -641,7 +749,7 @@
 
 
 <h1 id="getting-started">Getting started</h1>
-<p>The SDK is being built in public as a pre-release package. Clone the
+<p>The SDK is released under Apache-2.0. Clone the
 repository, install the development dependencies, and validate the project:</p>
 <pre><code class="language-bash">git clone https://github.com/tommycharade/aai-sec-sdk.git
 cd aai-sec-sdk
@@ -658,11 +766,12 @@ make check
 </ol>
 <p>The SDK does not make an LLM trustworthy. It limits what an incorrect or manipulated model can cause at the execution boundary.</p>
 <h2 id="run-the-example">Run the example</h2>
-<pre><code class="language-bash">python examples/guarded_runtime.py
+<pre><code class="language-bash">python examples/support_agent.py
 </code></pre>
-<p>The example demonstrates that a registered lookup executes with the
-application-owned principal, while an unregistered external-send proposal is
-denied and recorded. It deliberately does not connect to a model or network.</p>
+<p>The example demonstrates read, write, approval, credential, idempotency, audit,
+cross-tenant, and emergency-stop paths using synthetic data. It deliberately
+does not connect to a model or network. Read <a href="../production-readiness/">Production readiness</a>
+before connecting real tools.</p>
 
 
 

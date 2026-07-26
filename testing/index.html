@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/releasing/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/testing/">
       
       
-        <link rel="prev" href="../contributing/">
+        <link rel="prev" href="../runbooks/">
       
       
-        <link rel="next" href="../critical-adopter-review-2026-07-25/">
+        <link rel="next" href="../production-readiness/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Releasing - Agentic AI Security SDK</title>
+        <title>Testing and assurance - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#releasing" class="md-skip">
+        <a href="#testing-and-assurance" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Releasing
+              Testing and assurance
             
           </span>
         </div>
@@ -367,10 +367,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../testing/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and assurance
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -386,6 +413,59 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#deterministic-propertyfuzz-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deterministic property/fuzz coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mutation-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutation testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adapter-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapter contracts
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -583,37 +663,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Releasing
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
         
   
   
@@ -629,65 +682,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#stable-release-checklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stable-release checklist
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#supply-chain-boundaries" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Supply-chain boundaries
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Supply-chain boundaries">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#standalone-adopter-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Standalone adopter verification
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -746,10 +740,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#stable-release-checklist" class="md-nav__link">
+  <a href="#deterministic-propertyfuzz-coverage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Stable-release checklist
+        Deterministic property/fuzz coverage
       
     </span>
   </a>
@@ -757,30 +751,24 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#supply-chain-boundaries" class="md-nav__link">
+  <a href="#mutation-testing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Supply-chain boundaries
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Supply-chain boundaries">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#standalone-adopter-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Standalone adopter verification
+        Mutation testing
       
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#adapter-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapter contracts
+      
+    </span>
+  </a>
   
 </li>
       
@@ -804,83 +792,83 @@
   
 
 
-<h1 id="releasing">Releasing</h1>
-<h2 id="stable-release-checklist">Stable-release checklist</h2>
-<p>The <code>1.x</code> compatibility policy follows Semantic Versioning: public API
-breaking changes require a major version, and every breaking change must be
-called out in <code>CHANGELOG.md</code> with a migration note. Python 3.11, 3.12, and
-3.13 are the supported CI versions. Security fixes are backported only to the
-latest supported release line.</p>
+<h1 id="testing-and-assurance">Testing and assurance</h1>
+<p><code>make check</code> is the required local and CI quality gate. It runs formatting,
+linting, strict typing, unit and adversarial tests, 90% branch coverage,
+guardrail checks, a strict documentation build, package validation, dependency
+audits, and mutation-baseline validation.</p>
+<h2 id="deterministic-propertyfuzz-coverage">Deterministic property/fuzz coverage</h2>
+<p><code>tests/test_assurance.py</code> runs a finite checked-in corpus from
+<code>tests/corpus/malformed_inputs.json</code>. It exercises proposal construction,
+action fingerprints, nested redaction, policy response mapping, and audit
+acknowledgement behavior. The corpus is capped at 32 cases and has no random
+seed, network call, sleep, or unbounded loop, so CI remains reproducible.
+Expand the corpus with a regression case whenever malformed input reaches a
+new boundary.</p>
+<h2 id="mutation-testing">Mutation testing</h2>
+<p><code>mutation-baseline.json</code> records the security branches and the bounded command.
+<code>critical-mutants.json</code> is the schema-3 companion manifest of stable invariant
+IDs, exact module/class/method symbols, executable test IDs, and static source
+contracts. The runner emits a commit-bound symbol-to-mutant mapping with the
+source span, AST-node fingerprint, and mutation class reconstructed by the
+verifier; numeric mutmut IDs are evidence identifiers and are never used as a
+substitute for the reviewed symbol contract. Symbols listed
+under <code>static_contracts</code> have no generated mutation operator and require the
+listed adversarial tests instead. Diagnostic strings, event names, mapping
+keys, enum/state labels, operation names, timeout phases, and policy or
+approval metadata are not automatically exempt: any exclusion requires an
+explicit mutation-site rationale and executable contract evidence.
+The declared mutation source scope includes the runtime boundary, typed
+components, approvals, budgets, credentials, idempotency, isolation, policy,
+audit/redaction, and provider adapters. It is checked exactly against
+<code>pyproject.toml</code>:</p>
 <ul>
-<li>[ ] <code>make check</code> passes on the release commit.</li>
-<li>[ ] <code>make mutation</code> passes within its declared bound and its raw evidence
-      proves &gt;=80% overall, &gt;=75% per component, 100% critical mutants, and
-      zero timeout/suspicious/skipped/not-checked results; retain the artifact.</li>
-<li>[ ] <code>make package-check</code> builds and validates wheel and source distributions.</li>
-<li>[ ] <code>make security-check</code> reports no known dependency vulnerabilities.</li>
-<li>[ ] <code>requirements-ci.txt</code> and <code>requirements-docs.txt</code> are reviewed when
-      direct toolchain versions change; direct inputs are exact-pinned.</li>
-<li>[ ] <code>requirements-build.txt</code> matches the exact PEP 517 build requirements.</li>
-<li>[ ] <code>LICENSE</code> and <code>NOTICE</code> are present in both distributions.</li>
-<li>[ ] <code>CHANGELOG.md</code> describes user-visible and security-relevant changes.</li>
-<li>[ ] Public API and migration notes are up to date.</li>
-<li>[ ] Security regressions and known limitations are documented.</li>
-<li>[ ] The release is tagged from a clean, reviewed commit.</li>
-<li>[ ] The package is published through trusted CI credentials, not a developer workstation token.</li>
-<li>[ ] Release artifacts and checksums are retained.</li>
-<li>[ ] An independently verified SBOM is generated and hash-bound for each
-      artifact; dependency provenance is attached by trusted CI.</li>
-<li>[ ] GitHub Actions provenance attestation is present for release artifacts.</li>
-<li>[ ] Wheel installation is tested in clean Python 3.11, 3.12, and 3.13
-      environments.</li>
-<li>[ ] The compatibility policy and migration notes are published.</li>
-<li>[ ] At least two maintainers/code owners review security-sensitive changes.</li>
+<li><code>src/agentic_security/components.py</code></li>
+<li><code>src/agentic_security/runtime.py</code></li>
+<li><code>src/agentic_security/approvals.py</code></li>
+<li><code>src/agentic_security/budgets.py</code></li>
+<li><code>src/agentic_security/credentials.py</code></li>
+<li><code>src/agentic_security/idempotency.py</code></li>
+<li><code>src/agentic_security/isolation.py</code></li>
+<li><code>src/agentic_security/policies.py</code></li>
+<li><code>src/agentic_security/policy_adapters.py</code></li>
+<li><code>src/agentic_security/audit.py</code></li>
+<li><code>src/agentic_security/adapters.py</code></li>
 </ul>
-<p>Do not describe a release as a security certification. The SDK provides implementation controls; adopters remain responsible for configuring policy, identity, infrastructure, and domain authorization.</p>
-<h2 id="supply-chain-boundaries">Supply-chain boundaries</h2>
-<p>The repository exact-pins direct development, documentation, and PEP 517 build
-inputs and audits all three input files with <code>pip-audit</code>. Release CI builds the
-wheel and source archive, then installs each actual artifact into a fresh
-virtual environment before generating one CycloneDX SBOM per artifact. It also
-writes SHA-256 checksums and requests GitHub provenance attestations for the
-same artifact subjects. Exact hashes for every platform wheel are not
-committed because the supported Python matrix selects different transitive
-wheels; artifact SBOMs, checksums, and provenance are the release evidence.
-PyPI publication, if enabled, must use repository trusted publishing and never
-a developer workstation token.</p>
-<p>The build job creates checksums with <code>scripts/write_checksums.py</code>, excluding the
-checksum file itself and using artifact-local filenames. A separate clean
-verification job consumes the uploaded bundle.</p>
-<p><code>verify_release_evidence.py</code> is run in a separate clean-verification job. It
-independently checks that every wheel and source
-archive has a matching SHA-256 entry, a matching SBOM manifest entry, and an
-SBOM containing the artifact filename and digest. It also checks the clean
-checkout commit and exact tag against <code>RELEASE-METADATA.json</code>. The workflow
-then runs <code>gh attestation verify</code> for every subject in that same clean job,
-constraining the signer workflow and source ref. These checks verify artifact
-identity and provenance bindings; they do not certify the package's runtime
-behavior or external provider deployments.</p>
-<h3 id="standalone-adopter-verification">Standalone adopter verification</h3>
-<p>Adopters can verify downloaded release evidence without trusting the build
-workspace:</p>
-<pre><code class="language-bash">git clone https://github.com/tommycharade/aai-sec-sdk.git
-cd aai-sec-sdk
-git checkout --detach vX.Y.Z
-# Copy the published release-evidence bundle into ./dist first.
-python scripts/verify_release_evidence.py dist \
-  --commit &quot;$(git rev-parse HEAD)&quot; --tag &quot;vX.Y.Z&quot;
-gh attestation verify dist/*.whl --repo tommycharade/aai-sec-sdk \
-  --signer-workflow tommycharade/aai-sec-sdk/.github/workflows/release-artifacts.yml \
-  --source-ref vX.Y.Z
-</code></pre>
-<p>Do not use <code>--allow-untagged</code> for a published release; that option is only for
-local pre-tag verification.</p>
-<p><code>make check</code> validates the mutation contract; <code>make mutation</code> executes the
-mutmut run through <code>scripts/run_mutation_check.py</code>, enforces the declared 80%
-killed-mutant threshold, and fails on stale/missing/truncated/timeout,
-unparseable, or other-commit evidence. The run is bounded to two workers and
-120 seconds. No mutation score is claimed unless that command has completed
-successfully for the commit.</p>
+<p><code>make mutation</code> runs the actual tool in a pinned development environment and
+fails unless the overall threshold is met. It also requires at least 75% killed
+mutants in every declared component and 100% of the exact critical-symbol
+mapping. Any unmatched critical symbol, timeout, suspicious, skipped, or
+not-checked result fails
+closed. Surviving non-critical mutants count against the aggregate and
+component thresholds but are not execution gaps; critical-symbol mutants must
+all be killed. Run it when changing authorization, approval, credential, idempotency,
+timeout, isolation, budget, or audit code. CI runs the same <code>make mutation</code> command on pull requests and
+releases, uploads <code>.mutmut-cache/evidence.json</code> and <code>results.txt</code>, and fails
+on stale/missing/truncated/timeout/unparseable evidence or evidence generated
+for another commit. The evidence records the exact score, commit, tool,
+command, and source scope. No mutation score is claimed without the runner's
+parsed result file. One deliberately timing-heavy
+worker stress test is excluded from mutmut's baseline selection because
+mutation process overhead makes it nondeterministic; it remains mandatory in
+the normal unit/adversarial suite and is not excluded from <code>make check</code>.
+No source file is excluded because its mutants are difficult to kill. Only
+objectively non-security tooling may be outside the scope, and each such
+boundary requires contract tests. The runner records raw results with a
+commit header, per-component scores, critical-mutant results, and negative
+control outcomes. High-impact adoption must retain that raw evidence with the
+reviewed commit.</p>
+<p><code>scripts/verify_mutation_evidence.py</code> independently rechecks the uploaded
+evidence against the current commit, <code>pyproject.toml</code>, the baseline threshold,
+and the results-file hash. It fails closed for missing, stale, cross-commit,
+scope-mismatched, malformed, or tampered evidence.</p>
+<h2 id="adapter-contracts">Adapter contracts</h2>
+<p>The local contract suite uses synthetic fakes for OPA, Cedar, approval, IAM,
+idempotency, remote audit, and isolation boundaries. These tests verify request
+shape, binding, malformed-response handling, and fail-closed behavior. They do
+not certify an external deployment. Provider integrations should add
+ephemeral-service tests for authentication, timeouts, stale versions, replay,
+and service-unavailable responses.</p>
 
 
 
