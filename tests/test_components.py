@@ -41,6 +41,7 @@ from agentic_security.components import (
     PolicyPreparation,
     PreExecutionAuthorizationError,
     PreExecutionAuthorizer,
+    freeze_value,
 )
 from agentic_security.credentials import ScopedCredential
 from agentic_security.errors import WorkerCapacityError
@@ -105,6 +106,47 @@ def test_action_preparation_owns_live_identity_and_resource_validation() -> None
             context, replace(tool, delegation_depth=1), resources, 0
         )
     assert str(delegation_error.value) == "delegation depth exceeds configured limit"
+
+
+def test_authorization_arguments_are_deeply_frozen_and_handlers_get_a_copy() -> None:
+    """Nested mutable input cannot alter permit facts after authorization."""
+    arguments = {"nested": {"items": ["original"]}}
+    frozen = freeze_value(arguments)
+    arguments["nested"]["items"].append("caller-mutated")
+
+    assert frozen == {"nested": {"items": ["original"]}}
+    with pytest.raises(TypeError):
+        frozen["nested"]["items"][0] = "unauthorized"
+
+    observed: list[Any] = []
+
+    def handler(_context: ExecutionContext, received: Any) -> dict[str, bool]:
+        received["nested"]["items"].append("handler-mutated")
+        observed.append(received)
+        return {"ok": True}
+
+    facts = ActionFacts(
+        context=_context(),
+        proposal=ActionProposal("component_action", {"value": "safe"}, "proposal:frozen"),
+        tool=_tool(handler),
+        arguments={"nested": {"items": ["original"]}},
+        resources=(Resource("resource:test", "record", "tenant:test"),),
+        action_fingerprint="hash:frozen",
+    )
+    authorizer = PreExecutionAuthorizer(0)
+    permit = authorizer.issue_permit(
+        facts,
+        PolicyResult(PolicyDecision.ALLOW, "allowed"),
+        None,
+        None,
+        False,
+        _context(),
+        CancellationToken(),
+    )
+    authorizer.lifecycle(lambda: False).invoke_handler(permit)
+
+    assert observed[0]["nested"]["items"] == ["original", "handler-mutated"]
+    assert facts.arguments == {"nested": {"items": ["original"]}}
 
 
 def test_policy_and_credential_preparation_preserve_restrictive_contracts() -> None:

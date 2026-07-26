@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -157,6 +157,15 @@ def action_hash(
     resources: tuple[Resource, ...],
 ) -> str:
     """Hash host-owned identity and the exact validated action for approval binding."""
+
+    def json_ready(value: object) -> object:
+        """Convert immutable authorization containers to JSON primitives."""
+        if isinstance(value, Mapping):
+            return {key: json_ready(child) for key, child in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [json_ready(child) for child in value]
+        return value
+
     canonical = json.dumps(
         {
             "agent_id": context.agent_id,
@@ -168,10 +177,11 @@ def action_hash(
             "tenant": context.tenant,
             "environment": context.environment,
             "tool_name": tool_name,
-            "arguments": arguments,
+            "arguments": json_ready(arguments),
             "resources": [asdict(resource) for resource in resources],
         },
         sort_keys=True,
         separators=(",", ":"),
+        allow_nan=False,
     ).encode()
     return hashlib.sha256(canonical).hexdigest()

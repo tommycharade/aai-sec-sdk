@@ -6,8 +6,10 @@ Model output is untrusted input. Tool names, arguments, retrieved text, memory, 
 
 The boundary is represented explicitly by `ActionFacts` ->
 `PreExecutionAuthorizer` -> `ExecutionPermit` -> `ExecutionLifecycle`. Facts
-are immutable host-derived values, the authorizer is the centralized final
-decision point, and lifecycle is the permit-gated handler invocation path.
+are immutable host-derived values, including recursively frozen validated
+argument containers; the authorizer is the centralized final decision point,
+and lifecycle is the permit-gated handler invocation path. Handlers receive a
+defensive copy rather than the authorization snapshot.
 Permit issuer identity is kept in an internal registry rather than permit
 fields, so `object.__new__` objects and copied fields cannot authorize a
 handler call. This protects the SDK boundary from accidental forgery; code

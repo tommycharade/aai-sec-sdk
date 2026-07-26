@@ -86,10 +86,12 @@ def make_runtime(
     approvals: InMemoryApprovalProvider | None = None,
     budget: Budget | None = None,
     calls: list[dict[str, Any]] | None = None,
+    handler: Any | None = None,
+    idempotency_store: Any | None = None,
 ) -> tuple[GuardedRuntime, InMemoryAuditSink]:
     calls = calls if calls is not None else []
 
-    def handler(ctx: ExecutionContext, arguments: Any) -> Any:
+    def default_handler(ctx: ExecutionContext, arguments: Any) -> Any:
         calls.append({"principal": ctx.principal.id, "arguments": arguments})
         return {"ok": True}
 
@@ -97,7 +99,7 @@ def make_runtime(
     registry.register(
         ToolDefinition(
             name=tool_name,
-            handler=handler,
+            handler=handler or default_handler,
             validator=validator,
             risk=risk,
             requires_approval=requires_approval,
@@ -118,7 +120,7 @@ def make_runtime(
         approvals,
         config=RuntimeConfig(
             budget or Budget(),
-            idempotency_store=InMemoryIdempotencyStore(),
+            idempotency_store=idempotency_store or InMemoryIdempotencyStore(),
         ),
     )
     return runtime, audit
@@ -835,6 +837,57 @@ def test_handler_timeout_is_structured_and_signals_cancellation() -> None:
     assert result.timeout_phase is TimeoutPhase.HANDLER
     assert result.handler_started is True
     assert result.side_effect_state is SideEffectState.UNCERTAIN
+
+
+def test_timeout_surfaces_failed_uncertain_idempotency_persistence() -> None:
+    """A timeout must not hide failure to record the uncertain terminal state."""
+    release = Event()
+
+    class BrokenUncertainStore(InMemoryIdempotencyStore):
+        def mark_uncertain(self, *_: Any) -> Any:
+            raise RuntimeError("synthetic persistence outage")
+
+    def slow_handler(_context: ExecutionContext, _arguments: Any) -> dict[str, bool]:
+        release.wait(1)
+        return {"ok": True}
+
+    runtime, _ = make_runtime(
+        idempotency_required=True,
+        handler=slow_handler,
+        idempotency_store=BrokenUncertainStore(),
+    )
+    runtime.config = RuntimeConfig(
+        execution_timeout_seconds=0.005,
+        idempotency_store=runtime.config.idempotency_store,
+    )
+    result = runtime.execute(proposal(operation_key="operation:timeout-persist"))
+    release.set()
+
+    assert result.status is ExecutionStatus.TIMED_OUT
+    assert result.idempotency_recorded is False
+    assert "idempotency" in (result.reason or "")
+
+
+def test_handler_exception_surfaces_failed_uncertain_idempotency_persistence() -> None:
+    """A handler failure must expose an idempotency store outage to the caller."""
+
+    class BrokenUncertainStore(InMemoryIdempotencyStore):
+        def mark_uncertain(self, *_: Any) -> Any:
+            raise RuntimeError("synthetic persistence outage")
+
+    def failing_handler(_context: ExecutionContext, _arguments: Any) -> Any:
+        raise RuntimeError("synthetic handler failure")
+
+    runtime, _ = make_runtime(
+        idempotency_required=True,
+        handler=failing_handler,
+        idempotency_store=BrokenUncertainStore(),
+    )
+    result = runtime.execute(proposal(operation_key="operation:exception-persist"))
+
+    assert result.status is ExecutionStatus.FAILED
+    assert result.idempotency_recorded is False
+    assert "idempotency" in (result.reason or "")
 
 
 def test_runtime_bounded_timeout_preserves_callback_and_phase() -> None:

@@ -875,6 +875,7 @@ def test_idempotency_terminal_store_failure_is_not_reported_as_success() -> None
     )
 
     assert result.status is ExecutionStatus.EXECUTED_UNRECORDED
+    assert result.idempotency_recorded is False
     assert "idempotency" in (result.reason or "")
     assert calls == [1]
     assert store.lookup("op:store-failure") is not None

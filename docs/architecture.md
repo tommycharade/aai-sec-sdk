@@ -21,8 +21,10 @@ No side effect or privileged credential mint may happen before applicable checks
 
 The runtime boundary is decomposed into immutable, typed components:
 
-- `ActionFacts` is the host-derived snapshot of the proposal, validated
-  arguments, resources, registered tool, and action fingerprint.
+- `ActionFacts` is the host-derived snapshot of the proposal, recursively
+  frozen validated arguments, resources, registered tool, and action
+  fingerprint. The lifecycle gives handlers a defensive copy, so handler code
+  cannot mutate the evidence used for authorization.
 - `PreExecutionAuthorizer` is the centralized final decision point. It accepts
   provider evidence and issues an `ExecutionPermit` only when policy,
   approval, identity, tenant/resource, credential, isolation, and delegation

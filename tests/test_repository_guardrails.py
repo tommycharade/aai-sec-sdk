@@ -42,3 +42,24 @@ def test_generated_readme_links_resolve_from_repository_root() -> None:
     assert "](docs/end-to-end-example.md)" in readme
     assert "](SDK-assessment.md)" in readme
     assert "](../SDK-assessment.md)" not in readme
+
+
+def test_release_workflow_is_tag_bound_and_publishes_the_verified_bundle() -> None:
+    """Release provenance cannot be detached from the tag or evidence bundle."""
+    # mutmut runs copied tests below ``mutants/`` and may also change the
+    # working directory. Discover the checkout from either stable path rather
+    # than assuming the process cwd is the repository root.
+    candidates = (*Path(__file__).resolve().parents, *Path.cwd().resolve().parents)
+    workflow_path = next(
+        parent / ".github/workflows/release-artifacts.yml"
+        for parent in candidates
+        if (parent / ".github/workflows/release-artifacts.yml").is_file()
+    )
+    workflow = workflow_path.read_text(encoding="utf-8")
+    assert 'tags: ["v*.*.*"]' in workflow
+    assert "workflow_dispatch" not in workflow
+    assert "cp .mutmut-cache/evidence.json dist/evidence.json" in workflow
+    assert "cp .mutmut-cache/results.txt dist/results.txt" in workflow
+    assert "gh release create" in workflow
+    assert "gh release download" in workflow
+    assert '--source-ref "$GITHUB_REF"' in workflow
