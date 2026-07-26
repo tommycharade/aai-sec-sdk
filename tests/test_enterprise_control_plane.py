@@ -22,6 +22,7 @@ from agentic_security import (
     InMemoryAuditSink,
     InMemoryControlPlaneAuthority,
     StaticFleetAuthenticator,
+    WebhookFleetAlertSink,
 )
 
 
@@ -43,6 +44,34 @@ class AlertSink:
 
     def publish(self, alert: Mapping[str, Any]) -> None:
         self.alerts.append(dict(alert))
+
+
+def test_webhook_alert_sink_is_bounded_and_fail_closed() -> None:
+    """The concrete alert adapter requires HTTPS and reports delivery failures."""
+    requests: list[tuple[str, bytes, float]] = []
+
+    class Response:
+        status = 202
+
+    def opener(request: Any, *, timeout: float) -> Response:
+        requests.append((request.full_url, request.data, timeout))
+        return Response()
+
+    sink = WebhookFleetAlertSink("https://alerts.example.test/hook", opener=opener)
+    sink.publish({"id": "alert-1", "severity": "high"})
+    assert requests[0][0] == "https://alerts.example.test/hook"
+    assert b"alert-1" in requests[0][1]
+
+    with pytest.raises(FleetConfigurationError):
+        WebhookFleetAlertSink("http://alerts.example.test/hook")
+
+    def failed_opener(_request: Any, *, timeout: float) -> Response:
+        raise OSError("synthetic outage")
+
+    with pytest.raises(FleetConfigurationError):
+        WebhookFleetAlertSink("https://alerts.example.test/hook", opener=failed_opener).publish(
+            {"id": "alert-1"}
+        )
 
 
 def identity(organization_id: str, *, projects: frozenset[str] = frozenset()) -> FleetIdentity:

@@ -116,7 +116,10 @@ only status and counts, never credentials, sessions, or configuration values.
 
 Alerts are derived from current authoritative state. Incident commanders can
 acknowledge them, while a provider-neutral `FleetAlertSink` can deliver
-redacted alert records to an enterprise notification or incident system.
+redacted alert records to an enterprise notification or incident system. The
+included `WebhookFleetAlertSink` is a bounded HTTPS implementation suitable
+for an enterprise webhook gateway; endpoint material must be injected from a
+secret manager and is never persisted by the fleet store.
 Delivery failures are reported as failures and do not clear, hide, or mutate
 the underlying alert condition.
 
@@ -157,6 +160,7 @@ tokens in Vite variables or screenshots.
         - FleetAuthenticator
         - FleetDeploymentAuthority
         - FleetAlertSink
+        - WebhookFleetAlertSink
         - validate_fleet_configuration
         - FleetPage
         - FleetAuthorizationError

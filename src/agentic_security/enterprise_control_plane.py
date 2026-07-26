@@ -21,7 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 from typing import Any, Protocol
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import Request, urlopen
 
 from .audit import AuditSink
 
@@ -148,6 +149,66 @@ class FleetAlertSink(Protocol):
 
     def publish(self, alert: Mapping[str, Any]) -> None:
         """Deliver one redacted alert or raise without changing fleet state."""
+
+
+class WebhookFleetAlertSink:
+    """Deliver redacted fleet alerts to an HTTPS webhook.
+
+    The endpoint should be injected from a deployment secret manager and is
+    never included in fleet configuration, audit payloads, or exceptions.
+    Delivery is bounded and any transport or non-2xx response raises so the
+    caller does not claim that an alert was delivered when it was not.
+    """
+
+    def __init__(
+        self,
+        endpoint: str,
+        *,
+        timeout_seconds: float = 5.0,
+        opener: Callable[..., Any] | None = None,
+        allow_http: bool = False,
+    ) -> None:
+        """Create a bounded webhook adapter with an explicit local HTTP escape hatch."""
+        if not isinstance(endpoint, str):
+            raise FleetConfigurationError("alert webhook must be an HTTPS URL without credentials")
+        parsed = urlsplit(endpoint)
+        if (
+            len(endpoint) > 2048
+            or parsed.scheme not in ({"https", "http"} if allow_http else {"https"})
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+        ):
+            raise FleetConfigurationError("alert webhook must be an HTTPS URL without credentials")
+        if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool):
+            raise FleetConfigurationError("alert webhook timeout must be numeric")
+        if not 0.1 <= timeout_seconds <= 30:
+            raise FleetConfigurationError(
+                "alert webhook timeout must be between 0.1 and 30 seconds"
+            )
+        self._endpoint = endpoint
+        self._timeout_seconds = float(timeout_seconds)
+        self._opener = opener or urlopen
+
+    def publish(self, alert: Mapping[str, Any]) -> None:
+        """POST one bounded redacted alert and fail on transport/non-2xx errors."""
+        payload = json.dumps(dict(alert), separators=(",", ":")).encode("utf-8")
+        if len(payload) > 32_768:
+            raise FleetConfigurationError("fleet alert payload is too large")
+        request = Request(  # noqa: S310 - endpoint scheme is validated above.
+            self._endpoint,
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "aai-sec-sdk-fleet"},
+            method="POST",
+        )
+        try:
+            response = self._opener(request, timeout=self._timeout_seconds)
+            status = getattr(response, "status", getattr(response, "code", None))
+        except Exception as exc:
+            raise FleetConfigurationError("fleet alert delivery failed") from exc
+        if not isinstance(status, int) or not 200 <= status < 300:
+            raise FleetConfigurationError("fleet alert delivery returned a non-success status")
 
 
 class StaticFleetAuthenticator:
@@ -2006,6 +2067,7 @@ __all__ = [
     "FleetConfigurationError",
     "FleetDeploymentAuthority",
     "FleetAlertSink",
+    "WebhookFleetAlertSink",
     "FleetIdentity",
     "FleetNotFoundError",
     "FleetPage",
