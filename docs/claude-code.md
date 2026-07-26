@@ -29,6 +29,20 @@ Use this sequence when onboarding a new project:
 6. Replace the synthetic identity, policy, approval, audit, credential, and
    isolation adapters before enabling consequential work.
 
+### One-command setup
+
+From the project you want Claude Code to use, run:
+
+```bash
+python3 /absolute/path/to/aai-sec-sdk/scripts/onboard_claude.py \
+  --project-root "$PWD"
+```
+
+The script creates or updates `.claude/settings.json` and `.mcp.json`, keeps
+existing entries, and creates timestamped backups before modifying either
+file. Preview the changes first with `--dry-run`. It does not invoke Claude or
+silently replace an existing configuration.
+
 The hook configuration and MCP configuration are separate Claude Code host
 boundaries. Put the `hooks` object in `.claude/settings.json`; put the
 `mcpServers` object in `.mcp.json` or register it with `claude mcp add`. Do not
