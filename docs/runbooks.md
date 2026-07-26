@@ -193,3 +193,41 @@ At least once per release line, simulate a remote audit outage during a timed
 handler and an idempotency-store failure. The expected result is no blind
 retry, a fail-closed runtime outcome, preserved local evidence, an operator
 alert, and a documented reconciliation decision.
+
+## Enterprise fleet rollout, drift, and rollback
+
+**Before rollout:** verify the target organization, project, deployment IDs,
+environment, region, SDK version, current health, and operator authorization.
+Review the desired configuration hash and ensure the deployment authority is
+connected. Never put bearer tokens, credentials, or raw tool arguments into a
+template or ticket.
+
+**Stage safely:** assign the reviewed template, use a staged or canary rollout,
+and start with a small percentage. Confirm agent heartbeats, health, alerts,
+policy decisions, audit replication, and representative synthetic actions
+before increasing the percentage. The UI's Enterprise fleet page is an
+operator view; the API remains the authoritative control boundary.
+
+**Detect drift:** treat a desired/applied hash mismatch as an operational
+condition, not as permission to continue. Inspect the deployment's version,
+authority response, and audit trail. Reconcile through the deployment
+authority or reapply the reviewed template. Do not edit the database directly
+to hide drift.
+
+**Rollback:** select a known-good configuration history version and invoke the
+fleet rollback endpoint. The authority is called before the control plane
+claims the rollback. If the authority rejects it, the desired state remains
+unchanged and the action must be escalated. Validate health and drift after
+rollback, then record the decision and evidence.
+
+**Emergency stop:** use the deployment-scoped stop control for a localized
+incident or the application-owned global stop for a wider incident. The
+authority must acknowledge the stop before the control plane records it as
+active. Preserve the incident ID, last heartbeat, configuration hashes, and
+audit references. Clear the stop only after incident-command approval and a
+synthetic read-only validation.
+
+**Operational limitation:** the bundled SQLite store, static bearer
+authenticator, and reference server are demonstration/development adapters.
+Replace them with enterprise IAM, secret storage, HA persistence, durable
+alert delivery, and a real deployment authority before production use.

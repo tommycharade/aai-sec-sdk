@@ -74,7 +74,9 @@ def build_runtime() -> GuardedRuntime:
 
 if __name__ == "__main__":
     runtime = build_runtime()
-    control_plane_url = os.environ.get("AAI_SEC_CONTROL_PLANE_URL")
+    control_plane_url = os.environ.get("AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL") or os.environ.get(
+        "AAI_SEC_CONTROL_PLANE_URL"
+    )
     heartbeat_stop = threading.Event()
     heartbeat_thread: threading.Thread | None = None
     client: ControlPlaneAgentClient | None = None
@@ -88,6 +90,7 @@ if __name__ == "__main__":
             agent_token,
             agent_id=os.environ.get("AAI_SEC_AGENT_ID", "claude-code-local"),
             project_root=os.environ.get("CLAUDE_PROJECT_DIR", str(Path.cwd())),
+            deployment_id=os.environ.get("AAI_SEC_DEPLOYMENT_ID"),
         )
         registered_session = agent_client.register()
         client = agent_client

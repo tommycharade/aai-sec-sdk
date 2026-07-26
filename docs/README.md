@@ -15,6 +15,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Agent integrations](integrations.md)
 - [Claude Code example](claude-code.md)
 - [Management UI](ui.md)
+- [Enterprise fleet control plane](enterprise-fleet.md)
 - [End-to-end example](end-to-end-example.md)
 - [MCP gateway example](https://github.com/tommycharade/aai-sec-sdk/blob/main/examples/mcp_gateway.py)
 - [API design](api.md)
@@ -39,6 +40,9 @@ for the exact boundary between SDK guarantees and deployment responsibilities.
 The MCP integration layer provides one extensible gateway and host profiles
 for OpenCode, OpenHands self-hosted, Claude Code, Cline, Gemini CLI, GitHub
 Copilot CLI/cloud agent, and Codex CLI; see [Agent integrations](integrations.md).
+The enterprise fleet layer adds tenant-scoped organization, project,
+deployment, agent, rollout, drift, health, alert, and emergency-stop controls;
+see [Enterprise fleet control plane](enterprise-fleet.md).
 
 ## Development
 

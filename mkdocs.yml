@@ -44,6 +44,7 @@ nav:
   - Agent integrations: integrations.md
   - Claude Code example: claude-code.md
   - Management UI: ui.md
+  - Enterprise fleet: enterprise-fleet.md
   - End-to-end example: end-to-end-example.md
   - API reference: api.md
   - Engineering guardrails: guardrails.md

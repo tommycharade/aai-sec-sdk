@@ -92,6 +92,8 @@ def onboard(
     python: str,
     dry_run: bool,
     control_plane_url: str | None = None,
+    enterprise_control_plane_url: str | None = None,
+    deployment_id: str | None = None,
     agent_id: str = "claude-code-local",
 ) -> None:
     """Create or update Claude hook and MCP configuration for one project."""
@@ -126,11 +128,16 @@ def onboard(
     if not isinstance(servers, dict):
         raise SystemExit(f"{mcp_path}: mcpServers must be a JSON object")
     server: dict[str, Any] = {"command": python, "args": [str(gateway)]}
-    if control_plane_url:
-        server["env"] = {
-            "AAI_SEC_CONTROL_PLANE_URL": control_plane_url.rstrip("/"),
-            "AAI_SEC_AGENT_ID": agent_id,
-        }
+    if control_plane_url or enterprise_control_plane_url:
+        server["env"] = {"AAI_SEC_AGENT_ID": agent_id}
+        if enterprise_control_plane_url:
+            server["env"]["AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL"] = (
+                enterprise_control_plane_url.rstrip("/")
+            )
+        elif control_plane_url:
+            server["env"]["AAI_SEC_CONTROL_PLANE_URL"] = control_plane_url.rstrip("/")
+        if deployment_id:
+            server["env"]["AAI_SEC_DEPLOYMENT_ID"] = deployment_id
     servers["agentic-security"] = server
 
     if not dry_run:
@@ -154,11 +161,11 @@ def onboard(
     print("  2. Run Claude Code from the project root: claude")
     print("  3. In Claude Code, run /mcp and confirm agentic-security is connected")
     print("  4. Test an allowed read, an approval-required command, and a denied command")
-    if control_plane_url:
+    if control_plane_url or enterprise_control_plane_url:
         print("  5. Export AAI_SEC_AGENT_TOKEN before starting Claude Code")
         print("  6. Confirm the live Claude agent appears in the management UI")
     else:
-        print("  5. Add --control-plane-url and export AAI_SEC_AGENT_TOKEN for live UI presence")
+        print("  5. Add a control-plane URL and export AAI_SEC_AGENT_TOKEN for live UI presence")
     print("  7. Replace the synthetic example identity and policy before production use")
 
 
@@ -187,6 +194,14 @@ def main() -> int:
         help="Enable live registration, for example http://localhost:8000/api",
     )
     parser.add_argument(
+        "--enterprise-control-plane-url",
+        help="Enable deployment-scoped enterprise registration",
+    )
+    parser.add_argument(
+        "--deployment-id",
+        help="Enterprise deployment receiving this Claude agent",
+    )
+    parser.add_argument(
         "--agent-id",
         default="claude-code-local",
         help="Authenticated agent identity for live registration",
@@ -201,6 +216,8 @@ def main() -> int:
         python=args.python,
         dry_run=args.dry_run,
         control_plane_url=args.control_plane_url,
+        enterprise_control_plane_url=args.enterprise_control_plane_url,
+        deployment_id=args.deployment_id,
         agent_id=args.agent_id,
     )
     return 0

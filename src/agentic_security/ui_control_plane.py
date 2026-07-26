@@ -410,6 +410,7 @@ class ControlPlaneAgentClient:
         *,
         agent_id: str,
         project_root: str,
+        deployment_id: str | None = None,
         timeout_seconds: float = 5,
     ) -> None:
         """Bind one agent token to one explicit project registration."""
@@ -429,13 +430,19 @@ class ControlPlaneAgentClient:
         self.token = token
         self.agent_id = agent_id
         self.project_root = project_root
+        self.deployment_id = deployment_id
         self.timeout_seconds = timeout_seconds
 
     def register(self) -> str:
         """Register the MCP process and return its opaque heartbeat session."""
         response = self._request(
-            "/agents/register",
-            {"agentId": self.agent_id, "host": "claude-code", "projectRoot": self.project_root},
+            "/enterprise/agents/register" if self.deployment_id else "/agents/register",
+            {
+                "agentId": self.agent_id,
+                "host": "claude-code",
+                "projectRoot": self.project_root,
+                **({"deploymentId": self.deployment_id} if self.deployment_id else {}),
+            },
         )
         session_id = response.get("sessionId")
         if not isinstance(session_id, str) or not session_id:
@@ -444,15 +451,20 @@ class ControlPlaneAgentClient:
 
     def heartbeat(self, session_id: str) -> JsonObject:
         """Refresh the registered process presence."""
-        return self._request(
-            f"/agents/{quote(self.agent_id, safe='')}/heartbeat", {"sessionId": session_id}
-        )
+        return self._request(self._agent_path("heartbeat"), {"sessionId": session_id})
 
     def disconnect(self, session_id: str) -> JsonObject:
         """Mark the agent offline during an orderly MCP process shutdown."""
-        return self._request(
-            f"/agents/{quote(self.agent_id, safe='')}/disconnect", {"sessionId": session_id}
-        )
+        return self._request(self._agent_path("disconnect"), {"sessionId": session_id})
+
+    def _agent_path(self, action: str) -> str:
+        """Build a deployment-scoped or legacy agent lifecycle path."""
+        if self.deployment_id:
+            return (
+                f"/enterprise/agents/{quote(self.deployment_id, safe='')}/"
+                f"{quote(self.agent_id, safe='')}/{action}"
+            )
+        return f"/agents/{quote(self.agent_id, safe='')}/{action}"
 
     def _request(self, path: str, body: JsonObject) -> JsonObject:
         """Send one bounded JSON request without logging the bearer token."""

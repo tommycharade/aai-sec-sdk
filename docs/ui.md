@@ -25,6 +25,12 @@ runtime for application side effects.
 
 ## Managed controls
 
+The Enterprise Fleet page provides the first fleet-management surface for
+organizations, projects, SDK deployments, connected Claude agents, and
+configuration drift. It is backed by the authenticated `/api/enterprise/*`
+contracts described in [Enterprise fleet](enterprise-fleet.md). Inventory is
+tenant-scoped; it does not expose heartbeat sessions or secrets.
+
 The UI's Runtime settings page maps to the SDK's explicit configuration
 surfaces:
 

@@ -54,3 +54,25 @@ def test_onboard_preserves_existing_configuration_and_is_idempotent(tmp_path: Pa
     assert (claude_dir / "aai-sec-config.json").exists()
     assert len(list(claude_dir.glob("settings.json.bak.*"))) == 2
     assert len(list(tmp_path.glob(".mcp.json.bak.*"))) == 2
+
+
+def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path) -> None:
+    """Enterprise onboarding writes routing metadata but never an agent secret."""
+    onboard(
+        tmp_path,
+        Path.cwd(),
+        python="python3",
+        dry_run=False,
+        enterprise_control_plane_url="https://fleet.example.test/api",
+        deployment_id="deployment-prod-eu",
+        agent_id="claude-platform-prod",
+    )
+
+    mcp = json.loads((tmp_path / ".mcp.json").read_text())
+    environment = mcp["mcpServers"]["agentic-security"]["env"]
+    assert environment == {
+        "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL": "https://fleet.example.test/api",
+        "AAI_SEC_DEPLOYMENT_ID": "deployment-prod-eu",
+        "AAI_SEC_AGENT_ID": "claude-platform-prod",
+    }
+    assert "AAI_SEC_AGENT_TOKEN" not in environment

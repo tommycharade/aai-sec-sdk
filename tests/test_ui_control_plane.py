@@ -338,6 +338,17 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
     assert requests[0][2]["projectRoot"] == "/workspace/kratos"
     assert requests[0][1]["Authorization"] == f"Bearer {TOKEN}"
 
+    enterprise_client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-code-local",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+    )
+    assert enterprise_client.register() == "opaque-session"
+    assert requests[3][0].endswith("/enterprise/agents/register")
+    assert requests[3][2]["deploymentId"] == "deployment-prod"
+
 
 def test_agent_client_rejects_unsafe_endpoints_and_transport_failures(
     monkeypatch: pytest.MonkeyPatch,

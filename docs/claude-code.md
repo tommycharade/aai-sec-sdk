@@ -65,6 +65,24 @@ heartbeats, and stops its guarded runtime if the control plane becomes
 unavailable. The UI shows the connected project under **Agents**; heartbeat
 expiry changes it to `offline` and records an audited lifecycle event.
 
+For an enterprise deployment, onboard the project with a deployment scope:
+
+```bash
+python3 /path/to/aai-sec-sdk/scripts/onboard_claude.py \
+  --project-root "$PWD" \
+  --enterprise-control-plane-url https://fleet.example.test/api \
+  --deployment-id deployment-prod-eu \
+  --agent-id claude-platform-prod
+export AAI_SEC_AGENT_TOKEN="short-lived-agent-token"
+claude
+```
+
+The deployment ID determines which organization/project fleet receives the
+agent registration. The enterprise UI can then show the project alongside
+other deployments, report heartbeat health and drift, and apply staged
+configuration rollouts. Do not put the agent token in `.mcp.json`; inherit it
+from the process environment or a secret manager.
+
 The hook configuration and MCP configuration are separate Claude Code host
 boundaries. Put the `hooks` object in `.claude/settings.json`; put the
 `mcpServers` object in `.mcp.json` or register it with `claude mcp add`. Do not

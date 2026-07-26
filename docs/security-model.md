@@ -194,3 +194,14 @@ adapter never invokes a shell and passes only a JSON context/argument payload;
 it is a process boundary, not a complete sandbox. Deployments handling hostile
 code must place that worker in an OS/container sandbox with a restricted
 filesystem, network, identity, and resource policy.
+## Enterprise fleet trust boundaries
+
+The enterprise fleet layer adds organization, project, and deployment scope
+to the existing runtime boundary. The browser is an untrusted operator client;
+the authenticated API and injected authorizer decide whether an operation is
+permitted. Fleet persistence stores metadata, configuration references, and
+content hashes, never bearer tokens or credentials. Agent sessions are opaque,
+short-lived, scoped to one deployment and agent, and excluded from inventory
+responses. Every lifecycle and rollout mutation is auditable. Provider-backed
+authentication, policy, IAM, approval, audit retention, isolation, and runtime
+activation remain explicit adapters and are not simulated by the UI.

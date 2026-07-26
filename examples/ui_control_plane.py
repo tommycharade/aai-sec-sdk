@@ -10,17 +10,37 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any, cast
 from wsgiref.simple_server import make_server
 
 from agentic_security import (
     AgentPresenceStore,
     ControlPlaneApplication,
     ControlPlaneStore,
+    EnterpriseFleetApplication,
+    EnterpriseFleetStore,
+    FleetIdentity,
     InMemoryAuditSink,
     InMemoryControlPlaneAuthority,
     OperatorIdentity,
     StaticBearerAuthenticator,
+    StaticFleetAuthenticator,
 )
+
+
+class CombinedControlPlaneApplication:
+    """Route local runtime and enterprise fleet APIs through one HTTP server."""
+
+    def __init__(self, runtime: Any, enterprise: Any) -> None:
+        """Bind the two explicitly scoped reference applications."""
+        self.runtime = runtime
+        self.enterprise = enterprise
+
+    def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
+        """Dispatch enterprise paths without changing the existing runtime API."""
+        if str(environ.get("PATH_INFO", "")).startswith("/api/enterprise/"):
+            return cast(list[bytes], self.enterprise(environ, start_response))
+        return cast(list[bytes], self.runtime(environ, start_response))
 
 
 def main() -> None:
@@ -34,7 +54,7 @@ def main() -> None:
     agent_token = os.environ.get("AAI_SEC_AGENT_TOKEN", "synthetic-agent-token-1234")
     audit = InMemoryAuditSink()
     presence = AgentPresenceStore(audit=audit)
-    application = ControlPlaneApplication(
+    application: Any = ControlPlaneApplication(
         ControlPlaneStore(
             path,
             authority=InMemoryControlPlaneAuthority(),
@@ -49,6 +69,36 @@ def main() -> None:
         ),
         allowed_origin=os.environ.get("AAI_SEC_UI_ORIGIN", "http://localhost:5173"),
     )
+    fleet = EnterpriseFleetStore(path.with_name("fleet.sqlite"), audit=audit)
+    fleet_identity = FleetIdentity("local-operator", "org-example", frozenset({"admin"}))
+    try:
+        fleet.create_organization("org-example", "Example enterprise")
+        fleet.create_project("org-example", "project-platform", "Platform")
+        fleet.create_deployment(
+            "org-example",
+            "project-platform",
+            "deployment-local",
+            "Local development",
+            environment="development",
+            region="local",
+            sdk_version="1.1.0",
+        )
+    except ValueError:
+        # The seed is idempotent for the local reference database.
+        pass
+    enterprise_application = EnterpriseFleetApplication(
+        fleet,
+        authenticator=StaticFleetAuthenticator(
+            {
+                token: fleet_identity,
+                agent_token: FleetIdentity(
+                    "claude-code-local", "org-example", frozenset({"agent"})
+                ),
+            }
+        ),
+        allowed_origin=os.environ.get("AAI_SEC_UI_ORIGIN", "http://localhost:5173"),
+    )
+    application = CombinedControlPlaneApplication(application, enterprise_application)
     print(f"AAI Security UI control plane listening on http://{host}:{port}")
     print(f"Validated configuration will be stored at {path}")
     print("Agent presence token is configured for the local Claude MCP example.")

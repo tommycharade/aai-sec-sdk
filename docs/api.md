@@ -91,6 +91,14 @@ The example is synthetic and does not connect to a model or external service.
 
 ## Typed security components
 
+## Enterprise fleet control plane
+
+::: agentic_security.enterprise_control_plane.FleetIdentity
+
+::: agentic_security.enterprise_control_plane.EnterpriseFleetStore
+
+::: agentic_security.enterprise_control_plane.EnterpriseFleetApplication
+
 Applications normally continue to use `GuardedRuntime`; these contracts are
 provided for integrations and contract tests. Do not construct a permit from
 model output or bypass the runtime lifecycle.
