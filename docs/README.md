@@ -28,7 +28,9 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 The core runtime, synthetic reference application, typed idempotency and
 isolation contracts, phase-specific timeout outcomes, bounded HTTP
 policy/approval adapters, token broker, audit exporters, and process-boundary
-integration surfaces are available. See [production readiness](production-readiness.md)
+integration surfaces are available. The execution boundary now exposes typed
+action facts, permits, centralized pre-execution authorization, and lifecycle
+gates while preserving the `GuardedRuntime` entry point. See [production readiness](production-readiness.md)
 for the exact boundary between SDK guarantees and deployment responsibilities.
 
 ## Development

@@ -4,8 +4,32 @@ All notable changes to this project will be documented here.
 
 The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public APIs may change while the design is validated, but breaking changes will still be called out explicitly.
 
+## 1.0.0 - 2026-07-26
+
+The first stable Apache-2.0 release. The SDK provides a typed, fail-closed
+execution boundary for agentic tool calls, with explicit host-owned identity,
+policy, approval, credential, isolation, budget, idempotency, timeout, and
+audit controls. Production deployments must still provide durable adapters,
+real sandboxing where required, authenticated IAM/policy services, and domain
+authorization.
+
 ## Unreleased
 
+- Hardened execution permits against `object.__new__` and copied-field forgery
+  by authenticating issued object identity at the lifecycle boundary.
+- Extracted bounded worker admission/timeout accounting and atomic action-budget
+  leases into explicit security components while preserving runtime ordering.
+
+- Added immutable `ActionFacts` and `ExecutionPermit` boundary types,
+  centralized `PreExecutionAuthorizer`, and permit-gated
+  `ExecutionLifecycle` handler invocation while preserving `GuardedRuntime`.
+- Added an explicit `TerminalRecorder` for idempotency lookup, atomic claim,
+  replay/conflict/expiry handling, terminal persistence, and GC. Permit
+  issuance is authorizer-owned and lifecycle rejects cross-authority or forged
+  permits.
+- Expanded mutation scope to all security-relevant runtime controls and
+  adapters with aggregate, per-component, critical-mutant, raw-evidence, and
+  negative-control enforcement.
 - Made action-budget lease release atomic and single-use across concurrent
   timeout, reconciliation, audit, and worker-exit callbacks; duplicate
   releases are rejected without counter underflow, with adversarial stress

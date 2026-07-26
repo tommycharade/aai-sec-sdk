@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from agentic_security import (
+    ApprovalOutcome,
     HttpApprovalProvider,
     HttpCedarPolicyEngine,
     HttpOpaPolicyEngine,
@@ -71,6 +72,30 @@ def test_http_policy_and_approval_adapters_use_authenticated_transport() -> None
     )
     assert approval.consume("approval:1", context(), "read", "proposal:1", "hash")
     assert calls[-1]["action_hash"] == "hash"
+
+
+@pytest.mark.parametrize(
+    ("response", "outcome", "reason"),
+    [
+        ({"approved": True}, ApprovalOutcome.CONSUMED, "approval service consumed grant"),
+        ({"approved": False}, ApprovalOutcome.NOT_CONSUMED, "approval service rejected grant"),
+        ({}, ApprovalOutcome.UNKNOWN, "approval service returned no decision"),
+        ({"approved": "yes"}, ApprovalOutcome.UNKNOWN, "approval service returned no decision"),
+    ],
+)
+def test_http_approval_adapter_has_typed_fail_closed_outcomes(
+    response: dict[str, object], outcome: ApprovalOutcome, reason: str
+) -> None:
+    """Only explicit boolean service decisions can consume an approval."""
+
+    class Client:
+        def post(self, _payload: dict[str, object]) -> dict[str, object]:
+            return response
+
+    result = HttpApprovalProvider(Client()).consume(  # type: ignore[arg-type]
+        "approval:typed", context(), "read", "proposal:typed", "hash:typed"
+    )
+    assert (result.outcome, result.reason) == (outcome, reason)
 
 
 def test_http_client_requires_https_or_explicit_localhost_test_mode() -> None:
@@ -147,6 +172,37 @@ def test_jsonl_audit_sink_refuses_to_extend_a_corrupt_chain(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="hash chain is corrupt"):
         JsonlAuditSink(path)
+
+
+def test_jsonl_audit_verification_rejects_each_hash_chain_link_failure(tmp_path: Path) -> None:
+    path = tmp_path / "hash-links.jsonl"
+    sink = JsonlAuditSink(path)
+    sink.append("event", "request:1", {"value": "safe"})
+    sink.append("event", "request:2", {"value": "safe"})
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+
+    for index, field, value in (
+        (0, "previous_hash", "f" * 64),
+        (1, "event_hash", "not-a-hash"),
+    ):
+        altered = [dict(line) for line in lines]
+        altered[index][field] = value
+        path.write_text("\n".join(json.dumps(line, sort_keys=True) for line in altered) + "\n")
+        with pytest.raises(ValueError, match="hash chain is corrupt"):
+            JsonlAuditSink(path)
+
+
+def test_jsonl_audit_restart_reads_empty_and_utf8_chain_heads(tmp_path: Path) -> None:
+    """The restart path must distinguish an empty file from a non-empty chain."""
+    path = tmp_path / "restart.jsonl"
+    path.write_text("", encoding="utf-8")
+    empty = JsonlAuditSink(path)
+    first = empty.append("event", "request:empty", {"value": "safe"})
+
+    restarted = JsonlAuditSink(path)
+    second = restarted.append("event", "request:utf8", {"value": "café"})
+    assert second.previous_hash == first.event_hash
+    assert restarted.verify()
 
 
 def test_jsonl_audit_sink_refreshes_chain_head_under_lock(tmp_path: Path) -> None:

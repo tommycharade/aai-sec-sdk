@@ -4,6 +4,25 @@
 
 Model output is untrusted input. Tool names, arguments, retrieved text, memory, tool results, and inter-agent messages are also untrusted. The SDK’s security boundary sits between a proposed action and the side effect that would execute it.
 
+The boundary is represented explicitly by `ActionFacts` ->
+`PreExecutionAuthorizer` -> `ExecutionPermit` -> `ExecutionLifecycle`. Facts
+are immutable host-derived values, the authorizer is the centralized final
+decision point, and lifecycle is the permit-gated handler invocation path.
+Permit issuer identity is kept in an internal registry rather than permit
+fields, so `object.__new__` objects and copied fields cannot authorize a
+handler call. This protects the SDK boundary from accidental forgery; code
+with authority to modify the running Python interpreter remains trusted.
+
+Bounded provider and handler waits are admitted through
+`BoundedOperationTracker`. A timeout retains its worker slot until completion;
+`BoundedOperationExecutor` emits the typed timeout phase, while
+`ActionBudgetLease` prevents timeout and worker-exit callbacks from releasing
+the same action budget twice.
+The runtime does not expose a public operation that invokes a registered
+handler from a proposal without a permit. This is an in-process architectural
+guarantee, not a sandbox claim: trusted application code can still call its
+own handler directly outside the SDK.
+
 ## Required decision inputs
 
 An authorization decision should include, at minimum:
@@ -104,6 +123,10 @@ reference implementation. Without a configured store, the runtime fails
 closed. If terminal persistence fails after execution, the runtime returns
 `EXECUTED_UNRECORDED` rather than claiming a durable success. The SDK does not
 claim restart or multi-process safety for local memory.
+`TerminalRecorder` owns lookup, identity collision checks, claim, terminal
+state persistence, and observable GC at the runtime boundary. Recording is
+valid only after the caller has claimed the key; missing-claim or transition
+errors remain fail closed.
 TTL applies to completed records. GC may remove expired completed records only;
 expired `IN_PROGRESS` and `UNCERTAIN` records are retained and surfaced as
 `EXPIRED` so expiry cannot become an unsafe replay path. GC returns an
@@ -137,7 +160,7 @@ handling hostile code.
 - Run the release verification, SBOM, provenance, and compatibility checks
   described in `releasing.md` before depending on a published version.
 - Treat mutation evidence as commit- and scope-bound assurance: the checked
-  evidence must name the exact tool, score, commit, and three-file security
+  evidence must name the exact tool, score, commit, and complete 11-file security
   scope. It is not portable evidence for another source revision.
 
 ## Deployment adapters and process boundaries

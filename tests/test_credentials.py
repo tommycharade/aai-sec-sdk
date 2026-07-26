@@ -191,7 +191,7 @@ def test_credential_capabilities_are_identity_keyed() -> None:
 
 def test_credential_brokers_reject_invalid_ttl_and_token() -> None:
     broker = InMemoryCredentialBroker()
-    with pytest.raises(ValueError, match="TTL"):
+    with pytest.raises(ValueError, match=r"^credential TTL must be positive$"):
         broker.mint(
             _context(),
             ToolDefinition("read", lambda *_: None, _validator, description="Read."),

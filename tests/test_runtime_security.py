@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from math import inf, nan
 from threading import Event
@@ -13,6 +14,8 @@ import pytest
 
 from agentic_security import (
     ActionProposal,
+    ApprovalOutcome,
+    CancellationToken,
     ExecutionContext,
     ExecutionStatus,
     GuardedRuntime,
@@ -28,8 +31,14 @@ from agentic_security import (
     ToolRegistry,
     action_hash,
 )
+from agentic_security.approvals import ApprovalConsumption
 from agentic_security.budgets import Budget, BudgetState
-from agentic_security.errors import DuplicateToolError, SecurityConfigurationError
+from agentic_security.components import ActionBudgetLease, ActionFacts
+from agentic_security.errors import (
+    DuplicateToolError,
+    RuntimeOperationTimeoutError,
+    SecurityConfigurationError,
+)
 from agentic_security.policies import AllowListPolicy, PolicyDecision, PolicyResult
 from agentic_security.runtime import RuntimeConfig
 
@@ -42,6 +51,23 @@ def context() -> ExecutionContext:
         purpose="test",
         tenant="tenant:a",
     )
+
+
+@pytest.fixture(autouse=True)
+def host_denials_always_have_request_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every host denial must retain the UUID created at the execution boundary."""
+    original = GuardedRuntime._deny
+
+    def deny_with_identity(
+        runtime: GuardedRuntime,
+        request_id: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        assert isinstance(request_id, str) and UUID(request_id)
+        return original(runtime, request_id, *args, **kwargs)
+
+    monkeypatch.setattr(GuardedRuntime, "_deny", deny_with_identity)
 
 
 def validator(arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -98,8 +124,104 @@ def make_runtime(
     return runtime, audit
 
 
+def test_run_handler_contract_passes_bounded_handler_metadata_and_timeout_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The handler boundary must preserve its phase, request, and cancellation hooks."""
+    calls: list[Any] = []
+    runtime, _ = make_runtime(calls=calls)
+    tool = runtime.registry.get("read_record")
+    assert tool is not None
+    facts = ActionFacts(
+        runtime.context,
+        ActionProposal("read_record", {"value": "safe"}, "proposal:direct-handler"),
+        tool,
+        {"value": "safe"},
+        (Resource("record:1", "record", "tenant:a"),),
+        "fingerprint:direct-handler",
+    )
+    permit = runtime._authorizer.issue_permit(
+        facts,
+        PolicyResult(PolicyDecision.ALLOW, "allowed"),
+        None,
+        None,
+        False,
+        runtime.context,
+        CancellationToken(),
+    )
+    state = ActionBudgetLease()
+
+    def bounded(
+        operation: Any,
+        operation_name: str,
+        *,
+        on_timeout: Any,
+        request_id: str | None,
+        on_timeout_observed: Any,
+        timeout_phase: TimeoutPhase | None,
+    ) -> Any:
+        calls.extend([operation_name, request_id, on_timeout, on_timeout_observed, timeout_phase])
+        return operation()
+
+    monkeypatch.setattr(runtime, "_run_bounded", bounded)
+    assert runtime._run_handler(permit, "request:handler", state) == {"ok": True}
+    assert calls[0] == "handler execution"
+    assert calls[1] == "request:handler"
+    assert calls[2] is not None
+    assert calls[3] is not None
+    assert calls[4] is TimeoutPhase.HANDLER
+
+
+def test_consume_approval_contract_passes_live_binding_and_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Approval consumption must receive the exact live action binding."""
+    runtime, _ = make_runtime()
+    seen: list[Any] = []
+
+    class Provider:
+        def consume(self, *args: Any) -> ApprovalConsumption:
+            seen.extend(args)
+            return ApprovalConsumption(ApprovalOutcome.CONSUMED, "consumed")
+
+    def bounded(
+        operation: Any,
+        operation_name: str,
+        *,
+        on_timeout: Any,
+        request_id: str | None,
+        on_timeout_observed: Any,
+        timeout_phase: TimeoutPhase | None,
+    ) -> Any:
+        assert operation_name == "approval consumption"
+        assert request_id == "request:approval"
+        assert on_timeout is not None
+        assert on_timeout_observed is not None
+        assert timeout_phase is TimeoutPhase.APPROVAL
+        return operation()
+
+    monkeypatch.setattr(runtime, "_run_bounded", bounded)
+    result = runtime._consume_approval_bounded(
+        Provider(),
+        "approval:1",
+        "read_record",
+        "proposal:1",
+        "hash:live",
+        "request:approval",
+        ActionBudgetLease(),
+    )
+    assert result.outcome is ApprovalOutcome.CONSUMED
+    assert seen == [
+        "approval:1",
+        runtime.context,
+        "read_record",
+        "proposal:1",
+        "hash:live",
+    ]
+
+
 def proposal(
-    value: str = "safe", operation_key: str | None = None, **kwargs: Any
+    value: Any = "safe", operation_key: str | None = None, **kwargs: Any
 ) -> ActionProposal:
     return ActionProposal(
         "read_record", {"value": value, **kwargs}, "proposal:1", operation_key=operation_key
@@ -115,6 +237,123 @@ def test_allowed_action_executes_with_application_principal() -> None:
     assert result.status == "executed"
     assert calls == [{"principal": "user:alice", "arguments": {"value": "safe"}}]
     assert audit.verify()
+
+
+def _stopped_runtime_case() -> tuple[GuardedRuntime, ActionProposal]:
+    runtime, _ = make_runtime()
+    runtime.stop()
+    return runtime, proposal()
+
+
+def _exhausted_runtime_case() -> tuple[GuardedRuntime, ActionProposal]:
+    runtime, _ = make_runtime(budget=Budget(max_actions=1))
+    assert runtime.execute(proposal()).status in {
+        ExecutionStatus.EXECUTED,
+        ExecutionStatus.EXECUTED_UNRECORDED,
+    }
+    return runtime, proposal()
+
+
+@pytest.mark.parametrize(
+    ("case", "build"),
+    [
+        ("unknown tool", lambda: (make_runtime()[0], ActionProposal("missing", {}, "p:1"))),
+        (
+            "invalid arguments",
+            lambda: (make_runtime()[0], proposal(value=42)),
+        ),
+        (
+            "policy denial",
+            lambda: (make_runtime(policy=AllowListPolicy({"other"}))[0], proposal()),
+        ),
+        (
+            "approval missing",
+            lambda: (
+                make_runtime(requires_approval=True)[0],
+                proposal(),
+            ),
+        ),
+        ("emergency stop", _stopped_runtime_case),
+        ("budget exhausted", _exhausted_runtime_case),
+    ],
+)
+def test_every_early_denial_keeps_a_host_request_identity(
+    case: str,
+    build: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every denial branch must preserve the host-generated request identity."""
+    runtime, action = build()
+    original_deny = runtime._deny
+
+    def deny_with_identity(request_id: str, *args: Any, **kwargs: Any) -> Any:
+        assert isinstance(request_id, str) and UUID(request_id), case
+        return original_deny(request_id, *args, **kwargs)
+
+    monkeypatch.setattr(runtime, "_deny", deny_with_identity)
+    runtime.execute(action)
+
+
+def test_runtime_bounded_stages_preserve_live_request_and_phase_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Policy and handler workers retain host request, phase, and callbacks."""
+    runtime, _ = make_runtime()
+    calls: list[tuple[str, str | None, TimeoutPhase | None, bool, bool]] = []
+    original = runtime._run_bounded
+
+    def bounded(
+        operation: Any,
+        operation_name: str,
+        *,
+        on_timeout: Any,
+        request_id: str | None,
+        on_timeout_observed: Any,
+        timeout_phase: TimeoutPhase | None,
+    ) -> Any:
+        calls.append(
+            (
+                operation_name,
+                request_id,
+                timeout_phase,
+                on_timeout is not None,
+                on_timeout_observed is not None,
+            )
+        )
+        return original(
+            operation,
+            operation_name,
+            on_timeout=on_timeout,
+            request_id=request_id,
+            on_timeout_observed=on_timeout_observed,
+            timeout_phase=timeout_phase,
+        )
+
+    monkeypatch.setattr(runtime, "_run_bounded", bounded)
+    assert runtime.execute(proposal()).status in {
+        ExecutionStatus.EXECUTED,
+        ExecutionStatus.EXECUTED_UNRECORDED,
+    }
+    assert [call[0] for call in calls] == ["policy evaluation", "handler execution"]
+    for operation_name, request_id, phase, has_timeout, observed in calls:
+        assert UUID(request_id or "")
+        assert phase is (
+            TimeoutPhase.POLICY if operation_name == "policy evaluation" else TimeoutPhase.HANDLER
+        )
+        assert has_timeout and observed
+
+
+def test_health_reports_host_stop_and_bounded_lifecycle_state() -> None:
+    runtime, _ = make_runtime()
+
+    live = runtime.health()
+    assert live["stopped"] is False
+    assert live["active_actions"] == 0
+    assert live["bounded_workers"] == 0
+    assert live["timed_out_workers"] == 0
+
+    runtime.stop()
+    assert runtime.health()["stopped"] is True
 
 
 def test_denial_request_ids_and_reasons_are_auditable() -> None:
@@ -180,6 +419,50 @@ def test_approval_required_result_and_audit_are_host_bound() -> None:
     assert event.payload["reason"] == "explicit approval is required"
 
 
+def test_runtime_passes_the_complete_approval_binding_to_the_provider() -> None:
+    seen: dict[str, Any] = {}
+
+    class RecordingApproval:
+        def consume(
+            self,
+            approval_id: str,
+            ctx: ExecutionContext,
+            tool_name: str,
+            proposal_id: str,
+            fingerprint: str,
+        ) -> ApprovalConsumption:
+            seen.update(
+                approval_id=approval_id,
+                context=ctx,
+                tool_name=tool_name,
+                proposal_id=proposal_id,
+                fingerprint=fingerprint,
+            )
+            return ApprovalConsumption(ApprovalOutcome.NOT_CONSUMED, "synthetic denial")
+
+    runtime, audit = make_runtime(
+        risk=RiskLevel.HIGH,
+        requires_approval=True,
+        approvals=RecordingApproval(),  # type: ignore[arg-type]
+    )
+    candidate = ActionProposal(
+        "read_record",
+        {"value": "safe"},
+        "proposal:approval-binding",
+        approval_id="approval:binding",
+    )
+
+    result = runtime.execute(candidate)
+
+    assert result.status is ExecutionStatus.DENIED
+    assert seen["approval_id"] == "approval:binding"
+    assert seen["context"] is runtime.context
+    assert seen["tool_name"] == "read_record"
+    assert seen["proposal_id"] == "proposal:approval-binding"
+    assert isinstance(seen["fingerprint"], str) and seen["fingerprint"]
+    assert audit.verify()
+
+
 def test_success_audit_binds_request_and_live_policy_provenance() -> None:
     """Execution evidence includes the host decision and its provenance."""
 
@@ -198,6 +481,23 @@ def test_success_audit_binds_request_and_live_policy_provenance() -> None:
     assert event.payload["policy_decision"] == PolicyDecision.ALLOW.value
     assert event.payload["policy_version"] == "policy-7"
     assert event.payload["policy_provenance"] == "test-policy"
+
+
+def test_success_audit_contains_complete_host_identity_context() -> None:
+    """Audit records retain every host-owned identity field used for review."""
+    runtime, audit = make_runtime()
+
+    result = runtime.execute(proposal("audited"))
+
+    event = audit.events()[-1]
+    assert result.status is ExecutionStatus.EXECUTED
+    assert event.payload["agent_id"] == "agent:test"
+    assert event.payload["principal_id"] == "user:alice"
+    assert event.payload["task_id"] == "task:1"
+    assert event.payload["purpose"] == "test"
+    assert event.payload["tool_name"] == "read_record"
+    assert event.payload["proposal_id"] == "proposal:1"
+    assert event.payload["arguments"] == {"value": "audited"}
 
 
 def test_tool_results_are_redacted_before_crossing_runtime_boundary() -> None:
@@ -367,6 +667,31 @@ def test_oversized_tool_results_are_rejected_after_side_effect() -> None:
 
     assert result.status is ExecutionStatus.EXECUTED_RESULT_REJECTED
     assert result.output is None
+    assert result.handler_started is True
+    assert result.side_effect_state is SideEffectState.EXECUTED
+
+
+def test_output_at_the_configured_byte_limit_is_accepted() -> None:
+    output = {"value": "x"}
+    encoded_size = len(b'{"value":"x"}')
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="exact_limit",
+            handler=lambda *_: output,
+            validator=validator,
+            max_output_bytes=encoded_size,
+            description="Synthetic exact output limit action.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(), registry, AllowListPolicy({"exact_limit"}), InMemoryAuditSink()
+    )
+
+    result = runtime.execute(ActionProposal("exact_limit", {"value": "safe"}, "proposal:limit"))
+
+    assert result.status is ExecutionStatus.EXECUTED
+    assert result.output == output
 
 
 def test_unknown_tool_is_denied_without_side_effect() -> None:
@@ -416,6 +741,24 @@ def test_policy_is_evaluated_per_action_with_live_resource() -> None:
 
     assert result.status == "denied"
     assert observed == [("user:alice", "record:1")]
+
+
+def test_policy_denial_audit_preserves_live_decision_metadata_and_resources() -> None:
+    class VersionedDeny:
+        def decide(self, *_: Any) -> PolicyResult:
+            return PolicyResult(PolicyDecision.DENY, "blocked", "policy-9", "deny-test")
+
+    runtime, audit = make_runtime(policy=VersionedDeny())
+    result = runtime.execute(proposal())
+
+    event = audit.events()[-1]
+    assert result.status is ExecutionStatus.DENIED
+    assert event.payload["resources"] == [
+        {"id": "record:1", "kind": "record", "tenant": "tenant:a"}
+    ]
+    assert event.payload["policy_decision"] == "deny"
+    assert event.payload["policy_version"] == "policy-9"
+    assert event.payload["policy_provenance"] == "deny-test"
 
 
 def test_malformed_policy_decision_fails_closed() -> None:
@@ -492,6 +835,116 @@ def test_handler_timeout_is_structured_and_signals_cancellation() -> None:
     assert result.timeout_phase is TimeoutPhase.HANDLER
     assert result.handler_started is True
     assert result.side_effect_state is SideEffectState.UNCERTAIN
+
+
+def test_runtime_bounded_timeout_preserves_callback_and_phase() -> None:
+    callback = Event()
+    runtime, _ = make_runtime()
+    runtime.config = RuntimeConfig(execution_timeout_seconds=0.005)
+
+    with pytest.raises(RuntimeOperationTimeoutError) as raised:
+        runtime._run_bounded(
+            lambda: sleep(0.05),
+            "synthetic policy operation",
+            on_timeout=callback.set,
+            timeout_phase=TimeoutPhase.POLICY,
+        )
+
+    assert raised.value.phase is TimeoutPhase.POLICY  # type: ignore[attr-defined]
+    assert callback.wait(1)
+
+
+def test_handler_always_receives_host_cancellation_capability() -> None:
+    """The permit path must not silently omit cooperative cancellation."""
+    observed: list[bool] = []
+
+    def handler(ctx: ExecutionContext, _: Any) -> dict[str, bool]:
+        observed.append(ctx.cancellation is not None)
+        return {"cancel-capability": observed[-1]}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="cancellation_contract",
+            handler=handler,
+            validator=validator,
+            description="Synthetic cancellation contract action.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"cancellation_contract"}),
+        InMemoryAuditSink(),
+    )
+
+    result = runtime.execute(
+        ActionProposal("cancellation_contract", {"value": "safe"}, "proposal:cancel-contract")
+    )
+
+    assert result.status is ExecutionStatus.EXECUTED
+    assert observed == [True]
+    assert result.output == {"cancel-capability": True}
+
+
+def test_handler_contract_rejects_missing_cancellation_capability() -> None:
+    """A handler must never be invoked with a permit lacking host cancellation."""
+    observed: list[bool] = []
+
+    def handler(ctx: ExecutionContext, _: Any) -> dict[str, bool]:
+        if ctx.cancellation is None:
+            raise AssertionError("host cancellation capability is required")
+        observed.append(True)
+        return {"ok": True}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="strict_cancellation_contract",
+            handler=handler,
+            validator=validator,
+            description="Synthetic strict cancellation contract action.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"strict_cancellation_contract"}),
+        InMemoryAuditSink(),
+    )
+
+    result = runtime.execute(
+        ActionProposal(
+            "strict_cancellation_contract",
+            {"value": "safe"},
+            "proposal:strict-cancel-contract",
+        )
+    )
+
+    assert result.status is ExecutionStatus.EXECUTED
+    assert observed == [True]
+
+
+def test_runtime_authorizes_the_live_tool_and_arguments_in_action_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A permit cannot be issued from facts missing the live action identity."""
+    runtime, _ = make_runtime()
+    captured: dict[str, Any] = {}
+    original = runtime._authorizer.issue_permit
+
+    def issue_permit(*args: Any, **kwargs: Any) -> Any:
+        facts = args[0]
+        captured["facts"] = facts
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(runtime._authorizer, "issue_permit", issue_permit)
+    result = runtime.execute(proposal("live-value"))
+
+    assert result.status is ExecutionStatus.EXECUTED
+    facts = captured["facts"]
+    assert facts.tool is runtime.registry.get("read_record")
+    assert facts.arguments == {"value": "live-value"}
 
 
 def test_runtime_rejects_non_finite_timeout_configuration() -> None:
@@ -610,6 +1063,55 @@ def test_stop_after_policy_returns_prevents_handler_invocation() -> None:
         result = future.result(timeout=1)
 
     assert result.status is ExecutionStatus.DENIED
+    assert calls == []
+
+
+def test_stop_after_credential_mint_returns_prevents_handler_invocation() -> None:
+    """A stop during credential minting must block the subsequent permit path."""
+    credential_ready = Event()
+    release = Event()
+    calls: list[bool] = []
+
+    class Credential:
+        def valid_for(self, *_: Any) -> bool:
+            return True
+
+    class SlowBroker:
+        def mint(self, *_: Any) -> Credential:
+            credential_ready.set()
+            release.wait(1)
+            return Credential()
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="credential_stop_action",
+            handler=lambda *_: calls.append(True),
+            validator=validator,
+            requires_credential=True,
+            description="Synthetic credential stop-race action.",
+        )
+    )
+    runtime = GuardedRuntime(
+        context(),
+        registry,
+        AllowListPolicy({"credential_stop_action"}),
+        InMemoryAuditSink(),
+        credentials=SlowBroker(),  # type: ignore[arg-type]
+        config=RuntimeConfig(execution_timeout_seconds=0.05),
+    )
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            runtime.execute,
+            ActionProposal("credential_stop_action", {"value": "safe"}, "proposal:stop-credential"),
+        )
+        assert credential_ready.wait(1)
+        runtime.stop()
+        release.set()
+        result = future.result(timeout=1)
+
+    assert result.status is ExecutionStatus.DENIED
+    assert result.reason == "runtime emergency stop is active"
     assert calls == []
 
 
@@ -876,7 +1378,106 @@ def test_idempotency_key_includes_tool_and_arguments() -> None:
 
     assert first.output == {"tool": "first"}
     assert second.status is ExecutionStatus.DENIED
-    assert "conflicts" in (second.reason or "")
+
+
+def test_in_memory_approval_rejects_each_binding_dimension_and_expiry() -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    approvals = InMemoryApprovalProvider(now=lambda: now)
+    grant = approvals.issue(
+        "approval:matrix",
+        context(),
+        "read_record",
+        "proposal:matrix",
+        "approver:test",
+        "hash:matrix",
+        ttl_seconds=2,
+    )
+    cases = [
+        ("task:other", "task:other", "read_record", "proposal:matrix", "hash:matrix"),
+        ("tool:other", context().task_id, "other", "proposal:matrix", "hash:matrix"),
+        ("proposal:other", context().task_id, "read_record", "other", "hash:matrix"),
+        ("hash:other", context().task_id, "read_record", "proposal:matrix", "hash:other"),
+    ]
+    for label, task_id, tool_name, proposal_id, action in cases:
+        altered = replace(context(), task_id=task_id)
+        outcome = approvals.consume(grant.approval_id, altered, tool_name, proposal_id, action)
+        assert outcome.outcome is ApprovalOutcome.NOT_CONSUMED, label
+    now += timedelta(seconds=3)
+    assert (
+        approvals.consume(
+            grant.approval_id, context(), "read_record", "proposal:matrix", "hash:matrix"
+        ).outcome
+        is ApprovalOutcome.NOT_CONSUMED
+    )
+
+
+def test_approval_boundaries_and_reasons_are_explicit() -> None:
+    """Approval state and public reason text remain distinguishable at boundaries."""
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    approvals = InMemoryApprovalProvider(now=lambda: now)
+    grant = approvals.issue(
+        "approval:reasons",
+        context(),
+        "read_record",
+        "proposal:reasons",
+        "approver:test",
+        "hash:reasons",
+        ttl_seconds=1,
+    )
+
+    missing = approvals.consume(
+        "approval:missing", context(), "read_record", "proposal:reasons", "hash:reasons"
+    )
+    assert (missing.outcome, missing.reason) == (
+        ApprovalOutcome.NOT_CONSUMED,
+        "missing, used, or expired",
+    )
+    binding = approvals.consume(
+        grant.approval_id, context(), "other", "proposal:reasons", "hash:reasons"
+    )
+    assert (binding.outcome, binding.reason) == (
+        ApprovalOutcome.NOT_CONSUMED,
+        "action binding mismatch",
+    )
+    mismatch = approvals.consume(
+        grant.approval_id, context(), "read_record", "proposal:reasons", "wrong-hash"
+    )
+    assert (mismatch.outcome, mismatch.reason) == (
+        ApprovalOutcome.NOT_CONSUMED,
+        "action hash mismatch",
+    )
+    now += timedelta(seconds=1)
+    expired = approvals.consume(
+        grant.approval_id, context(), "read_record", "proposal:reasons", "hash:reasons"
+    )
+    assert (expired.outcome, expired.reason) == (
+        ApprovalOutcome.NOT_CONSUMED,
+        "missing, used, or expired",
+    )
+
+
+def test_approval_issue_and_action_hash_have_strict_boundaries() -> None:
+    """Zero TTL and canonical action identity cannot silently weaken approval scope."""
+    approvals = InMemoryApprovalProvider(now=lambda: datetime(2026, 1, 1, tzinfo=UTC))
+    with pytest.raises(ValueError, match="positive"):
+        approvals.issue(
+            "approval:zero",
+            context(),
+            "read_record",
+            "proposal:zero",
+            "approver:test",
+            "hash:zero",
+            ttl_seconds=0,
+        )
+    assert (
+        action_hash(
+            context(),
+            "read_record",
+            {"value": "safe"},
+            (Resource("record:test", "record", "tenant:test"),),
+        )
+        == "ca4243e9fcf2041606a24cc808ef993584afab6b58b32383b1e5dfeaecb87ff8"
+    )
 
 
 def test_stop_switch_denies_future_actions() -> None:
@@ -1052,6 +1653,10 @@ def test_runtime_reports_timed_out_worker_health_until_release() -> None:
     result = runtime.execute(ActionProposal("health_action", {"value": "safe"}, "proposal:health"))
     assert result.status is ExecutionStatus.TIMED_OUT
     assert started.is_set()
+    for _ in range(100):
+        if runtime.health()["timed_out_workers"] == 1:
+            break
+        sleep(0.001)
     assert runtime.health()["timed_out_workers"] == 1
     release.set()
     for _ in range(100):
@@ -1146,12 +1751,97 @@ def test_budget_state_rejects_concurrent_over_allocation() -> None:
     assert state.acquire()
 
 
+def test_budget_release_fails_closed_when_lease_counters_disagree() -> None:
+    """A partially corrupted lease must not decrement either counter."""
+    state = BudgetState(Budget(max_actions=2, max_concurrent=2, max_fan_out=2))
+    assert state.acquire()
+    state._fan_out = 0  # adversarial invariant test
+
+    assert state.release() is False
+    assert state._active == 1
+    assert state._fan_out == 0
+
+
 def test_budget_state_rejects_invalid_cost_and_rate_configuration() -> None:
     with pytest.raises(ValueError):
         BudgetState(Budget(max_actions_per_second=0))
     state = BudgetState(Budget(max_actions=2, max_cost_units=1))
     assert not state.acquire(0)
     assert not state.acquire(2)
+
+
+def test_budget_rate_window_is_strictly_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rate limits reject bursts, expire exactly at one second, and retain counts."""
+    now = iter((0.0, 0.0, 1.0))
+    monkeypatch.setattr("agentic_security.budgets.monotonic", lambda: next(now))
+    state = BudgetState(
+        Budget(
+            max_actions=4,
+            max_concurrent=4,
+            max_fan_out=4,
+            max_cost_units=4,
+            max_actions_per_second=1,
+        )
+    )
+    assert state.acquire()
+    assert not state.acquire()
+    assert state.acquire()
+    assert state.actions == 2
+
+
+def test_budget_rate_window_does_not_expire_on_clock_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A backwards clock jump must not erase a still-live rate reservation."""
+    now = iter((0.8, 0.5))
+    monkeypatch.setattr("agentic_security.budgets.monotonic", lambda: next(now))
+    state = BudgetState(
+        Budget(
+            max_actions=3,
+            max_concurrent=3,
+            max_fan_out=3,
+            max_cost_units=3,
+            max_actions_per_second=1,
+        )
+    )
+    assert state.acquire() is True
+    assert state.acquire() is False
+
+
+def test_budget_capacity_uses_each_concurrency_dimension(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A full active or fan-out dimension independently denies admission."""
+    monkeypatch.setattr("agentic_security.budgets.monotonic", lambda: 0.0)
+    active_limited = BudgetState(Budget(max_actions=3, max_concurrent=1, max_fan_out=2))
+    assert active_limited.acquire()
+    assert not active_limited.acquire()
+    fanout_limited = BudgetState(Budget(max_actions=3, max_concurrent=2, max_fan_out=1))
+    assert fanout_limited.acquire()
+    assert not fanout_limited.acquire()
+
+
+def test_budget_counters_accumulate_across_released_actions() -> None:
+    """Release frees concurrency but never rewinds consumed actions or cost."""
+    state = BudgetState(Budget(max_actions=3, max_cost_units=3, max_concurrent=1))
+    assert state.acquire()
+    assert state.release()
+    assert state.acquire()
+    assert state.actions == 2
+    assert state._cost == 2
+
+
+@pytest.mark.parametrize(
+    "budget",
+    [
+        Budget(max_actions=0),
+        Budget(max_concurrent=0),
+        Budget(max_fan_out=0),
+        Budget(max_cost_units=0),
+        Budget(max_delegation_depth=-1),
+    ],
+)
+def test_budget_state_rejects_each_non_positive_limit(budget: Budget) -> None:
+    with pytest.raises(ValueError, match="positive"):
+        BudgetState(budget)
 
 
 def test_delegation_depth_is_enforced_by_runtime() -> None:

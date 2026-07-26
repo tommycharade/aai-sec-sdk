@@ -8,6 +8,8 @@ from threading import Barrier, Event, Thread
 from time import sleep
 from typing import Any
 
+import pytest
+
 from agentic_security import (
     ActionProposal,
     AllowListPolicy,
@@ -26,6 +28,7 @@ from agentic_security import (
     ReconciliationState,
     Resource,
     RuntimeConfig,
+    RuntimeOperationTimeoutError,
     SideEffectState,
     TimeoutPhase,
     ToolDefinition,
@@ -235,10 +238,12 @@ def test_missing_idempotency_store_fails_closed() -> None:
 
 def test_policy_timeout_retains_action_capacity_until_worker_exit() -> None:
     release = Event()
+    finished = Event()
 
     class SlowPolicy:
         def decide(self, *_: Any) -> PolicyResult:
             release.wait(1)
+            finished.set()
             return PolicyResult(PolicyDecision.ALLOW, "late")
 
     registry = ToolRegistry()
@@ -255,7 +260,6 @@ def test_policy_timeout_retains_action_capacity_until_worker_exit() -> None:
 
     timed_out = runtime.execute(ActionProposal("read", {}, "proposal:1"))
     blocked = runtime.execute(ActionProposal("read", {}, "proposal:2"))
-    release.set()
 
     assert timed_out.status is ExecutionStatus.DENIED
     assert "timed out" in (timed_out.reason or "")
@@ -263,6 +267,51 @@ def test_policy_timeout_retains_action_capacity_until_worker_exit() -> None:
     assert timed_out.timeout_phase is TimeoutPhase.POLICY
     assert timed_out.handler_started is False
     assert timed_out.side_effect_state is SideEffectState.NOT_STARTED
+    assert runtime.health()["timed_out_workers"] == 1
+    assert runtime.health()["bounded_workers"] == 1
+    assert runtime.health()["active_policy_evaluation"] == 1
+    release.set()
+    assert finished.wait(1)
+    assert runtime.health()["timed_out_workers"] == 0
+    assert runtime.health()["bounded_workers"] == 0
+    assert "active_policy_evaluation" not in runtime.health()
+
+
+def test_bounded_operation_tracks_timeout_until_worker_exit_and_calls_callback_once() -> None:
+    """Bounded waits preserve capacity and invoke timeout cleanup exactly once."""
+    started = Event()
+    release = Event()
+    observed = Event()
+    cleaned = Event()
+    runtime = GuardedRuntime(
+        _context(),
+        ToolRegistry(),
+        AllowListPolicy(set()),
+        InMemoryAuditSink(),
+        config=RuntimeConfig(execution_timeout_seconds=0.005, max_timed_out_workers=1),
+    )
+
+    def operation() -> str:
+        started.set()
+        release.wait(1)
+        return "late"
+
+    with pytest.raises(RuntimeOperationTimeoutError, match="synthetic operation timed out"):
+        runtime._run_bounded(
+            operation,
+            "synthetic operation",
+            on_timeout_observed=observed.set,
+            on_timeout=cleaned.set,
+        )
+    assert started.is_set()
+    assert observed.is_set()
+    assert not cleaned.is_set()
+    assert runtime.health()["timed_out_workers"] == 1
+    assert runtime.health()["bounded_workers"] == 1
+    release.set()
+    assert cleaned.wait(1)
+    assert runtime.health()["timed_out_workers"] == 0
+    assert runtime.health()["bounded_workers"] == 0
 
 
 def test_approval_timeout_is_typed_and_does_not_start_handler() -> None:
@@ -339,9 +388,15 @@ def test_stop_during_approval_denies_without_starting_handler() -> None:
 
 
 def test_approval_outcomes_are_typed_and_unknown_fails_closed() -> None:
-    assert normalize_approval_result(True).outcome is ApprovalOutcome.CONSUMED
-    assert normalize_approval_result(False).outcome is ApprovalOutcome.NOT_CONSUMED
-    assert normalize_approval_result(object()).outcome is ApprovalOutcome.UNKNOWN
+    assert normalize_approval_result(True) == ApprovalConsumption(
+        ApprovalOutcome.CONSUMED, "legacy provider consumed approval"
+    )
+    assert normalize_approval_result(False) == ApprovalConsumption(
+        ApprovalOutcome.NOT_CONSUMED, "legacy provider did not consume"
+    )
+    assert normalize_approval_result(object()) == ApprovalConsumption(
+        ApprovalOutcome.UNKNOWN, "approval provider returned invalid outcome"
+    )
 
     calls: list[bool] = []
 
@@ -478,6 +533,50 @@ def test_isolation_attestation_rejects_expiry_and_verifier_errors() -> None:
         pass
     else:
         raise AssertionError("incomplete attestations must fail closed")
+
+
+def test_isolation_verifier_preserves_full_binding_and_rejects_each_mismatch() -> None:
+    """Isolation evidence must be bound to every live action dimension."""
+    context = _context()
+    resources = (Resource("resource:test", "record", "tenant:test"),)
+    attestation = IsolationAttestation(
+        "provider",
+        "workload",
+        "profile",
+        datetime.now(UTC) + timedelta(minutes=1),
+        "nonce",
+        "tool",
+        "tenant:test",
+        {"network": False},
+    )
+    seen: list[tuple[Any, ...]] = []
+
+    def callback(*values: Any) -> bool:
+        seen.append(values)
+        return True
+
+    verifier = CallbackIsolationVerifier(callback)
+    assert verifier.verify(attestation, context, "tool", resources, "nonce") is True
+    assert seen == [(attestation, context, "tool", resources, "nonce")]
+    assert validate_attestation(attestation, context, "tool", resources, "nonce") is True
+    assert not validate_attestation(attestation, context, "wrong-tool", resources, "nonce")
+    assert not validate_attestation(attestation, context, "tool", resources, "wrong-nonce")
+    assert not validate_attestation(
+        attestation,
+        _context().__class__(
+            context.agent_id,
+            context.principal,
+            context.task_id,
+            context.purpose,
+            tenant="other-tenant",
+        ),
+        "tool",
+        resources,
+        "nonce",
+    )
+    assert not validate_attestation(
+        attestation, context, "tool", (Resource("other", "record", "other-tenant"),), "nonce"
+    )
 
     try:
         IsolationAttestation(

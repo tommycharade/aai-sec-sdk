@@ -1,0 +1,111 @@
+{
+  "schema": 3,
+  "description": "Exact security-boundary symbols classified by invariant. Each target is owned by one phase; all other mutants remain in the overall and component gates.",
+  "static_contracts": [
+    {
+      "symbol": "agentic_security.components.ActionBudgetLease.release_once",
+      "reason": "No mutatable operator is generated; concurrent exactly-once behavior is covered by adversarial tests.",
+      "test_ids": ["BUDGET-LEASE-001", "BUDGET-LEASE-002"]
+    },
+    {
+      "symbol": "agentic_security.components.BoundedOperationLease.complete",
+      "reason": "No mutatable operator is generated; late-worker accounting is covered through tracker and executor mutants.",
+      "test_ids": ["TIMEOUT-LEASE-001"]
+    },
+    {
+      "symbol": "agentic_security.components.BoundedOperationLease.mark_timeout",
+      "reason": "No mutatable operator is generated; timeout behavior is covered through tracker and executor mutants.",
+      "test_ids": ["TIMEOUT-LEASE-002"]
+    },
+    {
+      "symbol": "agentic_security.credentials.ScopedCredential.valid_for",
+      "reason": "No mutatable operator is generated; credential scope is covered through broker and authorizer mutants.",
+      "test_ids": ["CREDENTIAL-SCOPE-001", "CREDENTIAL-SCOPE-002"]
+    }
+  ],
+  "critical_invariants": [
+    {
+      "id": "AUTH-EXEC",
+      "invariant": "Only a host-issued permit with live action facts may invoke a handler.",
+      "symbols": [
+        "agentic_security.components.PreExecutionAuthorizer.issue_permit",
+        "agentic_security.components.ExecutionLifecycle.invoke_handler"
+      ],
+      "test_ids": ["AUTH_EXEC_001", "AUTH_EXEC_002", "AUTH_EXEC_003", "AUTH_EXEC_006"],
+      "required_kill_percent": 100
+    },
+    {
+      "id": "IDENTITY",
+      "invariant": "Principal, tenant, tool, and resources remain consistent across the action boundary.",
+      "symbols": ["agentic_security.components.ActionPreparation.validate_identity"],
+      "test_ids": ["IDENTITY_001", "IDENTITY_002", "IDENTITY_007"],
+      "required_kill_percent": 100
+    },
+    {
+      "id": "ISOLATION",
+      "invariant": "Isolation is nonce-bound and independently host-verified before execution.",
+      "symbols": ["agentic_security.components.ActionPreparation.verify_isolation"],
+      "test_ids": ["ISOLATION_001", "ISOLATION_002", "ISOLATION_005"],
+      "required_kill_percent": 100
+    },
+    {
+      "id": "POLICY",
+      "invariant": "Tool-declared policy requirements cannot be weakened by provider output.",
+      "symbols": ["agentic_security.components.PolicyPreparation.apply_tool_approval_requirement"],
+      "test_ids": ["POLICY_001", "POLICY_004", "AUTH_ORDER_003"],
+      "required_kill_percent": 100
+    },
+    {
+      "id": "CREDENTIAL",
+      "invariant": "A credential is accepted only when it is scoped to the live tool and resources.",
+      "symbols": ["agentic_security.components.CredentialPreparation.validate_scope"],
+      "test_ids": ["CREDENTIAL_003", "CREDENTIAL_004", "CREDENTIAL_006"],
+      "required_kill_percent": 100
+    },
+    {
+      "id": "LIFE-001",
+      "invariant": "Timed-out workers retain capacity until completion and report the correct phase.",
+      "symbols": [
+        "agentic_security.runtime.GuardedRuntime._run_bounded"
+      ],
+      "test_ids": ["TIMEOUT_001", "TIMEOUT_002", "TIMEOUT_005", "TIMEOUT_008"],
+      "required_kill_percent": 100
+    },
+    {
+      "id": "APPROVAL-001",
+      "invariant": "Approval consumption is action-bound, typed, single-use, and fail-closed when unknown.",
+      "symbols": [
+        "agentic_security.components.ApprovalPreparation.require_consumed"
+      ],
+      "test_ids": ["APPROVAL_001", "APPROVAL_002", "APPROVAL_004", "APPROVAL_007"],
+      "required_kill_percent": 100
+    },
+    {
+      "id": "LEASE-001",
+      "invariant": "Action and worker leases release at most once and never underflow.",
+      "symbols": [
+        "agentic_security.runtime.GuardedRuntime._release_action_budget_once"
+      ],
+      "test_ids": ["BUDGET_001", "BUDGET_004", "BUDGET_007"],
+      "required_kill_percent": 100
+    },
+    {
+      "id": "TERMINAL-001",
+      "invariant": "In-progress and uncertain idempotency records cannot enable unsafe replay.",
+      "symbols": [
+        "agentic_security.idempotency.InMemoryIdempotencyStore.complete"
+      ],
+      "test_ids": ["IDEMPOTENCY_002", "IDEMPOTENCY_003", "IDEMPOTENCY_006", "IDEMPOTENCY_008"],
+      "required_kill_percent": 100
+    },
+    {
+      "id": "AUDIT",
+      "invariant": "Audit data is redacted, integrity-checked, and cannot imply false success.",
+      "symbols": [
+        "agentic_security.audit.ReplicatedAuditSink.append"
+      ],
+      "test_ids": ["AUDIT_001", "AUDIT_004", "AUDIT_005", "AUDIT_008", "AUDIT_009"],
+      "required_kill_percent": 100
+    }
+  ]
+}

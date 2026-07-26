@@ -85,6 +85,45 @@ The example is synthetic and does not connect to a model or external service.
 
 ::: agentic_security.RuntimeConfig
 
+## Typed security components
+
+Applications normally continue to use `GuardedRuntime`; these contracts are
+provided for integrations and contract tests. Do not construct a permit from
+model output or bypass the runtime lifecycle.
+
+::: agentic_security.ActionFacts
+
+::: agentic_security.AuthorizationEvidence
+
+::: agentic_security.ExecutionPermit
+
+Permits are issued only by `PreExecutionAuthorizer`. The lifecycle authenticates
+the permit's object identity against an internal issuer registry; constructing a
+same-shaped object or copying fields cannot authorize a handler call.
+
+::: agentic_security.PreExecutionAuthorizer
+
+::: agentic_security.ExecutionLifecycle
+
+::: agentic_security.TerminalRecorder
+
+::: agentic_security.BoundedOperationTracker
+
+::: agentic_security.BoundedOperationExecutor
+
+::: agentic_security.ActionBudgetLease
+
+`TerminalRecorder` owns the idempotency state transition around a consequential
+action. Callers must claim before invoking `record`; the configured store
+enforces atomic claim/replay/conflict/expiry semantics. `lookup` rejects a
+different action under the same operation key, `claim` returns existing or
+expired evidence without permitting unsafe replay, `record` returns `False`
+when terminal persistence fails, and `gc` returns the store's observable
+garbage-collection report.
+`replay_completed` is the single completed-result replay API; malformed
+terminal records and identity collisions fail closed, while in-progress and
+uncertain records remain non-replayable.
+
 `RuntimeConfig.execution_timeout_seconds` is a caller-wait deadline for policy,
 approval, credential, audit, handler, and reconciliation operations. Python
 cannot forcibly terminate an arbitrary running thread, so non-cooperative

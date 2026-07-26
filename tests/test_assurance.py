@@ -67,6 +67,8 @@ def test_remote_audit_replication_is_required_and_redacted() -> None:
     exporter = InMemoryAuditExporter()
     sink = ReplicatedAuditSink(primary, exporter)
     event = sink.append("decision", "request:1", {"token": "secret", "value": "safe"})
+    assert event.event_type == "decision"
+    assert event.request_id == "request:1"
     assert event.payload == {"token": "[REDACTED]", "value": "safe"}
     assert exporter.events == [event]
 
@@ -77,10 +79,38 @@ def test_remote_audit_replication_is_required_and_redacted() -> None:
             """Fail as a remote service would during an outage."""
             raise OSError("collector unavailable")
 
-    with pytest.raises(AuditReplicationError):
+    with pytest.raises(AuditReplicationError) as error:
         ReplicatedAuditSink(InMemoryAuditSink(), BrokenExporter()).append(
             "decision", "request:2", {}
         )
+    assert str(error.value) == "required audit replication failed"
+
+
+def test_in_memory_audit_verification_checks_each_hash_chain_invariant() -> None:
+    """Verification must reject a broken link and changed event body independently."""
+    sink = InMemoryAuditSink()
+    first = sink.append("event", "request:hash-1", {"value": "one"})
+    sink.append("event", "request:hash-2", {"value": "two"})
+
+    object.__setattr__(first, "previous_hash", "f" * 64)
+    assert sink.verify() is False
+
+    object.__setattr__(first, "previous_hash", "0" * 64)
+    object.__setattr__(first, "event_hash", "f" * 64)
+    assert sink.verify() is False
+
+
+def test_replicated_audit_passes_the_same_immutable_event_to_exporter() -> None:
+    primary = InMemoryAuditSink()
+    exported: list[Any] = []
+
+    class Exporter:
+        def export(self, event: Any) -> None:
+            exported.append(event)
+
+    event = ReplicatedAuditSink(primary, Exporter()).append("event", "request:replica", {"v": 1})
+    assert exported == [event]
+    assert primary.events() == (event,)
 
 
 def test_http_audit_contract_requires_explicit_acknowledgement() -> None:

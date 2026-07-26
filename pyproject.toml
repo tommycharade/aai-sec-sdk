@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-security-sdk"
-version = "0.1.0.dev0"
+version = "1.0.0"
 description = "Execution security runtime for agentic AI systems"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -86,9 +86,17 @@ show_missing = true
 [tool.mutmut]
 source_paths = ["src/agentic_security"]
 only_mutate = [
+  "src/agentic_security/components.py",
+  "src/agentic_security/runtime.py",
+  "src/agentic_security/approvals.py",
+  "src/agentic_security/budgets.py",
   "src/agentic_security/credentials.py",
+  "src/agentic_security/idempotency.py",
   "src/agentic_security/isolation.py",
+  "src/agentic_security/policies.py",
+  "src/agentic_security/policy_adapters.py",
   "src/agentic_security/audit.py",
+  "src/agentic_security/adapters.py",
 ]
 pytest_add_cli_args_test_selection = ["tests"]
 pytest_add_cli_args = [
@@ -97,6 +105,7 @@ pytest_add_cli_args = [
 ]
 also_copy = [
   "examples/",
+  "scripts/",
   "AGENTS.md",
   "CONTRIBUTING.md",
   "README.md",

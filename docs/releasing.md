@@ -1,16 +1,17 @@
 # Releasing
 
-## Pre-release checklist
+## Stable-release checklist
 
-The compatibility policy for the current `0.x` series is intentionally
-conservative: minor releases may change public APIs, but every breaking change
-must be called out in `CHANGELOG.md` with a migration note. Python 3.11, 3.12,
-and 3.13 are the supported CI versions. Security fixes are backported only to
-the latest supported release line until a stable support policy is published.
+The `1.x` compatibility policy follows Semantic Versioning: public API
+breaking changes require a major version, and every breaking change must be
+called out in `CHANGELOG.md` with a migration note. Python 3.11, 3.12, and
+3.13 are the supported CI versions. Security fixes are backported only to the
+latest supported release line.
 
 - [ ] `make check` passes on the release commit.
-- [ ] `make mutation` passes within its 120-second bound and its evidence
-      artifact is retained.
+- [ ] `make mutation` passes within its declared bound and its raw evidence
+      proves >=80% overall, >=75% per component, 100% critical mutants, and
+      zero timeout/suspicious/skipped/not-checked results; retain the artifact.
 - [ ] `make package-check` builds and validates wheel and source distributions.
 - [ ] `make security-check` reports no known dependency vulnerabilities.
 - [ ] `requirements-ci.txt` and `requirements-docs.txt` are reviewed when

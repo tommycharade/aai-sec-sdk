@@ -17,9 +17,45 @@ proposal -> normalize -> schema/business validation -> policy -> approval
 
 No side effect or privileged credential mint may happen before applicable checks pass. A credential broker receives only the application-owned context, validated live resources, and registered tool definition; the resulting short-lived credential is attached to the handler context and is never copied into proposals or audit payloads. Provider integrations, policy engines, credential brokers, sandboxes, telemetry backends, and approval systems belong behind adapters.
 
+## Explicit security components
+
+The runtime boundary is decomposed into immutable, typed components:
+
+- `ActionFacts` is the host-derived snapshot of the proposal, validated
+  arguments, resources, registered tool, and action fingerprint.
+- `PreExecutionAuthorizer` is the centralized final decision point. It accepts
+  provider evidence and issues an `ExecutionPermit` only when policy,
+  approval, identity, tenant/resource, credential, isolation, and delegation
+  checks all pass.
+- `ExecutionPermit` is an immutable capability bound to those exact facts and
+  the host-owned handler context. A proposal or model result is not a permit.
+- `ExecutionLifecycle` performs the final emergency-stop check and is the only
+  runtime path that invokes a handler. Its invocation remains bounded and
+  cooperatively cancellable, with late-worker accounting preserved.
+- `BoundedOperationExecutor` and `BoundedOperationTracker` own bounded worker
+  admission, phase timeout classification, and late-worker lifecycle counters.
+  `ActionBudgetLease` owns atomic one-shot action-budget release. The runtime
+  remains the ordering façade and supplies provider operations to these
+  components.
+- `TerminalRecorder` owns final idempotency persistence and audit outcome
+  handling; a side effect is never reported as safely complete when terminal
+  persistence fails.
+- `ActionPreparation` owns argument/resource validation, host identity checks,
+  and nonce-bound isolation verification before policy evaluation.
+- `PolicyPreparation` owns normalization of tool-declared approval requirements;
+  provider results cannot weaken a registered tool contract.
+- `CredentialPreparation` owns the final exact tool/resource scope check on
+  broker-issued credentials before a credential enters handler context.
+
+These components are provider-neutral. The runtime remains an orchestration
+façade and owns bounded provider calls because timeout, worker capacity,
+ordering, and stop state are part of the host security boundary. Adapters
+supply policy, approval, credential, isolation, audit, and idempotency
+infrastructure.
+
 ## Current runtime scope
 
-The current pre-release provides the framework-neutral core: explicit tool
+The current stable release provides the framework-neutral core: explicit tool
 registration, deterministic argument validation, deny-by-default local policy,
 mandatory tenant/resource checks, scoped in-memory approvals for development and tests,
 budgets, emergency stop, idempotency, and redaction-aware hash-chain audit

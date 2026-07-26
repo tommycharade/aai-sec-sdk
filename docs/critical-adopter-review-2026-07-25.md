@@ -1,8 +1,8 @@
 # Fresh Critical Adopter Review
 
-**Reviewed commit:** final commit-bound mutation evidence  
-**Review date:** 2026-07-25  
-**Working tree:** clean at the verification point
+**Reviewed commit:** source snapshot bound to `498fbd6` evidence
+**Review date:** 2026-07-26
+**Working tree:** uncommitted implementation snapshot; final release still requires a clean commit
 
 ## Evidence reviewed
 
@@ -10,11 +10,15 @@
   approval binding, and policy provenance.
 - `make check` passed.
 - GitHub CI passed on Python 3.11, 3.12, and 3.13.
-- The passing bounded gate remains 180/218 mutants killed, 82.57% on the
-  declared three-file scope. A widened runtime-plus-controls attempt after
-  targeted tests completed at 808/1308 (61.8%) and failed closed at the 80%
-  threshold.
+- Historical figures below are retained as review history only. The current
+  declared scope is the complete 11-file security scope; current mutation
+  evidence is recorded separately and is not accepted until all thresholds
+  pass.
 - Mutation evidence was commit-bound and independently verified.
+- The fresh bounded run records 1,974/2,372 killed mutants (83.22%), all
+  component thresholds pass, and all 205 exact critical-symbol mutants are
+  killed. The verifier independently reconstructs source spans and AST-node
+  fingerprints and accepts the evidence.
 
 ## Recommendation
 
@@ -23,6 +27,31 @@
 **No-go for high-impact production actions and hostile-code execution.**
 
 ## P1 findings and status
+
+### Architecture and expanded mutation assurance resolved in the current snapshot
+
+The current workstream implements a coherent vertical slice: immutable
+`ActionFacts` and `ExecutionPermit`, centralized `PreExecutionAuthorizer`,
+and permit-gated `ExecutionLifecycle` handler invocation. `GuardedRuntime`
+remains the compatibility entry point, and targeted component/runtime tests
+pass.
+
+The runtime now delegates deterministic validation/isolation, policy
+normalization, approval gating, and credential scope checks to explicit phase
+components. The full declared source scope passes the aggregate, component,
+and exact critical-symbol gates with no timeout, skipped, suspicious, or
+unchecked execution gaps. Surviving non-critical mutants remain visible in
+the aggregate score and are not silently excluded.
+
+The previous failed runs remain below as historical diagnostics only. The
+current evidence is the only accepted mutation record and is bound to its
+source snapshot and results hash.
+
+The permit boundary is now hardened against same-shaped objects fabricated via
+`object.__new__` and copied-field reflection: lifecycle authorization uses a
+module-owned issuer registry keyed by permit identity. This is an in-process
+boundary, not a defense against code that already controls the Python
+interpreter.
 
 ### Action-budget release is resolved by `103bf6d`
 
@@ -34,27 +63,23 @@ Evidence includes `test_action_budget_release_callbacks_are_atomic_under_concurr
 and `test_budget_release_rejects_concurrent_duplicate_releases_without_underflow`
 in `tests/test_product_owner_backlog.py`, plus the full `make check` run.
 
-### Mutation assurance scope corrected; central runtime remains open
+### Mutation assurance scope and central runtime resolved in the current snapshot
 
-The mutation score passes, but the configured bounded mutation scope includes
-only:
+The mutation scope is now configured as the complete security-relevant
+11-file scope: runtime/components, approvals, budgets, credentials,
+idempotency, isolation, policies/policy adapters, audit, and adapters. The
+central runtime, typed components, approval, policy, budget, idempotency,
+credential, isolation, audit, and adapter modules are all in the declared
+scope. No source exclusions or clean-worktree claims are made while this
+workstream is in progress.
 
-- `credentials.py`;
-- `isolation.py`;
-- `audit.py`.
-
-The central `src/agentic_security/runtime.py` implementation and the
-approval/policy/budget/idempotency/type modules are outside the actual mutmut
-scope. A bounded experiment widening the scope to runtime plus the existing
-three modules completed but scored only 808/1308 (61.8%), so it correctly
-failed the 80% gate. The project now explicitly makes no mutation-coverage
-claim for the runtime boundary.
-
-The passing score is valid only for the three listed modules. It does not
-establish mutation assurance for the central execution boundary or the
-action-budget race above. This P1 remains open. Runtime mutation assurance
-remains a production-readiness requirement for high-impact use; the passing
-three-file gate must not be presented as runtime assurance.
+The critical invariant manifest is `critical-mutants.json`; it now uses exact
+module/class/method symbols and records a commit-bound symbol-to-mutant
+mapping. Symbols without generated mutation operators are listed as static
+contracts with executable adversarial-test references. The source-level P1 is
+closed for this snapshot: the complete scope and exact critical mapping pass.
+Runtime mutation assurance remains a production-readiness requirement for every
+future change and does not replace deployment-level evidence.
 
 ## P2 issues
 

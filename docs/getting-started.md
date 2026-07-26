@@ -1,6 +1,6 @@
 # Getting started
 
-The SDK is being built in public as a pre-release package. Clone the
+The SDK is released under Apache-2.0. Clone the
 repository, install the development dependencies, and validate the project:
 
 ```bash
