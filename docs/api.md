@@ -49,6 +49,10 @@ Expected outcomes use `ExecutionStatus.EXECUTED`, `DENIED`,
 `RECONCILED` enum value is retained for compatibility but is not emitted by the
 current runtime. Callers must not blindly retry `TIMED_OUT` or
 `EXECUTED_UNRECORDED` because side-effect or audit state may be uncertain.
+`ExecutionResult.idempotency_recorded` independently reports whether a
+terminal idempotency result was durably persisted. For uncertain timeout,
+cancellation, or handler-failure outcomes, `False` is a release-blocking
+operational signal and the side effect must be reconciled before retrying.
 `ExecutionResult.reconciliation_state` independently
 reports `STILL_RUNNING`, `CONFIRMED_COMPLETE`, `CONFIRMED_ABSENT`, `UNKNOWN`, or
 `FAILED`. A live timed-out worker always keeps the primary status `TIMED_OUT`.
@@ -100,6 +104,10 @@ model output or bypass the runtime lifecycle.
 Permits are issued only by `PreExecutionAuthorizer`. The lifecycle authenticates
 the permit's object identity against an internal issuer registry; constructing a
 same-shaped object or copying fields cannot authorize a handler call.
+Validated argument mappings and sequences inside `ActionFacts` and
+`ExecutionPermit` are recursively frozen. The lifecycle passes handlers a
+defensive ordinary-container copy, so a handler can transform its local input
+without mutating the authorization snapshot.
 
 ::: agentic_security.PreExecutionAuthorizer
 

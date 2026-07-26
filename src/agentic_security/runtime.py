@@ -36,6 +36,7 @@ from .components import (
     PreExecutionAuthorizer,
     TerminalRecorder,
     TerminalRecorderError,
+    thaw_value,
 )
 from .credentials import CredentialBroker
 from .errors import (
@@ -525,6 +526,7 @@ class GuardedRuntime:
                         status=ExecutionStatus.EXECUTED_UNRECORDED,
                         reason="side effect result could not be durably recorded",
                         audit_recorded=False,
+                        idempotency_recorded=False,
                     )
                 return result
             result = ExecutionResult(
@@ -565,6 +567,7 @@ class GuardedRuntime:
                     status=ExecutionStatus.EXECUTED_UNRECORDED,
                     reason="side effect executed but idempotency result was not recorded",
                     audit_recorded=False,
+                    idempotency_recorded=False,
                 )
             return result
         except WorkerCapacityError:
@@ -591,7 +594,7 @@ class GuardedRuntime:
                 reconciliation = tool.reconciliation
                 try:
                     reconciled = self._run_bounded(
-                        lambda: reconciliation(handler_context, validated_arguments),
+                        lambda: reconciliation(handler_context, thaw_value(validated_arguments)),
                         "side-effect reconciliation",
                         request_id=request_id,
                         on_timeout_observed=lambda: self._defer_action_budget_release(
@@ -628,7 +631,15 @@ class GuardedRuntime:
             )
             if not recorded:
                 result = replace(result, audit_recorded=False)
-            self._store_terminal(tool, proposal, result, uncertain=True)
+            if not self._store_terminal(tool, proposal, result, uncertain=True):
+                result = replace(
+                    result,
+                    idempotency_recorded=False,
+                    reason=(
+                        "handler timed out with uncertain side-effect state and "
+                        "idempotency outcome could not be durably recorded"
+                    ),
+                )
             return result
         except RuntimeCancelledError:
             result = ExecutionResult(
@@ -644,6 +655,15 @@ class GuardedRuntime:
             )
             if not recorded:
                 result = replace(result, audit_recorded=False)
+            if not self._store_terminal(tool, proposal, result, uncertain=True):
+                result = replace(
+                    result,
+                    idempotency_recorded=False,
+                    reason=(
+                        "handler cancellation was uncertain and idempotency outcome "
+                        "could not be durably recorded"
+                    ),
+                )
             return result
         except Exception as exc:  # pragma: no cover - exercised by integration tests
             recorded = self._record(
@@ -658,7 +678,15 @@ class GuardedRuntime:
                 handler_started=True,
                 side_effect_state=SideEffectState.UNCERTAIN,
             )
-            self._store_terminal(tool, proposal, result, uncertain=True)
+            if not self._store_terminal(tool, proposal, result, uncertain=True):
+                result = replace(
+                    result,
+                    idempotency_recorded=False,
+                    reason=(
+                        "tool execution failed and idempotency outcome could not be "
+                        "durably recorded"
+                    ),
+                )
             return result
         finally:
             with self._stop_lock:

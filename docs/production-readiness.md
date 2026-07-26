@@ -10,11 +10,12 @@ The SDK is currently suitable only for low-risk pilot use with trusted handlers
 and read-only actions when the deployment supplies authenticated policy,
 approval, IAM, audit, idempotency, and isolation infrastructure.
 
-The current source-level mutation gate passes: 1,974/2,372 mutants killed
-(83.22%), every declared component is above threshold, and all 205 exact
-critical-symbol mutants are killed with independently verified metadata. High-
-impact production use remains conditional on deployment evidence and durable
-adapter validation; the source score is not a security certification.
+The source-level mutation score is commit-bound evidence, not a document
+constant. The release bundle publishes the exact `evidence.json` and
+`results.txt` for that release, and the clean verification job checks those
+files together with the checksum manifest. High-impact production use remains
+conditional on deployment evidence and durable adapter validation; the source
+score is not a security certification.
 
 It is not, by itself, a sufficient security boundary for payments, destructive
 operations, hostile or model-generated code, or regulated workloads.
@@ -91,8 +92,10 @@ mutation run whose raw evidence names the complete security scope, aggregate
 and per-component scores, critical-mutant results, negative controls, commit,
 and tool, clean wheel and source builds, legal metadata, dependency audits,
 artifact-matched checksums and complete per-artifact SBOMs, verified
-provenance, and a clean reviewed release commit/tag. The artifact build and
-independent clean verification are separate release steps.
+provenance bound to the release tag, and a clean reviewed release commit/tag.
+The exact published GitHub Release bundle is independently downloaded and
+verified after publication; the artifact build and clean post-publication
+verification are separate release steps.
 
 `make check` validates the mutation contract and normal quality gates. The
 actual mutation score is established only by a successful `make mutation` run.

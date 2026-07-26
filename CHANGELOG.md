@@ -4,6 +4,18 @@ All notable changes to this project will be documented here.
 
 The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public APIs may change while the design is validated, but breaking changes will still be called out explicitly.
 
+## 1.0.1 - 2026-07-26
+
+This corrective release makes the published evidence bundle independently
+verifiable. Mutation evidence is included before checksum generation, release
+CI publishes and then downloads the exact GitHub Release bundle for clean
+verification, and provenance is produced only from pushed version tags.
+
+The runtime now exposes failed idempotency persistence on timeout, cancellation,
+and handler-failure outcomes. Validated arguments are recursively immutable in
+authorization facts and handlers receive defensive copies. Deployment evidence
+requirements for consequential workloads are documented explicitly.
+
 ## 1.0.0 - 2026-07-26
 
 The first stable Apache-2.0 release. The SDK provides a typed, fail-closed

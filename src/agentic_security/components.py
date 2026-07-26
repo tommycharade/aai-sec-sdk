@@ -8,11 +8,12 @@ which is the single place that turns those decisions into an execution permit.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field, replace
 from threading import Event, Lock
+from types import MappingProxyType
 from typing import Any
 from weakref import WeakKeyDictionary
 
@@ -39,6 +40,80 @@ from .types import (
 )
 
 
+class FrozenMapping(Mapping[Any, Any]):
+    """Read-only mapping used inside authorization facts."""
+
+    __slots__ = ("_values",)
+
+    def __init__(self, values: Mapping[Any, Any]) -> None:
+        """Copy ``values`` behind an immutable mapping proxy."""
+        self._values = MappingProxyType(dict(values))
+
+    def __getitem__(self, key: Any) -> Any:
+        """Return one immutable child value."""
+        return self._values[key]
+
+    def __iter__(self) -> Iterator[Any]:
+        """Iterate immutable mapping keys."""
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        """Return the number of immutable mapping entries."""
+        return len(self._values)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare by mapping contents while preserving ordinary test ergonomics."""
+        if isinstance(other, Mapping):
+            return dict(self.items()) == dict(other.items())
+        return NotImplemented
+
+
+class FrozenList(tuple[Any, ...]):
+    """Tuple-backed representation of an input list."""
+
+    def __eq__(self, other: object) -> bool:
+        """Compare like the source list without exposing mutability."""
+        if isinstance(other, (list, tuple)):
+            return tuple(self) == tuple(other)
+        return NotImplemented
+
+
+class FrozenTuple(tuple[Any, ...]):
+    """Tuple-backed representation of an input tuple."""
+
+
+def freeze_value(value: Any) -> Any:
+    """Recursively normalize JSON-like values into immutable containers.
+
+    Unsupported mutable or opaque objects are rejected rather than being
+    shallowly accepted into an authorization permit.
+    """
+    if isinstance(value, FrozenMapping | FrozenList | FrozenTuple):
+        return value
+    if isinstance(value, Mapping):
+        return FrozenMapping(
+            {freeze_value(key): freeze_value(child) for key, child in value.items()}
+        )
+    if isinstance(value, list):
+        return FrozenList(freeze_value(child) for child in value)
+    if isinstance(value, tuple):
+        return FrozenTuple(freeze_value(child) for child in value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise TypeError(f"validated arguments contain unsupported value: {type(value).__name__}")
+
+
+def thaw_value(value: Any) -> Any:
+    """Create a defensive ordinary-container copy for handler boundaries."""
+    if isinstance(value, FrozenMapping):
+        return {thaw_value(key): thaw_value(child) for key, child in value.items()}
+    if isinstance(value, FrozenList):
+        return [thaw_value(child) for child in value]
+    if isinstance(value, FrozenTuple):
+        return tuple(thaw_value(child) for child in value)
+    return value
+
+
 class ActionPreparation:
     """Own deterministic validation and isolation checks before policy.
 
@@ -50,8 +125,15 @@ class ActionPreparation:
 
     @staticmethod
     def validate_arguments(tool: ToolDefinition, proposal: ActionProposal) -> Any:
-        """Validate proposal arguments with the registered tool schema."""
-        return tool.validator(proposal.arguments)
+        """Validate and recursively freeze arguments with the tool schema.
+
+        The frozen value is used for resource resolution, policy, hashing, and
+        permit evidence. Handlers receive a defensive mutable copy at the
+        final invocation boundary so legacy handlers can continue to consume
+        ordinary dictionaries without being able to mutate authorization
+        facts.
+        """
+        return freeze_value(tool.validator(proposal.arguments))
 
     @staticmethod
     def resolve_resources(tool: ToolDefinition, arguments: Any) -> tuple[Resource, ...]:
@@ -160,9 +242,10 @@ class ActionFacts:
     action_fingerprint: str
 
     def __post_init__(self) -> None:
-        """Reject incomplete facts before they can become a permit."""
+        """Freeze nested arguments and reject incomplete permit facts."""
         if not self.action_fingerprint:
             raise SecurityConfigurationError("action fingerprint is required")
+        object.__setattr__(self, "arguments", freeze_value(self.arguments))
         if not isinstance(self.resources, tuple) or not all(
             isinstance(resource, Resource) for resource in self.resources
         ):
@@ -286,7 +369,9 @@ class ExecutionLifecycle:
             raise PreExecutionAuthorizationError("runtime emergency stop is active")
         if _PERMIT_AUTHORITIES.get(permit) is not self._authority:
             raise PreExecutionAuthorizationError("execution permit was not issued by this runtime")
-        return permit.facts.tool.handler(permit.handler_context, permit.facts.arguments)
+        # Authorization facts remain immutable; the handler gets an isolated
+        # copy so handler code cannot mutate the values used for authorization.
+        return permit.facts.tool.handler(permit.handler_context, thaw_value(permit.facts.arguments))
 
     @staticmethod
     def completion_event() -> Event:

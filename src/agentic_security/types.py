@@ -211,7 +211,13 @@ class ActionProposal:
 
 @dataclass(frozen=True, slots=True)
 class ExecutionResult:
-    """Structured outcome of an attempted action."""
+    """Structured outcome of an attempted action.
+
+    ``audit_recorded`` and ``idempotency_recorded`` are independent signals.
+    An action can be auditable while its replay-prevention result is not
+    durable, or vice versa; callers must treat either false value as an
+    operational failure requiring repair before retrying a side effect.
+    """
 
     status: ExecutionStatus
     tool_name: str
@@ -220,6 +226,7 @@ class ExecutionResult:
     output: Any = None
     approval_id: str | None = None
     audit_recorded: bool = True
+    idempotency_recorded: bool = True
     reconciliation_state: ReconciliationState | None = None
     timeout_phase: TimeoutPhase | None = None
     handler_started: bool = False

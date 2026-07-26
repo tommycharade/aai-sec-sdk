@@ -3,16 +3,6 @@ name: release-artifacts
 on:
   push:
     tags: ["v*.*.*"]
-  workflow_dispatch:
-    inputs:
-      source_ref:
-        description: "Git ref containing the release source to verify"
-        required: true
-        type: string
-      release_tag:
-        description: "Release tag bound into metadata and verification"
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -25,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262b # v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
+          ref: ${{ github.ref }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
@@ -38,6 +28,10 @@ jobs:
           make package-check
       - name: Run bounded mutation gate
         run: make mutation
+      - name: Add mutation evidence to the release bundle
+        run: |
+          cp .mutmut-cache/evidence.json dist/evidence.json
+          cp .mutmut-cache/results.txt dist/results.txt
       - name: Upload mutation evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -49,9 +43,7 @@ jobs:
       - name: Generate artifact-specific CycloneDX SBOMs
         run: python scripts/build_artifact_sbom.py dist/*.whl dist/*.tar.gz
       - name: Write release metadata
-        env:
-          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-        run: python scripts/write_release_metadata.py dist --commit "$(git rev-parse HEAD)" --tag "$RELEASE_TAG"
+        run: python scripts/write_release_metadata.py dist --commit "$(git rev-parse HEAD)" --tag "$GITHUB_REF_NAME"
       - name: Generate checksums
         run: python scripts/write_checksums.py dist
       - name: Upload release evidence
@@ -66,22 +58,49 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
 
-  verify:
+  publish:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262b # v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
+          ref: ${{ github.ref }}
           fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-evidence
           path: dist
-      - name: Verify release evidence from the clean checkout
+      - name: Publish the exact verified release bundle
         env:
-          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-        run: python scripts/verify_release_evidence.py dist --commit "$(git rev-parse HEAD)" --tag "$RELEASE_TAG"
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Agentic Security SDK $GITHUB_REF_NAME" \
+            --generate-notes \
+            --latest
+
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262b # v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - name: Download the published release bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir dist
+      - name: Verify release evidence from the clean checkout
+        run: python scripts/verify_release_evidence.py dist --commit "$GITHUB_SHA" --tag "$GITHUB_REF_NAME"
       - name: Verify cryptographic provenance subjects
         env:
           GH_TOKEN: ${{ github.token }}
