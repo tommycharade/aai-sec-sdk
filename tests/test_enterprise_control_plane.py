@@ -104,9 +104,12 @@ def test_secret_reference_resolver_never_accepts_material_as_configuration() -> 
     """Secret managers resolve opaque references only at the deployment boundary."""
     reference = FleetSecretReference("aws-secretsmanager://prod/claude-token")
     seen: list[tuple[str, str]] = []
-    resolver = CallbackFleetSecretResolver(
-        lambda item, purpose: seen.append((item.reference, purpose)) or "ephemeral-token"
-    )
+
+    def resolve(_reference: FleetSecretReference, purpose: str) -> str:
+        seen.append((reference.reference, purpose))
+        return "ephemeral-token"
+
+    resolver = CallbackFleetSecretResolver(resolve)
     assert resolver.resolve(reference, "agentic-tool") == "ephemeral-token"
     assert seen == [(reference.reference, "agentic-tool")]
     with pytest.raises(FleetConfigurationError):
