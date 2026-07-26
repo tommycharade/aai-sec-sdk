@@ -63,4 +63,7 @@ Set `VITE_USE_MOCKS=false` and the same `VITE_API_TOKEN` in the UI `.env`.
 The adapter persists validated configuration and exposes the emergency stop,
 but it is localhost-only and does not by itself construct an application
 runtime. Production deployments must add authenticated operator identity,
-authorization, durable audit, and runtime reconciliation.
+authorization, durable audit, and runtime reconciliation. Never bundle a
+durable administrator bearer token in a production `VITE_*` variable because
+Vite embeds those values in browser assets; use a short-lived authenticated
+operator session instead.
