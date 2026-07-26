@@ -120,3 +120,7 @@ def test_enterprise_reference_server_end_to_end(tmp_path: Path) -> None:
         assert evidence["deploymentCount"] == 1
         assert evidence["deployments"][0]["configuration"]["desiredHash"]
         assert evidence["redaction"]["credentialMaterialIncluded"] is False
+        status, capabilities = request_json(base_url, token, "GET", "/api/enterprise/capabilities")
+        assert status == 200
+        assert capabilities["adapter"] == "sqlite-reference"
+        assert capabilities["highAvailability"] is False

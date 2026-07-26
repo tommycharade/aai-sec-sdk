@@ -24,6 +24,7 @@ from agentic_security import (
     FleetSecretReference,
     InMemoryAuditSink,
     InMemoryControlPlaneAuthority,
+    SQLiteFleetPersistenceAdapter,
     StaticFleetAuthenticator,
     WebhookFleetAlertSink,
 )
@@ -128,6 +129,23 @@ def test_secret_reference_resolver_never_accepts_material_as_configuration() -> 
     with pytest.raises(FleetConfigurationError):
         CallbackFleetSecretResolver(lambda _reference, _purpose: "").resolve(
             reference, "agentic-tool"
+        )
+
+
+def test_reference_persistence_is_explicitly_rejected_for_ha_requirements(tmp_path: Path) -> None:
+    """A deployment cannot accidentally promote SQLite into an HA role."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    assert store.persistence_capabilities() == {
+        "adapter": "sqlite-reference",
+        "highAvailability": False,
+        "schemaVersion": 4,
+    }
+    store.close()
+    with pytest.raises(FleetConfigurationError):
+        EnterpriseFleetStore(
+            tmp_path / "ha.sqlite",
+            persistence=SQLiteFleetPersistenceAdapter(),
+            require_high_availability=True,
         )
 
 

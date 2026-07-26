@@ -162,6 +162,32 @@ class CallbackFleetSecretResolver:
         return value
 
 
+class FleetPersistenceAdapter(Protocol):
+    """Provider-neutral persistence boundary for fleet state and migrations."""
+
+    name: str
+    supports_high_availability: bool
+
+    def connect(self, path: str, busy_timeout_ms: int) -> Any:
+        """Open a transaction-capable connection or raise before serving traffic."""
+
+
+class SQLiteFleetPersistenceAdapter:
+    """Reference SQLite adapter with WAL and bounded lock contention settings."""
+
+    name = "sqlite-reference"
+    supports_high_availability = False
+
+    def connect(self, path: str, busy_timeout_ms: int) -> sqlite3.Connection:
+        """Open and configure the reference connection; no credentials are involved."""
+        connection = sqlite3.connect(path, check_same_thread=False)
+        connection.row_factory = sqlite3.Row
+        connection.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=NORMAL")
+        return connection
+
+
 class FleetAuthenticator(Protocol):
     """Deployment-owned authentication boundary for enterprise API requests."""
 
@@ -408,6 +434,8 @@ class EnterpriseFleetStore:
         now: Callable[[], float] | None = None,
         heartbeat_ttl_seconds: int = 90,
         sqlite_busy_timeout_ms: int = 5_000,
+        persistence: FleetPersistenceAdapter | None = None,
+        require_high_availability: bool = False,
         slo_window_seconds: int = 86_400,
         slo_target: float = 0.99,
         authorities: Mapping[str, FleetDeploymentAuthority] | None = None,
@@ -422,6 +450,11 @@ class EnterpriseFleetStore:
             or not 100 <= sqlite_busy_timeout_ms <= 60_000
         ):
             raise FleetConfigurationError("SQLite busy timeout must be between 100 and 60000 ms")
+        self.persistence = persistence or SQLiteFleetPersistenceAdapter()
+        if require_high_availability and not self.persistence.supports_high_availability:
+            raise FleetConfigurationError(
+                "configured fleet persistence adapter does not provide high availability"
+            )
         if slo_window_seconds < 300 or slo_window_seconds > 31_536_000:
             raise FleetConfigurationError("SLO window must be between 300 and 31536000 seconds")
         if not 0.5 <= slo_target <= 1.0:
@@ -435,12 +468,16 @@ class EnterpriseFleetStore:
         self.authorities = dict(authorities or {})
         self.alert_sink = alert_sink
         self._lock = RLock()
-        self._connection = sqlite3.connect(self.path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
-        self._connection.execute(f"PRAGMA busy_timeout={sqlite_busy_timeout_ms}")
-        self._connection.execute("PRAGMA journal_mode=WAL")
-        self._connection.execute("PRAGMA synchronous=NORMAL")
+        self._connection = self.persistence.connect(self.path, sqlite_busy_timeout_ms)
         self._migrate()
+
+    def persistence_capabilities(self) -> dict[str, Any]:
+        """Return safe adapter metadata so deployment checks can prove HA selection."""
+        return {
+            "adapter": self.persistence.name,
+            "highAvailability": self.persistence.supports_high_availability,
+            "schemaVersion": 4,
+        }
 
     def close(self) -> None:
         """Close the persistence connection after callers stop serving requests."""
@@ -1853,6 +1890,9 @@ class EnterpriseFleetApplication:
                     return self._respond(
                         start_response, 200, self.store.compliance_evidence(identity)
                     )
+                if resource == "capabilities":
+                    self._authorize(identity, "read")
+                    return self._respond(start_response, 200, self.store.persistence_capabilities())
                 if resource == "drift":
                     self._authorize(identity, "read")
                     page = self.store.list_drift(identity)
@@ -2161,6 +2201,8 @@ __all__ = [
     "FleetSecretReference",
     "FleetSecretResolver",
     "CallbackFleetSecretResolver",
+    "FleetPersistenceAdapter",
+    "SQLiteFleetPersistenceAdapter",
     "FleetAuthorizationError",
     "FleetConfigurationError",
     "FleetDeploymentAuthority",

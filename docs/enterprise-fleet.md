@@ -50,6 +50,7 @@ The reference WSGI application exposes these authenticated endpoints:
 | `GET /api/enterprise/deployments` | SDK deployment inventory |
 | `GET /api/enterprise/agents` | Claude and other agent presence |
 | `GET /api/enterprise/sessions` | Active/expired session inventory without session tokens |
+| `GET /api/enterprise/capabilities` | Persistence adapter and HA capability metadata |
 | `GET /api/enterprise/drift` | Desired/applied configuration drift |
 | `GET /api/enterprise/templates` | Tenant-scoped configuration templates |
 | `GET /api/enterprise/deployment-config` | Current desired/applied configuration state |
@@ -95,6 +96,14 @@ fail validation before persistence. Provider endpoints and broker references
 are metadata only; credentials and bearer material are never accepted. Legacy
 extension sections remain supported for migration, but typed sections are the
 recommended enterprise contract.
+
+Persistence is an explicit adapter boundary. The bundled
+`SQLiteFleetPersistenceAdapter` enables WAL and bounded lock waits for local
+development, but advertises `highAvailability: false`. Deployments can require
+HA at startup with `require_high_availability=True`; the reference adapter is
+then rejected before serving traffic. A PostgreSQL or managed-database adapter
+must implement `FleetPersistenceAdapter`, migrations, transactions, locking,
+backup/restore, and tenant-safe concurrency before being used in production.
 
 The management UI provides tenant-scoped template creation, parent selection,
 deployment filtering, template assignment, canary rollout, rollback to the
