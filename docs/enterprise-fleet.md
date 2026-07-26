@@ -82,6 +82,11 @@ lifecycle events are written to the configured audit sink.
 
 ## Configuration governance
 
+The UI template editor provides typed controls for deny-by-default policy,
+approvals, tool allow-lists, budgets, credentials, high-risk isolation, audit,
+and telemetry. It generates reviewable JSON while retaining an advanced editor
+for provider-specific fields; backend validation remains authoritative.
+
 Templates can inherit from one parent template. Inheritance is bounded and
 cycle-checked; child values override parent values. A deployment assignment
 creates a desired configuration hash and starts in `staged` state. Operators

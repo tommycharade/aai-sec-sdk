@@ -37,6 +37,13 @@ production schedulers should call the same API at a controlled frequency. It
 also allows an authorized operator to register projects within the
 authenticated organization; organization roots remain enterprise identity
 provisioning objects.
+
+Template creation includes typed governance controls for deny-by-default policy,
+approval provider, tool allow-list, action budget, credential broker mode,
+high-risk isolation, audit provider, and telemetry. “Apply to template JSON”
+generates the corresponding configuration sections for review. The advanced JSON
+editor remains available for provider-specific fields, but submission is still
+validated by the backend and does not make the browser an authority boundary.
 is backed by the authenticated `/api/enterprise/*` contracts described in
 [Enterprise fleet](enterprise-fleet.md). Inventory is tenant-scoped; it does
 not expose heartbeat sessions or secrets.
