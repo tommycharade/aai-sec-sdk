@@ -27,6 +27,28 @@ authorization.
 
 ## Unreleased
 
+- Added the 1.1 integration foundation: bounded WSGI MCP transport,
+  application-authenticated expiring runtime sessions, bounded response
+  serialization, and deployment bootstrap guidance for all supported hosts.
+
+## 1.1.0 - 2026-07-26
+
+- Added a Claude Code `PreToolUse` hook adapter with deterministic ordered
+  rules, deny-by-default behavior, native allow/ask/deny responses, path and
+  command matchers, and redaction-aware audit output.
+- Added a complete Claude Code project example covering `.claude/settings.json`,
+  native tool protection, MCP registration, verification commands, and the
+  boundary between hook-governed host actions and SDK-owned MCP actions.
+- Added an extensible MCP integration layer with host profiles and a
+  dependency-free stdio gateway for OpenCode, OpenHands self-hosted, Claude
+  Code, Cline, Gemini CLI, GitHub Copilot CLI/cloud agent, and Codex CLI.
+- Added bounded HTTP/WSGI transport with bearer-session authentication,
+  runtime session expiry/revocation, request/response size limits, and
+  fail-closed malformed input handling.
+- Added JSON Schema discovery to `ToolDefinition` and integration contract,
+  adversarial transport, session, and model-identity tests.
+- Added integration documentation and generated README navigation.
+
 - Hardened execution permits against `object.__new__` and copied-field forgery
   by authenticating issued object identity at the lifecycle boundary.
 - Extracted bounded worker admission/timeout accounting and atomic action-budget

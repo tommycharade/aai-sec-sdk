@@ -29,6 +29,15 @@ from .audit import (
     ReplicatedAuditSink,
 )
 from .budgets import Budget
+from .claude_code import (
+    ClaudeCodeHook,
+    ClaudeHookDecision,
+    ClaudeHookResult,
+    ClaudeToolEvent,
+    command_rule,
+    exact_tool_rule,
+    path_within_rule,
+)
 from .components import (
     ActionBudgetLease,
     ActionFacts,
@@ -70,6 +79,25 @@ from .idempotency import (
     IdempotencyStore,
     InMemoryIdempotencyStore,
 )
+from .integrations import (
+    HOST_PROFILES,
+    AgentHost,
+    HostIntegration,
+    HostProfile,
+    IntegrationProtocolError,
+    McpGateway,
+    McpHttpApplication,
+    RuntimeSession,
+    RuntimeSessionStore,
+    claude_code_integration,
+    cline_integration,
+    codex_cli_integration,
+    gemini_cli_integration,
+    github_copilot_integration,
+    integration_for,
+    opencode_integration,
+    openhands_integration,
+)
 from .isolation import (
     CallbackIsolationVerifier,
     IsolationAttestation,
@@ -93,6 +121,12 @@ from .types import (
     RiskLevel,
     SideEffectState,
     TimeoutPhase,
+)
+from .ui_control_plane import (
+    ControlPlaneApplication,
+    ControlPlaneConfigurationError,
+    ControlPlaneStore,
+    validate_configuration,
 )
 
 __all__ = [
@@ -129,9 +163,37 @@ __all__ = [
     "IdempotencyState",
     "IdempotencyStore",
     "InMemoryIdempotencyStore",
+    "ClaudeCodeHook",
+    "ClaudeHookDecision",
+    "ClaudeHookResult",
+    "ClaudeToolEvent",
+    "command_rule",
+    "exact_tool_rule",
+    "path_within_rule",
+    "AgentHost",
+    "HOST_PROFILES",
+    "HostIntegration",
+    "HostProfile",
+    "IntegrationProtocolError",
+    "McpGateway",
+    "McpHttpApplication",
+    "RuntimeSession",
+    "RuntimeSessionStore",
+    "claude_code_integration",
+    "cline_integration",
+    "codex_cli_integration",
+    "gemini_cli_integration",
+    "github_copilot_integration",
+    "integration_for",
+    "openhands_integration",
+    "opencode_integration",
     "IsolationAttestation",
     "IsolationVerifier",
     "CallbackIsolationVerifier",
+    "ControlPlaneApplication",
+    "ControlPlaneConfigurationError",
+    "ControlPlaneStore",
+    "validate_configuration",
     "CedarPolicyEngine",
     "DuplicateToolError",
     "ExecutionContext",

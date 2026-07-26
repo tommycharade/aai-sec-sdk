@@ -239,6 +239,23 @@ modified action.
 
 ::: agentic_security.credentials.ScopedCredential
 
+## UI control plane adapter
+
+The optional management UI talks to an authenticated control-plane adapter.
+The reference implementation below validates complete configuration
+replacements, persists them atomically, and exposes a persisted emergency
+stop. It is a local/development adapter; it does not create application
+identity or replace the deployment's policy, approval, credential, audit, or
+isolation services.
+
+::: agentic_security.ControlPlaneStore
+
+::: agentic_security.ControlPlaneApplication
+
+::: agentic_security.ControlPlaneConfigurationError
+
+::: agentic_security.validate_configuration
+
 ::: agentic_security.credentials.InMemoryCredentialBroker
 
 ::: agentic_security.credentials.TokenCredentialBroker

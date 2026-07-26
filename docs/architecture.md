@@ -8,6 +8,12 @@ model/provider -> adapter -> security runtime -> tool adapter -> system
              context / policy / approvals / budgets / audit / kill switch
 ```
 
+Agent-host integrations sit at the adapter boundary. The bundled MCP gateway
+normalizes host tool calls into `ActionProposal` objects and serializes typed
+`ExecutionResult` values; it never creates identity or policy evidence. Host
+profiles are labels and configuration guidance, not permissions. See
+[Agent integrations](integrations.md).
+
 The execution pipeline is ordered deliberately:
 
 ```text

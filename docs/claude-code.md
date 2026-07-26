@@ -1,0 +1,167 @@
+# Claude Code: complete working example
+
+This example uses both Claude Code integration points:
+
+```text
+Claude native tools ── PreToolUse hook ──> deterministic project policy/audit
+
+Application tools ─── MCP server ────────> GuardedRuntime, approvals, credentials,
+                                           idempotency, and audit
+```
+
+The hook does not execute actions. It returns Claude Code's native `allow`,
+`ask`, or `deny` decision before Claude executes a built-in tool. Use MCP when
+the SDK must own the operation and provide credentials, idempotency, timeout,
+reconciliation, or result validation.
+
+## 1. Install the SDK
+
+From the project you want Claude Code to work on:
+
+```bash
+python3 -m pip install agentic-security-sdk
+mkdir -p .claude
+cp /path/to/aai-sec-sdk/examples/.claude/settings.json .claude/settings.json
+```
+
+The copied settings file runs
+`examples/claude_code_hook.py` for `Bash`, `Read`, `Edit`, `Write`, `Glob`, and
+`Grep`. If the example is outside the project, change the command to an
+absolute path:
+
+```json
+{
+  "type": "command",
+  "command": "python3 /absolute/path/to/claude_code_hook.py",
+  "timeout": 10
+}
+```
+
+Claude Code reads project hook configuration from `.claude/settings.json`.
+Review the current [Claude Code hook documentation](https://code.claude.com/docs/en/hooks)
+when upgrading Claude Code because hook fields are host-owned configuration.
+
+## 2. Start Claude Code
+
+Run Claude Code from the project root:
+
+```bash
+claude
+```
+
+Try these synthetic checks:
+
+```text
+Ask Claude to run: git status
+Ask Claude to run: git push origin main
+Ask Claude to run: rm -rf /tmp/example
+Ask Claude to read: /etc/hosts
+```
+
+Expected behavior:
+
+| Request | Hook result |
+| --- | --- |
+| `git status` | Allowed |
+| `git push` | Ask for interactive approval |
+| `rm -rf` | Denied |
+| Read outside project | Denied |
+
+The hook writes a redaction-aware audit chain to
+`.claude/security-audit.jsonl`. This example uses synthetic local identity and
+rules. Replace them with the authenticated identity and policy boundary used
+by your organization before production use.
+
+## 3. Add SDK-owned application tools through MCP
+
+The MCP example is a separate process that exposes an explicit registered
+`lookup_record` tool through `GuardedRuntime`:
+
+```bash
+claude mcp add --transport stdio --scope project \
+  agentic-security -- \
+  python3 /absolute/path/to/aai-sec-sdk/examples/mcp_gateway.py
+```
+
+Check the connection:
+
+```bash
+claude mcp list
+claude mcp get agentic-security
+```
+
+Inside Claude Code, `/mcp` should show the server and its tools. Ask Claude
+to call `lookup_record` with `record_001`. The proposal is validated and
+authorized by the SDK before the synthetic handler runs. An unknown tool or
+invalid record identifier is denied.
+
+Claude Code stores project-scoped MCP configuration in `.mcp.json`. The
+project file should be reviewed like source code because it controls which
+external processes Claude can start. [Claude Code MCP configuration](https://code.claude.com/docs/en/mcp)
+describes project, user, and local scopes.
+
+## 4. Choosing hook versus MCP
+
+Use the hook for host-native operations where Claude Code remains the executor:
+
+- Bash commands;
+- file reads and writes;
+- project search;
+- Git commands;
+- other Claude-native tools matched by `PreToolUse`.
+
+Use MCP and `GuardedRuntime` for operations where the SDK must remain the
+executor and authority boundary:
+
+- external API calls;
+- payments or destructive business actions;
+- scoped credentials;
+- durable idempotency;
+- approval workflows;
+- reconciliation after uncertain outcomes;
+- domain-specific resource authorization.
+
+Do not treat the hook example as a sandbox. Claude Code or another process may
+still have access to the host outside the matched tools. For hostile or
+regulated workloads, combine the hook and MCP gateway with OS/container
+isolation, restricted credentials, and network egress controls.
+
+## 5. Customize the policy
+
+The hook API is extensible through ordered rules:
+
+```python
+from agentic_security import (
+    ClaudeCodeHook,
+    ClaudeHookDecision,
+    command_rule,
+    exact_tool_rule,
+)
+
+hook = ClaudeCodeHook(
+    rules=[
+        command_rule(
+            (r"git\s+push",),
+            decision=ClaudeHookDecision.ASK,
+            reason="publishing requires approval",
+        ),
+        exact_tool_rule({"Read", "Glob", "Grep"}),
+    ]
+)
+```
+
+Rules are evaluated in order and the default decision is deny. A rule
+exception also denies. Add tests for every new command or path rule and run
+`make check` before distributing the hook configuration.
+
+::: agentic_security.claude_code
+    options:
+      members:
+        - ClaudeCodeHook
+        - ClaudeHookDecision
+        - ClaudeHookResult
+        - ClaudeToolEvent
+        - command_rule
+        - exact_tool_rule
+        - path_within_rule
+      show_source: false

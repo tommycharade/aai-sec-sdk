@@ -41,6 +41,9 @@ nav:
   - Testing and assurance: testing.md
   - Production readiness: production-readiness.md
   - Architecture: architecture.md
+  - Agent integrations: integrations.md
+  - Claude Code example: claude-code.md
+  - Management UI: ui.md
   - End-to-end example: end-to-end-example.md
   - API reference: api.md
   - Engineering guardrails: guardrails.md

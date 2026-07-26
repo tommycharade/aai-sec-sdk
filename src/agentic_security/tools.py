@@ -52,6 +52,7 @@ class ToolDefinition:
     delegation_depth: int = 0
     requires_isolation: bool = False
     description: str = ""
+    input_schema: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """Reject tool contracts that make safe mediation ambiguous."""
@@ -59,6 +60,8 @@ class ToolDefinition:
             raise SecurityConfigurationError("tool names must be non-empty and trimmed")
         if not self.description:
             raise SecurityConfigurationError(f"tool {self.name!r} requires a description")
+        if self.input_schema is not None and not isinstance(self.input_schema, Mapping):
+            raise SecurityConfigurationError(f"tool {self.name!r} input schema must be a mapping")
         if self.risk in {RiskLevel.HIGH, RiskLevel.CRITICAL} and not self.requires_approval:
             raise SecurityConfigurationError(
                 f"high-impact tool {self.name!r} must require approval"
