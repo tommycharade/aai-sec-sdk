@@ -10,6 +10,7 @@ dist/
 # The management console is a separate private repository nested for local development.
 aai-sec-ui/
 .aai-sec-ui/
+.claude/
 build/
 *.egg-info/
 site/
