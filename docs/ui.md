@@ -38,6 +38,11 @@ also allows an authorized operator to register projects within the
 authenticated organization; organization roots remain enterprise identity
 provisioning objects.
 
+The same page renders connected Claude Code instances and a redacted session
+inventory. Session tokens and credential material are never displayed. Fleet
+collections are cursor-paginated by the API and the browser follows continuation
+pages automatically for larger tenants.
+
 Template creation includes typed governance controls for deny-by-default policy,
 approval provider, tool allow-list, action budget, credential broker mode,
 high-risk isolation, audit provider, and telemetry. “Apply to template JSON”

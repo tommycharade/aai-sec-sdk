@@ -267,6 +267,35 @@ def test_migrates_inventory_and_enforces_organization_scope(tmp_path: Path) -> N
         )
 
 
+def test_inventory_paginates_with_bounded_opaque_cursors(tmp_path: Path) -> None:
+    """Large tenant inventories return bounded pages without crossing tenants."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    for index in range(1, 4):
+        store.create_deployment(
+            "org-a",
+            "project-a",
+            f"deploy-{index}",
+            f"Deployment {index}",
+            environment="staging",
+            region="eu-west-2",
+        )
+
+    first = store.list_inventory(identity("org-a"), "deployments", limit=2)
+    second = store.list_inventory(
+        identity("org-a"), "deployments", cursor=first.next_cursor, limit=2
+    )
+
+    assert len(first.items) == 2
+    assert first.next_cursor == "2"
+    assert len(second.items) == 2
+    assert first.items[0]["organization_id"] == "org-a"
+    with pytest.raises(FleetConfigurationError):
+        store.list_inventory(identity("org-a"), "deployments", limit=201)
+    with pytest.raises(FleetConfigurationError):
+        store.list_inventory(identity("org-a"), "deployments", cursor="not-a-cursor")
+
+
 def test_migrates_legacy_deployments_with_team_dimension(tmp_path: Path) -> None:
     """The schema migration preserves legacy deployments and adds team metadata."""
     database = tmp_path / "legacy.sqlite"

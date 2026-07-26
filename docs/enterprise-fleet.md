@@ -74,6 +74,13 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/alerts/dispatch` | Deliver unacknowledged alerts through an alert adapter |
 | `POST /api/enterprise/slo/sample` | Record one redaction-safe health sample for an authorized deployment |
 
+Inventory and fleet collection endpoints accept `limit=1..200` and an opaque
+numeric continuation `cursor`; responses contain `nextCursor` until the
+collection is exhausted. The UI follows those cursors automatically, so a
+tenant with more than one page of deployments or Claude instances is not
+silently truncated. Cursors carry no identity or authority and are valid only
+as continuation tokens for the same authenticated read.
+
 Agent registration returns one opaque, expiring session. It is accepted only
 for the authenticated deployment/agent scope. Session inventory exposes only
 agent/deployment scope, timestamps, and active/expired status; the opaque

@@ -446,6 +446,30 @@ class FleetPage:
     next_cursor: str | None
 
 
+def _paginate(items: Sequence[dict[str, Any]], cursor: str | None, limit: int) -> FleetPage:
+    """Return a bounded page using an opaque offset cursor.
+
+    The reference adapter keeps cursors intentionally stateless: they contain
+    no authority or tenant data, and are only used to continue a read within
+    the same authenticated query. The API validates their shape and bounds so
+    a caller cannot request an unbounded response.
+    """
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+        raise FleetConfigurationError("limit must be an integer between 1 and 200")
+    if cursor is None or cursor == "":
+        offset = 0
+    elif isinstance(cursor, str) and cursor.isdecimal():
+        offset = int(cursor)
+    else:
+        raise FleetConfigurationError("cursor must be a non-negative integer token")
+    if offset > len(items):
+        raise FleetConfigurationError("cursor is outside the result set")
+    page = tuple(items[offset : offset + limit])
+    next_offset = offset + len(page)
+    next_cursor = str(next_offset) if next_offset < len(items) else None
+    return FleetPage(page, next_cursor)
+
+
 def _text(value: object, name: str) -> str:
     """Validate bounded non-empty metadata without interpreting it as authority."""
     if not isinstance(value, str) or not value.strip() or len(value) > _MAX_TEXT:
@@ -696,7 +720,13 @@ class EnterpriseFleetStore:
         return self._deployment(values[2])
 
     def list_inventory(
-        self, identity: FleetIdentity, resource: str, *, organization_id: str | None = None
+        self,
+        identity: FleetIdentity,
+        resource: str,
+        *,
+        organization_id: str | None = None,
+        cursor: str | None = None,
+        limit: int = 200,
     ) -> FleetPage:
         """Return tenant-scoped inventory without exposing agent session secrets."""
         if resource not in {"organizations", "projects", "deployments", "agents", "sessions"}:
@@ -761,7 +791,7 @@ class EnterpriseFleetStore:
                     if not identity.project_ids or row["project_id"] in identity.project_ids
                 ]
             items = tuple(dict(row) for row in rows)
-        return FleetPage(items, None)
+        return _paginate(items, cursor, limit)
 
     def create_template(
         self,
@@ -802,7 +832,9 @@ class EnterpriseFleetStore:
                 raise FleetConfigurationError("template already exists") from exc
         return self._template(template_id)
 
-    def list_templates(self, identity: FleetIdentity) -> FleetPage:
+    def list_templates(
+        self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
+    ) -> FleetPage:
         """Return tenant-scoped templates without exposing secret material."""
         with self._lock:
             rows = self._connection.execute(
@@ -810,7 +842,7 @@ class EnterpriseFleetStore:
                 (identity.organization_id,),
             ).fetchall()
             items = tuple(self._template(row["id"]) for row in rows)
-        return FleetPage(items, None)
+        return _paginate(items, cursor, limit)
 
     def validate_template_configuration(
         self, identity: FleetIdentity, configuration: Mapping[str, Any]
@@ -1032,7 +1064,12 @@ class EnterpriseFleetStore:
         return result
 
     def list_configurations(
-        self, identity: FleetIdentity, deployment_id: str | None = None
+        self,
+        identity: FleetIdentity,
+        deployment_id: str | None = None,
+        *,
+        cursor: str | None = None,
+        limit: int = 200,
     ) -> FleetPage:
         """Return desired/applied configuration state for scoped deployments."""
         with self._lock:
@@ -1051,10 +1088,15 @@ class EnterpriseFleetStore:
                 for row in rows
                 if not identity.project_ids or row["project_id"] in identity.project_ids
             )
-        return FleetPage(items, None)
+        return _paginate(items, cursor, limit)
 
     def list_configuration_history(
-        self, identity: FleetIdentity, deployment_id: str | None = None
+        self,
+        identity: FleetIdentity,
+        deployment_id: str | None = None,
+        *,
+        cursor: str | None = None,
+        limit: int = 200,
     ) -> FleetPage:
         """Return bounded, tenant-scoped prior configuration versions."""
         with self._lock:
@@ -1084,7 +1126,7 @@ class EnterpriseFleetStore:
             for row in rows
             if not identity.project_ids or row["project_id"] in identity.project_ids
         )
-        return FleetPage(items, None)
+        return _paginate(items, cursor, limit)
 
     def record_applied_configuration(
         self, identity: FleetIdentity, deployment_id: str, configuration_hash: str
@@ -1109,7 +1151,9 @@ class EnterpriseFleetStore:
             self._connection.commit()
             return self._deployment_configuration(deployment_id)
 
-    def list_drift(self, identity: FleetIdentity) -> FleetPage:
+    def list_drift(
+        self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
+    ) -> FleetPage:
         """Return deployments whose applied configuration differs from desired state."""
         with self._lock:
             rows = self._connection.execute(
@@ -1124,7 +1168,7 @@ class EnterpriseFleetStore:
             for row in rows
             if identity.project_ids == frozenset() or row["project_id"] in identity.project_ids
         )
-        return FleetPage(items, None)
+        return _paginate(items, cursor, limit)
 
     def set_emergency_stop(
         self, identity: FleetIdentity, deployment_id: str, *, active: bool
@@ -1163,7 +1207,9 @@ class EnterpriseFleetStore:
         )
         return result
 
-    def health(self, identity: FleetIdentity) -> FleetPage:
+    def health(
+        self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
+    ) -> FleetPage:
         """Return deployment health and bounded operational SLO indicators."""
         with self._lock:
             rows = self._connection.execute(
@@ -1176,7 +1222,7 @@ class EnterpriseFleetStore:
                 if not identity.project_ids
                 or identity.project_ids & {self._deployment(row["id"])["projectId"]}
             )
-        return FleetPage(items, None)
+        return _paginate(items, cursor, limit)
 
     def record_slo_sample(self, identity: FleetIdentity, deployment_id: str) -> dict[str, Any]:
         """Persist a redaction-safe health sample for one authorized deployment.
@@ -1210,7 +1256,9 @@ class EnterpriseFleetStore:
         )
         return result
 
-    def slo(self, identity: FleetIdentity) -> FleetPage:
+    def slo(
+        self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
+    ) -> FleetPage:
         """Return bounded sample-based availability for each visible deployment."""
         cutoff = self._now() - self.slo_window_seconds
         with self._lock:
@@ -1246,7 +1294,7 @@ class EnterpriseFleetStore:
                     ),
                 }
             )
-        return FleetPage(tuple(items), None)
+        return _paginate(items, cursor, limit)
 
     def compliance_evidence(self, identity: FleetIdentity) -> dict[str, Any]:
         """Build a redacted tenant-scoped evidence summary for review/export.
@@ -1320,7 +1368,9 @@ class EnterpriseFleetStore:
             },
         }
 
-    def alerts(self, identity: FleetIdentity) -> FleetPage:
+    def alerts(
+        self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
+    ) -> FleetPage:
         """Return deterministic alerts derived from authoritative fleet state."""
         alerts: list[dict[str, Any]] = []
         for health in self.health(identity).items:
@@ -1365,7 +1415,7 @@ class EnterpriseFleetStore:
             }
         for alert in alerts:
             alert["acknowledged"] = alert["id"] in acknowledged
-        return FleetPage(tuple(alerts), None)
+        return _paginate(alerts, cursor, limit)
 
     def acknowledge_alert(self, identity: FleetIdentity, alert_id: str) -> dict[str, Any]:
         """Acknowledge one current alert without deleting or hiding its evidence."""
@@ -1958,12 +2008,19 @@ class EnterpriseFleetApplication:
                 resource = path[len(inventory_prefix) :]
                 if resource in {"health", "slo", "alerts"}:
                     self._authorize(identity, "read")
+                    query = parse_qs(str(environ.get("QUERY_STRING", "")))
+                    requested_cursor = query.get("cursor", [None])[0]
+                    requested_limit = int(query.get("limit", ["200"])[0])
                     page = (
-                        self.store.health(identity)
+                        self.store.health(identity, cursor=requested_cursor, limit=requested_limit)
                         if resource == "health"
-                        else self.store.slo(identity)
+                        else self.store.slo(
+                            identity, cursor=requested_cursor, limit=requested_limit
+                        )
                         if resource == "slo"
-                        else self.store.alerts(identity)
+                        else self.store.alerts(
+                            identity, cursor=requested_cursor, limit=requested_limit
+                        )
                     )
                     return self._respond(
                         start_response,
@@ -1980,7 +2037,12 @@ class EnterpriseFleetApplication:
                     return self._respond(start_response, 200, self.store.persistence_capabilities())
                 if resource == "drift":
                     self._authorize(identity, "read")
-                    page = self.store.list_drift(identity)
+                    query = parse_qs(str(environ.get("QUERY_STRING", "")))
+                    page = self.store.list_drift(
+                        identity,
+                        cursor=query.get("cursor", [None])[0],
+                        limit=int(query.get("limit", ["200"])[0]),
+                    )
                     return self._respond(
                         start_response,
                         200,
@@ -1990,12 +2052,26 @@ class EnterpriseFleetApplication:
                     self._authorize(identity, "read")
                     query = parse_qs(str(environ.get("QUERY_STRING", "")))
                     requested_deployment = query.get("deploymentId", [None])[0]
+                    requested_cursor = query.get("cursor", [None])[0]
+                    requested_limit = int(query.get("limit", ["200"])[0])
                     page = (
-                        self.store.list_templates(identity)
+                        self.store.list_templates(
+                            identity, cursor=requested_cursor, limit=requested_limit
+                        )
                         if resource == "templates"
-                        else self.store.list_configuration_history(identity, requested_deployment)
+                        else self.store.list_configuration_history(
+                            identity,
+                            requested_deployment,
+                            cursor=requested_cursor,
+                            limit=requested_limit,
+                        )
                         if resource == "deployment-config/history"
-                        else self.store.list_configurations(identity, requested_deployment)
+                        else self.store.list_configurations(
+                            identity,
+                            requested_deployment,
+                            cursor=requested_cursor,
+                            limit=requested_limit,
+                        )
                     )
                     return self._respond(
                         start_response,
@@ -2006,8 +2082,14 @@ class EnterpriseFleetApplication:
                     self._authorize(identity, "read")
                     query = parse_qs(str(environ.get("QUERY_STRING", "")))
                     requested_org = query.get("organizationId", [None])[0]
+                    requested_cursor = query.get("cursor", [None])[0]
+                    requested_limit = int(query.get("limit", ["200"])[0])
                     page = self.store.list_inventory(
-                        identity, resource, organization_id=requested_org
+                        identity,
+                        resource,
+                        organization_id=requested_org,
+                        cursor=requested_cursor,
+                        limit=requested_limit,
                     )
                     return self._respond(
                         start_response,

@@ -81,6 +81,33 @@ def test_enterprise_reference_server_end_to_end(tmp_path: Path) -> None:
             },
         )
         assert status == 201 and deployment["id"] == "deployment-e2e"
+        status, _ = request_json(
+            base_url,
+            token,
+            "POST",
+            "/api/enterprise/deployments",
+            {
+                "organizationId": "org-e2e",
+                "projectId": "project-e2e",
+                "deploymentId": "deployment-e2e-2",
+                "name": "E2E Claude 2",
+                "environment": "staging",
+                "region": "us-east-1",
+            },
+        )
+        assert status == 201
+        status, first_page = request_json(
+            base_url, token, "GET", "/api/enterprise/deployments?limit=1"
+        )
+        assert status == 200 and len(first_page["items"]) == 1
+        assert first_page["nextCursor"] == "1"
+        status, second_page = request_json(
+            base_url,
+            token,
+            "GET",
+            f"/api/enterprise/deployments?limit=1&cursor={first_page['nextCursor']}",
+        )
+        assert status == 200 and len(second_page["items"]) == 1
         status, template = request_json(
             base_url,
             token,
@@ -117,7 +144,7 @@ def test_enterprise_reference_server_end_to_end(tmp_path: Path) -> None:
             base_url, token, "GET", "/api/enterprise/compliance/evidence"
         )
         assert status == 200
-        assert evidence["deploymentCount"] == 1
+        assert evidence["deploymentCount"] == 2
         assert evidence["deployments"][0]["configuration"]["desiredHash"]
         assert evidence["redaction"]["credentialMaterialIncluded"] is False
         status, capabilities = request_json(base_url, token, "GET", "/api/enterprise/capabilities")
