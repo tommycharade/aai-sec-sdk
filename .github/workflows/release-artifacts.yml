@@ -34,6 +34,7 @@ jobs:
           name: release-mutation-evidence
           path: .mutmut-cache/
           if-no-files-found: error
+          include-hidden-files: true
       - name: Generate artifact-specific CycloneDX SBOMs
         run: python scripts/build_artifact_sbom.py dist/*.whl dist/*.tar.gz
       - name: Write release metadata
