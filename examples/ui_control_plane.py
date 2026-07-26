@@ -12,7 +12,12 @@ import os
 from pathlib import Path
 from wsgiref.simple_server import make_server
 
-from agentic_security import ControlPlaneApplication, ControlPlaneStore
+from agentic_security import (
+    ControlPlaneApplication,
+    ControlPlaneStore,
+    InMemoryAuditSink,
+    InMemoryControlPlaneAuthority,
+)
 
 
 def main() -> None:
@@ -24,7 +29,11 @@ def main() -> None:
     host = os.environ.get("AAI_SEC_UI_HOST", "127.0.0.1")
     port = int(os.environ.get("AAI_SEC_UI_PORT", "8000"))
     application = ControlPlaneApplication(
-        ControlPlaneStore(path),
+        ControlPlaneStore(
+            path,
+            authority=InMemoryControlPlaneAuthority(),
+            audit=InMemoryAuditSink(),
+        ),
         token,
         allowed_origin=os.environ.get("AAI_SEC_UI_ORIGIN", "http://localhost:5173"),
     )

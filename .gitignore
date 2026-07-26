@@ -7,6 +7,8 @@ __pycache__/
 .coverage
 htmlcov/
 dist/
+# The management console is a separate private repository nested for local development.
+aai-sec-ui/
 build/
 *.egg-info/
 site/

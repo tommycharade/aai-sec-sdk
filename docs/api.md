@@ -243,14 +243,30 @@ modified action.
 
 The optional management UI talks to an authenticated control-plane adapter.
 The reference implementation below validates complete configuration
-replacements, persists them atomically, and exposes a persisted emergency
-stop. It is a local/development adapter; it does not create application
-identity or replace the deployment's policy, approval, credential, audit, or
-isolation services.
+replacements, applies persisted controls to a live authority before serving,
+persists them atomically, records requested/activated changes, and exposes a
+persisted emergency stop. Bind it to an application-owned authority and an
+authoritative audit sink before enabling mutation. It does not create
+application identity or replace the deployment's policy, approval, credential,
+audit, or isolation services.
 
 ::: agentic_security.ControlPlaneStore
 
 ::: agentic_security.ControlPlaneApplication
+
+::: agentic_security.ControlPlaneAuthority
+
+::: agentic_security.CallbackControlPlaneAuthority
+
+::: agentic_security.OperatorAuthenticator
+
+::: agentic_security.OperatorIdentity
+
+::: agentic_security.StaticBearerAuthenticator
+
+::: agentic_security.ControlPlaneDependencyError
+
+::: agentic_security.InMemoryControlPlaneAuthority
 
 ::: agentic_security.ControlPlaneConfigurationError
 

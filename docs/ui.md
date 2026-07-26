@@ -40,7 +40,10 @@ The browser submits a complete typed configuration to an authenticated
 control-plane API. It must not connect directly to the Python runtime or be
 treated as an authority boundary. The API must authenticate the operator,
 authorize configuration changes, validate restrictive limits, redact data,
-and audit writes.
+audit writes, activate changes through a live runtime authority, and expose
+bounded rollback history. On startup the adapter must reconcile persisted
+configuration and emergency-stop state into the live authority before serving
+requests; a failed reconciliation must prevent the service from starting.
 
 ## Local development
 

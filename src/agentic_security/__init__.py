@@ -123,9 +123,16 @@ from .types import (
     TimeoutPhase,
 )
 from .ui_control_plane import (
+    CallbackControlPlaneAuthority,
     ControlPlaneApplication,
+    ControlPlaneAuthority,
     ControlPlaneConfigurationError,
+    ControlPlaneDependencyError,
     ControlPlaneStore,
+    InMemoryControlPlaneAuthority,
+    OperatorAuthenticator,
+    OperatorIdentity,
+    StaticBearerAuthenticator,
     validate_configuration,
 )
 
@@ -191,8 +198,15 @@ __all__ = [
     "IsolationVerifier",
     "CallbackIsolationVerifier",
     "ControlPlaneApplication",
+    "ControlPlaneAuthority",
     "ControlPlaneConfigurationError",
+    "ControlPlaneDependencyError",
     "ControlPlaneStore",
+    "CallbackControlPlaneAuthority",
+    "InMemoryControlPlaneAuthority",
+    "OperatorAuthenticator",
+    "OperatorIdentity",
+    "StaticBearerAuthenticator",
     "validate_configuration",
     "CedarPolicyEngine",
     "DuplicateToolError",
