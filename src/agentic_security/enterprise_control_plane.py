@@ -27,6 +27,70 @@ from .audit import AuditSink
 
 _MAX_TEXT = 256
 _MAX_PAGE_SIZE = 200
+_FLEET_GOVERNANCE_KEYS: dict[str, frozenset[str]] = {
+    "policy": frozenset({"provider", "endpoint", "allowedPrincipals", "denyByDefault"}),
+    "approvals": frozenset({"provider", "endpoint", "ttlSeconds", "requiredFor"}),
+    "tools": frozenset({"allowed", "denied", "builtIn", "fileTools"}),
+    "budgets": frozenset(
+        {
+            "maxActions",
+            "maxConcurrent",
+            "maxFanOut",
+            "maxCostUnits",
+            "maxDelegationDepth",
+            "maxActionsPerSecond",
+            "executionTimeoutSeconds",
+            "maxTimedOutWorkers",
+        }
+    ),
+    "credentials": frozenset({"enabled", "brokerEndpoint", "scopes", "mode"}),
+    "isolation": frozenset({"verifier", "requiredForHighRisk", "mode"}),
+    "audit": frozenset(
+        {"provider", "path", "replicaEndpoint", "redactSensitiveData", "captureToolContent"}
+    ),
+    "telemetry": frozenset(
+        {"enabled", "endpoint", "exporter", "redactSensitiveData", "captureToolContent"}
+    ),
+    "runtime": frozenset(
+        {
+            "policyProvider",
+            "approvalProvider",
+            "auditProvider",
+            "policyEndpoint",
+            "approvalEndpoint",
+            "auditPath",
+            "auditReplicaEndpoint",
+            "credentialBrokerEndpoint",
+            "isolationVerifier",
+            "telemetryEnabled",
+            "allowedTools",
+            "allowedPrincipals",
+            "maxActions",
+            "maxConcurrent",
+            "maxFanOut",
+            "maxCostUnits",
+            "maxDelegationDepth",
+            "maxActionsPerSecond",
+            "executionTimeoutSeconds",
+            "maxTimedOutWorkers",
+            "idempotencyTtlSeconds",
+            "approvalTtlSeconds",
+            "credentialsEnabled",
+            "isolationRequiredForHighRisk",
+            "redactSensitiveData",
+            "captureToolContent",
+        }
+    ),
+    "claudeCode": frozenset(
+        {
+            "enabled",
+            "allowedBuiltInTools",
+            "deniedCommandPatterns",
+            "approvalCommandPatterns",
+            "fileTools",
+        }
+    ),
+}
 
 
 class FleetConfigurationError(ValueError):
@@ -152,6 +216,38 @@ def _json_object(value: Mapping[str, Any] | None, name: str) -> str:
         if not isinstance(key, str) or not isinstance(item, (str, int, float, bool, list)):
             raise FleetConfigurationError(f"{name} must contain JSON scalar metadata")
     return json.dumps(data, sort_keys=True, separators=(",", ":"))
+
+
+def validate_fleet_configuration(configuration: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate typed enterprise governance sections without accepting authority.
+
+    Templates remain backward compatible with small legacy objects, but any
+    recognized governance section is a closed schema. This makes policy,
+    approvals, tools, budgets, credentials, isolation, audit, telemetry, and
+    Claude Code controls discoverable and rejects configuration typos before a
+    template can be rolled out. Endpoint values are references only; secrets
+    are rejected by the common recursive validator below.
+    """
+    if not isinstance(configuration, Mapping):
+        raise FleetConfigurationError("configuration must be an object")
+    normalized: dict[str, Any] = {}
+    for key, value in configuration.items():
+        key_text = _text(key, "configuration section")
+        if key_text in _FLEET_GOVERNANCE_KEYS:
+            if not isinstance(value, Mapping):
+                raise FleetConfigurationError(f"{key_text} must be an object")
+            unknown = set(value) - _FLEET_GOVERNANCE_KEYS[key_text]
+            if unknown:
+                fields = ", ".join(sorted(map(str, unknown)))
+                raise FleetConfigurationError(
+                    f"{key_text} contains unsupported fields: {fields}"
+                )
+            normalized[key_text] = dict(value)
+        else:
+            # Preserve legacy extension sections; the recursive bounded and
+            # secret-safe serializer remains the final storage boundary.
+            normalized[key_text] = value
+    return normalized
 
 
 class EnterpriseFleetStore:
@@ -1126,7 +1222,7 @@ class EnterpriseFleetStore:
                 return value
             raise FleetConfigurationError("configuration contains unsupported data")
 
-        normalized = visit(configuration)
+        normalized = visit(validate_fleet_configuration(configuration))
         if not isinstance(normalized, dict):
             raise FleetConfigurationError("configuration must be an object")
         serialized = json.dumps(normalized, sort_keys=True, separators=(",", ":"))

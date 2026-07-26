@@ -390,6 +390,38 @@ def test_live_authority_is_required_for_activation_and_stop(tmp_path: Path) -> N
     assert authority.status()["stopped"] is True
 
 
+def test_typed_governance_sections_reject_typos_and_preserve_safe_controls(
+    tmp_path: Path,
+) -> None:
+    """Enterprise governance fields are closed schemas without storing credentials."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    operator = identity("org-a")
+    template = store.create_template(
+        operator,
+        template_id="governance",
+        name="Governance",
+        configuration={
+            "policy": {"provider": "opa", "denyByDefault": True},
+            "approvals": {"provider": "http", "ttlSeconds": 60},
+            "tools": {"allowed": ["read_file"]},
+            "budgets": {"maxActions": 10, "maxCostUnits": 100},
+            "credentials": {"enabled": False, "mode": "broker"},
+            "isolation": {"requiredForHighRisk": True, "verifier": "attested"},
+            "audit": {"provider": "replicated", "redactSensitiveData": True},
+            "telemetry": {"enabled": True, "exporter": "otlp"},
+        },
+    )
+    assert template["configuration"]["budgets"]["maxActions"] == 10
+    with pytest.raises(FleetConfigurationError):
+        store.create_template(
+            operator,
+            template_id="typo",
+            name="Typo",
+            configuration={"budgets": {"maxAction": 10}},
+        )
+
+
 class FailingAuthority:
     """Synthetic runtime authority that proves fleet mutations fail closed."""
 

@@ -75,6 +75,7 @@ from .enterprise_control_plane import (
     FleetNotFoundError,
     FleetPage,
     StaticFleetAuthenticator,
+    validate_fleet_configuration,
 )
 from .errors import (
     DuplicateToolError,
@@ -237,6 +238,7 @@ __all__ = [
     "FleetNotFoundError",
     "FleetPage",
     "StaticFleetAuthenticator",
+    "validate_fleet_configuration",
     "validate_configuration",
     "CedarPolicyEngine",
     "DuplicateToolError",

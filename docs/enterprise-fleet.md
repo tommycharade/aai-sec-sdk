@@ -73,6 +73,14 @@ can move it through `canary`, `active`, `paused`, or `rollback` with an
 explicit percentage. A deployment is drifted when its applied hash is absent
 or differs from the desired hash.
 
+Templates may use typed governance sections: `policy`, `approvals`, `tools`,
+`budgets`, `credentials`, `isolation`, `audit`, `telemetry`, `runtime`, and
+`claudeCode`. Each recognized section is a closed schema, so misspelled fields
+fail validation before persistence. Provider endpoints and broker references
+are metadata only; credentials and bearer material are never accepted. Legacy
+extension sections remain supported for migration, but typed sections are the
+recommended enterprise contract.
+
 The management UI provides tenant-scoped template creation, parent selection,
 deployment filtering, template assignment, canary rollout, rollback to the
 latest known history version, and emergency stop. Invalid JSON remains in the
@@ -137,6 +145,7 @@ tokens in Vite variables or screenshots.
         - FleetAuthenticator
         - FleetDeploymentAuthority
         - FleetAlertSink
+        - validate_fleet_configuration
         - FleetPage
         - FleetAuthorizationError
         - FleetConfigurationError
