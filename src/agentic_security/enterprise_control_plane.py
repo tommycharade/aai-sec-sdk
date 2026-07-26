@@ -79,6 +79,13 @@ class FleetDeploymentAuthority(Protocol):
         """Clear the deployment stop after incident controls permit it."""
 
 
+class FleetAlertSink(Protocol):
+    """Provider-neutral delivery boundary for redacted fleet alerts."""
+
+    def publish(self, alert: Mapping[str, Any]) -> None:
+        """Deliver one redacted alert or raise without changing fleet state."""
+
+
 class StaticFleetAuthenticator:
     """Bounded bearer authenticator for local tests and reference deployments."""
 
@@ -107,6 +114,8 @@ class StaticFleetAuthenticator:
         if action == "agent_presence":
             return bool(identity.roles & {"agent", "admin"})
         if action == "emergency_stop":
+            return bool(identity.roles & {"incident_commander", "admin"})
+        if action in {"manage_alerts", "dispatch_alerts"}:
             return bool(identity.roles & {"incident_commander", "admin"})
         return False
 
@@ -161,6 +170,7 @@ class EnterpriseFleetStore:
         now: Callable[[], float] | None = None,
         heartbeat_ttl_seconds: int = 90,
         authorities: Mapping[str, FleetDeploymentAuthority] | None = None,
+        alert_sink: FleetAlertSink | None = None,
     ) -> None:
         """Open or create a migrated fleet database with bounded heartbeat TTL."""
         if heartbeat_ttl_seconds < 15 or heartbeat_ttl_seconds > 86_400:
@@ -170,6 +180,7 @@ class EnterpriseFleetStore:
         self._now = now or time.time
         self.heartbeat_ttl_seconds = heartbeat_ttl_seconds
         self.authorities = dict(authorities or {})
+        self.alert_sink = alert_sink
         self._lock = RLock()
         self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
@@ -760,7 +771,53 @@ class EnterpriseFleetStore:
                         "message": f"{health['offlineAgents']} agent(s) are offline",
                     }
                 )
+        with self._lock:
+            acknowledged = {
+                row["alert_id"]
+                for row in self._connection.execute(
+                    "SELECT alert_id FROM fleet_alert_acknowledgements WHERE organization_id=?",
+                    (identity.organization_id,),
+                ).fetchall()
+            }
+        for alert in alerts:
+            alert["acknowledged"] = alert["id"] in acknowledged
         return FleetPage(tuple(alerts), None)
+
+    def acknowledge_alert(self, identity: FleetIdentity, alert_id: str) -> dict[str, Any]:
+        """Acknowledge one current alert without deleting or hiding its evidence."""
+        alert_id = _text(alert_id, "alertId")
+        current = {item["id"]: item for item in self.alerts(identity).items}
+        if alert_id not in current:
+            raise FleetNotFoundError("fleet alert not found")
+        with self._lock:
+            self._connection.execute(
+                "INSERT INTO fleet_alert_acknowledgements"
+                "(organization_id,alert_id,subject,acknowledged_at) VALUES(?,?,?,?) "
+                "ON CONFLICT(organization_id,alert_id) DO UPDATE SET subject=excluded.subject,"
+                "acknowledged_at=excluded.acknowledged_at",
+                (identity.organization_id, alert_id, identity.subject, self._now()),
+            )
+            self._connection.commit()
+        result = {**current[alert_id], "acknowledged": True, "acknowledgedBy": identity.subject}
+        self._audit("fleet_alert_acknowledged", identity.subject, result)
+        return result
+
+    def dispatch_alerts(self, identity: FleetIdentity) -> FleetPage:
+        """Deliver current unacknowledged alerts through the injected alert adapter."""
+        if self.alert_sink is None:
+            raise FleetConfigurationError("no fleet alert sink is configured")
+        delivered: list[dict[str, Any]] = []
+        for alert in self.alerts(identity).items:
+            if alert["acknowledged"]:
+                continue
+            redacted = dict(alert)
+            try:
+                self.alert_sink.publish(redacted)
+            except Exception as exc:
+                raise FleetConfigurationError("fleet alert delivery failed") from exc
+            delivered.append({**redacted, "delivered": True})
+        self._audit("fleet_alerts_dispatched", identity.subject, {"count": len(delivered)})
+        return FleetPage(tuple(delivered), None)
 
     def register_agent(
         self,
@@ -933,6 +990,11 @@ class EnterpriseFleetStore:
                     applied_hash TEXT, rollout_state TEXT NOT NULL,
                     rollout_percentage INTEGER NOT NULL, created_at REAL NOT NULL,
                     PRIMARY KEY(deployment_id,version));
+                CREATE TABLE IF NOT EXISTS fleet_alert_acknowledgements(
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    alert_id TEXT NOT NULL, subject TEXT NOT NULL,
+                    acknowledged_at REAL NOT NULL,
+                    PRIMARY KEY(organization_id,alert_id));
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(1);
                 """
             )
@@ -1322,6 +1384,24 @@ class EnterpriseFleetApplication:
                     200,
                     self.store.validate_template_configuration(identity, configuration),
                 )
+            if (
+                method == "POST"
+                and path.startswith("/api/enterprise/alerts/")
+                and path.endswith("/ack")
+            ):
+                self._authorize(identity, "manage_alerts")
+                alert_id = path[len("/api/enterprise/alerts/") : -len("/ack")].strip("/")
+                return self._respond(
+                    start_response, 200, self.store.acknowledge_alert(identity, alert_id)
+                )
+            if method == "POST" and path == "/api/enterprise/alerts/dispatch":
+                self._authorize(identity, "dispatch_alerts")
+                page = self.store.dispatch_alerts(identity)
+                return self._respond(
+                    start_response,
+                    200,
+                    {"items": list(page.items), "nextCursor": page.next_cursor},
+                )
             if method == "POST" and path == "/api/enterprise/organizations":
                 self._authorize(identity, "manage_inventory")
                 organization_id = _text(body.get("organizationId"), "organizationId")
@@ -1557,6 +1637,7 @@ __all__ = [
     "FleetAuthorizationError",
     "FleetConfigurationError",
     "FleetDeploymentAuthority",
+    "FleetAlertSink",
     "FleetIdentity",
     "FleetNotFoundError",
     "FleetPage",

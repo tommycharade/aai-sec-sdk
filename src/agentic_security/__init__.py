@@ -66,6 +66,7 @@ from .credentials import (
 from .enterprise_control_plane import (
     EnterpriseFleetApplication,
     EnterpriseFleetStore,
+    FleetAlertSink,
     FleetAuthenticator,
     FleetAuthorizationError,
     FleetConfigurationError,
@@ -229,6 +230,7 @@ __all__ = [
     "EnterpriseFleetApplication",
     "FleetAuthenticator",
     "FleetAuthorizationError",
+    "FleetAlertSink",
     "FleetConfigurationError",
     "FleetDeploymentAuthority",
     "FleetIdentity",

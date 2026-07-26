@@ -35,6 +35,16 @@ class Clock:
         return self.value
 
 
+class AlertSink:
+    """Synthetic redacted alert delivery adapter."""
+
+    def __init__(self) -> None:
+        self.alerts: list[dict[str, Any]] = []
+
+    def publish(self, alert: Mapping[str, Any]) -> None:
+        self.alerts.append(dict(alert))
+
+
 def identity(organization_id: str, *, projects: frozenset[str] = frozenset()) -> FleetIdentity:
     """Build a synthetic tenant identity."""
     return FleetIdentity("operator-1", organization_id, frozenset({"admin"}), projects)
@@ -279,7 +289,8 @@ def test_project_scope_limits_operator_to_assigned_project(tmp_path: Path) -> No
 
 def test_templates_inherit_stage_rollout_and_report_drift(tmp_path: Path) -> None:
     """Desired configuration is inherited, staged, and compared by content hash."""
-    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    sink = AlertSink()
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite", alert_sink=sink)
     seed(store)
     operator = identity("org-a")
     store.create_template(
@@ -314,6 +325,11 @@ def test_templates_inherit_stage_rollout_and_report_drift(tmp_path: Path) -> Non
     stopped = store.set_emergency_stop(operator, "deploy-a", active=True)
     assert stopped["status"] == "critical"
     assert store.alerts(operator).items[0]["type"] == "emergency_stop"
+    dispatched = store.dispatch_alerts(operator)
+    assert dispatched.items[0]["delivered"] is True and sink.alerts
+    acknowledged = store.acknowledge_alert(operator, dispatched.items[0]["id"])
+    assert acknowledged["acknowledged"] is True
+    assert store.dispatch_alerts(operator).items == ()
     store.set_emergency_stop(operator, "deploy-a", active=False)
     store.assign_template(operator, "deploy-a", "base")
     batch = store.rollout_deployments(
@@ -562,8 +578,12 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
         "/api/enterprise/emergency-stop",
         {"deploymentId": "deploy-a", "active": True},
     )[0].startswith("200")
+    status, alerts = call_api(app, "GET", "/api/enterprise/alerts")
+    assert status.startswith("200") and alerts["items"]
+    alert_id = alerts["items"][0]["id"]
+    assert call_api(app, "POST", f"/api/enterprise/alerts/{alert_id}/ack")[0].startswith("200")
+    assert call_api(app, "POST", "/api/enterprise/alerts/dispatch")[0].startswith("400")
     assert call_api(app, "GET", "/api/enterprise/health")[1]["items"][0]["status"] == "critical"
-    assert call_api(app, "GET", "/api/enterprise/alerts")[1]["items"]
     status, drift = call_api(app, "GET", "/api/enterprise/drift")
     assert status.startswith("200") and drift["items"]
     status, disconnected = call_api(

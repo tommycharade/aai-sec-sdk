@@ -54,6 +54,8 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/deployment-config/rollback` | Restore a known prior version as a new staged version |
 | `POST /api/enterprise/deployment-config/applied` | Record an applied configuration hash |
 | `POST /api/enterprise/emergency-stop` | Stop or clear one deployment through its authority |
+| `POST /api/enterprise/alerts/{alertId}/ack` | Acknowledge an alert without deleting evidence |
+| `POST /api/enterprise/alerts/dispatch` | Deliver unacknowledged alerts through an alert adapter |
 
 Agent registration returns one opaque, expiring session. It is accepted only
 for the authenticated deployment/agent scope and is never included in fleet
@@ -84,6 +86,11 @@ claim activation.
 The fleet store rejects secret-like configuration keys and stores only JSON
 configuration and hashes. It does not provision OPA/Cedar, IAM, approvals,
 credentials, sandboxes, or telemetry backends; those remain explicit adapters.
+Alerts are derived from current authoritative state. Incident commanders can
+acknowledge them, while a provider-neutral `FleetAlertSink` can deliver
+redacted alert records to an enterprise notification or incident system.
+Delivery failures are reported as failures and do not clear, hide, or mutate
+the underlying alert condition.
 
 ## Reference setup
 
@@ -121,6 +128,7 @@ tokens in Vite variables or screenshots.
         - EnterpriseFleetApplication
         - FleetAuthenticator
         - FleetDeploymentAuthority
+        - FleetAlertSink
         - FleetPage
         - FleetAuthorizationError
         - FleetConfigurationError

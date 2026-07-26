@@ -9,6 +9,7 @@ wire the saved configuration to an application-owned ``GuardedRuntime``.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 from wsgiref.simple_server import make_server
@@ -43,6 +44,18 @@ class CombinedControlPlaneApplication:
         return cast(list[bytes], self.runtime(environ, start_response))
 
 
+class ExampleFleetAlertSink:
+    """Synthetic alert sink used to demonstrate provider-neutral delivery."""
+
+    def __init__(self) -> None:
+        """Keep redacted alerts in memory for local inspection only."""
+        self.alerts: list[dict[str, Any]] = []
+
+    def publish(self, alert: Mapping[str, Any]) -> None:
+        """Record one already-redacted alert without adding credentials."""
+        self.alerts.append(dict(alert))
+
+
 def main() -> None:
     """Start the local UI control plane with explicit development settings."""
     token = os.environ.get("AAI_SEC_UI_TOKEN")
@@ -69,7 +82,9 @@ def main() -> None:
         ),
         allowed_origin=os.environ.get("AAI_SEC_UI_ORIGIN", "http://localhost:5173"),
     )
-    fleet = EnterpriseFleetStore(path.with_name("fleet.sqlite"), audit=audit)
+    fleet = EnterpriseFleetStore(
+        path.with_name("fleet.sqlite"), audit=audit, alert_sink=ExampleFleetAlertSink()
+    )
     fleet_identity = FleetIdentity("local-operator", "org-example", frozenset({"admin"}))
     try:
         fleet.create_organization("org-example", "Example enterprise")
