@@ -65,6 +65,7 @@ from .credentials import (
 )
 from .enterprise_control_plane import (
     CallbackFleetAuthenticator,
+    CallbackFleetSecretResolver,
     EnterpriseFleetApplication,
     EnterpriseFleetStore,
     FleetAlertSink,
@@ -76,6 +77,8 @@ from .enterprise_control_plane import (
     FleetIdentityVerifier,
     FleetNotFoundError,
     FleetPage,
+    FleetSecretReference,
+    FleetSecretResolver,
     StaticFleetAuthenticator,
     WebhookFleetAlertSink,
     validate_fleet_configuration,
@@ -240,6 +243,9 @@ __all__ = [
     "FleetDeploymentAuthority",
     "FleetIdentity",
     "FleetIdentityVerifier",
+    "FleetSecretReference",
+    "FleetSecretResolver",
+    "CallbackFleetSecretResolver",
     "FleetNotFoundError",
     "FleetPage",
     "StaticFleetAuthenticator",

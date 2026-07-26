@@ -14,12 +14,14 @@ import pytest
 import agentic_security.enterprise_control_plane as fleet_module
 from agentic_security import (
     CallbackFleetAuthenticator,
+    CallbackFleetSecretResolver,
     EnterpriseFleetApplication,
     EnterpriseFleetStore,
     FleetAuthorizationError,
     FleetConfigurationError,
     FleetIdentity,
     FleetNotFoundError,
+    FleetSecretReference,
     InMemoryAuditSink,
     InMemoryControlPlaneAuthority,
     StaticFleetAuthenticator,
@@ -96,6 +98,23 @@ def test_callback_iam_adapter_fails_closed_and_preserves_verified_scope() -> Non
     failing = CallbackFleetAuthenticator(fail_verification, fail_authorization)
     assert failing.authenticate("valid") is None
     assert failing.authorize(verified, "read") is False
+
+
+def test_secret_reference_resolver_never_accepts_material_as_configuration() -> None:
+    """Secret managers resolve opaque references only at the deployment boundary."""
+    reference = FleetSecretReference("aws-secretsmanager://prod/claude-token")
+    seen: list[tuple[str, str]] = []
+    resolver = CallbackFleetSecretResolver(
+        lambda item, purpose: seen.append((item.reference, purpose)) or "ephemeral-token"
+    )
+    assert resolver.resolve(reference, "agentic-tool") == "ephemeral-token"
+    assert seen == [(reference.reference, "agentic-tool")]
+    with pytest.raises(FleetConfigurationError):
+        FleetSecretReference("raw secret value")
+    with pytest.raises(FleetConfigurationError):
+        CallbackFleetSecretResolver(lambda _reference, _purpose: "").resolve(
+            reference, "agentic-tool"
+        )
 
 
 def identity(organization_id: str, *, projects: frozenset[str] = frozenset()) -> FleetIdentity:

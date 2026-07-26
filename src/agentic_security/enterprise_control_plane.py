@@ -121,6 +121,47 @@ class FleetIdentity:
             raise ValueError("fleet identity requires subject, organization, and roles")
 
 
+@dataclass(frozen=True, slots=True)
+class FleetSecretReference:
+    """Opaque reference to a deployment-owned secret, never the secret value."""
+
+    reference: str
+
+    def __post_init__(self) -> None:
+        """Reject empty or oversized references before they reach a resolver."""
+        if not isinstance(self.reference, str) or not self.reference.strip():
+            raise FleetConfigurationError("secret reference must be non-empty text")
+        if len(self.reference) > 512 or any(char.isspace() for char in self.reference):
+            raise FleetConfigurationError("secret reference is malformed")
+
+
+class FleetSecretResolver(Protocol):
+    """Deployment-owned secret manager boundary for ephemeral credential use."""
+
+    def resolve(self, reference: FleetSecretReference, purpose: str) -> str:
+        """Resolve one reference for one purpose without persisting or returning metadata."""
+
+
+class CallbackFleetSecretResolver:
+    """Adapt a deployment secret manager callback with fail-closed validation."""
+
+    def __init__(self, resolver: Callable[[FleetSecretReference, str], str]) -> None:
+        """Create a resolver around an application-owned secret manager client."""
+        self._resolver = resolver
+
+    def resolve(self, reference: FleetSecretReference, purpose: str) -> str:
+        """Resolve one bounded reference and reject empty or malformed results."""
+        if not isinstance(purpose, str) or not purpose.strip() or len(purpose) > _MAX_TEXT:
+            raise FleetConfigurationError("secret purpose must be bounded non-empty text")
+        try:
+            value = self._resolver(reference, purpose)
+        except Exception as exc:
+            raise FleetConfigurationError("secret resolution failed") from exc
+        if not isinstance(value, str) or not value:
+            raise FleetConfigurationError("secret manager returned no credential")
+        return value
+
+
 class FleetAuthenticator(Protocol):
     """Deployment-owned authentication boundary for enterprise API requests."""
 
@@ -2117,6 +2158,9 @@ __all__ = [
     "FleetAuthenticator",
     "FleetIdentityVerifier",
     "CallbackFleetAuthenticator",
+    "FleetSecretReference",
+    "FleetSecretResolver",
+    "CallbackFleetSecretResolver",
     "FleetAuthorizationError",
     "FleetConfigurationError",
     "FleetDeploymentAuthority",

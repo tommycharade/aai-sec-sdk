@@ -33,6 +33,12 @@ signature, issuer, audience, expiry, and claims before returning a normalized
 `FleetIdentity`; the SDK does not guess those rules or accept roles from the
 browser. Authorization is a separate callback and fails closed on exceptions.
 
+Credential governance uses `FleetSecretReference` and
+`CallbackFleetSecretResolver`. Templates may contain broker endpoint and
+opaque reference metadata, but never credential material. A deployment-owned
+secret manager resolves a reference only for a bounded purpose; resolution
+failures are errors rather than empty or synthetic credentials.
+
 ## Inventory API
 
 The reference WSGI application exposes these authenticated endpoints:
@@ -164,6 +170,9 @@ tokens in Vite variables or screenshots.
         - FleetIdentity
         - FleetIdentityVerifier
         - CallbackFleetAuthenticator
+        - FleetSecretReference
+        - FleetSecretResolver
+        - CallbackFleetSecretResolver
         - EnterpriseFleetStore
         - EnterpriseFleetApplication
         - FleetAuthenticator
