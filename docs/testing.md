@@ -4,7 +4,10 @@
 linting, strict typing, unit and adversarial tests, 90% branch coverage,
 guardrail checks, a strict documentation build, package validation, dependency
 audits, mutation-baseline validation, and the nested React UI typecheck,
-contract tests, and production build. The browser smoke path for the live
+contract tests, and production build. `tests/test_enterprise_e2e.py` starts the
+actual reference WSGI server on an ephemeral localhost port and exercises
+authenticated HTTP registration, template assignment, rollout, and compliance
+evidence. The browser smoke path for the live
 reference server is documented in the enterprise fleet runbook and is used
 before release evidence is accepted.
 
