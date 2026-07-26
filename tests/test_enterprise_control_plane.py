@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
+import sys
+import types
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -153,6 +155,76 @@ def test_reference_persistence_is_explicitly_rejected_for_ha_requirements(tmp_pa
         "INSERT OR IGNORE INTO schema_migrations(version) VALUES(?)"
     )
     assert "INSERT INTO" in translated and "%s" in translated
+
+
+def test_postgres_connection_translation_and_failure_mapping() -> None:
+    """The optional adapter translates only the bounded reference SQL surface."""
+
+    class FakeDatabase:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Any]] = []
+            self.fail_unique = False
+
+        def execute(self, sql: str, params: Any = ()) -> FakeDatabase:
+            self.calls.append((sql, params))
+            if self.fail_unique:
+
+                class UniqueViolation(Exception):
+                    pass
+
+                raise UniqueViolation("duplicate")
+            return self
+
+        def fetchall(self) -> list[dict[str, str]]:
+            return [{"name": "team"}]
+
+        def commit(self) -> None:
+            self.calls.append(("COMMIT", ()))
+
+        def rollback(self) -> None:
+            self.calls.append(("ROLLBACK", ()))
+
+        def close(self) -> None:
+            self.calls.append(("CLOSE", ()))
+
+    database = FakeDatabase()
+    connection = fleet_module._PostgresFleetConnection(database)
+    connection.execute("PRAGMA foreign_keys = ON")
+    assert connection.execute("PRAGMA table_info(deployments)").fetchall() == [{"name": "team"}]
+    connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(?)", (4,))
+    assert "ON CONFLICT DO NOTHING" in database.calls[-1][0]
+    connection.execute(
+        "INSERT INTO examples(id) VALUES(?) ON CONFLICT(id) DO UPDATE SET id=excluded.id",
+        (1,),
+    )
+    assert database.calls[-1][0].count("ON CONFLICT") == 1
+    connection.executescript("SELECT 1; SELECT 2;")
+    connection.commit()
+    connection.rollback()
+    connection.close()
+
+    database.fail_unique = True
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute("INSERT INTO examples(id) VALUES(?)", (1,))
+    assert any(call[0] == "ROLLBACK" for call in database.calls)
+
+
+def test_postgres_adapter_connection_failure_is_normalized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Optional driver loading and connection failures abort before serving traffic."""
+    fake_psycopg = types.ModuleType("psycopg")
+    fake_rows = types.ModuleType("psycopg.rows")
+    setattr(fake_rows, "dict_row", object())
+
+    def connect(**_kwargs: Any) -> Any:
+        raise OSError("database unavailable")
+
+    setattr(fake_psycopg, "connect", connect)
+    monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
+    monkeypatch.setitem(sys.modules, "psycopg.rows", fake_rows)
+    with pytest.raises(FleetConfigurationError):
+        PostgresFleetPersistenceAdapter().connect("postgresql://unavailable", 5000)
 
 
 def identity(organization_id: str, *, projects: frozenset[str] = frozenset()) -> FleetIdentity:
