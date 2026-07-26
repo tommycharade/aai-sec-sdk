@@ -610,7 +610,9 @@ class EnterpriseFleetStore:
             )
             self._connection.commit()
             result = self._deployment_configuration(deployment_id)
-        self._audit("fleet_configuration_staged", identity.subject, result)
+        self._audit(
+            "fleet_configuration_staged", identity.subject, result, identity.organization_id
+        )
         return result
 
     def set_rollout(
@@ -652,7 +654,12 @@ class EnterpriseFleetStore:
             )
             self._connection.commit()
             result = self._deployment_configuration(deployment_id)
-        self._audit("fleet_configuration_rollout_changed", identity.subject, result)
+        self._audit(
+            "fleet_configuration_rollout_changed",
+            identity.subject,
+            result,
+            identity.organization_id,
+        )
         return result
 
     def rollout_deployments(
@@ -675,6 +682,7 @@ class EnterpriseFleetStore:
             "fleet_batch_rollout_changed",
             identity.subject,
             {"deploymentIds": list(normalized), "state": state, "percentage": percentage},
+            identity.organization_id,
         )
         return FleetPage(results, None)
 
@@ -742,7 +750,9 @@ class EnterpriseFleetStore:
             )
             self._connection.commit()
             result = self._deployment_configuration(deployment_id)
-        self._audit("fleet_configuration_rollback", identity.subject, result)
+        self._audit(
+            "fleet_configuration_rollback", identity.subject, result, identity.organization_id
+        )
         return result
 
     def list_configurations(
@@ -869,7 +879,12 @@ class EnterpriseFleetStore:
             )
             self._connection.commit()
             result = self._deployment_health(deployment_id)
-        self._audit("fleet_deployment_emergency_stop_changed", identity.subject, result)
+        self._audit(
+            "fleet_deployment_emergency_stop_changed",
+            identity.subject,
+            result,
+            identity.organization_id,
+        )
         return result
 
     def health(self, identity: FleetIdentity) -> FleetPage:
@@ -914,7 +929,9 @@ class EnterpriseFleetStore:
             )
             self._connection.commit()
         result = {"deploymentId": deployment_id, "observedAt": observed_at, **sample}
-        self._audit("fleet_health_sample_recorded", identity.subject, result)
+        self._audit(
+            "fleet_health_sample_recorded", identity.subject, result, identity.organization_id
+        )
         return result
 
     def slo(self, identity: FleetIdentity) -> FleetPage:
@@ -954,6 +971,78 @@ class EnterpriseFleetStore:
                 }
             )
         return FleetPage(tuple(items), None)
+
+    def compliance_evidence(self, identity: FleetIdentity) -> dict[str, Any]:
+        """Build a redacted tenant-scoped evidence summary for review/export.
+
+        The bundle contains identifiers, hashes, states, counts, and audit
+        metadata only. It intentionally excludes desired configuration values,
+        credentials, opaque sessions, and raw audit payloads.
+        """
+        inventory = self.list_inventory(identity, "deployments")
+        configurations = {
+            item["deploymentId"]: item for item in self.list_configurations(identity).items
+        }
+        health = {item["deploymentId"]: item for item in self.health(identity).items}
+        slo = {item["deploymentId"]: item for item in self.slo(identity).items}
+        with self._lock:
+            audit_rows = self._connection.execute(
+                "SELECT event_type,COUNT(*) AS count,MAX(occurred_at) AS last_occurred "
+                "FROM fleet_audit_evidence WHERE organization_id=? GROUP BY event_type "
+                "ORDER BY event_type",
+                (identity.organization_id,),
+            ).fetchall()
+            sessions = self._connection.execute(
+                "SELECT COUNT(*) AS count FROM agent_sessions s JOIN agents a "
+                "ON a.id=s.agent_id AND a.deployment_id=s.deployment_id "
+                "WHERE a.organization_id=? AND s.expires_at>?",
+                (identity.organization_id, self._now()),
+            ).fetchone()["count"]
+        deployments: list[dict[str, Any]] = []
+        for deployment in inventory.items:
+            if identity.project_ids and deployment["project_id"] not in identity.project_ids:
+                continue
+            deployment_id = deployment["id"]
+            config = configurations.get(deployment_id)
+            deployments.append(
+                {
+                    "id": deployment_id,
+                    "projectId": deployment["project_id"],
+                    "team": deployment["team"],
+                    "environment": deployment["environment"],
+                    "region": deployment["region"],
+                    "sdkVersion": deployment["sdk_version"],
+                    "configuration": (
+                        {
+                            "templateId": config["templateId"],
+                            "desiredHash": config["desiredHash"],
+                            "appliedHash": config["appliedHash"],
+                            "version": config["version"],
+                            "rolloutState": config["rolloutState"],
+                            "rolloutPercentage": config["rolloutPercentage"],
+                        }
+                        if config
+                        else None
+                    ),
+                    "health": health.get(deployment_id),
+                    "slo": slo.get(deployment_id),
+                }
+            )
+        return {
+            "schemaVersion": 1,
+            "organizationId": identity.organization_id,
+            "generatedAt": self._now(),
+            "activeSessionCount": int(sessions),
+            "deploymentCount": len(deployments),
+            "deployments": deployments,
+            "audit": [dict(row) for row in audit_rows],
+            "redaction": {
+                "configurationValuesIncluded": False,
+                "sessionTokensIncluded": False,
+                "credentialMaterialIncluded": False,
+                "rawAuditPayloadsIncluded": False,
+            },
+        }
 
     def alerts(self, identity: FleetIdentity) -> FleetPage:
         """Return deterministic alerts derived from authoritative fleet state."""
@@ -1018,7 +1107,7 @@ class EnterpriseFleetStore:
             )
             self._connection.commit()
         result = {**current[alert_id], "acknowledged": True, "acknowledgedBy": identity.subject}
-        self._audit("fleet_alert_acknowledged", identity.subject, result)
+        self._audit("fleet_alert_acknowledged", identity.subject, result, identity.organization_id)
         return result
 
     def dispatch_alerts(self, identity: FleetIdentity) -> FleetPage:
@@ -1035,7 +1124,12 @@ class EnterpriseFleetStore:
             except Exception as exc:
                 raise FleetConfigurationError("fleet alert delivery failed") from exc
             delivered.append({**redacted, "delivered": True})
-        self._audit("fleet_alerts_dispatched", identity.subject, {"count": len(delivered)})
+        self._audit(
+            "fleet_alerts_dispatched",
+            identity.subject,
+            {"count": len(delivered)},
+            identity.organization_id,
+        )
         return FleetPage(tuple(delivered), None)
 
     def register_agent(
@@ -1100,7 +1194,7 @@ class EnterpriseFleetStore:
             )
             self._connection.commit()
             result = self._agent(values[0], values[1])
-        self._audit("fleet_agent_registered", identity.subject, result)
+        self._audit("fleet_agent_registered", identity.subject, result, identity.organization_id)
         result["sessionId"] = session_id
         return result
 
@@ -1139,7 +1233,7 @@ class EnterpriseFleetStore:
             )
             self._connection.commit()
             result = self._agent(deployment_id, agent_id)
-        self._audit("fleet_agent_heartbeat", identity.subject, result)
+        self._audit("fleet_agent_heartbeat", identity.subject, result, identity.organization_id)
         return result
 
     def disconnect(
@@ -1154,7 +1248,7 @@ class EnterpriseFleetStore:
             )
             self._connection.commit()
             result = self._agent(deployment_id, agent_id)
-        self._audit("fleet_agent_disconnected", identity.subject, result)
+        self._audit("fleet_agent_disconnected", identity.subject, result, identity.organization_id)
         return result
 
     def _migrate(self) -> None:
@@ -1221,6 +1315,14 @@ class EnterpriseFleetStore:
                     drifted INTEGER NOT NULL, emergency_stop INTEGER NOT NULL);
                 CREATE INDEX IF NOT EXISTS idx_fleet_health_samples_window
                     ON fleet_health_samples(deployment_id,observed_at);
+                CREATE TABLE IF NOT EXISTS fleet_audit_evidence(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    event_type TEXT NOT NULL, actor TEXT NOT NULL,
+                    deployment_id TEXT, payload_hash TEXT NOT NULL,
+                    occurred_at REAL NOT NULL);
+                CREATE INDEX IF NOT EXISTS idx_fleet_audit_evidence_org
+                    ON fleet_audit_evidence(organization_id,occurred_at);
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(1);
                 """
             )
@@ -1233,6 +1335,7 @@ class EnterpriseFleetStore:
                 )
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(2)")
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(3)")
+            self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(4)")
             self._connection.commit()
 
     @staticmethod
@@ -1513,8 +1616,30 @@ class EnterpriseFleetStore:
         ):
             raise FleetAuthorizationError("agent identity does not match the authenticated subject")
 
-    def _audit(self, event_type: str, actor: str, payload: Mapping[str, Any]) -> None:
+    def _audit(
+        self,
+        event_type: str,
+        actor: str,
+        payload: Mapping[str, Any],
+        organization_id: str | None = None,
+    ) -> None:
         """Write only redaction-safe lifecycle metadata when an audit sink exists."""
+        organization_id = organization_id or payload.get("organizationId")
+        if isinstance(organization_id, str):
+            with self._lock:
+                self._connection.execute(
+                    "INSERT INTO fleet_audit_evidence(organization_id,event_type,actor,"
+                    "deployment_id,payload_hash,occurred_at) VALUES(?,?,?,?,?,?)",
+                    (
+                        organization_id,
+                        event_type,
+                        actor,
+                        payload.get("deploymentId"),
+                        self._configuration_hash(payload),
+                        self._now(),
+                    ),
+                )
+                self._connection.commit()
         if self.audit is not None:
             self.audit.append(
                 event_type, f"fleet-{secrets.token_hex(8)}", {"actor": actor, **dict(payload)}
@@ -1568,6 +1693,11 @@ class EnterpriseFleetApplication:
                         start_response,
                         200,
                         {"items": list(page.items), "nextCursor": page.next_cursor},
+                    )
+                if resource == "compliance/evidence":
+                    self._authorize(identity, "read")
+                    return self._respond(
+                        start_response, 200, self.store.compliance_evidence(identity)
                     )
                 if resource == "drift":
                     self._authorize(identity, "read")

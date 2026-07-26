@@ -44,6 +44,7 @@ The reference WSGI application exposes these authenticated endpoints:
 | `GET /api/enterprise/deployment-config/history` | Bounded prior configuration versions |
 | `GET /api/enterprise/health` | Deployment health and rollout indicators |
 | `GET /api/enterprise/slo` | Sample-based availability and SLO status in the bounded window |
+| `GET /api/enterprise/compliance/evidence` | Redacted tenant-scoped evidence bundle for review/export |
 | `GET /api/enterprise/alerts` | Derived fleet alerts |
 | `POST /api/enterprise/agents/register` | Register an authenticated agent |
 | `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence |
@@ -100,6 +101,13 @@ application serves requests; a reconciliation failure aborts startup.
 The fleet store rejects secret-like configuration keys and stores only JSON
 configuration and hashes. It does not provision OPA/Cedar, IAM, approvals,
 credentials, sandboxes, or telemetry backends; those remain explicit adapters.
+
+The compliance evidence endpoint is intentionally a summary, not a raw audit
+export. It includes deployment identity, configuration hashes and versions,
+rollout state, health/SLO posture, active-session counts, audit event types and
+counts, and explicit redaction assertions. It excludes configuration values,
+credential material, session tokens, and raw audit payloads. Use the deployment's
+immutable audit service for forensic event export.
 Health is intentionally split into current state and explicit SLO samples.
 Schedulers or telemetry adapters call the sample endpoint at a controlled
 frequency; the read-only SLO endpoint computes availability over the bounded

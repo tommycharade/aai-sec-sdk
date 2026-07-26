@@ -677,6 +677,14 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
     assert status.startswith("201") and sample["deploymentId"] == "deploy-a"
     status, slo = call_api(app, "GET", "/api/enterprise/slo")
     assert status.startswith("200") and slo["items"][0]["sampleCount"] == 1
+    status, evidence = call_api(app, "GET", "/api/enterprise/compliance/evidence")
+    assert status.startswith("200")
+    assert evidence["organizationId"] == "org-a"
+    assert evidence["redaction"]["sessionTokensIncluded"] is False
+    assert evidence["audit"]
+    other_evidence = store.compliance_evidence(identity("org-b"))
+    assert other_evidence["deploymentCount"] == 0
+    assert other_evidence["audit"] == []
     status, drift = call_api(app, "GET", "/api/enterprise/drift")
     assert status.startswith("200") and drift["items"]
     status, disconnected = call_api(
