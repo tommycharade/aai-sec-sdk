@@ -104,6 +104,10 @@ HA at startup with `require_high_availability=True`; the reference adapter is
 then rejected before serving traffic. A PostgreSQL or managed-database adapter
 must implement `FleetPersistenceAdapter`, migrations, transactions, locking,
 backup/restore, and tenant-safe concurrency before being used in production.
+The optional PostgreSQL implementation is available with
+`pip install 'agentic-security-sdk[postgres]'`; pass its deployment-managed DSN
+as the `path` argument. Connection failure aborts startup and the DSN is never
+returned by the API.
 
 The management UI provides tenant-scoped template creation, parent selection,
 deployment filtering, template assignment, canary rollout, rollback to the

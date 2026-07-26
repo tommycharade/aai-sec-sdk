@@ -24,6 +24,7 @@ from agentic_security import (
     FleetSecretReference,
     InMemoryAuditSink,
     InMemoryControlPlaneAuthority,
+    PostgresFleetPersistenceAdapter,
     SQLiteFleetPersistenceAdapter,
     StaticFleetAuthenticator,
     WebhookFleetAlertSink,
@@ -147,6 +148,11 @@ def test_reference_persistence_is_explicitly_rejected_for_ha_requirements(tmp_pa
             persistence=SQLiteFleetPersistenceAdapter(),
             require_high_availability=True,
         )
+    assert PostgresFleetPersistenceAdapter.supports_high_availability is True
+    translated = fleet_module._PostgresFleetConnection._statement(
+        "INSERT OR IGNORE INTO schema_migrations(version) VALUES(?)"
+    )
+    assert "INSERT INTO" in translated and "%s" in translated
 
 
 def identity(organization_id: str, *, projects: frozenset[str] = frozenset()) -> FleetIdentity:

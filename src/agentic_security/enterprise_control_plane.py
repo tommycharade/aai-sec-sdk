@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import sqlite3
 import time
@@ -186,6 +187,90 @@ class SQLiteFleetPersistenceAdapter:
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA synchronous=NORMAL")
         return connection
+
+
+class _PostgresFleetConnection:
+    """Small DB-API compatibility layer for the bounded fleet SQL surface."""
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    @staticmethod
+    def _statement(sql: str) -> str:
+        """Translate only the SQLite constructs used by the fleet migrations."""
+        sql = re.sub(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT INTO", sql, flags=re.I)
+        sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+        return sql.replace("?", "%s")
+
+    def execute(self, sql: str, params: Any = ()) -> Any:
+        """Execute translated SQL and normalize uniqueness failures."""
+        stripped = sql.strip()
+        ignore_insert = bool(re.match(r"INSERT\s+OR\s+IGNORE\s+INTO\b", stripped, flags=re.I))
+        if stripped.upper().startswith("PRAGMA FOREIGN_KEYS"):
+            return self._connection.execute("SELECT 1 AS pragma_ignored")
+        table_info = re.fullmatch(r"PRAGMA\s+table_info\((\w+)\)", stripped, flags=re.I)
+        if table_info:
+            return self._connection.execute(
+                "SELECT column_name AS name FROM information_schema.columns "
+                "WHERE table_schema=current_schema() AND table_name=%s "
+                "ORDER BY ordinal_position",
+                (table_info.group(1),),
+            )
+        statement = self._statement(sql)
+        if ignore_insert:
+            statement = f"{statement} ON CONFLICT DO NOTHING"
+        try:
+            return self._connection.execute(statement, params)
+        except Exception as exc:
+            if exc.__class__.__name__ == "UniqueViolation":
+                self._connection.rollback()
+                raise sqlite3.IntegrityError(str(exc)) from exc
+            raise
+
+    def executescript(self, script: str) -> None:
+        """Execute the reference migration script statement by statement."""
+        for statement in script.split(";"):
+            if statement.strip():
+                self.execute(statement)
+
+    def commit(self) -> None:
+        """Commit one migration or control-plane transaction."""
+        self._connection.commit()
+
+    def rollback(self) -> None:
+        """Rollback a failed transaction."""
+        self._connection.rollback()
+
+    def close(self) -> None:
+        """Close the managed database connection."""
+        self._connection.close()
+
+
+class PostgresFleetPersistenceAdapter:
+    """Optional PostgreSQL adapter for managed HA fleet persistence.
+
+    Install the optional ``postgres`` extra. The DSN must be supplied by the
+    deployment, normally through its secret/configuration system; it is never
+    stored in fleet state or returned by capability APIs.
+    """
+
+    name = "postgresql-psycopg"
+    supports_high_availability = True
+
+    def connect(self, path: str, busy_timeout_ms: int) -> _PostgresFleetConnection:
+        """Open PostgreSQL with dictionary rows and fail before serving on error."""
+        del busy_timeout_ms
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as exc:  # pragma: no cover - optional dependency branch.
+            raise FleetConfigurationError(
+                "PostgreSQL persistence requires the optional 'postgres' extra"
+            ) from exc
+        try:
+            return _PostgresFleetConnection(psycopg.connect(path, row_factory=dict_row))
+        except Exception as exc:
+            raise FleetConfigurationError("PostgreSQL fleet persistence connection failed") from exc
 
 
 class FleetAuthenticator(Protocol):
@@ -2203,6 +2288,7 @@ __all__ = [
     "CallbackFleetSecretResolver",
     "FleetPersistenceAdapter",
     "SQLiteFleetPersistenceAdapter",
+    "PostgresFleetPersistenceAdapter",
     "FleetAuthorizationError",
     "FleetConfigurationError",
     "FleetDeploymentAuthority",

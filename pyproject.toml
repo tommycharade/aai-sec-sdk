@@ -46,6 +46,9 @@ docs = [
 otel = [
   "opentelemetry-api>=1.28,<2",
 ]
+postgres = [
+  "psycopg[binary]>=3.3,<4",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
