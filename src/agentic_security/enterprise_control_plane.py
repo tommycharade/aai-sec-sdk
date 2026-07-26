@@ -131,6 +131,47 @@ class FleetAuthenticator(Protocol):
         """Return whether the identity may perform the coarse-grained action."""
 
 
+class FleetIdentityVerifier(Protocol):
+    """Deployment-owned verifier for an OIDC/JWT/IAM authorization header."""
+
+    def verify(self, authorization: object) -> FleetIdentity | None:
+        """Validate signature, issuer, audience, expiry, and claims externally."""
+
+
+class CallbackFleetAuthenticator:
+    """Bridge a verified enterprise IAM adapter into the fleet API.
+
+    The SDK deliberately does not implement key discovery, issuer policy, or
+    JWT algorithm selection. The callback must perform those checks and return
+    only a normalized :class:`FleetIdentity`; authorization remains a separate
+    callback so tenant and role policy cannot be inferred from browser input.
+    """
+
+    def __init__(
+        self,
+        verifier: Callable[[object], FleetIdentity | None],
+        authorizer: Callable[[FleetIdentity, str], bool],
+    ) -> None:
+        """Create an authenticator around deployment-owned verification policy."""
+        self._verifier = verifier
+        self._authorizer = authorizer
+
+    def authenticate(self, authorization: object) -> FleetIdentity | None:
+        """Return the verifier's identity or fail closed on verifier errors."""
+        try:
+            identity = self._verifier(authorization)
+        except Exception:
+            return None
+        return identity if isinstance(identity, FleetIdentity) else None
+
+    def authorize(self, identity: FleetIdentity, action: str) -> bool:
+        """Delegate authorization to the deployment IAM policy boundary."""
+        try:
+            return self._authorizer(identity, action) is True
+        except Exception:
+            return False
+
+
 class FleetDeploymentAuthority(Protocol):
     """Runtime adapter that applies controls to one independently deployed SDK."""
 
@@ -313,7 +354,8 @@ class EnterpriseFleetStore:
     """SQLite-backed tenant inventory and authenticated agent presence store.
 
     SQLite is a reference persistence adapter, not a claim that every
-    enterprise should use SQLite.  The schema and method contracts are the
+    enterprise should use SQLite. WAL mode and a bounded busy timeout improve
+    local multi-process behavior; the schema and method contracts remain the
     portable boundary for a PostgreSQL or managed database adapter.
     """
 
@@ -324,6 +366,7 @@ class EnterpriseFleetStore:
         audit: AuditSink | None = None,
         now: Callable[[], float] | None = None,
         heartbeat_ttl_seconds: int = 90,
+        sqlite_busy_timeout_ms: int = 5_000,
         slo_window_seconds: int = 86_400,
         slo_target: float = 0.99,
         authorities: Mapping[str, FleetDeploymentAuthority] | None = None,
@@ -332,6 +375,12 @@ class EnterpriseFleetStore:
         """Open or create a migrated fleet database with bounded heartbeat TTL."""
         if heartbeat_ttl_seconds < 15 or heartbeat_ttl_seconds > 86_400:
             raise FleetConfigurationError("heartbeat TTL must be between 15 and 86400 seconds")
+        if (
+            isinstance(sqlite_busy_timeout_ms, bool)
+            or not isinstance(sqlite_busy_timeout_ms, int)
+            or not 100 <= sqlite_busy_timeout_ms <= 60_000
+        ):
+            raise FleetConfigurationError("SQLite busy timeout must be between 100 and 60000 ms")
         if slo_window_seconds < 300 or slo_window_seconds > 31_536_000:
             raise FleetConfigurationError("SLO window must be between 300 and 31536000 seconds")
         if not 0.5 <= slo_target <= 1.0:
@@ -347,6 +396,9 @@ class EnterpriseFleetStore:
         self._lock = RLock()
         self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
+        self._connection.execute(f"PRAGMA busy_timeout={sqlite_busy_timeout_ms}")
+        self._connection.execute("PRAGMA journal_mode=WAL")
+        self._connection.execute("PRAGMA synchronous=NORMAL")
         self._migrate()
 
     def close(self) -> None:
@@ -2063,6 +2115,8 @@ class EnterpriseFleetApplication:
 __all__ = [
     "EnterpriseFleetStore",
     "FleetAuthenticator",
+    "FleetIdentityVerifier",
+    "CallbackFleetAuthenticator",
     "FleetAuthorizationError",
     "FleetConfigurationError",
     "FleetDeploymentAuthority",

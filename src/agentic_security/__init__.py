@@ -64,6 +64,7 @@ from .credentials import (
     TokenCredentialBroker,
 )
 from .enterprise_control_plane import (
+    CallbackFleetAuthenticator,
     EnterpriseFleetApplication,
     EnterpriseFleetStore,
     FleetAlertSink,
@@ -72,6 +73,7 @@ from .enterprise_control_plane import (
     FleetConfigurationError,
     FleetDeploymentAuthority,
     FleetIdentity,
+    FleetIdentityVerifier,
     FleetNotFoundError,
     FleetPage,
     StaticFleetAuthenticator,
@@ -229,6 +231,7 @@ __all__ = [
     "OperatorIdentity",
     "StaticBearerAuthenticator",
     "EnterpriseFleetStore",
+    "CallbackFleetAuthenticator",
     "EnterpriseFleetApplication",
     "FleetAuthenticator",
     "FleetAuthorizationError",
@@ -236,6 +239,7 @@ __all__ = [
     "FleetConfigurationError",
     "FleetDeploymentAuthority",
     "FleetIdentity",
+    "FleetIdentityVerifier",
     "FleetNotFoundError",
     "FleetPage",
     "StaticFleetAuthenticator",

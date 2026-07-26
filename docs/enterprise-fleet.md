@@ -27,6 +27,12 @@ filter and compare the same SDK policy across platform groups and geographic
 rollouts. The team field is inventory metadata, not an authorization grant;
 authorization remains organization/project/RBAC based.
 
+For enterprise IAM, provide a `CallbackFleetAuthenticator` backed by the
+organization's OIDC/JWT or service-mesh verifier. The callback must validate
+signature, issuer, audience, expiry, and claims before returning a normalized
+`FleetIdentity`; the SDK does not guess those rules or accept roles from the
+browser. Authorization is a separate callback and fails closed on exceptions.
+
 ## Inventory API
 
 The reference WSGI application exposes these authenticated endpoints:
@@ -134,8 +140,9 @@ AAI_SEC_AGENT_TOKEN=synthetic-agent-token-1234 \
 python3 examples/ui_control_plane.py
 ```
 
-For production, replace static bearer authentication with an enterprise IdP,
-use a durable multi-process database adapter, put the API behind TLS, and
+For production, replace static bearer authentication with an enterprise IdP
+through `CallbackFleetAuthenticator`, use a durable multi-process database
+adapter, put the API behind TLS, and
 connect each deployment to an authoritative runtime and immutable audit
 service. The SQLite/reference implementation is suitable for development and
 contract testing, not an enterprise production HA deployment.
@@ -155,6 +162,8 @@ tokens in Vite variables or screenshots.
     options:
       members:
         - FleetIdentity
+        - FleetIdentityVerifier
+        - CallbackFleetAuthenticator
         - EnterpriseFleetStore
         - EnterpriseFleetApplication
         - FleetAuthenticator

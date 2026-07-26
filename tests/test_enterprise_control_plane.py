@@ -13,6 +13,7 @@ import pytest
 
 import agentic_security.enterprise_control_plane as fleet_module
 from agentic_security import (
+    CallbackFleetAuthenticator,
     EnterpriseFleetApplication,
     EnterpriseFleetStore,
     FleetAuthorizationError,
@@ -72,6 +73,29 @@ def test_webhook_alert_sink_is_bounded_and_fail_closed() -> None:
         WebhookFleetAlertSink("https://alerts.example.test/hook", opener=failed_opener).publish(
             {"id": "alert-1"}
         )
+
+
+def test_callback_iam_adapter_fails_closed_and_preserves_verified_scope() -> None:
+    """External OIDC/JWT verification and authorization remain explicit boundaries."""
+    verified = FleetIdentity("iam-user", "org-a", frozenset({"viewer"}))
+    authenticator = CallbackFleetAuthenticator(
+        lambda authorization: verified if authorization == "valid" else None,
+        lambda identity, action: identity.organization_id == "org-a" and action == "read",
+    )
+    assert authenticator.authenticate("valid") == verified
+    assert authenticator.authenticate("invalid") is None
+    assert authenticator.authorize(verified, "read") is True
+    assert authenticator.authorize(verified, "manage_configuration") is False
+
+    def fail_verification(_authorization: object) -> FleetIdentity | None:
+        raise RuntimeError("IAM outage")
+
+    def fail_authorization(_identity: FleetIdentity, _action: str) -> bool:
+        raise RuntimeError("policy outage")
+
+    failing = CallbackFleetAuthenticator(fail_verification, fail_authorization)
+    assert failing.authenticate("valid") is None
+    assert failing.authorize(verified, "read") is False
 
 
 def identity(organization_id: str, *, projects: frozenset[str] = frozenset()) -> FleetIdentity:
