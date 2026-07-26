@@ -40,8 +40,16 @@ python3 /absolute/path/to/aai-sec-sdk/scripts/onboard_claude.py \
 
 The script creates or updates `.claude/settings.json` and `.mcp.json`, keeps
 existing entries, and creates timestamped backups before modifying either
-file. Preview the changes first with `--dry-run`. It does not invoke Claude or
-silently replace an existing configuration.
+file. It also installs `.claude/aai-sec-config.json`, the checked-in safe
+default policy used by the example hook. Preview the changes first with
+`--dry-run`. It does not invoke Claude or silently replace an existing
+configuration or policy.
+
+The default policy is intentionally narrow: `Read`, `Glob`, and `Grep` are the
+only explicitly allowed native tools; read-only/status/test commands are
+allowed; publishing, commits, pushes, and deployments require approval; and
+destructive shell commands are denied. Edit the project policy only after
+reviewing the security impact and adding tests.
 
 The hook configuration and MCP configuration are separate Claude Code host
 boundaries. Put the `hooks` object in `.claude/settings.json`; put the

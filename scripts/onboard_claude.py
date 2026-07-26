@@ -72,17 +72,32 @@ def _write_json(path: Path, value: dict[str, Any], *, dry_run: bool) -> None:
         raise
 
 
+def _copy_policy(source: Path, destination: Path, *, dry_run: bool) -> None:
+    """Install the checked-in safe policy without replacing a project policy."""
+    if destination.exists():
+        print(f"Preserved existing Claude policy at {destination}")
+        return
+    if dry_run:
+        print(f"Would copy safe policy to {destination}")
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    os.chmod(destination, 0o600)
+
+
 def onboard(project_root: Path, sdk_root: Path, *, python: str, dry_run: bool) -> None:
     """Create or update Claude hook and MCP configuration for one project."""
     project_root = project_root.expanduser().resolve()
     sdk_root = sdk_root.expanduser().resolve()
     hook = sdk_root / "examples" / "claude_code_hook.py"
     gateway = sdk_root / "examples" / "mcp_gateway.py"
-    if not hook.is_file() or not gateway.is_file():
+    policy = sdk_root / "examples" / "claude_safe_config.json"
+    if not hook.is_file() or not gateway.is_file() or not policy.is_file():
         raise SystemExit(f"SDK examples were not found under {sdk_root}")
 
     command = shlex.join([python, str(hook)])
     settings_path = project_root / ".claude" / "settings.json"
+    policy_path = project_root / ".claude" / "aai-sec-config.json"
     mcp_path = project_root / ".mcp.json"
     settings = _load_object(settings_path)
     mcp = _load_object(mcp_path)
@@ -116,15 +131,16 @@ def onboard(project_root: Path, sdk_root: Path, *, python: str, dry_run: bool) -
     else:
         _write_json(settings_path, settings, dry_run=True)
         _write_json(mcp_path, mcp, dry_run=True)
+    _copy_policy(policy, policy_path, dry_run=dry_run)
 
     print("Claude Code onboarding prepared.")
     print(f"Project root: {project_root}")
     print("Next steps:")
-    print(f"  1. Review {settings_path} and {mcp_path}")
+    print(f"  1. Review {settings_path}, {policy_path}, and {mcp_path}")
     print("  2. Run Claude Code from the project root: claude")
     print("  3. In Claude Code, run /mcp and confirm agentic-security is connected")
     print("  4. Test an allowed read, an approval-required command, and a denied command")
-    print("  5. Replace the synthetic example policy and identity before production use")
+    print("  5. Replace the synthetic example identity and policy before production use")
 
 
 def main() -> int:

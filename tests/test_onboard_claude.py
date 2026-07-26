@@ -12,12 +12,15 @@ def test_onboard_creates_separate_hook_and_mcp_configuration(tmp_path: Path) -> 
     onboard(tmp_path, Path.cwd(), python="python3", dry_run=False)
 
     settings = json.loads((tmp_path / ".claude/settings.json").read_text())
+    policy = json.loads((tmp_path / ".claude/aai-sec-config.json").read_text())
     mcp = json.loads((tmp_path / ".mcp.json").read_text())
 
     assert settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"].endswith(
         "examples/claude_code_hook.py"
     )
     assert mcp["mcpServers"]["agentic-security"]["args"][0].endswith("examples/mcp_gateway.py")
+    assert policy["allowedTools"] == ["Read", "Glob", "Grep"]
+    assert "rm\\s+-rf" in policy["deniedCommandPatterns"][0]
 
 
 def test_onboard_preserves_existing_configuration_and_is_idempotent(tmp_path: Path) -> None:
@@ -38,5 +41,6 @@ def test_onboard_preserves_existing_configuration_and_is_idempotent(tmp_path: Pa
     assert settings["permissions"] == {"allow": ["Read"]}
     assert len(settings["hooks"]["PreToolUse"]) == 1
     assert "existing" in mcp["mcpServers"]
+    assert (claude_dir / "aai-sec-config.json").exists()
     assert len(list(claude_dir.glob("settings.json.bak.*"))) == 2
     assert len(list(tmp_path.glob(".mcp.json.bak.*"))) == 2

@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "allowedTools": [
+    "Read",
+    "Glob",
+    "Grep"
+  ],
+  "deniedCommandPatterns": [
+    "(^|\\s)(rm\\s+-rf|git\\s+reset\\s+--hard|sudo|chmod\\s+777)(\\s|$)",
+    "curl\\s+[^|]+\\|\\s*(sh|bash)"
+  ],
+  "approvalCommandPatterns": [
+    "\\bgit\\s+(push|commit)\\b",
+    "\\b(npm|pnpm|yarn)\\s+publish\\b",
+    "\\b(deploy|terraform\\s+apply)\\b"
+  ],
+  "allowedCommandPatterns": [
+    "^(pwd|ls|git\\s+(status|diff|log)|pytest|python\\s+-m\\s+pytest)(\\s|$)"
+  ],
+  "fileTools": [
+    "Read",
+    "Edit",
+    "Write",
+    "Glob",
+    "Grep"
+  ],
+  "auditFile": ".claude/security-audit.jsonl"
+}
