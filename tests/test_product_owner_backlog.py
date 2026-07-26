@@ -272,6 +272,13 @@ def test_policy_timeout_retains_action_capacity_until_worker_exit() -> None:
     assert runtime.health()["active_policy_evaluation"] == 1
     release.set()
     assert finished.wait(1)
+    # The policy thread signals completion immediately before the tracker
+    # callback releases its accounting. Poll briefly instead of racing that
+    # final bookkeeping step on slower CI and mutation-test workers.
+    for _ in range(1000):
+        if runtime.health()["timed_out_workers"] == 0:
+            break
+        sleep(0.001)
     assert runtime.health()["timed_out_workers"] == 0
     assert runtime.health()["bounded_workers"] == 0
     assert "active_policy_evaluation" not in runtime.health()
