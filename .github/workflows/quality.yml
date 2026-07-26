@@ -23,3 +23,30 @@ jobs:
       - name: Validate package artifacts
         if: matrix.python-version == '3.13'
         run: make package-check
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agentic_security
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agentic_security"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262b # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - name: Install PostgreSQL integration dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e '.[dev,postgres]'
+      - name: Run live PostgreSQL fleet integration
+        env:
+          AAI_SEC_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/agentic_security
+        run: python -m pytest -q tests/test_enterprise_postgres_integration.py

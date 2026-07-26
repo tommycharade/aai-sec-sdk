@@ -11,6 +11,16 @@ evidence. The browser smoke path for the live
 reference server is documented in the enterprise fleet runbook and is used
 before release evidence is accepted.
 
+The optional live PostgreSQL path is exercised by the `postgres-integration`
+GitHub Actions job. Locally, install `.[postgres]`, set
+`AAI_SEC_POSTGRES_DSN`, and run:
+
+```bash
+python -m pytest -q tests/test_enterprise_postgres_integration.py
+```
+
+Without a DSN the test skips; the CI service job always supplies one.
+
 ## Deterministic property/fuzz coverage
 
 `tests/test_assurance.py` runs a finite checked-in corpus from
