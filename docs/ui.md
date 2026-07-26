@@ -30,7 +30,8 @@ organizations, projects, SDK deployments, connected Claude agents, and
 configuration drift. It supports tenant-scoped deployment filtering across
 team, environment, region, and ID; safe template creation with one-level
 parent inheritance; assignment and staged configuration; canary rollout;
-history rollback; health/alert inspection; and deployment emergency stop. It
+history rollback; deployment registration; health/alert inspection; alert
+acknowledgement/delivery; and deployment emergency stop/recovery. It
 is backed by the authenticated `/api/enterprise/*` contracts described in
 [Enterprise fleet](enterprise-fleet.md). Inventory is tenant-scoped; it does
 not expose heartbeat sessions or secrets.
