@@ -32,6 +32,9 @@ team, environment, region, and ID; safe template creation with one-level
 parent inheritance; assignment and staged configuration; canary rollout;
 history rollback; deployment registration; health/alert inspection; alert
 acknowledgement/delivery; and deployment emergency stop/recovery. It
+also allows an authorized operator to register projects within the
+authenticated organization; organization roots remain enterprise identity
+provisioning objects.
 is backed by the authenticated `/api/enterprise/*` contracts described in
 [Enterprise fleet](enterprise-fleet.md). Inventory is tenant-scoped; it does
 not expose heartbeat sessions or secrets.
