@@ -10,6 +10,12 @@ REQUIRED = (
     "docs/guardrails.md",
     "pyproject.toml",
     "Makefile",
+    "requirements-ci.txt",
+    "requirements-build.txt",
+    "mutation-baseline.json",
+    "critical-mutants.json",
+    "docs/runbooks.md",
+    "docs/testing.md",
 )
 
 

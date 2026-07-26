@@ -12,12 +12,14 @@ The SDK is built around one boundary:
 - [Security model](security-model.md)
 - [Architecture](architecture.md)
 - [End-to-end example](end-to-end-example.md)
+- [Production readiness](production-readiness.md)
 - [API design](api.md)
 - [Engineering guardrails](guardrails.md)
 - [Licensing](license.md)
 - [Contributing](contributing.md)
 - [Governance](https://github.com/tommycharade/aai-sec-sdk/blob/main/GOVERNANCE.md)
 - [Releasing](releasing.md)
+- [Online documentation](https://tommycharade.github.io/aai-sec-sdk/)
 
 The core runtime and a complete synthetic reference application are available;
 provider-specific integrations remain separate adapter work.

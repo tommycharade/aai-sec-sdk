@@ -97,7 +97,14 @@ def _map_decision(result: Mapping[str, Any], default_reason: str) -> PolicyResul
     if decision is None:
         return PolicyResult(PolicyDecision.DENY, "external policy returned an invalid decision")
     reason = result.get("reason")
-    return PolicyResult(decision, reason if isinstance(reason, str) and reason else default_reason)
+    version = result.get("policy_version", result.get("version"))
+    provenance = result.get("provenance", result.get("source"))
+    return PolicyResult(
+        decision,
+        reason if isinstance(reason, str) and reason else default_reason,
+        version if isinstance(version, str) and version else None,
+        provenance if isinstance(provenance, str) and provenance else None,
+    )
 
 
 class OpaPolicyEngine:

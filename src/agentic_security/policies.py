@@ -24,6 +24,18 @@ class PolicyResult:
 
     decision: PolicyDecision
     reason: str
+    policy_version: str | None = None
+    provenance: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject ambiguous policy evidence before it reaches the runtime."""
+        for field_name, value in (
+            ("reason", self.reason),
+            ("policy_version", self.policy_version),
+            ("provenance", self.provenance),
+        ):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"policy {field_name} must be a non-empty string")
 
 
 class PolicyEngine(Protocol):
@@ -69,11 +81,9 @@ class AllowListPolicy:
             and context.principal.id not in self._allowed_principals
         ):
             return PolicyResult(PolicyDecision.DENY, "principal is not allowed for this task")
-        if context.tenant is not None and context.principal.tenant != context.tenant:
+        if context.principal.tenant != context.tenant:
             return PolicyResult(PolicyDecision.DENY, "principal tenant does not match task tenant")
-        if context.tenant is not None and any(
-            resource.tenant != context.tenant for resource in resources
-        ):
+        if any(resource.tenant != context.tenant for resource in resources):
             return PolicyResult(PolicyDecision.DENY, "resource is outside the task tenant")
         if tool.requires_approval:
             return PolicyResult(PolicyDecision.APPROVAL_REQUIRED, "explicit approval is required")

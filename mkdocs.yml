@@ -37,6 +37,9 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Security model: security-model.md
+  - Operational runbooks: runbooks.md
+  - Testing and assurance: testing.md
+  - Production readiness: production-readiness.md
   - Architecture: architecture.md
   - End-to-end example: end-to-end-example.md
   - API reference: api.md
@@ -44,3 +47,4 @@ nav:
   - Licensing: license.md
   - Contributing: contributing.md
   - Releasing: releasing.md
+  - Critical adopter review: critical-adopter-review-2026-07-25.md

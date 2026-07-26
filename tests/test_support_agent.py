@@ -6,7 +6,7 @@ from pathlib import Path
 
 from examples.support_agent import build_demo_application
 
-from agentic_security import ActionProposal, action_hash
+from agentic_security import ActionProposal, Resource, action_hash
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,6 +20,7 @@ def _email_proposal(proposal_id: str = "proposal:test-email") -> ActionProposal:
             "body": "Synthetic update.",
         },
         proposal_id,
+        operation_key=f"operation:email:{proposal_id}",
     )
 
 
@@ -65,7 +66,10 @@ def test_support_agent_requires_approval_before_credential_backed_side_effect() 
                 "destination": "alice@customer.test",
                 "body": "Synthetic update.",
             },
-            (store.resource_for("ticket_001"),),
+            (
+                store.resource_for("ticket_001"),
+                Resource("alice@customer.test", "external_destination", "tenant:acme"),
+            ),
         ),
     )
     executed = runtime.execute(
@@ -74,6 +78,7 @@ def test_support_agent_requires_approval_before_credential_backed_side_effect() 
             proposal.arguments,
             proposal.proposal_id,
             grant.approval_id,
+            proposal.operation_key,
         )
     )
 

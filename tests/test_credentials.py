@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
+
+import pytest
 
 from agentic_security import (
     ActionProposal,
@@ -75,8 +77,8 @@ def test_runtime_mints_scoped_credential_only_after_authorization() -> None:
     assert result.status == "executed"
     assert len(seen) == 1
     assert seen[0].valid_for("read_record", (Resource("record:1", "record", "tenant:a"),))
-    assert seen[0].secret not in repr(seen[0])
-    assert seen[0].secret not in str(audit.events())
+    assert "_secret" not in repr(seen[0])
+    assert "secret" not in str(audit.events()).lower()
     assert broker.issued()[0].credential_id == seen[0].credential_id
     assert not hasattr(broker.issued()[0], "secret")
 
@@ -116,7 +118,12 @@ def test_invalid_broker_scope_is_denied_without_handler() -> None:
         ) -> ScopedCredential:
             now = datetime.now(UTC)
             return ScopedCredential(
-                "wrong", "different_tool", (), now, now + timedelta(minutes=1), "synthetic"
+                "wrong",
+                "different_tool",
+                (),
+                now,
+                now + timedelta(minutes=1),
+                lambda: "synthetic",
             )
 
     calls: list[bool] = []
@@ -137,8 +144,68 @@ def test_scoped_credential_expiry_is_enforced() -> None:
         (),
         issued,
         issued + timedelta(seconds=10),
-        "synthetic",
+        lambda: "synthetic",
     )
 
     assert credential.valid_for("read_record", (), issued + timedelta(seconds=9))
     assert not credential.valid_for("read_record", (), issued + timedelta(seconds=10))
+
+
+def test_credential_material_is_only_available_inside_live_callback() -> None:
+    issued = datetime(2026, 1, 1, tzinfo=UTC)
+    credential = ScopedCredential(
+        "cred:test",
+        "read_record",
+        (),
+        issued,
+        issued + timedelta(seconds=10),
+        _secret_provider=lambda: "synthetic-token",  # noqa: S106 - synthetic test material
+    )
+
+    with pytest.raises(ValueError, match="must not return"):
+        credential.with_secret(lambda value: value, issued)
+    seen: list[str] = []
+    credential.with_secret(lambda value: seen.append(value), issued)
+    assert seen == ["synthetic-token"]
+    assert not hasattr(credential, "_secret")
+    assert not hasattr(credential, "_secret_provider")
+    with pytest.raises(ValueError):
+        credential.with_secret(lambda value: seen.append(value), issued + timedelta(seconds=10))
+
+
+def test_credential_capabilities_are_identity_keyed() -> None:
+    issued = datetime(2026, 1, 1, tzinfo=UTC)
+    first = ScopedCredential(
+        "same-id", "read_record", (), issued, issued + timedelta(seconds=10), lambda: "first"
+    )
+    second = ScopedCredential(
+        "same-id", "read_record", (), issued, issued + timedelta(seconds=10), lambda: "second"
+    )
+    seen: list[str] = []
+
+    first.with_secret(lambda value: seen.append(value), issued)
+    second.with_secret(lambda value: seen.append(value), issued)
+
+    assert seen == ["first", "second"]
+
+
+def test_credential_brokers_reject_invalid_ttl_and_token() -> None:
+    broker = InMemoryCredentialBroker()
+    with pytest.raises(ValueError, match=r"^credential TTL must be positive$"):
+        broker.mint(
+            _context(),
+            ToolDefinition("read", lambda *_: None, _validator, description="Read."),
+            (),
+            0,
+        )
+
+    from agentic_security.credentials import TokenCredentialBroker
+
+    token_broker = TokenCredentialBroker(lambda *_: cast(Any, ""))
+    with pytest.raises(ValueError, match="scope attestation"):
+        token_broker.mint(
+            _context(),
+            ToolDefinition("read", lambda *_: None, _validator, description="Read."),
+            (),
+            30,
+        )

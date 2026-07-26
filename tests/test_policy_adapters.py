@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import pytest
+
 from agentic_security import (
     ActionProposal,
     CedarPolicyEngine,
@@ -17,6 +19,30 @@ from agentic_security import (
     ToolRegistry,
 )
 from agentic_security.policies import PolicyDecision
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("allow", PolicyDecision.ALLOW),
+        ("Allowed", PolicyDecision.ALLOW),
+        ("permit", PolicyDecision.ALLOW),
+        ("permitted", PolicyDecision.ALLOW),
+        ("deny", PolicyDecision.DENY),
+        ("Denied", PolicyDecision.DENY),
+        ("forbid", PolicyDecision.DENY),
+        ("approval_required", PolicyDecision.APPROVAL_REQUIRED),
+        ("approval", PolicyDecision.APPROVAL_REQUIRED),
+        ("approval-required", PolicyDecision.APPROVAL_REQUIRED),
+    ],
+)
+def test_policy_adapters_map_all_explicit_decision_spellings(
+    value: str, expected: PolicyDecision
+) -> None:
+    result = CedarPolicyEngine(lambda _: {"decision": value}).decide(
+        context(), tool(), {"record_id": "record:1"}, ()
+    )
+    assert result.decision is expected
 
 
 def context() -> ExecutionContext:
@@ -73,6 +99,74 @@ def test_cedar_adapter_maps_explicit_deny_result() -> None:
 
     assert result.decision is PolicyDecision.DENY
     assert result.reason == "closed period"
+
+
+def test_external_policy_metadata_is_preserved() -> None:
+    engine = CedarPolicyEngine(
+        lambda _: {
+            "decision": "Allow",
+            "policy_version": "policy-42",
+            "provenance": "cedar-production",
+        }
+    )
+
+    result = engine.decide(context(), tool(), {"record_id": "record:1"}, ())
+
+    assert result.policy_version == "policy-42"
+    assert result.provenance == "cedar-production"
+
+
+@pytest.mark.parametrize(
+    ("response", "reason", "version", "provenance"),
+    [
+        (
+            {"decision": "Allow", "allow": False},
+            "Cedar policy allowed this action",
+            None,
+            None,
+        ),
+        (
+            {"allow": False},
+            "Cedar policy allowed this action",
+            None,
+            None,
+        ),
+        (
+            {
+                "decision": "Allow",
+                "reason": "approved",
+                "version": "legacy-version",
+                "source": "legacy-source",
+            },
+            "approved",
+            "legacy-version",
+            "legacy-source",
+        ),
+    ],
+)
+def test_policy_adapter_preserves_precedence_and_metadata_fallbacks(
+    response: dict[str, Any], reason: str, version: str | None, provenance: str | None
+) -> None:
+    """Explicit decisions win and legacy metadata remains observable."""
+    result = CedarPolicyEngine(lambda _: response).decide(context(), tool(), {}, ())
+    assert result.reason == reason
+    assert result.policy_version == version
+    assert result.provenance == provenance
+
+
+def test_policy_adapter_rejects_non_string_metadata_and_reasons() -> None:
+    """Malformed provider metadata cannot become policy evidence."""
+    result = CedarPolicyEngine(
+        lambda _: {
+            "decision": "Allow",
+            "reason": 42,
+            "policy_version": object(),
+            "provenance": [],
+        }
+    ).decide(context(), tool(), {}, ())
+    assert result.reason == "Cedar policy allowed this action"
+    assert result.policy_version is None
+    assert result.provenance is None
 
 
 def test_external_policy_errors_fail_closed() -> None:

@@ -7,13 +7,23 @@ from dataclasses import dataclass, field
 from typing import Any, TypeAlias
 
 from .errors import DuplicateToolError, SecurityConfigurationError
-from .types import ExecutionContext, Resource, RiskLevel
+from .types import ExecutionContext, ReconciliationResult, Resource, RiskLevel
 
 ArgumentValidator: TypeAlias = Callable[[Mapping[str, Any]], Any]
 """Callable that validates and normalizes untrusted tool arguments."""
 
 ToolHandler: TypeAlias = Callable[[ExecutionContext, Any], Any]
 """Callable that executes a validated action using application-owned context."""
+
+OutputValidator: TypeAlias = Callable[[Any], Any]
+"""Callable that normalizes a handler result before it crosses the boundary."""
+
+ReconciliationHandler: TypeAlias = Callable[[ExecutionContext, Any], ReconciliationResult | bool]
+"""Callable returning typed reconciliation evidence for an uncertain action.
+
+``bool`` is accepted temporarily for source compatibility; the runtime treats
+it as ``STILL_RUNNING`` and never interprets it as final confirmation.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +45,12 @@ class ToolDefinition:
     external_egress: bool = False
     requires_credential: bool = False
     credential_ttl_seconds: int = 120
+    output_validator: OutputValidator | None = None
+    max_output_bytes: int = 1_000_000
+    reconciliation: ReconciliationHandler | None = None
+    cost_units: int = 1
+    delegation_depth: int = 0
+    requires_isolation: bool = False
     description: str = ""
 
     def __post_init__(self) -> None:
@@ -51,9 +67,26 @@ class ToolDefinition:
             raise SecurityConfigurationError(
                 f"external-egress tool {self.name!r} must require approval"
             )
+        if (
+            (self.external_egress or self.risk in {RiskLevel.HIGH, RiskLevel.CRITICAL})
+            and not self.idempotency_required
+            and self.reconciliation is None
+        ):
+            raise SecurityConfigurationError(
+                f"high-impact or external-egress tool {self.name!r} must require idempotency "
+                "or declare reconciliation"
+            )
         if self.requires_credential and self.credential_ttl_seconds <= 0:
             raise SecurityConfigurationError(
                 f"credential TTL for tool {self.name!r} must be positive"
+            )
+        if self.max_output_bytes <= 0:
+            raise SecurityConfigurationError(
+                f"maximum output size for tool {self.name!r} must be positive"
+            )
+        if self.cost_units <= 0 or self.delegation_depth < 0:
+            raise SecurityConfigurationError(
+                f"tool {self.name!r} has invalid cost or delegation depth"
             )
 
 

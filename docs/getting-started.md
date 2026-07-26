@@ -1,6 +1,6 @@
 # Getting started
 
-The SDK is being built in public as a pre-release package. Clone the
+The SDK is released under Apache-2.0. Clone the
 repository, install the development dependencies, and validate the project:
 
 ```bash
@@ -23,9 +23,10 @@ The SDK does not make an LLM trustworthy. It limits what an incorrect or manipul
 ## Run the example
 
 ```bash
-python examples/guarded_runtime.py
+python examples/support_agent.py
 ```
 
-The example demonstrates that a registered lookup executes with the
-application-owned principal, while an unregistered external-send proposal is
-denied and recorded. It deliberately does not connect to a model or network.
+The example demonstrates read, write, approval, credential, idempotency, audit,
+cross-tenant, and emergency-stop paths using synthetic data. It deliberately
+does not connect to a model or network. Read [Production readiness](production-readiness.md)
+before connecting real tools.

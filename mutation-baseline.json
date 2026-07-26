@@ -1,0 +1,45 @@
+{
+  "tool": "mutmut",
+  "command": "python scripts/run_mutation_check.py",
+  "time_limit_seconds": 600,
+  "security_branch_targets": [
+    "authorization deny/allow",
+    "approval binding and expiry",
+    "credential scope",
+    "tenant isolation",
+    "budget admission",
+    "idempotency claim and terminal persistence",
+    "timeout and reconciliation",
+    "audit replication failure"
+  ],
+  "source_scope": [
+    "src/agentic_security/components.py",
+    "src/agentic_security/runtime.py",
+    "src/agentic_security/approvals.py",
+    "src/agentic_security/budgets.py",
+    "src/agentic_security/credentials.py",
+    "src/agentic_security/idempotency.py",
+    "src/agentic_security/isolation.py",
+    "src/agentic_security/policies.py",
+    "src/agentic_security/policy_adapters.py",
+    "src/agentic_security/audit.py",
+    "src/agentic_security/adapters.py"
+  ],
+  "critical_manifest": "critical-mutants.json",
+  "minimum_killed_percent": 80,
+  "minimum_component_killed_percent": 75,
+  "components": {
+    "runtime_boundary": ["src/agentic_security/components.py", "src/agentic_security/runtime.py"],
+    "approvals": ["src/agentic_security/approvals.py"],
+    "budgets": ["src/agentic_security/budgets.py"],
+    "credentials": ["src/agentic_security/credentials.py"],
+    "idempotency": ["src/agentic_security/idempotency.py"],
+    "isolation": ["src/agentic_security/isolation.py"],
+    "policies": ["src/agentic_security/policies.py", "src/agentic_security/policy_adapters.py"],
+    "audit_redaction": ["src/agentic_security/audit.py"],
+    "adapters": ["src/agentic_security/adapters.py"]
+  },
+  "status": "enforced-bounded-run",
+  "results_file": ".mutmut-cache/results.txt",
+  "evidence_file": ".mutmut-cache/evidence.json"
+}

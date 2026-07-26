@@ -13,7 +13,8 @@ python examples/support_agent.py
 The application registers three tools:
 
 - `read_ticket` is an allow-listed read operation.
-- `update_ticket` is an idempotent write operation.
+- `update_ticket` is an idempotent write operation and callers provide a stable
+  `operation_key` for each business update.
 - `send_customer_email` is high impact, requires single-use approval, is
   idempotent, and receives a short-lived broker-issued credential only after
   authorization.
@@ -31,7 +32,8 @@ The output includes:
 - a cross-tenant denial before the handler runs;
 - an approval-required email attempt;
 - an approved credential-backed email;
-- an idempotent replay that does not send a second message;
+- an idempotent replay with the same operation key that does not send a second
+  message;
 - an approval replay with a different proposal that is denied;
 - an emergency-stop denial;
 - a verified hash-chain audit result.
@@ -42,8 +44,10 @@ application should replace the store, approval provider, policy engine, and
 credential broker with authenticated adapters while preserving the same
 runtime boundary and tests.
 
-`stop()` prevents actions that have not started; it is not a cancellation or
-timeout mechanism for a handler already in progress.
+`stop()` prevents new actions and requests cooperative cancellation for an
+in-flight handler. The runtime also bounds how long the caller waits, but code
+blocked in a non-cooperative external call cannot be forcibly terminated. A
+timed-out handler retains its concurrency slot until its worker exits.
 
 The example’s security-path tests are in
 `tests/test_support_agent.py` and are executed by `make check`.

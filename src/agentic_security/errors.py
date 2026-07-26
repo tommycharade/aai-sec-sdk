@@ -11,3 +11,15 @@ class DuplicateToolError(SecurityConfigurationError):
 
 class RuntimeStateError(RuntimeError):
     """Raised when the runtime cannot safely perform an operation."""
+
+
+class RuntimeCancelledError(RuntimeError):
+    """Raised cooperatively by a handler that observes runtime cancellation."""
+
+
+class RuntimeOperationTimeoutError(RuntimeError):
+    """Raised when a bounded policy, credential, audit, or handler call expires."""
+
+
+class WorkerCapacityError(RuntimeOperationTimeoutError):
+    """Raised when no bounded worker slot is available for a new operation."""

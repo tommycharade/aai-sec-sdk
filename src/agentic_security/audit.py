@@ -12,6 +12,12 @@ from threading import Lock
 from typing import Any, Protocol
 
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
+_SECRET_PATTERNS = (
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b", re.IGNORECASE),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,}\b"),
+)
 _SECRET_KEYS = {
     "password",
     "secret",
@@ -29,24 +35,6 @@ _SECRET_KEYS = {
 }
 
 
-def redact(value: Any) -> Any:
-    """Return a JSON-shaped copy with common secrets and email addresses masked."""
-    if isinstance(value, Mapping):
-        return {
-            str(key): "[REDACTED]" if str(key).lower() in _SECRET_KEYS else redact(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, (list, tuple)):
-        return [redact(item) for item in value]
-    if isinstance(value, str):
-        return _EMAIL.sub("[EMAIL]", value)
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    # Audit must remain JSON-serializable even when an untrusted proposal
-    # contains bytes, custom objects, or another non-JSON value.
-    return f"[UNSERIALIZABLE:{type(value).__name__}]"
-
-
 @dataclass(frozen=True, slots=True)
 class AuditEvent:
     """Tamper-evident event describing one runtime decision or execution."""
@@ -59,11 +47,96 @@ class AuditEvent:
     event_hash: str
 
 
+class Redactor(Protocol):
+    """Provider-neutral contract for redacting data before persistence."""
+
+    def __call__(self, value: Any) -> Any:
+        """Return a safe JSON-shaped representation of ``value``."""
+
+
+def _redact_string(value: str) -> str:
+    """Mask common secret formats even when they occur under innocuous keys."""
+    value = _EMAIL.sub("[EMAIL]", value)
+    for pattern in _SECRET_PATTERNS:
+        value = pattern.sub("[REDACTED]", value)
+    return value
+
+
+def redact(value: Any) -> Any:
+    """Return a JSON-shaped copy with key and content secret detection."""
+    if isinstance(value, Mapping):
+        return {
+            str(key): "[REDACTED]" if str(key).lower() in _SECRET_KEYS else redact(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [redact(item) for item in value]
+    if isinstance(value, str):
+        return _redact_string(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return f"[UNSERIALIZABLE:{type(value).__name__}]"
+
+
 class AuditSink(Protocol):
     """Destination for already-redacted audit events."""
 
     def append(self, event_type: str, request_id: str, payload: dict[str, Any]) -> AuditEvent:
         """Append and return an immutable audit event."""
+
+
+class AuditExporter(Protocol):
+    """Durable remote replication contract for already-redacted events.
+
+    An exporter must not acknowledge until the event is durably accepted by
+    its destination.  Authentication, ordering, retries, retention, and
+    immutable storage are deployment responsibilities behind this boundary.
+    """
+
+    def export(self, event: AuditEvent) -> None:
+        """Persist ``event`` remotely or raise without claiming success."""
+
+
+class AuditReplicationError(RuntimeError):
+    """Raised when a required remote audit replica cannot acknowledge an event."""
+
+
+class ReplicatedAuditSink:
+    """Compose a local sink with a required remote audit exporter.
+
+    Local persistence happens first so a locally recoverable event exists if
+    the remote service is unavailable.  The exporter is still authoritative
+    for the configured deployment: an export failure raises, causing the
+    runtime to return its fail-closed unrecorded outcome for consequential
+    actions.  This class intentionally does not pretend that local JSONL or
+    memory storage is immutable forensic evidence.
+    """
+
+    def __init__(self, primary: AuditSink, exporter: AuditExporter) -> None:
+        """Create a sink whose append succeeds only after remote acknowledgement."""
+        self.primary = primary
+        self.exporter = exporter
+
+    def append(self, event_type: str, request_id: str, payload: dict[str, Any]) -> AuditEvent:
+        """Append locally, then require durable remote replication."""
+        event = self.primary.append(event_type, request_id, payload)
+        try:
+            self.exporter.export(event)
+        except Exception as exc:
+            raise AuditReplicationError("required audit replication failed") from exc
+        return event
+
+
+class InMemoryAuditExporter:
+    """Deterministic exporter used by tests and local contract examples."""
+
+    def __init__(self) -> None:
+        """Create an empty acknowledged-event collection."""
+        self.events: list[AuditEvent] = []
+
+    def export(self, event: AuditEvent) -> None:
+        """Record an event as if a remote test service acknowledged it."""
+        self.events.append(event)
 
 
 class InMemoryAuditSink:
