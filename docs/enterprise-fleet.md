@@ -91,7 +91,9 @@ Rollout and emergency operations are not database-only claims. A deployment
 can be bound to a `FleetDeploymentAuthority` adapter. Active/canary rollout,
 rollback, and stop/clear operations invoke the live authority first; an
 adapter failure leaves the operation unsuccessful and the database does not
-claim activation.
+claim activation. On application startup, persisted active rollout and
+emergency-stop state is reconciled into every bound authority before the WSGI
+application serves requests; a reconciliation failure aborts startup.
 
 The fleet store rejects secret-like configuration keys and stores only JSON
 configuration and hashes. It does not provision OPA/Cedar, IAM, approvals,

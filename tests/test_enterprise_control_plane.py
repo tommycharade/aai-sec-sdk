@@ -462,6 +462,43 @@ def test_authority_outage_does_not_claim_activation(tmp_path: Path) -> None:
         )
 
 
+def test_startup_reconciles_persisted_authority_state_fail_closed(tmp_path: Path) -> None:
+    """A restarted API applies persisted state before serving and aborts on outage."""
+    database = tmp_path / "fleet.sqlite"
+    authority = InMemoryControlPlaneAuthority()
+    store = EnterpriseFleetStore(database, authorities={"deploy-a": authority})
+    seed(store)
+    operator = identity("org-a")
+    template = store.create_template(
+        operator,
+        template_id="runtime",
+        name="Runtime",
+        configuration={"runtime": {"maxActions": 1}},
+    )
+    store.assign_template(operator, "deploy-a", template["id"])
+    store.set_rollout(operator, "deploy-a", state="active", percentage=100)
+    store.close()
+
+    restarted_authority = InMemoryControlPlaneAuthority()
+    restarted = EnterpriseFleetStore(database, authorities={"deploy-a": restarted_authority})
+    EnterpriseFleetApplication(
+        restarted,
+        authenticator=StaticFleetAuthenticator(
+            {"fleet-admin-token-1234": identity("org-a")}
+        ),
+    )
+    assert restarted_authority.status()["configuration_active"] is True
+
+    restarted.close()
+    with pytest.raises(FleetConfigurationError):
+        EnterpriseFleetApplication(
+            EnterpriseFleetStore(database, authorities={"deploy-a": FailingAuthority()}),
+            authenticator=StaticFleetAuthenticator(
+                {"fleet-admin-token-1234": identity("org-a")}
+            ),
+        )
+
+
 def call_api(
     app: EnterpriseFleetApplication,
     method: str,

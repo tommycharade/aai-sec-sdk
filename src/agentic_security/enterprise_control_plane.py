@@ -295,6 +295,40 @@ class EnterpriseFleetStore:
         with self._lock:
             self._connection.close()
 
+    def reconcile_authorities(self) -> None:
+        """Reconcile persisted controls into live authorities before serving traffic.
+
+        The database is not an execution authority. On restart, every bound
+        deployment is brought to its persisted stop state and active rollout
+        configuration first; any adapter failure aborts reconciliation and
+        callers must keep the API out of service.
+        """
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT d.id,c.desired_configuration,c.rollout_state,"
+                "COALESCE(ctrl.emergency_stop,0) AS emergency_stop "
+                "FROM deployments d LEFT JOIN deployment_configs c ON c.deployment_id=d.id "
+                "LEFT JOIN deployment_controls ctrl ON ctrl.deployment_id=d.id"
+            ).fetchall()
+            rows = [row for row in rows if row["id"] in self.authorities]
+            try:
+                for row in rows:
+                    authority = self.authorities[row["id"]]
+                    if bool(row["emergency_stop"]):
+                        authority.emergency_stop()
+                    else:
+                        authority.clear_emergency_stop()
+                    if row["desired_configuration"] is not None and row["rollout_state"] in {
+                        "canary",
+                        "active",
+                        "rollback",
+                    }:
+                        authority.apply_configuration(json.loads(row["desired_configuration"]))
+            except Exception as exc:
+                raise FleetConfigurationError(
+                    "live deployment authority reconciliation failed"
+                ) from exc
+
     def __del__(self) -> None:
         """Best-effort cleanup for short-lived reference applications and tests."""
         connection = getattr(self, "_connection", None)
@@ -1488,6 +1522,9 @@ class EnterpriseFleetApplication:
         self.store = store
         self.authenticator = authenticator
         self.allowed_origin = allowed_origin
+        # Startup is fail-closed: persisted state must reach live authorities
+        # before this WSGI application can accept an authenticated request.
+        self.store.reconcile_authorities()
 
     def __call__(self, environ: Mapping[str, Any], start_response: Any) -> list[bytes]:
         """Handle one bounded JSON request and return a JSON response."""
