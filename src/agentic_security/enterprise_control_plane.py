@@ -470,6 +470,23 @@ def _paginate(items: Sequence[dict[str, Any]], cursor: str | None, limit: int) -
     return FleetPage(page, next_cursor)
 
 
+def _collect_pages(fetch: Callable[[str | None], FleetPage]) -> tuple[dict[str, Any], ...]:
+    """Collect a bounded paginated read without silently dropping records."""
+    items: list[dict[str, Any]] = []
+    cursor: str | None = None
+    seen: set[str] = set()
+    for _ in range(1000):
+        page = fetch(cursor)
+        items.extend(page.items)
+        if page.next_cursor is None:
+            return tuple(items)
+        if page.next_cursor in seen:
+            raise FleetConfigurationError("fleet pagination returned a repeated cursor")
+        seen.add(page.next_cursor)
+        cursor = page.next_cursor
+    raise FleetConfigurationError("fleet pagination exceeded the safety limit")
+
+
 def _text(value: object, name: str) -> str:
     """Validate bounded non-empty metadata without interpreting it as authority."""
     if not isinstance(value, str) or not value.strip() or len(value) > _MAX_TEXT:
@@ -1303,12 +1320,23 @@ class EnterpriseFleetStore:
         metadata only. It intentionally excludes desired configuration values,
         credentials, opaque sessions, and raw audit payloads.
         """
-        inventory = self.list_inventory(identity, "deployments")
+        inventory = _collect_pages(
+            lambda cursor: self.list_inventory(identity, "deployments", cursor=cursor)
+        )
         configurations = {
-            item["deploymentId"]: item for item in self.list_configurations(identity).items
+            item["deploymentId"]: item
+            for item in _collect_pages(
+                lambda cursor: self.list_configurations(identity, cursor=cursor)
+            )
         }
-        health = {item["deploymentId"]: item for item in self.health(identity).items}
-        slo = {item["deploymentId"]: item for item in self.slo(identity).items}
+        health = {
+            item["deploymentId"]: item
+            for item in _collect_pages(lambda cursor: self.health(identity, cursor=cursor))
+        }
+        slo = {
+            item["deploymentId"]: item
+            for item in _collect_pages(lambda cursor: self.slo(identity, cursor=cursor))
+        }
         with self._lock:
             audit_rows = self._connection.execute(
                 "SELECT event_type,COUNT(*) AS count,MAX(occurred_at) AS last_occurred "
@@ -1323,7 +1351,7 @@ class EnterpriseFleetStore:
                 (identity.organization_id, self._now()),
             ).fetchone()["count"]
         deployments: list[dict[str, Any]] = []
-        for deployment in inventory.items:
+        for deployment in inventory:
             if identity.project_ids and deployment["project_id"] not in identity.project_ids:
                 continue
             deployment_id = deployment["id"]
@@ -1373,7 +1401,7 @@ class EnterpriseFleetStore:
     ) -> FleetPage:
         """Return deterministic alerts derived from authoritative fleet state."""
         alerts: list[dict[str, Any]] = []
-        for health in self.health(identity).items:
+        for health in _collect_pages(lambda cursor: self.health(identity, cursor=cursor)):
             deployment_id = health["deploymentId"]
             if health["emergencyStop"]:
                 alerts.append(
@@ -1420,7 +1448,10 @@ class EnterpriseFleetStore:
     def acknowledge_alert(self, identity: FleetIdentity, alert_id: str) -> dict[str, Any]:
         """Acknowledge one current alert without deleting or hiding its evidence."""
         alert_id = _text(alert_id, "alertId")
-        current = {item["id"]: item for item in self.alerts(identity).items}
+        current = {
+            item["id"]: item
+            for item in _collect_pages(lambda cursor: self.alerts(identity, cursor=cursor))
+        }
         if alert_id not in current:
             raise FleetNotFoundError("fleet alert not found")
         with self._lock:
@@ -1441,7 +1472,7 @@ class EnterpriseFleetStore:
         if self.alert_sink is None:
             raise FleetConfigurationError("no fleet alert sink is configured")
         delivered: list[dict[str, Any]] = []
-        for alert in self.alerts(identity).items:
+        for alert in _collect_pages(lambda cursor: self.alerts(identity, cursor=cursor)):
             if alert["acknowledged"]:
                 continue
             redacted = dict(alert)

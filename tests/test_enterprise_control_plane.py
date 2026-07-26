@@ -295,6 +295,9 @@ def test_inventory_paginates_with_bounded_opaque_cursors(tmp_path: Path) -> None
     with pytest.raises(FleetConfigurationError):
         store.list_inventory(identity("org-a"), "deployments", cursor="not-a-cursor")
 
+    evidence = store.compliance_evidence(identity("org-a"))
+    assert evidence["deploymentCount"] == 4
+
 
 def test_migrates_legacy_deployments_with_team_dimension(tmp_path: Path) -> None:
     """The schema migration preserves legacy deployments and adds team metadata."""
