@@ -126,6 +126,28 @@ def main() -> None:
     except ValueError:
         pass
     try:
+        fleet.create_policy(
+            fleet_identity,
+            policy_id="policy-safe-default",
+            name="Safe default policy",
+            configuration={
+                "policy": {"provider": "local_allow_list", "denyByDefault": True},
+                "tools": {"allowed": ["read_repository"]},
+                "budgets": {"maxActions": 25, "maxConcurrent": 2},
+            },
+        )
+    except ValueError:
+        pass
+    try:
+        fleet.create_group(
+            fleet_identity,
+            group_id="group-platform",
+            name="Platform engineers",
+            policy_id="policy-safe-default",
+        )
+    except ValueError:
+        pass
+    try:
         fleet.assign_template(fleet_identity, "deployment-local", "template-safe-default")
     except ValueError:
         # Re-applying the same local seed is intentionally harmless.

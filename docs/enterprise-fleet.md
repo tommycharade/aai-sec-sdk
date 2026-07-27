@@ -53,6 +53,8 @@ The reference WSGI application exposes these authenticated endpoints:
 | `GET /api/enterprise/capabilities` | Persistence adapter and HA capability metadata |
 | `GET /api/enterprise/drift` | Desired/applied configuration drift |
 | `GET /api/enterprise/templates` | Tenant-scoped configuration templates |
+| `GET /api/enterprise/policies` | Tenant-scoped configuration policies |
+| `GET /api/enterprise/groups` | Agent groups with selected policy and enrolled agents |
 | `GET /api/enterprise/deployment-config` | Current desired/applied configuration state |
 | `GET /api/enterprise/deployment-config/history` | Bounded prior configuration versions |
 | `GET /api/enterprise/health` | Deployment health and rollout indicators |
@@ -63,6 +65,10 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence |
 | `POST /api/enterprise/agents/{deployment}/{agent}/disconnect` | Mark offline |
 | `POST /api/enterprise/templates` | Create a configuration template |
+| `POST /api/enterprise/policies` | Create a configuration policy |
+| `POST /api/enterprise/groups` | Create a group and bind it to a policy |
+| `POST /api/enterprise/groups/{group}/agents` | Enroll an existing agent in a group |
+| `DELETE /api/enterprise/groups/{group}/agents/{deployment}/{agent}` | Remove an agent from a group |
 | `POST /api/enterprise/templates/validate` | Validate safe configuration without persisting it |
 | `POST /api/enterprise/deployment-config` | Assign desired configuration |
 | `POST /api/enterprise/deployment-config/rollout` | Stage, canary, pause, activate, or rollback |
@@ -86,6 +92,13 @@ for the authenticated deployment/agent scope. Session inventory exposes only
 agent/deployment scope, timestamps, and active/expired status; the opaque
 session token is never returned. Expired heartbeats are marked offline and
 lifecycle events are written to the configured audit sink.
+
+Policies are immutable, tenant-scoped configuration records in this reference
+implementation. A group selects one policy, and membership changes affect only
+group assignment; they do not create, rotate, or revoke the agent's session.
+Every policy, group, enrollment, and removal is authorized against the live
+operator identity and recorded as redacted fleet audit evidence. Runtime
+enforcement still occurs in each deployment's SDK authority.
 
 ## Configuration governance
 

@@ -141,7 +141,7 @@ def test_reference_persistence_is_explicitly_rejected_for_ha_requirements(tmp_pa
     assert store.persistence_capabilities() == {
         "adapter": "sqlite-reference",
         "highAvailability": False,
-        "schemaVersion": 4,
+        "schemaVersion": 5,
     }
     store.close()
     with pytest.raises(FleetConfigurationError):
@@ -932,3 +932,108 @@ def test_enterprise_api_rejects_forbidden_and_malformed_requests(tmp_path: Path)
     assert status.startswith("403")
     status, payload = call_api(app, "GET", "/api/enterprise/not-found", token=viewer_token)
     assert status.startswith("404") and payload["error"] == "not found"
+
+
+def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) -> None:
+    """Operators can assign policies to groups and manage membership without exposing sessions."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    token = "fleet-admin-token-1234"  # noqa: S105 - synthetic test credential
+    app = EnterpriseFleetApplication(
+        store,
+        authenticator=StaticFleetAuthenticator({token: identity("org-a")}),
+    )
+    assert call_api(
+        app, "POST", "/api/enterprise/organizations", {"organizationId": "org-a", "name": "Alpha"}
+    )[0].startswith("201")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/projects",
+        {"organizationId": "org-a", "projectId": "project-a", "name": "Platform"},
+    )[0].startswith("201")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/deployments",
+        {
+            "organizationId": "org-a",
+            "projectId": "project-a",
+            "deploymentId": "deploy-a",
+            "name": "Local",
+            "environment": "dev",
+            "region": "local",
+        },
+    )[0].startswith("201")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/agents/register",
+        {
+            "deploymentId": "deploy-a",
+            "agentId": "claude-a",
+            "host": "claude",
+            "projectRoot": "/workspace",
+        },
+    )[0].startswith("201")
+    status, policy = call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies",
+        {
+            "policyId": "policy-safe",
+            "name": "Safe default",
+            "configuration": {"policy": {"denyByDefault": True}},
+        },
+    )
+    assert status.startswith("201") and policy["id"] == "policy-safe"
+    status, policies = call_api(app, "GET", "/api/enterprise/policies")
+    assert status.startswith("200") and policies["items"][0]["id"] == "policy-safe"
+    status, duplicate_policy = call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies",
+        {"policyId": "policy-safe", "name": "Duplicate", "configuration": {}},
+    )
+    assert status.startswith("400") and duplicate_policy["error"] == "policy already exists"
+    status, group = call_api(
+        app,
+        "POST",
+        "/api/enterprise/groups",
+        {"groupId": "group-platform", "name": "Platform", "policyId": "policy-safe"},
+    )
+    assert (
+        status.startswith("201") and group["policyName"] == "Safe default" and group["agents"] == []
+    )
+    status, duplicate_group = call_api(
+        app,
+        "POST",
+        "/api/enterprise/groups",
+        {"groupId": "group-platform", "name": "Duplicate", "policyId": "policy-safe"},
+    )
+    assert status.startswith("400") and duplicate_group["error"] == "group already exists"
+    status, enrolled = call_api(
+        app,
+        "POST",
+        "/api/enterprise/groups/group-platform/agents",
+        {"deploymentId": "deploy-a", "agentId": "claude-a"},
+    )
+    assert status.startswith("201") and enrolled["agents"][0]["id"] == "claude-a"
+    status, duplicate_member = call_api(
+        app,
+        "POST",
+        "/api/enterprise/groups/group-platform/agents",
+        {"deploymentId": "deploy-a", "agentId": "claude-a"},
+    )
+    assert (
+        status.startswith("400") and duplicate_member["error"] == "agent is already in this group"
+    )
+    status, groups = call_api(app, "GET", "/api/enterprise/groups")
+    assert status.startswith("200") and groups["items"][0]["policyId"] == "policy-safe"
+    status, removed = call_api(
+        app, "DELETE", "/api/enterprise/groups/group-platform/agents/deploy-a/claude-a"
+    )
+    assert status.startswith("200") and removed["agents"] == []
+    status, duplicate = call_api(
+        app, "DELETE", "/api/enterprise/groups/group-platform/agents/deploy-a/claude-a"
+    )
+    assert status.startswith("404") and duplicate["error"] == "agent group membership not found"

@@ -114,3 +114,9 @@ authorization, durable audit, and runtime reconciliation. Never bundle a
 durable administrator bearer token in a production `VITE_*` variable because
 Vite embeds those values in browser assets; use a short-lived authenticated
 operator session instead.
+
+On **Policy**, create a tenant-scoped configuration policy using JSON. On
+**Enterprise fleet**, create an agent group, select its policy, inspect enrolled
+Claude Code agents, and use **Add agent** or **Remove agent** to manage group
+membership. Group membership is control-plane metadata; the deployment runtime
+remains the authority that enforces the selected policy.

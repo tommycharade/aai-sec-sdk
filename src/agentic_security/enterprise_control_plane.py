@@ -602,7 +602,7 @@ class EnterpriseFleetStore:
         return {
             "adapter": self.persistence.name,
             "highAvailability": self.persistence.supports_high_availability,
-            "schemaVersion": 4,
+            "schemaVersion": 5,
         }
 
     def close(self) -> None:
@@ -860,6 +860,154 @@ class EnterpriseFleetStore:
             ).fetchall()
             items = tuple(self._template(row["id"]) for row in rows)
         return _paginate(items, cursor, limit)
+
+    def create_policy(
+        self,
+        identity: FleetIdentity,
+        *,
+        policy_id: str,
+        name: str,
+        configuration: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Create a tenant-scoped configuration policy for group assignment."""
+        policy_id, name = _text(policy_id, "policyId"), _text(name, "name")
+        configuration_json = self._configuration_json(configuration)
+        with self._lock:
+            self._assert_identity_org(identity, identity.organization_id)
+            try:
+                self._connection.execute(
+                    "INSERT INTO policies(id,organization_id,name,configuration,version,"
+                    "created_at) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (policy_id, identity.organization_id, name, configuration_json, 1, self._now()),
+                )
+                self._connection.commit()
+            except sqlite3.IntegrityError as exc:
+                raise FleetConfigurationError("policy already exists") from exc
+        result = self._policy(policy_id)
+        self._audit("fleet_policy_created", identity.subject, result, identity.organization_id)
+        return result
+
+    def list_policies(
+        self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
+    ) -> FleetPage:
+        """Return tenant-scoped configuration policies without secret material."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT id FROM policies WHERE organization_id=? ORDER BY name,id",
+                (identity.organization_id,),
+            ).fetchall()
+            items = tuple(self._policy(row["id"]) for row in rows)
+        return _paginate(items, cursor, limit)
+
+    def create_group(
+        self,
+        identity: FleetIdentity,
+        *,
+        group_id: str,
+        name: str,
+        policy_id: str,
+    ) -> dict[str, Any]:
+        """Create a tenant-scoped agent group bound to one configuration policy."""
+        group_id, name, policy_id = (
+            _text(group_id, "groupId"),
+            _text(name, "name"),
+            _text(policy_id, "policyId"),
+        )
+        with self._lock:
+            policy = self._policy(policy_id)
+            if policy["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            self._assert_identity_org(identity, identity.organization_id)
+            try:
+                self._connection.execute(
+                    "INSERT INTO agent_groups(id,organization_id,name,policy_id,created_at) "
+                    "VALUES(?,?,?,?,?)",
+                    (group_id, identity.organization_id, name, policy_id, self._now()),
+                )
+                self._connection.commit()
+            except sqlite3.IntegrityError as exc:
+                raise FleetConfigurationError("group already exists") from exc
+        result = self._group(group_id)
+        self._audit("fleet_group_created", identity.subject, result, identity.organization_id)
+        return result
+
+    def list_groups(
+        self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
+    ) -> FleetPage:
+        """Return groups with redacted agent membership for enterprise management."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT id FROM agent_groups WHERE organization_id=? ORDER BY name,id",
+                (identity.organization_id,),
+            ).fetchall()
+            items = tuple(self._group(row["id"]) for row in rows)
+        return _paginate(items, cursor, limit)
+
+    def add_agent_to_group(
+        self, identity: FleetIdentity, *, group_id: str, deployment_id: str, agent_id: str
+    ) -> dict[str, Any]:
+        """Enroll an existing tenant agent in a group without changing its session."""
+        group_id, deployment_id, agent_id = (
+            _text(group_id, "groupId"),
+            _text(deployment_id, "deploymentId"),
+            _text(agent_id, "agentId"),
+        )
+        with self._lock:
+            group = self._group(group_id)
+            agent = self._agent(deployment_id, agent_id)
+            self._assert_identity_scope(identity, group["organizationId"], agent["projectId"])
+            if agent["organizationId"] != group["organizationId"]:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            try:
+                self._connection.execute(
+                    "INSERT INTO agent_group_members(group_id,deployment_id,agent_id) "
+                    "VALUES(?,?,?)",
+                    (group_id, deployment_id, agent_id),
+                )
+                self._connection.commit()
+            except sqlite3.IntegrityError as exc:
+                raise FleetConfigurationError("agent is already in this group") from exc
+        result = self._group(group_id)
+        self._audit(
+            "fleet_group_agent_added",
+            identity.subject,
+            {"groupId": group_id, "deploymentId": deployment_id, "agentId": agent_id},
+            identity.organization_id,
+        )
+        return result
+
+    def remove_agent_from_group(
+        self, identity: FleetIdentity, *, group_id: str, deployment_id: str, agent_id: str
+    ) -> dict[str, Any]:
+        """Remove an agent from a group while leaving its enrollment intact."""
+        group_id, deployment_id, agent_id = (
+            _text(group_id, "groupId"),
+            _text(deployment_id, "deploymentId"),
+            _text(agent_id, "agentId"),
+        )
+        with self._lock:
+            group = self._group(group_id)
+            agent = self._agent(deployment_id, agent_id)
+            self._assert_identity_scope(identity, group["organizationId"], agent["projectId"])
+            if agent["organizationId"] != group["organizationId"]:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            deleted = self._connection.execute(
+                "DELETE FROM agent_group_members WHERE group_id=? AND deployment_id=? "
+                "AND agent_id=?",
+                (group_id, deployment_id, agent_id),
+            ).rowcount
+            if deleted != 1:
+                raise FleetNotFoundError("agent group membership not found")
+            self._connection.commit()
+        result = self._group(group_id)
+        self._audit(
+            "fleet_group_agent_removed",
+            identity.subject,
+            {"groupId": group_id, "deploymentId": deployment_id, "agentId": agent_id},
+            identity.organization_id,
+        )
+        return result
 
     def validate_template_configuration(
         self, identity: FleetIdentity, configuration: Mapping[str, Any]
@@ -1643,6 +1791,21 @@ class EnterpriseFleetStore:
                     name TEXT NOT NULL, parent_id TEXT REFERENCES templates(id),
                     configuration TEXT NOT NULL, version INTEGER NOT NULL, created_at REAL NOT NULL,
                     UNIQUE(organization_id,name));
+                CREATE TABLE IF NOT EXISTS policies(
+                    id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    name TEXT NOT NULL, configuration TEXT NOT NULL, version INTEGER NOT NULL,
+                    created_at REAL NOT NULL, UNIQUE(organization_id,name));
+                CREATE TABLE IF NOT EXISTS agent_groups(
+                    id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    name TEXT NOT NULL, policy_id TEXT NOT NULL REFERENCES policies(id),
+                    created_at REAL NOT NULL, UNIQUE(organization_id,name));
+                CREATE TABLE IF NOT EXISTS agent_group_members(
+                    group_id TEXT NOT NULL REFERENCES agent_groups(id) ON DELETE CASCADE,
+                    deployment_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    PRIMARY KEY(group_id,deployment_id,agent_id),
+                    FOREIGN KEY(deployment_id,agent_id) REFERENCES agents(deployment_id,id)
+                        ON DELETE CASCADE);
                 CREATE TABLE IF NOT EXISTS deployment_configs(
                     deployment_id TEXT PRIMARY KEY REFERENCES deployments(id),
                     template_id TEXT NOT NULL REFERENCES templates(id),
@@ -1681,6 +1844,7 @@ class EnterpriseFleetStore:
                 CREATE INDEX IF NOT EXISTS idx_fleet_audit_evidence_org
                     ON fleet_audit_evidence(organization_id,occurred_at);
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(1);
+                INSERT OR IGNORE INTO schema_migrations(version) VALUES(5);
                 """
             )
             deployment_columns = {
@@ -1760,6 +1924,50 @@ class EnterpriseFleetStore:
             "configuration": json.loads(row["configuration"]),
             "version": row["version"],
             "createdAt": row["created_at"],
+        }
+
+    def _policy(self, policy_id: str) -> dict[str, Any]:
+        """Load one policy without exposing credentials or bearer material."""
+        row = self._connection.execute(
+            "SELECT id,organization_id,name,configuration,version,created_at "
+            "FROM policies WHERE id=?",
+            (policy_id,),
+        ).fetchone()
+        if row is None:
+            raise FleetNotFoundError("policy not found")
+        return {
+            "id": row["id"],
+            "organizationId": row["organization_id"],
+            "name": row["name"],
+            "configuration": json.loads(row["configuration"]),
+            "version": row["version"],
+            "createdAt": row["created_at"],
+        }
+
+    def _group(self, group_id: str) -> dict[str, Any]:
+        """Load one group and its non-secret enrolled agent summaries."""
+        row = self._connection.execute(
+            "SELECT id,organization_id,name,policy_id,created_at FROM agent_groups WHERE id=?",
+            (group_id,),
+        ).fetchone()
+        if row is None:
+            raise FleetNotFoundError("group not found")
+        members = self._connection.execute(
+            "SELECT a.id,a.organization_id,a.project_id,a.deployment_id,a.host,a.project_root,"
+            "a.environment,a.region,a.status,a.last_heartbeat,a.expires_at "
+            "FROM agent_group_members m JOIN agents a ON a.deployment_id=m.deployment_id "
+            "AND a.id=m.agent_id WHERE m.group_id=? ORDER BY a.id",
+            (group_id,),
+        ).fetchall()
+        policy = self._policy(row["policy_id"])
+        return {
+            "id": row["id"],
+            "organizationId": row["organization_id"],
+            "name": row["name"],
+            "policyId": row["policy_id"],
+            "policyName": policy["name"],
+            "createdAt": row["created_at"],
+            "agents": [dict(member) for member in members],
         }
 
     def _effective_template(self, template_id: str) -> dict[str, Any]:
@@ -2109,6 +2317,25 @@ class EnterpriseFleetApplication:
                         200,
                         {"items": list(page.items), "nextCursor": page.next_cursor},
                     )
+                if resource in {"policies", "groups"}:
+                    self._authorize(identity, "read")
+                    query = parse_qs(str(environ.get("QUERY_STRING", "")))
+                    requested_cursor = query.get("cursor", [None])[0]
+                    requested_limit = int(query.get("limit", ["200"])[0])
+                    page = (
+                        self.store.list_policies(
+                            identity, cursor=requested_cursor, limit=requested_limit
+                        )
+                        if resource == "policies"
+                        else self.store.list_groups(
+                            identity, cursor=requested_cursor, limit=requested_limit
+                        )
+                    )
+                    return self._respond(
+                        start_response,
+                        200,
+                        {"items": list(page.items), "nextCursor": page.next_cursor},
+                    )
                 if resource in {"organizations", "projects", "deployments", "agents", "sessions"}:
                     self._authorize(identity, "read")
                     query = parse_qs(str(environ.get("QUERY_STRING", "")))
@@ -2224,6 +2451,51 @@ class EnterpriseFleetApplication:
                     ),
                 )
                 return self._respond(start_response, 201, result)
+            if method == "POST" and path == "/api/enterprise/policies":
+                self._authorize(identity, "manage_configuration")
+                configuration = body.get("configuration")
+                if not isinstance(configuration, Mapping):
+                    raise FleetConfigurationError("configuration must be an object")
+                result = self.store.create_policy(
+                    identity,
+                    policy_id=_text(body.get("policyId"), "policyId"),
+                    name=_text(body.get("name"), "name"),
+                    configuration=configuration,
+                )
+                return self._respond(start_response, 201, result)
+            if method == "POST" and path == "/api/enterprise/groups":
+                self._authorize(identity, "manage_inventory")
+                result = self.store.create_group(
+                    identity,
+                    group_id=_text(body.get("groupId"), "groupId"),
+                    name=_text(body.get("name"), "name"),
+                    policy_id=_text(body.get("policyId"), "policyId"),
+                )
+                return self._respond(start_response, 201, result)
+            membership_prefix = "/api/enterprise/groups/"
+            if method == "POST" and path.startswith(membership_prefix) and path.endswith("/agents"):
+                self._authorize(identity, "manage_inventory")
+                group_id = _text(
+                    path[len(membership_prefix) : -len("/agents")].strip("/"), "groupId"
+                )
+                result = self.store.add_agent_to_group(
+                    identity,
+                    group_id=group_id,
+                    deployment_id=_text(body.get("deploymentId"), "deploymentId"),
+                    agent_id=_text(body.get("agentId"), "agentId"),
+                )
+                return self._respond(start_response, 201, result)
+            if method == "DELETE" and path.startswith(membership_prefix) and "/agents/" in path:
+                self._authorize(identity, "manage_inventory")
+                group_id, member = path[len(membership_prefix) :].strip("/").split("/agents/", 1)
+                deployment_id, agent_id = member.split("/", 1)
+                result = self.store.remove_agent_from_group(
+                    identity,
+                    group_id=_text(group_id, "groupId"),
+                    deployment_id=_text(deployment_id, "deploymentId"),
+                    agent_id=_text(agent_id, "agentId"),
+                )
+                return self._respond(start_response, 200, result)
             if method == "POST" and path == "/api/enterprise/deployment-config":
                 self._authorize(identity, "manage_configuration")
                 result = self.store.assign_template(
