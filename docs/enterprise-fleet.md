@@ -166,8 +166,10 @@ The local UI example multiplexes the original runtime API with the enterprise
 API. Start it with a UI token and open [the management UI](ui.md):
 
 ```bash
-AAI_SEC_UI_TOKEN=synthetic-local-token-1234 \
-AAI_SEC_AGENT_TOKEN=synthetic-agent-token-1234 \
+AAI_SEC_UI_TOKEN=synthetic-enterprise-ui-token-1234 \
+AAI_SEC_AGENT_TOKEN=synthetic-enterprise-agent-token-1234 \
+AAI_SEC_UI_PORT=8001 \
+AAI_SEC_UI_ORIGIN=http://localhost:5174 \
 python3 examples/ui_control_plane.py
 ```
 
@@ -180,7 +182,7 @@ contract testing, not an enterprise production HA deployment.
 
 ## Smoke-test evidence
 
-With the reference server on port `8001` and the UI on port `5175`, set
+With the reference server on port `8001` and the UI on port `5174`, set
 `VITE_USE_MOCKS=false`, `VITE_API_BASE_URL=http://localhost:8001/api`, and a
 synthetic `VITE_API_TOKEN`. Open the UI, select **Enterprise fleet**, verify
 the seeded `Safe default` template and `Local development` deployment, filter

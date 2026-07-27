@@ -98,12 +98,15 @@ Mock mode is enabled by default. To exercise HTTP mode against the dependency-
 free reference adapter, run this from the SDK repository in another terminal:
 
 ```bash
-AAI_SEC_UI_TOKEN=synthetic-local-token-1234 \
-AAI_SEC_AGENT_TOKEN=synthetic-agent-token-1234 \
+AAI_SEC_UI_TOKEN=synthetic-enterprise-ui-token-1234 \
+AAI_SEC_AGENT_TOKEN=synthetic-enterprise-agent-token-1234 \
+AAI_SEC_UI_PORT=8001 \
   python examples/ui_control_plane.py
 ```
 
-Set `VITE_USE_MOCKS=false` and the same `VITE_API_TOKEN` in the UI `.env`.
+Set `VITE_USE_MOCKS=false`, `VITE_API_BASE_URL=http://localhost:8001/api`, and
+the same `VITE_API_TOKEN` in the UI `.env`. Restart Vite after changing
+`VITE_*` values; they are read at startup.
 The adapter persists validated configuration and exposes the emergency stop,
 but it is localhost-only and does not by itself construct an application
 runtime. Production deployments must add authenticated operator identity,
