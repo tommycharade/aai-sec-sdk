@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 
-import boto3  # type: ignore[import-untyped]
+import boto3
 
 
 def _decision(iam: object, role_arn: str, action: str, resource_arn: str) -> str:

@@ -25,7 +25,7 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=int, default=180)
     args = parser.parse_args()
 
-    import boto3  # type: ignore[import-untyped]
+    import boto3
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
     sqs = session.client("sqs")

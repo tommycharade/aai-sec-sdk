@@ -26,7 +26,7 @@ from urllib.parse import urlparse
 
 def _claim_worker(payload: Mapping[str, Any]) -> str:
     """Claim the same live operation from an independently spawned process."""
-    import boto3  # type: ignore[import-untyped]
+    import boto3
 
     from agentic_security import DynamoDbIdempotencyStore
     from agentic_security.idempotency import new_record

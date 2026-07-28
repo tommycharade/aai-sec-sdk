@@ -26,7 +26,7 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=int, default=180)
     args = parser.parse_args()
 
-    import boto3  # type: ignore[import-untyped]
+    import boto3
 
     source_session = boto3.Session(profile_name=args.profile, region_name=args.source_region)
     replica_session = boto3.Session(profile_name=args.profile, region_name=args.replica_region)

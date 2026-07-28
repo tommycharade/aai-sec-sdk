@@ -194,7 +194,13 @@ def main() -> int:
             runner_output_tail=RESULTS.read_text(encoding="utf-8")[-4000:],
             **status_diagnostics(partial_records),
         )
+        runner_tail = RESULTS.read_text(encoding="utf-8")[-4000:]
         print("mutmut did not complete successfully; threshold not proven.")
+        # Keep CI failures actionable without weakening the fail-closed gate.
+        # The same bounded tail is retained in machine-readable evidence.
+        if runner_tail:
+            print("Mutation runner output (tail):")
+            print(runner_tail)
         return 1
 
     try:

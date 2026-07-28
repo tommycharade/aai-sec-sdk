@@ -367,3 +367,29 @@ def test_docker_sandbox_handler_fails_closed_when_runtime_is_missing(
     monkeypatch.setattr(adapters, "which", lambda _name: None)
     with pytest.raises(RuntimeError, match="Docker executable"):
         DockerSandboxToolHandler("image@sha256:" + "a" * 64)(context(), {})
+
+
+def test_docker_sandbox_handler_accepts_immutable_local_image_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A content-addressed local build can be tested without a registry push."""
+    calls: list[tuple[str, ...]] = []
+
+    class FakeWorker:
+        def __call__(self, _context: ExecutionContext, _arguments: object) -> dict[str, bool]:
+            return {"ok": True}
+
+    def fake_subprocess(command: tuple[str, ...], **_: object) -> FakeWorker:
+        calls.append(command)
+        return FakeWorker()
+
+    import agentic_security.adapters as adapters
+
+    monkeypatch.setattr(adapters, "which", lambda _name: "/usr/local/bin/docker")
+    monkeypatch.setattr(adapters, "SubprocessToolHandler", fake_subprocess)
+    image_id = "sha256:" + "b" * 64
+
+    result = DockerSandboxToolHandler(image_id)(context(), {})
+
+    assert result == {"ok": True}
+    assert calls[0][-1] == image_id

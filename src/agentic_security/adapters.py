@@ -230,7 +230,10 @@ class DockerSandboxToolHandler:
 
     def __post_init__(self) -> None:
         """Reject image names and resource settings that make isolation ambiguous."""
-        if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", self.image):
+        # Registry manifests use ``name@sha256:...`` while a locally built
+        # image is addressed by Docker as ``sha256:...``. Both are immutable
+        # content identifiers; mutable names and tags remain rejected.
+        if not re.fullmatch(r"(?:.+@)?sha256:[0-9a-f]{64}", self.image):
             raise ValueError("sandbox image must be an immutable sha256 digest reference")
         if (
             not math.isfinite(self.timeout_seconds)

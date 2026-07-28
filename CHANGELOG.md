@@ -94,6 +94,11 @@ authorization.
 
 ## Unreleased
 
+- Fixed the release gates for core-only environments: optional AWS/PostgreSQL
+  imports now type-check without forcing provider dependencies, mutation tests
+  include the AWS Lambda contract fixture, and local Docker isolation evidence
+  uses Docker's immutable content-addressed image ID.
+
 - Added a keyboard-accessible global command palette: press **⌘K** on macOS or
   **Ctrl+K** on other platforms to jump between the console's primary surfaces.
 - Made the command palette entity-aware so operators can find enrolled agents,

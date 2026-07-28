@@ -177,10 +177,11 @@ no-shell process boundary and must be deployed inside a real sandbox when
 handling hostile code. `DockerSandboxToolHandler` is the concrete container
 option; it fixes `--network=none`, read-only root, dropped capabilities,
 non-root UID, no-new-privileges, PID/memory bounds, and a restricted temporary
-filesystem. Pin the image by digest and retain host/daemon hardening and
-the adapter rejects mutable image tags before execution; retain host/daemon
-hardening and escape-test evidence. It is not a microVM and is not sufficient for a threat
-model that includes a malicious Docker daemon or host kernel.
+filesystem. Pin production images by registry digest. Local evidence runs may
+use Docker's immutable `sha256:...` content-addressed image ID; mutable names
+and tags are rejected. Retain host/daemon hardening and escape-test evidence.
+It is not a microVM and is not sufficient for a threat model that includes a
+malicious Docker daemon or host kernel.
 
 ## Production readiness checklist
 

@@ -179,7 +179,7 @@ worker image and run:
 
 ```bash
 docker build --tag aai-sec-isolation-probe:2026-07-27 tests/fixtures/docker-worker
-image_ref="$(docker image inspect aai-sec-isolation-probe:2026-07-27 --format '{{index .RepoDigests 0}}')"
+image_ref="$(docker image inspect aai-sec-isolation-probe:2026-07-27 --format '{{.Id}}')"
 python3 scripts/test_docker_sandbox.py --image "$image_ref"
 ```
 

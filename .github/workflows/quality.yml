@@ -64,5 +64,7 @@ jobs:
         run: docker build --tag aai-sec-isolation-probe:ci tests/fixtures/docker-worker
       - name: Verify restrictive Docker boundary
         run: |
-          image_ref="$(docker image inspect aai-sec-isolation-probe:ci --format '{{index .RepoDigests 0}}')"
+          # A locally built image has no registry RepoDigest. Its content-addressed
+          # image ID is still immutable and is the correct local verification input.
+          image_ref="$(docker image inspect aai-sec-isolation-probe:ci --format '{{.Id}}')"
           python scripts/test_docker_sandbox.py --image "$image_ref"
