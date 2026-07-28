@@ -1,5 +1,9 @@
 # Fresh Critical Adopter Review
 
+> Historical review snapshot. Mutation figures in this document are not a
+> current release claim; run `make mutation` against the exact release commit
+> and retain its commit-bound evidence bundle.
+
 **Reviewed commit:** source snapshot bound to `498fbd6` evidence
 **Review date:** 2026-07-26
 **Working tree:** uncommitted implementation snapshot; final release still requires a clean commit

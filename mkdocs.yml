@@ -41,6 +41,21 @@ nav:
   - Testing and assurance: testing.md
   - Production readiness: production-readiness.md
   - Architecture: architecture.md
+  - Agent integrations: integrations.md
+  - Claude Code example: claude-code.md
+  - Management UI: ui.md
+  - Enterprise fleet: enterprise-fleet.md
+  - Policy editor: policy-editor.md
+  - Managed Claude resources: claude-managed-resources.md
+  - Wider enterprise UI: enterprise-ui.md
+  - Enterprise integration design: enterprise-integration-design.md
+  - Enterprise user journeys: enterprise-user-journeys.md
+  - Enterprise operations readiness: enterprise-operations-readiness.md
+  - Product Owner rollout review: product-owner-enterprise-claude-rollout-review-2026-07-27.md
+  - Enterprise Claude Code rollout plan: enterprise-claude-rollout-plan.md
+  - Real Claude Code acceptance evidence: real-claude-code-acceptance-evidence-2026-07-27.md
+  - AWS deployment: aws-deployment.md
+  - Code-owned controls: code-owned-controls.md
   - End-to-end example: end-to-end-example.md
   - API reference: api.md
   - Engineering guardrails: guardrails.md
@@ -48,5 +63,7 @@ nav:
   - Contributing: contributing.md
   - Releasing: releasing.md
   - Deployment evidence: deployment-evidence.md
+  - P1/P2 closure evidence: p1-p2-closure-evidence-2026-07-27.md
+  - Release evidence v1.0.1: release-evidence-v1.0.1.md
   - Critical adopter review (2026-07-25): critical-adopter-review-2026-07-25.md
   - Critical adopter review (2026-07-26): critical-adopter-review-2026-07-26.md

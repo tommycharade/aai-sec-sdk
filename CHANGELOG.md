@@ -1,5 +1,72 @@
 # Changelog
 
+- Rebuilt Integrations as a three-stage connection journey for Claude Code and
+  Codex CLI: define scope, install secret-free project configuration, and prove
+  the live heartbeat/policy binding. Added a hardened project-scoped Codex
+  installer, stopped serializing the agent bearer through `codex mcp add`, and
+  made the Copilot profile explicitly admin-managed until a restart-safe
+  credential broker is available.
+- Rebuilt Rollouts & health around operator intervention: a source-derived
+  posture, prioritized blocker queue and deployment health matrix now precede
+  diagnostics, while agent/session inventories and compliance evidence use
+  progressive disclosure. Corrected the UI drift contract to the camel-case
+  deployment configuration fields returned by both supported control planes.
+- Reworked Deployments & rollout into a live operator command view. Fleet
+  readiness and the next-action queue are now derived from agent health,
+  configuration assignment, drift, alerts and emergency-stop state; the
+  deployment inventory shows coverage and rollout status at a glance and moves
+  rollback and emergency stop into a deliberate secondary action menu.
+- Added bounded agent performance telemetry end to end. The runtime reports
+  content-free action outcomes, cost units, and latency aggregates through
+  authenticated heartbeats; the enterprise control plane validates and stores
+  only the fixed projection; and the UI now surfaces reporting coverage and
+  per-agent/group performance without inventing values.
+- Removed misleading dashboard and policy-editor metrics: decision cards now
+  show source-backed totals, the policy editor shows draft/applied state and
+  real assignment impact, and freshness labels use the control-plane timestamp
+  rather than implying that every snapshot was just checked.
+- Reduced onboarding friction by placing advanced Claude Code hook, generated
+  settings, and native-tool controls behind an explicit expandable section;
+  central enrollment and verification are now the first-run focus.
+- Surfaced real deployment availability SLO data in group detail and made the
+  absence of performance telemetry explicit instead of implying coverage that
+  the agent contract does not provide.
+- Made live host onboarding fail clearly when no registered deployment is
+  available; the UI no longer presents a synthetic `deployment-local` boundary
+  outside simulation mode.
+- Added page-shaped fleet loading states and durable group deep links so a
+  retry never renders an empty screen and group context survives refreshes and
+  handoffs.
+- Added an explicit fleet recovery state with retry and access guidance when
+  live enterprise fleet data cannot be loaded; missing control-plane data is no
+  longer presented as an empty screen or silently replaced with fixtures.
+- Refined the Enterprise fleet landing surface with a posture strip for groups,
+  enrolled agents, current health, and unassigned coverage before the group
+  table.
+- Added a contextual Overview next-action panel for uncovered agents, stale
+  health, and held high-risk actions, plus a persistent Connect agent action in
+  the authenticated top bar to reduce onboarding friction.
+- Improved the Audit trail with decision summaries, search and decision filters,
+  explicit empty states, and a clear redacted-evidence boundary. The UI no longer
+  implies that the approval count is itself an actionable approval workflow.
+- Tightened AWS enrollment verification so the UI reports an agent as ready
+  only when its heartbeat is current, its policy group resolves to a real
+  policy, and no emergency stop is active; record existence alone no longer
+  produces a false "connected" state.
+- Made the overview, trial banner, notifications and fleet fixtures agree on
+  the same enrolled-agent source of truth; the trial action now changes from
+  **Connect an agent** to **Manage agents** after enrollment.
+- Made host onboarding a verifiable activation flow: Claude Code now has the
+  same central deployment/group enrollment path as Codex CLI, generated
+  commands use the selected agent identity, and the UI can verify live
+  registration, heartbeat, policy assignment, and emergency-stop state.
+- Added a direct **View agent** handoff after successful verification, plus
+  explicit copied feedback for generated onboarding commands, so operators can
+  move immediately from setup to the agent's live health and policy view.
+- Reworked the Skills & MCP page into an operational catalog with search,
+  enabled counts, policy reach, and affected-agent impact beside every
+  registered resource.
+
 All notable changes to this project will be documented here.
 
 The project follows Semantic Versioning after `1.0.0`. Before `1.0.0`, public APIs may change while the design is validated, but breaking changes will still be called out explicitly.
@@ -26,6 +93,102 @@ real sandboxing where required, authenticated IAM/policy services, and domain
 authorization.
 
 ## Unreleased
+
+- Fixed the release gates for core-only environments: optional AWS/PostgreSQL
+  imports now type-check without forcing provider dependencies, mutation tests
+  include the AWS Lambda contract fixture, and local Docker isolation evidence
+  uses Docker's immutable content-addressed image ID. Trial policy construction
+  also keeps the AWS provider import behind the deployed Lambda boundary, and
+  public SDK CI no longer assumes the separate private UI checkout is present.
+
+- Added a keyboard-accessible global command palette: press **⌘K** on macOS or
+  **Ctrl+K** on other platforms to jump between the console's primary surfaces.
+- Made the command palette entity-aware so operators can find enrolled agents,
+  policy groups, policies, and deployments with their operational context.
+- Made entity results deep-linkable: reopening an agent, group, or policy URL
+  restores its detail view instead of dropping the operator at a generic list.
+- Added pending-state feedback to policy saves and group membership, policy,
+  and emergency-stop actions to prevent ambiguous double submissions.
+- Added responsive scroll guidance for dense fleet, agent, and deployment
+  tables so narrow screens do not make operational columns appear missing.
+- Added a truthful control-plane freshness indicator with Live, Syncing, and
+  Stale states; transient poll failures retain the last known snapshot instead
+  of silently presenting an empty fleet.
+- Made primary console destinations bookmarkable and browser-history aware,
+  removed the repeated trial banner from operational pages, and simplified the
+  agent directory to one explicit inspection action per row.
+- Clarified the enterprise console information architecture: group and agent
+  management now lives under **Enterprise fleet**, while deployment operations
+  live under **Deployments & rollout** without duplicated group controls.
+- Added a tenant-scoped trial summary and activation banner so new workspaces
+  can see their remaining trial time and reach first-agent onboarding directly.
+- Made first-run signup resilient to the Cognito/post-confirmation provisioning
+  race: the console retries only the expected entitlement gap and explains
+  workspace setup instead of exposing a raw infrastructure 403.
+- Sharpened the public landing-page promise around the first user outcome:
+  secure Claude Code before production, then expand the same controls to other
+  coding agents.
+- Fixed Codex CLI presence registration to preserve `codex-cli` as the
+  authenticated host identity instead of hard-coding Claude Code, and made the
+  UI command explicit about its short-lived enrollment session requirement.
+- Corrected the generated Codex command to the installed `codex mcp add`
+  syntax and documented its current user-scoped configuration boundary.
+- Completed the enrollment handoff so the UI exchanges the one-time bootstrap
+  secret for the short-lived agent session that the gateway actually accepts.
+- Added bounded AWS agent-session renewal: live Claude Code and Codex gateways
+  rotate their bearer in memory before expiry, while the previous bearer is
+  immediately rejected and missed heartbeats remain fail-closed.
+- Refined the enterprise fleet journey so operators land on a clean groups
+  index, open a focused group detail view for health and membership actions,
+  and access group creation only when needed.
+- Rebuilt the Agents page as a searchable operations directory with health
+  metrics, policy coverage, heartbeat freshness, filtering and an agent
+  inspector for verification and emergency-stop actions.
+- Split **Deployments & rollout** into deployment-first, **Rollouts & health**,
+  and **Templates & setup** modes so common rollout actions are not buried
+  beneath configuration and diagnostic forms.
+- Fixed enterprise Claude Code onboarding to generate executable `env
+  NAME=VALUE` hook commands, preserved integer policy versions across the AWS
+  DynamoDB JSON boundary, and added an initial AWS agent heartbeat before the
+  MCP gateway serves tools. Added real Claude Code acceptance evidence for
+  native hook decisions, central MCP policy enforcement, heartbeat and
+  emergency-stop recovery.
+- Added AWS control-plane template assignment, rollout state, drift tracking,
+  rollback and deployment/group emergency-stop routes used by the enterprise
+  UI, with live canary-to-active acceptance evidence.
+- Added AWS deployment adapters for DynamoDB-backed idempotency, typed STS
+  session policies, restrictive Docker execution, and a live control-plane
+  smoke test covering multi-process claims, emergency-stop enforcement, WORM
+  audit retention, and SNS/SQS alert delivery.
+- Added an encrypted SQS security-alert queue with a dead-letter queue to the
+  AWS control-plane reference stack.
+- Added the 1.1 integration foundation: bounded WSGI MCP transport,
+  application-authenticated expiring runtime sessions, bounded response
+  serialization, and deployment bootstrap guidance for all supported hosts.
+- Added atomic live policy replacement for long-running runtimes and central
+  enterprise stop enforcement at deployment, group, and agent scope.
+- Added authenticated agent enrollment verification with explicit readiness
+  checks and a redaction-safe enterprise audit evidence index.
+- Added audited group-policy reassignment and corresponding enterprise UI
+  controls; policy records remain immutable and take effect on runtime refresh.
+
+## 1.1.0 - 2026-07-26
+
+- Added a Claude Code `PreToolUse` hook adapter with deterministic ordered
+  rules, deny-by-default behavior, native allow/ask/deny responses, path and
+  command matchers, and redaction-aware audit output.
+- Added a complete Claude Code project example covering `.claude/settings.json`,
+  native tool protection, MCP registration, verification commands, and the
+  boundary between hook-governed host actions and SDK-owned MCP actions.
+- Added an extensible MCP integration layer with host profiles and a
+  dependency-free stdio gateway for OpenCode, OpenHands self-hosted, Claude
+  Code, Cline, Gemini CLI, GitHub Copilot CLI/cloud agent, and Codex CLI.
+- Added bounded HTTP/WSGI transport with bearer-session authentication,
+  runtime session expiry/revocation, request/response size limits, and
+  fail-closed malformed input handling.
+- Added JSON Schema discovery to `ToolDefinition` and integration contract,
+  adversarial transport, session, and model-identity tests.
+- Added integration documentation and generated README navigation.
 
 - Hardened execution permits against `object.__new__` and copied-field forgery
   by authenticating issued object identity at the lifecycle boundary.

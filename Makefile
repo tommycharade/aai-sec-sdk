@@ -1,8 +1,15 @@
 PYTHON ?= python3
 
-.PHONY: check format lint type test coverage guardrails docs docs-check package-check security-check mutation-check mutation
+.PHONY: check format lint type test coverage guardrails docs docs-check package-check security-check mutation-check mutation ui-check
 
-check: format-check lint type test coverage guardrails docs-check package-check security-check mutation-check
+check: format-check lint type test coverage guardrails docs-check package-check security-check mutation-check ui-check
+
+ui-check:
+	@if [ -d aai-sec-ui ]; then \
+		cd aai-sec-ui && npm ci --ignore-scripts && npm run check; \
+	else \
+		echo "Private UI checkout not present; SDK checks continue independently."; \
+	fi
 
 package-check:
 	rm -rf dist

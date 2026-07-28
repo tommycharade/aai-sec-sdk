@@ -20,6 +20,31 @@ score is not a security certification.
 It is not, by itself, a sufficient security boundary for payments, destructive
 operations, hostile or model-generated code, or regulated workloads.
 
+### Control-plane approval boundary
+
+The optional UI adapter is production-usable only when all of these deployment
+conditions are met:
+
+- the API is behind TLS and an application-owned short-lived identity provider;
+- operator roles are enforced by an `OperatorAuthenticator`, with read,
+  configuration, and emergency-stop permissions separated;
+- every mutation is bound to an application-owned `ControlPlaneAuthority` and
+  authoritative audit sink;
+- persisted configuration and emergency-stop state are reconciled into the
+  live runtime before the API serves traffic;
+- Claude/MCP presence uses separate short-lived agent credentials, project
+  registration, bounded heartbeats, expiry, and audited disconnect events;
+- configuration changes are versioned, audited, and recoverable through a
+  tested rollback procedure; and
+- the UI is deployed without durable bearer tokens in browser assets, with
+  CSRF protection, rate limiting, security headers, and monitored health
+  endpoints supplied by the hosting layer.
+
+The localhost bearer-token path and in-memory authority are development/test
+fixtures. They deliberately fail closed for mutation when no live authority or
+audit sink is bound and must not be promoted as production authentication or
+runtime control.
+
 The SDK is a security-runtime framework. It is not an LLM safety oracle, IAM
 replacement, sandbox, compliance certification, business authorization system,
 or guarantee that an external side effect can be cancelled after a timeout.

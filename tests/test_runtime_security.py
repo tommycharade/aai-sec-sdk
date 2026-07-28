@@ -358,6 +358,45 @@ def test_health_reports_host_stop_and_bounded_lifecycle_state() -> None:
     assert runtime.health()["stopped"] is True
 
 
+def test_runtime_telemetry_is_aggregate_bounded_and_content_free() -> None:
+    """Runtime metrics report outcomes and latency without proposal contents."""
+    runtime, _ = make_runtime()
+
+    assert runtime.execute(proposal()).status is ExecutionStatus.EXECUTED
+    assert (
+        runtime.execute(
+            ActionProposal("missing", {"secret": "synthetic-secret"}, "proposal:unknown")
+        ).status
+        is ExecutionStatus.DENIED
+    )
+
+    telemetry = runtime.telemetry()
+    assert telemetry["actionsTotal"] == 2
+    assert telemetry["actionsAdmitted"] == 1
+    assert telemetry["allowed"] == 1
+    assert telemetry["denied"] == 1
+    assert telemetry["costUnits"] == 1
+    assert telemetry["averageLatencyMs"] >= 0
+    assert "secret" not in telemetry
+    assert runtime.health()["actionsTotal"] == 2
+
+
+def test_runtime_telemetry_tracks_approval_and_handler_failure() -> None:
+    """Non-executing approval gates and handler failures remain distinguishable."""
+    approval_runtime, _ = make_runtime(requires_approval=True)
+    approval = approval_runtime.execute(proposal())
+    assert approval.status is ExecutionStatus.APPROVAL_REQUIRED
+    assert approval_runtime.telemetry()["approvalRequired"] == 1
+
+    def failing_handler(_context: ExecutionContext, _arguments: Any) -> Any:
+        raise RuntimeError("synthetic failure")
+
+    failed_runtime, _ = make_runtime(handler=failing_handler)
+    failed = failed_runtime.execute(proposal())
+    assert failed.status is ExecutionStatus.FAILED
+    assert failed_runtime.telemetry()["failed"] == 1
+
+
 def test_denial_request_ids_and_reasons_are_auditable() -> None:
     """Every host denial keeps one request identity and its exact reason."""
     runtime, audit = make_runtime()
@@ -671,6 +710,9 @@ def test_oversized_tool_results_are_rejected_after_side_effect() -> None:
     assert result.output is None
     assert result.handler_started is True
     assert result.side_effect_state is SideEffectState.EXECUTED
+    telemetry = runtime.telemetry()
+    assert telemetry["resultRejected"] == 1
+    assert telemetry["allowed"] == 1
 
 
 def test_output_at_the_configured_byte_limit_is_accepted() -> None:
@@ -761,6 +803,16 @@ def test_policy_denial_audit_preserves_live_decision_metadata_and_resources() ->
     assert event.payload["policy_decision"] == "deny"
     assert event.payload["policy_version"] == "policy-9"
     assert event.payload["policy_provenance"] == "deny-test"
+
+
+def test_runtime_policy_can_be_replaced_atomically_between_actions() -> None:
+    """A central policy refresh changes later decisions without a restart."""
+    runtime, _ = make_runtime(policy=AllowListPolicy({"read_record"}))
+    allowed = runtime.execute(proposal())
+    assert allowed.status is ExecutionStatus.EXECUTED
+    runtime.replace_policy(AllowListPolicy({"other"}))
+    denied = runtime.execute(proposal())
+    assert denied.status is ExecutionStatus.DENIED
 
 
 def test_malformed_policy_decision_fails_closed() -> None:
@@ -1007,6 +1059,19 @@ def test_runtime_rejects_non_finite_timeout_configuration() -> None:
         RuntimeConfig(execution_timeout_seconds=nan)
 
 
+def test_runtime_rejects_non_positive_idempotency_ttl() -> None:
+    with pytest.raises(SecurityConfigurationError, match="idempotency TTL"):
+        RuntimeConfig(idempotency_ttl_seconds=0)
+    with pytest.raises(SecurityConfigurationError, match="timed-out workers"):
+        RuntimeConfig(max_timed_out_workers=0)
+
+
+def test_runtime_rejects_policy_without_decision_method() -> None:
+    runtime, _ = make_runtime()
+    with pytest.raises(SecurityConfigurationError, match="replacement policy"):
+        runtime.replace_policy(object())  # type: ignore[arg-type]
+
+
 def test_timed_out_handler_keeps_concurrency_slot_until_worker_exits() -> None:
     started = Event()
     release = Event()
@@ -1083,6 +1148,20 @@ def test_stop_requests_cancellation_for_cooperative_handler() -> None:
         result = future.result(timeout=1)
 
     assert result.status is ExecutionStatus.CANCELLED
+    assert runtime.telemetry()["cancelled"] == 1
+
+
+def test_runtime_telemetry_counts_unexpected_runtime_error() -> None:
+    runtime, _ = make_runtime()
+
+    # This exercises the defensive finally-path directly: the public execute
+    # boundary must still publish a bounded metric if an internal invariant
+    # fails before an ExecutionResult can be produced.
+    runtime._telemetry.record(None, 0.001)
+
+    telemetry = runtime.telemetry()
+    assert telemetry["runtimeErrors"] == 1
+    assert telemetry["actionsTotal"] == 1
 
 
 def test_stop_after_policy_returns_prevents_handler_invocation() -> None:

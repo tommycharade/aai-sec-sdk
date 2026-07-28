@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-security-sdk"
-version = "1.0.1"
+version = "1.1.0"
 description = "Execution security runtime for agentic AI systems"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -20,7 +20,7 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Security",
 ]
-dependencies = []
+dependencies = ["certifi>=2024.8.30"]
 
 [project.optional-dependencies]
 dev = [
@@ -46,6 +46,9 @@ docs = [
 otel = [
   "opentelemetry-api>=1.28,<2",
 ]
+postgres = [
+  "psycopg[binary]>=3.3,<4",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -70,6 +73,12 @@ convention = "google"
 python_version = "3.11"
 strict = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# These providers are intentionally optional deployment adapters. Their imports
+# are checked when installed, while a core-only SDK environment remains valid.
+module = ["boto3", "psycopg", "psycopg.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -105,6 +114,7 @@ pytest_add_cli_args = [
 ]
 also_copy = [
   "examples/",
+  "infra/aws-control-plane/lambda/",
   "scripts/",
   "AGENTS.md",
   "CONTRIBUTING.md",

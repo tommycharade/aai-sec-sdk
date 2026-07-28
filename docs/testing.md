@@ -3,7 +3,27 @@
 `make check` is the required local and CI quality gate. It runs formatting,
 linting, strict typing, unit and adversarial tests, 90% branch coverage,
 guardrail checks, a strict documentation build, package validation, dependency
-audits, and mutation-baseline validation.
+audits, and mutation-baseline validation. When the separate private
+`aai-sec-ui` checkout is present beside the SDK sources, the same command also
+runs its React typecheck, contract tests, and production build. A clean public
+SDK checkout reports that the private UI is absent and completes the SDK gate;
+the UI repository enforces its own mandatory `npm run check` workflow.
+`tests/test_enterprise_e2e.py` starts the
+actual reference WSGI server on an ephemeral localhost port and exercises
+authenticated HTTP registration, template assignment, rollout, and compliance
+evidence. The browser smoke path for the live
+reference server is documented in the enterprise fleet runbook and is used
+before release evidence is accepted.
+
+The optional live PostgreSQL path is exercised by the `postgres-integration`
+GitHub Actions job. Locally, install `.[postgres]`, set
+`AAI_SEC_POSTGRES_DSN`, and run:
+
+```bash
+python -m pytest -q tests/test_enterprise_postgres_integration.py
+```
+
+Without a DSN the test skips; the CI service job always supplies one.
 
 ## Deterministic property/fuzz coverage
 

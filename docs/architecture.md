@@ -8,6 +8,12 @@ model/provider -> adapter -> security runtime -> tool adapter -> system
              context / policy / approvals / budgets / audit / kill switch
 ```
 
+Agent-host integrations sit at the adapter boundary. The bundled MCP gateway
+normalizes host tool calls into `ActionProposal` objects and serializes typed
+`ExecutionResult` values; it never creates identity or policy evidence. Host
+profiles are labels and configuration guidance, not permissions. See
+[Agent integrations](integrations.md).
+
 The execution pipeline is ordered deliberately:
 
 ```text
@@ -99,3 +105,31 @@ The policy adapter layer provides `OpaPolicyEngine` and `CedarPolicyEngine`.
 They accept injected evaluators, serialize the same live identity/argument/
 resource request, and map only explicit external decisions. Transport errors,
 malformed responses, and unknown decisions are denied.
+
+## Enterprise fleet control plane
+
+The optional `EnterpriseFleetStore` and `EnterpriseFleetApplication` add a
+provider-neutral management plane around the runtime. The control plane owns
+inventory, tenant/project scope, agent presence, desired configuration,
+rollout state, drift, health, alerts, and emergency-stop intent. It does not
+execute tools and it does not mint credentials. A deployment-specific
+`FleetDeploymentAuthority` adapter is the trust boundary that applies a
+configuration or stops execution in the live SDK instance; the database state
+is updated only after that adapter succeeds.
+
+```text
+enterprise UI / API client
+          |
+authenticated fleet API -> tenant/RBAC checks -> durable desired state
+          |                                      |
+          +-> deployment authority adapter <-----+-- apply / stop / rollback
+          |
+          +-> inventory, drift, health, alerts, redacted audit
+```
+
+SQLite is a reference adapter for a single control-plane process and local
+development. Production deployments should provide an authenticated,
+transactional, highly available persistence adapter and connect each
+deployment to a real authority adapter. The core intentionally does not
+assume a particular database, IAM product, secrets manager, alert transport,
+or orchestration platform.

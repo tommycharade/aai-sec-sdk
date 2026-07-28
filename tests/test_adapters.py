@@ -11,6 +11,7 @@ import pytest
 
 from agentic_security import (
     ApprovalOutcome,
+    DockerSandboxToolHandler,
     HttpApprovalProvider,
     HttpCedarPolicyEngine,
     HttpOpaPolicyEngine,
@@ -307,3 +308,88 @@ def test_subprocess_handler_bounds_large_input_to_worker_that_does_not_read() ->
     )
     with pytest.raises(TimeoutError, match="timed out"):
         handler(context(), {"value": "x" * 2_000_000})
+
+
+def test_docker_sandbox_handler_constructs_restrictive_container_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    class FakeWorker:
+        def __call__(self, _context: ExecutionContext, _arguments: object) -> dict[str, bool]:
+            return {"ok": True}
+
+    def fake_subprocess(command: tuple[str, ...], **_: object) -> FakeWorker:
+        calls.append(command)
+        return FakeWorker()
+
+    import agentic_security.adapters as adapters
+
+    monkeypatch.setattr(adapters, "which", lambda _name: "/usr/local/bin/docker")
+    monkeypatch.setattr(adapters, "SubprocessToolHandler", fake_subprocess)
+    result = DockerSandboxToolHandler(
+        "registry.example.test/worker@sha256:" + "a" * 64, pids_limit=32
+    )(context(), {"value": "safe"})
+    assert result == {"ok": True}
+    assert calls == [
+        (
+            "/usr/local/bin/docker",
+            "run",
+            "--interactive",
+            "--rm",
+            "--network=none",
+            "--read-only",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges:true",
+            "--user=65532:65532",
+            "--memory=256m",
+            "--pids-limit=32",
+            "--tmpfs=/tmp:rw,noexec,nosuid,size=64m",
+            "registry.example.test/worker@sha256:" + "a" * 64,
+        )
+    ]
+    with pytest.raises(ValueError, match="image"):
+        DockerSandboxToolHandler("image with spaces")
+    with pytest.raises(ValueError, match="sha256"):
+        DockerSandboxToolHandler("registry.example.test/worker:latest")
+    with pytest.raises(ValueError, match="positive"):
+        DockerSandboxToolHandler(
+            "registry.example.test/worker@sha256:" + "a" * 64,
+            timeout_seconds=float("inf"),
+        )
+
+
+def test_docker_sandbox_handler_fails_closed_when_runtime_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentic_security.adapters as adapters
+
+    monkeypatch.setattr(adapters, "which", lambda _name: None)
+    with pytest.raises(RuntimeError, match="Docker executable"):
+        DockerSandboxToolHandler("image@sha256:" + "a" * 64)(context(), {})
+
+
+def test_docker_sandbox_handler_accepts_immutable_local_image_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A content-addressed local build can be tested without a registry push."""
+    calls: list[tuple[str, ...]] = []
+
+    class FakeWorker:
+        def __call__(self, _context: ExecutionContext, _arguments: object) -> dict[str, bool]:
+            return {"ok": True}
+
+    def fake_subprocess(command: tuple[str, ...], **_: object) -> FakeWorker:
+        calls.append(command)
+        return FakeWorker()
+
+    import agentic_security.adapters as adapters
+
+    monkeypatch.setattr(adapters, "which", lambda _name: "/usr/local/bin/docker")
+    monkeypatch.setattr(adapters, "SubprocessToolHandler", fake_subprocess)
+    image_id = "sha256:" + "b" * 64
+
+    result = DockerSandboxToolHandler(image_id)(context(), {})
+
+    assert result == {"ok": True}
+    assert calls[0][-1] == image_id

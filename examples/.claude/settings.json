@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Edit|Write|Glob|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 examples/claude_code_hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

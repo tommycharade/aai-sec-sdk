@@ -91,6 +91,14 @@ The example is synthetic and does not connect to a model or external service.
 
 ## Typed security components
 
+## Enterprise fleet control plane
+
+::: agentic_security.enterprise_control_plane.FleetIdentity
+
+::: agentic_security.enterprise_control_plane.EnterpriseFleetStore
+
+::: agentic_security.enterprise_control_plane.EnterpriseFleetApplication
+
 Applications normally continue to use `GuardedRuntime`; these contracts are
 provided for integrations and contract tests. Do not construct a permit from
 model output or bypass the runtime lifecycle.
@@ -138,6 +146,14 @@ cannot forcibly terminate an arbitrary running thread, so non-cooperative
 workers remain tracked and count against `max_timed_out_workers` until they
 return. Use `GuardedRuntime.health()` for operational alerts. Configure a
 custom `redactor` for domain-specific secret or PII rules.
+
+`GuardedRuntime.telemetry()` returns the bounded, content-free aggregate
+execution counters used by the agent heartbeat. It reports action outcomes,
+admission and cost units, and aggregate latency; it never includes tool names,
+arguments, resources, principals, credentials, or handler output. Deployments
+may send this snapshot to the enterprise control plane for fleet performance
+views. It is an operational metric snapshot, not a replacement for the
+redacted audit stream.
 
 ## Tools
 
@@ -238,6 +254,45 @@ modified action.
 ::: agentic_security.credentials.CredentialMetadata
 
 ::: agentic_security.credentials.ScopedCredential
+
+## UI control plane adapter
+
+The optional management UI talks to an authenticated control-plane adapter.
+The reference implementation below validates complete configuration
+replacements, applies persisted controls to a live authority before serving,
+persists them atomically, records requested/activated changes, and exposes a
+persisted emergency stop. Bind it to an application-owned authority and an
+authoritative audit sink before enabling mutation. It does not create
+application identity or replace the deployment's policy, approval, credential,
+audit, or isolation services.
+
+::: agentic_security.ControlPlaneStore
+
+::: agentic_security.ControlPlaneApplication
+
+::: agentic_security.ControlPlaneAuthority
+
+::: agentic_security.CallbackControlPlaneAuthority
+
+::: agentic_security.OperatorAuthenticator
+
+::: agentic_security.OperatorIdentity
+
+::: agentic_security.StaticBearerAuthenticator
+
+::: agentic_security.ControlPlaneDependencyError
+
+::: agentic_security.InMemoryControlPlaneAuthority
+
+::: agentic_security.AgentPresence
+
+::: agentic_security.AgentPresenceStore
+
+::: agentic_security.ControlPlaneAgentClient
+
+::: agentic_security.ControlPlaneConfigurationError
+
+::: agentic_security.validate_configuration
 
 ::: agentic_security.credentials.InMemoryCredentialBroker
 

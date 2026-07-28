@@ -14,7 +14,20 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Testing and assurance](docs/testing.md)
 - [Production readiness](docs/production-readiness.md)
 - [Architecture](docs/architecture.md)
+- [Agent integrations](docs/integrations.md)
+- [Claude Code example](docs/claude-code.md)
+- [Management UI](docs/ui.md)
+- [Enterprise fleet control plane](docs/enterprise-fleet.md)
+- [Policy editor](docs/policy-editor.md)
+- [Wider enterprise UI](docs/enterprise-ui.md)
+- [Enterprise integration design](docs/enterprise-integration-design.md)
+- [Enterprise user journeys](docs/enterprise-user-journeys.md)
+- [Product Owner enterprise Claude Code rollout review](docs/product-owner-enterprise-claude-rollout-review-2026-07-27.md)
+- [Enterprise Claude Code rollout plan](docs/enterprise-claude-rollout-plan.md)
+- [Real Claude Code acceptance evidence](docs/real-claude-code-acceptance-evidence-2026-07-27.md)
+- [Code-owned and deployment-owned controls](docs/code-owned-controls.md)
 - [End-to-end example](docs/end-to-end-example.md)
+- [MCP gateway example](https://github.com/tommycharade/aai-sec-sdk/blob/main/examples/mcp_gateway.py)
 - [API design](docs/api.md)
 - [Runnable example](docs/end-to-end-example.md)
 - [Engineering guardrails](docs/guardrails.md)
@@ -22,6 +35,9 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Contributing](docs/contributing.md)
 - [Governance](GOVERNANCE.md)
 - [Releasing](docs/releasing.md)
+- [Deployment evidence](docs/deployment-evidence.md)
+- [P1/P2 closure evidence](docs/p1-p2-closure-evidence-2026-07-27.md)
+- [Release evidence v1.0.1](docs/release-evidence-v1.0.1.md)
 - [SDK assessment](SDK-assessment.md)
 - [Online documentation](https://tommycharade.github.io/aai-sec-sdk/)
 
@@ -34,6 +50,12 @@ integration surfaces are available. The execution boundary now exposes typed
 action facts, permits, centralized pre-execution authorization, and lifecycle
 gates while preserving the `GuardedRuntime` entry point. See [production readiness](docs/production-readiness.md)
 for the exact boundary between SDK guarantees and deployment responsibilities.
+The MCP integration layer provides one extensible gateway and host profiles
+for OpenCode, OpenHands self-hosted, Claude Code, Cline, Gemini CLI, GitHub
+Copilot CLI/cloud agent, and Codex CLI; see [Agent integrations](docs/integrations.md).
+The enterprise fleet layer adds tenant-scoped organization, project,
+deployment, agent, rollout, drift, health, alert, and emergency-stop controls;
+see [Enterprise fleet control plane](docs/enterprise-fleet.md).
 
 ## Development
 
