@@ -1764,18 +1764,28 @@ reconciliation, or result validation.</p>
 </ol>
 <h3 id="one-command-setup">One-command setup</h3>
 <p>From the project you want Claude Code to use, run:</p>
-<pre><code class="language-bash">SDK_ROOT=&quot;${AAI_SEC_SDK_ROOT:-$HOME/.aai-sec-sdk}&quot;
+<pre><code class="language-bash">set -euo pipefail
+SDK_ROOT=&quot;${AAI_SEC_SDK_ROOT:-$HOME/.aai-sec-sdk}&quot;
 if [ ! -f &quot;$SDK_ROOT/scripts/onboard_claude.py&quot; ]; then
   git clone https://github.com/tommycharade/aai-sec-sdk.git &quot;$SDK_ROOT&quot;
+else
+  git -C &quot;$SDK_ROOT&quot; pull --ff-only
 fi
-python3 &quot;$SDK_ROOT/scripts/onboard_claude.py&quot; \
+python3 -m venv &quot;$SDK_ROOT/.venv&quot;
+&quot;$SDK_ROOT/.venv/bin/python&quot; -m pip install \
+  --disable-pip-version-check --quiet &quot;$SDK_ROOT&quot;
+&quot;$SDK_ROOT/.venv/bin/python&quot; &quot;$SDK_ROOT/scripts/onboard_claude.py&quot; \
   --project-root &quot;$PWD&quot; --sdk-root &quot;$SDK_ROOT&quot; \
+  --python &quot;$SDK_ROOT/.venv/bin/python&quot; \
   --control-plane-url http://localhost:8000/api
 </code></pre>
 <p>Review the repository and command before running it in a regulated
 environment. Set <code>AAI_SEC_SDK_ROOT</code> when the SDK is already checked out at a
-different path. The script writes only project-scoped files and creates
-timestamped backups before changing existing configuration.</p>
+different path. The private virtual environment ensures the generated hook and
+MCP commands use an interpreter where the SDK is actually installed. The
+script writes only project-scoped configuration plus, for enterprise
+enrollment, the separate user-private session cache. It creates timestamped
+backups before changing existing project configuration.</p>
 <p>The script creates or updates <code>.claude/settings.json</code> and <code>.mcp.json</code>, keeps
 existing entries, and creates timestamped backups before modifying either
 file. It also installs <code>.claude/aai-sec-config.json</code>, the checked-in safe
@@ -1810,25 +1820,26 @@ and it must not be stored in the project. Then run onboarding with that token:</
   --deployment-id deployment-prod-eu \
   --agent-id claude-platform-prod \
   --bootstrap-token &quot;&lt;one-time-token&gt;&quot;
-# The script prints this export after a successful exchange.
-export AAI_SEC_AGENT_TOKEN=&quot;&lt;short-lived-session-token&gt;&quot;
 claude
 </code></pre>
 <p>The script consumes the bootstrap token at <code>/agent/enroll</code>, writes only
-non-secret routing metadata to Claude's files, and prints the short-lived
-session token for the current shell. The token is deployment/agent-bound and
-expires; repeat enrollment with a newly issued bootstrap token when it expires.</p>
+non-secret routing metadata to Claude's files, and places the short-lived
+session in the SDK's user-private host cache. The cache is outside the project,
+uses a <code>0700</code> directory and <code>0600</code> file, and is scoped to the control-plane URL,
+deployment and agent. You can unset <code>AAI_SEC_AGENT_TOKEN</code> before starting
+Claude. The MCP heartbeat rotates the cache and each native hook process reads
+the current value, so a healthy session continues beyond the original bearer.</p>
 <p>The real-device acceptance run for Claude Code 2.1.220 is recorded in
 <a href="../real-claude-code-acceptance-evidence-2026-07-27/">real Claude Code acceptance evidence</a>.</p>
 <p>The deployment ID determines which organization/project fleet receives the
 agent registration. The enterprise UI can then show the project alongside
 other deployments, report heartbeat health and drift, and apply staged
-configuration rollouts. Do not put the agent token in <code>.mcp.json</code>; inherit it
-from the process environment or a secret manager.</p>
+configuration rollouts. Do not put the agent token in <code>.mcp.json</code>.</p>
 <p>Enterprise onboarding also embeds only the control-plane URL, deployment ID
-and agent ID in the hook command. When <code>AAI_SEC_AGENT_TOKEN</code> is inherited by
-Claude Code, the native-tool hook resolves the same authenticated effective
-group policy as the MCP gateway before each event. Missing credentials,
+and agent ID in the hook command. The native-tool hook reads the current
+deployment-scoped session from the user-private cache and resolves the same
+authenticated effective group policy as the MCP gateway before each event.
+Missing credentials,
 unassigned or conflicting groups, malformed policy, or control-plane failure
 deny the native action. This keeps central policy enforcement consistent for
 Claude's built-in tools and SDK-owned MCP tools.</p>
