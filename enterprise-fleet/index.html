@@ -3641,6 +3641,10 @@ failures are errors rather than empty or synthetic credentials.</p>
 <td>Record an applied configuration hash</td>
 </tr>
 <tr>
+<td><code>POST /api/emergency-stop</code></td>
+<td>Activate or clear the durable tenant-wide stop used by every enrolled agent</td>
+</tr>
+<tr>
 <td><code>POST /api/enterprise/emergency-stop</code></td>
 <td>Stop or clear one deployment through its authority</td>
 </tr>
@@ -3666,6 +3670,13 @@ failures are errors rather than empty or synthetic credentials.</p>
 </tr>
 </tbody>
 </table>
+<p>The tenant-wide emergency stop accepts <code>{"active": true}</code> or
+<code>{"active": false}</code> from a <code>security-operator</code> or <code>platform-admin</code>. It is
+stored independently from deployment, group, and agent stops. Effective-policy
+requests fail closed with HTTP 409 while it is active, including requests from
+agents enrolled after activation. Clearing the fleet stop does not clear a
+narrower stop. Every transition records the operator identity, resulting state,
+and affected-agent count in the redacted audit trail.</p>
 <p>Inventory and fleet collection endpoints accept <code>limit=1..200</code> and an opaque
 numeric continuation <code>cursor</code>; responses contain <code>nextCursor</code> until the
 collection is exhausted. The UI follows those cursors automatically, so a

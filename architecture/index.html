@@ -1419,6 +1419,13 @@ transactional, highly available persistence adapter and connect each
 deployment to a real authority adapter. The core intentionally does not
 assume a particular database, IAM product, secrets manager, alert transport,
 or orchestration platform.</p>
+<p>The hosted control plane stores a tenant-wide emergency stop as independent
+server-owned control state. Agent effective-policy retrieval checks that state
+before returning authority, so the stop also covers agents enrolled after an
+incident begins. Fleet, deployment, group, and agent stop scopes remain
+independent: clearing the fleet scope cannot silently clear a narrower stop.
+The operator dashboard derives its critical posture from the same durable
+state rather than from browser state or a cached presentation flag.</p>
 
 
 
