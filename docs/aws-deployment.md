@@ -81,10 +81,15 @@ the role policy, so neither model output nor the SDK can expand the role's
 permissions. The role's identity policy and AWS IAM policy-simulation result
 remain deployment evidence and must be retained with the environment.
 
-Remote approvals are created by an authenticated operator at
-`POST /enterprise/approvals` and consumed once at the agent boundary. The
-consumption binding includes the tenant, enrolled agent, tool, proposal, task,
-principal, and action hash. A replay or any mismatch returns `approved: false`.
+Remote approvals can be requested by an enrolled agent at
+`POST /agent/{deployment}/{agent}/approvals/request`, reviewed at
+`GET /enterprise/approvals`, and decided by an authenticated operator at
+`POST /enterprise/approvals/{approvalId}/decision`. The decision requires an
+operator rationale. Approved grants are consumed once at the agent boundary;
+the binding includes the tenant, enrolled agent, tool, proposal, task,
+principal, and action hash. A denial, expiry, replay, concurrent second
+decision, or binding mismatch returns no authority. The legacy direct operator
+grant at `POST /enterprise/approvals` remains available for bounded automation.
 
 The UI build is uploaded separately because its public configuration depends on
 the deployed API, Cognito client, and CloudFront URLs:

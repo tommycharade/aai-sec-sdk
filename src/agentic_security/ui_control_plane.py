@@ -565,6 +565,95 @@ class ControlPlaneAgentClient:
                 }
         return response
 
+    def request_approval(
+        self,
+        *,
+        approval_id: str,
+        tool_name: str,
+        proposal_id: str,
+        task_id: str,
+        principal_id: str,
+        action_hash: str,
+        risk_class: str = "unspecified",
+        resource_ids: tuple[str, ...] = (),
+        review_ttl_seconds: int = 900,
+        grant_ttl_seconds: int = 120,
+    ) -> JsonObject:
+        """Submit one exact-action request to the central operator queue.
+
+        The agent bearer supplies deployment and agent identity. The caller
+        supplies only the runtime-owned approval binding and bounded resource
+        identifiers; tool arguments, outputs, prompts, and credentials must
+        never be placed in this request. Submission grants no authority. A
+        separate authorized operator decision is required before the matching
+        approval provider can consume the grant once.
+
+        Raises:
+            ControlPlaneConfigurationError: If a field is malformed or exceeds
+                the content-minimised request bounds.
+            ControlPlaneDependencyError: If this is not an AWS enrolled-agent
+                session or the control plane does not durably accept the
+                request.
+        """
+        if not self.aws_agent_session or not self.deployment_id:
+            raise ControlPlaneDependencyError(
+                "central approval requests require an enrolled AWS agent session"
+            )
+
+        def bounded(value: str, name: str, maximum: int = 256) -> str:
+            if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+                raise ControlPlaneConfigurationError(
+                    f"{name} must be non-empty text up to {maximum} characters"
+                )
+            return value.strip()
+
+        allowed_risks = {
+            "write",
+            "destructive",
+            "external_egress",
+            "code_execution",
+            "secret_read",
+            "unspecified",
+        }
+        if risk_class not in allowed_risks:
+            raise ControlPlaneConfigurationError("approval risk class is unsupported")
+        if not isinstance(resource_ids, tuple) or len(resource_ids) > 20:
+            raise ControlPlaneConfigurationError(
+                "approval resource IDs must be a tuple of at most 20 identifiers"
+            )
+        resources = [bounded(value, "resource ID") for value in resource_ids]
+        if (
+            isinstance(review_ttl_seconds, bool)
+            or not isinstance(review_ttl_seconds, int)
+            or not 60 <= review_ttl_seconds <= 3600
+        ):
+            raise ControlPlaneConfigurationError(
+                "approval review TTL must be between 60 and 3600 seconds"
+            )
+        if (
+            isinstance(grant_ttl_seconds, bool)
+            or not isinstance(grant_ttl_seconds, int)
+            or not 1 <= grant_ttl_seconds <= 600
+        ):
+            raise ControlPlaneConfigurationError(
+                "approval grant TTL must be between 1 and 600 seconds"
+            )
+        return self._request(
+            self._agent_path("approvals/request"),
+            {
+                "approval_id": bounded(approval_id, "approval ID"),
+                "tool_name": bounded(tool_name, "tool name"),
+                "proposal_id": bounded(proposal_id, "proposal ID"),
+                "task_id": bounded(task_id, "task ID"),
+                "principal_id": bounded(principal_id, "principal ID"),
+                "action_hash": bounded(action_hash, "action hash", 128),
+                "risk_class": risk_class,
+                "resource_ids": resources,
+                "review_ttl_seconds": review_ttl_seconds,
+                "grant_ttl_seconds": grant_ttl_seconds,
+            },
+        )
+
     def _agent_path(self, action: str) -> str:
         """Build a deployment-scoped or legacy agent lifecycle path."""
         if self.aws_agent_session:

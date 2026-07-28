@@ -1,5 +1,10 @@
 # Changelog
 
+- Added a first-class enterprise approval queue instead of routing held actions
+  to a read-only audit page. Enrolled agents can submit bounded, exact-action
+  requests; authorized operators can approve or deny them with a recorded
+  rationale; and approved grants remain agent/tool/proposal/task/principal/hash
+  bound, short-lived, single-use, fail-closed on expiry or replay, and auditable.
 - Added a real reversible tenant-wide emergency stop to the AWS control plane.
   The dashboard now reports the durable state, every agent effective-policy
   request fails closed while it is active, newly enrolled agents are covered,

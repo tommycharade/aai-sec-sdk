@@ -33,6 +33,22 @@ identity, SDK version, last heartbeat, group, policy version and health. The
 host never supplies its own authority, policy decision or principal in model
 output.
 
+### Operator approval journey
+
+When policy returns `APPROVAL_REQUIRED`, the enrolled host may submit the
+runtime-issued approval ID and exact action binding to the agent approval
+endpoint. The control plane derives agent identity from the short-lived session
+and queues only content-minimised metadata. The agent remains blocked while the
+request is pending.
+
+The central operator opens **Approvals**, verifies the authenticated host,
+principal, task, risk class, bounded resource identifiers, and action
+fingerprint, then records an approval or denial rationale. Approval grants
+authority only to that exact action for a short TTL and one consumption. A
+timeout, denial, expiry, replay, changed argument fingerprint, or control-plane
+failure keeps execution blocked. The audit page presents the resulting
+evidence but is not itself an approval control.
+
 After enrollment, a deployment may fetch its effective policy with the
 authenticated `GET /api/enterprise/agents/{deploymentId}/{agentId}/effective-policy`
 endpoint. The endpoint fails closed when the agent has no policy group or when

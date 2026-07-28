@@ -115,15 +115,23 @@ policy, investigate stale health, or review held high-risk actions. This keeps
 the first useful action visible after onboarding instead of requiring the
 operator to infer which page to open next.
 
-### Audit and response boundary
+### Approvals, audit, and response boundary
 
-The Audit trail is an evidence view, not an approval engine. It presents decision
-counts and supports searching by agent, tool, resource, or reason plus filtering
-by allowed, approval-required, or denied decisions. The UI deliberately displays
-redacted metadata only; credentials, tool arguments, and sensitive content are
-not rendered. The approval count is a control-plane signal until an approval
-provider with an explicit, enforceable approve/deny API is configured. Operators
-must not treat the count as proof that an action can be approved from this page.
+The **Approvals** page is the live operator queue for high-risk actions held at
+the execution boundary. It shows only the authenticated agent identity,
+runtime-owned action fingerprint, tool, principal, task, risk class, and bounded
+resource identifiers. Tool arguments, outputs, prompts, credentials, and
+sensitive content are not copied into the queue. Operators approve once or deny
+with a required rationale. The control plane conditionally records that
+decision; an approval remains exact-action bound, short-lived, single-use, and
+unavailable after expiry, replay, a binding mismatch, or a concurrent decision.
+
+The **Audit trail** remains read-only evidence. It presents decision counts and
+supports searching by agent, tool, resource, or reason plus filtering by
+allowed, approval-required, or denied decisions. Operators must decide from the
+live Approvals record, not infer authority from an audit event. Both pages show
+redacted metadata, while lifecycle evidence records the request and operator
+decision without action content.
 
 Trial tenants also receive a server-derived status banner showing the remaining
 trial time and safe-default readiness. Before the first enrollment it links
