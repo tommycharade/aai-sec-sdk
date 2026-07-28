@@ -256,6 +256,14 @@ Neither agent registration nor bootstrap exchange is accepted as liveness:
 presence remains offline until the deployment-bound session sends a successful
 heartbeat. Duplicate project, deployment, group, and agent identifiers are
 rejected rather than overwriting an existing authority record.
+
+AWS operator mutation roles come from the verified Cognito
+`cognito:groups` claim. API Gateway projects JWT claim values as strings, so
+the Lambda normalizes a bounded single value, JSON-array string, or
+bracket/comma projection into exact group names. Only `platform-admin` and
+`security-operator` authorize mutations. Malformed values, oversized claims,
+objects, and lookalike substrings fail closed; the browser cannot supply or
+override this claim.
 Fleet collection reads use bounded continuation cursors. Cursors carry no
 identity, role, or credential material and are treated as untrusted offsets;
 tenant and project authorization is re-evaluated on every page, and malformed,

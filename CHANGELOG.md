@@ -1,5 +1,9 @@
 # Changelog
 
+- Fixed AWS operator mutation RBAC for the string-shaped `cognito:groups`
+  claims emitted by API Gateway. Bounded single, JSON-array, and
+  bracket/comma projections now normalize to exact role names, while malformed,
+  oversized, and lookalike claims continue to fail closed.
 - Added authenticated, content-minimised host decision evidence for enrolled
   Claude hooks and SDK/MCP runtimes. The AWS control plane now derives policy
   and identity metadata server-side, idempotently indexes allowed, denied, and
