@@ -16,6 +16,7 @@ import shutil
 import ssl
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -24,6 +25,18 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import certifi
+
+# Support the documented direct-checkout command while keeping the imported
+# package bound to this reviewed checkout, not an unrelated global install.
+_SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
+if str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOURCE_ROOT))
+
+from agentic_security import (  # noqa: E402
+    AgentSessionCredential,
+    AgentSessionStore,
+    AgentSessionStoreError,
+)
 
 
 def _timestamp() -> str:
@@ -91,7 +104,7 @@ def _copy_policy(source: Path, destination: Path, *, dry_run: bool) -> None:
     os.chmod(destination, 0o600)
 
 
-def _enroll_agent(base_url: str, bootstrap_token: str) -> str:
+def _enroll_agent(base_url: str, bootstrap_token: str) -> AgentSessionCredential:
     """Consume one AWS bootstrap token and return the short-lived session."""
     parsed = urlsplit(base_url.rstrip("/"))
     local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
@@ -113,9 +126,15 @@ def _enroll_agent(base_url: str, bootstrap_token: str) -> str:
     except (urllib.error.HTTPError, urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
         raise SystemExit("agent bootstrap enrollment failed") from exc
     token = value.get("accessToken") if isinstance(value, dict) else None
-    if not isinstance(token, str) or len(token) < 16:
+    expires_at = value.get("expiresAt") if isinstance(value, dict) else None
+    if (
+        not isinstance(token, str)
+        or len(token) < 16
+        or isinstance(expires_at, bool)
+        or not isinstance(expires_at, int)
+    ):
         raise SystemExit("agent enrollment returned no valid session token")
-    return token
+    return AgentSessionCredential(token, expires_at)
 
 
 def onboard(
@@ -139,27 +158,53 @@ def onboard(
     if not hook.is_file() or not gateway.is_file() or not policy.is_file():
         raise SystemExit(f"SDK examples were not found under {sdk_root}")
 
-    agent_session_token = None
+    session_store: AgentSessionStore | None = None
+    if enterprise_control_plane_url:
+        if not deployment_id:
+            raise SystemExit("--enterprise-control-plane-url requires --deployment-id")
+        try:
+            # Constructing the store validates endpoint, identity, and host
+            # storage semantics before any project configuration is changed.
+            session_store = AgentSessionStore(
+                enterprise_control_plane_url,
+                deployment_id,
+                agent_id,
+            )
+        except (ValueError, AgentSessionStoreError) as exc:
+            raise SystemExit(f"enterprise session storage is unavailable: {exc}") from exc
+
+    agent_session: AgentSessionCredential | None = None
     if bootstrap_token:
         if not enterprise_control_plane_url or not deployment_id:
             raise SystemExit(
                 "--bootstrap-token requires --enterprise-control-plane-url and --deployment-id"
             )
         if not dry_run:
-            agent_session_token = _enroll_agent(enterprise_control_plane_url, bootstrap_token)
+            agent_session = _enroll_agent(enterprise_control_plane_url, bootstrap_token)
+
+    inherited_token = os.environ.get("AAI_SEC_AGENT_TOKEN")
+    if agent_session is None and inherited_token:
+        # Direct UI enrollment supplies a 15-minute session. The server remains
+        # authoritative for its real expiry; this conservative local bound is
+        # replaced by the first authenticated heartbeat.
+        agent_session = AgentSessionCredential(inherited_token, int(time.time()) + 900)
+    session_cached = False
+    if not dry_run and agent_session is not None and session_store is not None:
+        session_store.save(agent_session)
+        session_cached = True
 
     command_parts = [python, str(hook)]
     if enterprise_control_plane_url:
-        # Routing metadata is safe to embed in the hook command. The agent
-        # bearer token is intentionally inherited from the Claude process and
-        # is never written to project configuration.
-        aws_session = bool(bootstrap_token or os.environ.get("AAI_SEC_AGENT_TOKEN"))
+        # Selecting an enterprise endpoint always selects fail-closed AWS
+        # session mode. Deriving authority mode from a transient shell token
+        # made repeat onboarding silently downgrade to local policy after the
+        # token was correctly cleared.
         command_parts = [
             "env",
             f"AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL={enterprise_control_plane_url.rstrip('/')}",
             f"AAI_SEC_DEPLOYMENT_ID={deployment_id or ''}",
             f"AAI_SEC_AGENT_ID={agent_id}",
-            f"AAI_SEC_AGENT_SESSION_MODE={'aws' if aws_session else 'local'}",
+            "AAI_SEC_AGENT_SESSION_MODE=aws",
             *command_parts,
         ]
     command = shlex.join(command_parts)
@@ -178,8 +223,21 @@ def onboard(
         "matcher": "Bash|Read|Edit|Write|Glob|Grep",
         "hooks": [{"type": "command", "command": command, "timeout": 10}],
     }
-    if not any(item == entry for item in pre_tool_use):
-        pre_tool_use.append(entry)
+    # Own exactly the hook entry that invokes this checkout's hook. Replacing
+    # it prevents a mode/configuration change from accumulating contradictory
+    # local and enterprise entries while preserving unrelated user hooks.
+    managed_entries = [
+        item
+        for item in pre_tool_use
+        if isinstance(item, dict)
+        and isinstance(item.get("hooks"), list)
+        and any(
+            isinstance(candidate, dict) and str(hook) in str(candidate.get("command", ""))
+            for candidate in item["hooks"]
+        )
+    ]
+    pre_tool_use[:] = [item for item in pre_tool_use if item not in managed_entries]
+    pre_tool_use.append(entry)
 
     servers = mcp.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
@@ -191,9 +249,7 @@ def onboard(
             server["env"]["AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL"] = (
                 enterprise_control_plane_url.rstrip("/")
             )
-            server["env"]["AAI_SEC_AGENT_SESSION_MODE"] = (
-                "aws" if (bootstrap_token or os.environ.get("AAI_SEC_AGENT_TOKEN")) else "local"
-            )
+            server["env"]["AAI_SEC_AGENT_SESSION_MODE"] = "aws"
         elif control_plane_url:
             server["env"]["AAI_SEC_CONTROL_PLANE_URL"] = control_plane_url.rstrip("/")
         if deployment_id:
@@ -222,10 +278,11 @@ def onboard(
     print("  3. In Claude Code, run /mcp and confirm agentic-security is connected")
     print("  4. Test an allowed read, an approval-required command, and a denied command")
     if control_plane_url or enterprise_control_plane_url:
-        print("  5. Export AAI_SEC_AGENT_TOKEN before starting Claude Code")
-        if agent_session_token:
-            print(f"     export AAI_SEC_AGENT_TOKEN={shlex.quote(agent_session_token)}")
-            print("     (This token is short-lived; do not commit it.)")
+        if session_cached:
+            print("  5. The short-lived session is secured in the user-private host cache")
+            print("     Unset AAI_SEC_AGENT_TOKEN before starting Claude Code.")
+        else:
+            print("  5. Export AAI_SEC_AGENT_TOKEN before starting Claude Code")
         print("  6. Confirm the live Claude agent appears in the management UI")
     else:
         print("  5. Add a control-plane URL and export AAI_SEC_AGENT_TOKEN for live UI presence")

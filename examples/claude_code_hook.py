@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from agentic_security import (
+    AgentSessionStore,
+    AgentSessionStoreError,
     ClaudeCodeHook,
     ClaudeHookDecision,
     ClaudeHookResult,
@@ -81,10 +83,21 @@ def _control_plane_client(project_dir: Path) -> ControlPlaneAgentClient | None:
     control_plane_url = os.environ.get("AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL")
     if not control_plane_url:
         return None
-    token = os.environ.get("AAI_SEC_AGENT_TOKEN")
     deployment_id = os.environ.get("AAI_SEC_DEPLOYMENT_ID")
     agent_id = os.environ.get("AAI_SEC_AGENT_ID", "claude-code-local")
-    if not token or not deployment_id:
+    if not deployment_id:
+        return None
+    session_store = None
+    token = os.environ.get("AAI_SEC_AGENT_TOKEN")
+    if os.environ.get("AAI_SEC_AGENT_SESSION_MODE") == "aws":
+        try:
+            session_store = AgentSessionStore(control_plane_url, deployment_id, agent_id)
+            cached = session_store.load()
+        except (AgentSessionStoreError, ValueError):
+            return None
+        if cached is not None:
+            token = cached.token
+    if not token:
         return None
     try:
         return ControlPlaneAgentClient(
@@ -94,6 +107,7 @@ def _control_plane_client(project_dir: Path) -> ControlPlaneAgentClient | None:
             project_root=str(project_dir),
             deployment_id=deployment_id,
             aws_agent_session=os.environ.get("AAI_SEC_AGENT_SESSION_MODE") == "aws",
+            session_store=session_store,
             timeout_seconds=3,
         )
     except ValueError:
@@ -106,11 +120,13 @@ def _load_central_config(
 ) -> dict[str, Any] | None:
     """Resolve the authenticated group policy for Claude native tools.
 
-    The hook receives only routing metadata from onboarding; the bearer token
-    remains an inherited process secret. A central lookup failure is returned
-    as ``None`` so the caller's existing invalid-policy path denies the event.
-    The translation deliberately includes only Claude-native controls and
-    keeps the SDK's immutable deny-by-default and redaction requirements.
+    The hook receives only routing metadata from onboarding. It reads the
+    current short-lived bearer from the user-private host cache, falling back
+    to the inherited first-session value before the gateway has persisted it.
+    A central lookup failure is returned as ``None`` so the caller's existing
+    invalid-policy path denies the event. The translation deliberately
+    includes only Claude-native controls and keeps the SDK's immutable
+    deny-by-default and redaction requirements.
     """
     control_plane_url = os.environ.get("AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL")
     if not control_plane_url:

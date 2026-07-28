@@ -145,13 +145,14 @@ python3 /path/to/aai-sec-sdk/scripts/onboard_codex.py \
   --agent-id synthetic-codex-agent
 ```
 
-The generated `.codex/config.toml` uses
-`env_vars = ["AAI_SEC_AGENT_TOKEN"]`. It stores non-secret routing metadata,
-but reads the short-lived bearer from the environment of the Codex process.
-Export the session only in the launching shell, run
-`codex mcp get agentic-security --json`, and then start `codex` from that same
-shell. The installer rejects invalid TOML, unmanaged duplicate server entries,
-unsafe identifiers and symlinked configuration rather than overwriting them.
+The generated `.codex/config.toml` stores only non-secret routing metadata.
+During onboarding the short-lived bearer is copied to the SDK's
+identity-scoped, user-private host cache; it is never serialized into project
+TOML or forwarded through `env_vars`. You can unset the variable, run
+`codex mcp get agentic-security --json`, and start `codex`. The gateway reads
+and rotates the cache. The installer rejects invalid TOML, unmanaged duplicate
+server entries, unsafe identifiers and symlinked configuration rather than
+overwriting them.
 
 For Copilot cloud agent, a deployment-specific credential broker must provide
 and renew agent sessions without serializing them into repository MCP

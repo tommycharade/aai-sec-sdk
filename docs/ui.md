@@ -42,13 +42,16 @@ control plane rather than inferred from a copied file: it checks registration,
 heartbeat, policy assignment and emergency-stop state. Host configuration is
 project/repository-scoped by default; a local config file is not treated as
 enterprise enrollment until the authenticated agent heartbeat and policy
-assignment are verified. The Claude command exports the exchanged short-lived
-session bearer only for the onboarding shell and its child Claude/MCP
-processes; it is not written to `.claude/settings.json` or `.mcp.json`. Codex
-uses `scripts/onboard_codex.py` to write a project-scoped `.codex/config.toml`
-whose `env_vars` entry forwards `AAI_SEC_AGENT_TOKEN` by name rather than
-serializing its value. Both installers preserve unrelated project
-configuration. After successful verification the UI offers **View agent**,
+assignment are verified. Claude writes routing metadata to
+`.claude/settings.json` and `.mcp.json`; Codex uses
+`scripts/onboard_codex.py` to write a project-scoped `.codex/config.toml`.
+Both installers preserve unrelated project configuration and transfer the
+one-time shell value into an identity-scoped, user-private rotating cache and
+then clear it;
+neither host inherits it after onboarding. Project configuration contains only
+the control-plane URL, deployment, agent identity, and `aws` session mode. The
+gateway rotates the cache and each short-lived native hook process reads the
+current value. After successful verification the UI offers **View agent**,
 taking the operator directly to the live agent inspector.
 
 The Copilot profile does not generate a misleading ready-to-paste bearer

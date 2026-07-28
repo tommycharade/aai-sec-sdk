@@ -15,6 +15,8 @@ from typing import Any
 
 from agentic_security import (
     AgentHost,
+    AgentSessionStore,
+    AgentSessionStoreError,
     AuditSink,
     ControlPlaneAgentClient,
     ControlPlaneDecisionExporter,
@@ -119,18 +121,37 @@ if __name__ == "__main__":
     runtime: GuardedRuntime | None = None
     try:
         if control_plane_url:
+            deployment_id = os.environ.get("AAI_SEC_DEPLOYMENT_ID")
+            agent_id = os.environ.get("AAI_SEC_AGENT_ID", "claude-code-local")
+            aws_session = os.environ.get("AAI_SEC_AGENT_SESSION_MODE") == "aws"
+            session_store = None
             agent_token = os.environ.get("AAI_SEC_AGENT_TOKEN")
+            if aws_session:
+                if not deployment_id:
+                    raise SystemExit("AWS agent session requires AAI_SEC_DEPLOYMENT_ID")
+                try:
+                    session_store = AgentSessionStore(
+                        control_plane_url,
+                        deployment_id,
+                        agent_id,
+                    )
+                    cached = session_store.load()
+                except (AgentSessionStoreError, ValueError) as exc:
+                    raise SystemExit("AWS agent session cache is unsafe or invalid") from exc
+                if cached is not None:
+                    agent_token = cached.token
             if not agent_token:
                 raise SystemExit(
-                    "AAI_SEC_AGENT_TOKEN is required when agent registration is enabled"
+                    "an enrolled agent session is required when registration is enabled"
                 )
             agent_client = ControlPlaneAgentClient(
                 control_plane_url,
                 agent_token,
-                agent_id=os.environ.get("AAI_SEC_AGENT_ID", "claude-code-local"),
+                agent_id=agent_id,
                 project_root=os.environ.get("CLAUDE_PROJECT_DIR", str(Path.cwd())),
-                deployment_id=os.environ.get("AAI_SEC_DEPLOYMENT_ID"),
-                aws_agent_session=os.environ.get("AAI_SEC_AGENT_SESSION_MODE") == "aws",
+                deployment_id=deployment_id,
+                aws_agent_session=aws_session,
+                session_store=session_store,
                 host=agent_host,
             )
             session_state = {"token": agent_client.register()}
