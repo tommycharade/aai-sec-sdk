@@ -198,6 +198,200 @@ def test_json_boundary_preserves_integral_policy_versions(monkeypatch: Any) -> N
     }
 
 
+def test_trial_foundation_creation_is_tenant_scoped_and_agent_identity_is_derived(
+    monkeypatch: Any,
+) -> None:
+    """A fresh trial can create real prerequisites without trusting browser ownership."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-trial-activation"
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root")
+        | {"id": tenant, "status": "active", "trial": True}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "ORG", "org-trial")
+        | {"id": "org-trial", "name": "Trial workspace"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-safe-default")
+        | {
+            "id": "policy-safe-default",
+            "organization_id": "org-trial",
+            "name": "Safe default policy",
+            "configuration": {"policy": {"denyByDefault": True}},
+            "version": 1,
+        }
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "trial-operator",
+    }
+
+    project = _invoke(
+        module,
+        _event(
+            "/enterprise/projects",
+            "POST",
+            body={
+                "organizationId": "org-trial",
+                "projectId": "project-pilot",
+                "name": "Platform pilot",
+            },
+            claims=claims,
+        ),
+    )
+    assert project["statusCode"] == 201
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/enterprise/projects",
+                "POST",
+                body={
+                    "organizationId": "org-trial",
+                    "projectId": "project-pilot",
+                    "name": "Replacement project",
+                },
+                claims=claims,
+            ),
+        )["statusCode"]
+        == 409
+    )
+    malformed = _invoke(
+        module,
+        _event(
+            "/enterprise/projects",
+            "POST",
+            body={
+                "organizationId": "org-trial",
+                "projectId": "../cross-tenant",
+                "name": "Invalid",
+            },
+            claims=claims,
+        ),
+    )
+    assert malformed["statusCode"] == 400
+
+    deployment = _invoke(
+        module,
+        _event(
+            "/enterprise/deployments",
+            "POST",
+            body={
+                "organizationId": "org-trial",
+                "projectId": "project-pilot",
+                "deploymentId": "deployment-pilot",
+                "name": "Claude pilot",
+                "environment": "pilot",
+                "region": "eu-west-2",
+                "team": "Platform",
+                "sdkVersion": "1.1.0",
+            },
+            claims=claims,
+        ),
+    )
+    assert deployment["statusCode"] == 201
+    wrong_organization = _invoke(
+        module,
+        _event(
+            "/enterprise/deployments",
+            "POST",
+            body={
+                "organizationId": "org-forged",
+                "projectId": "project-pilot",
+                "deploymentId": "deployment-forged",
+                "name": "Forged",
+                "environment": "prod",
+                "region": "us-east-1",
+            },
+            claims=claims,
+        ),
+    )
+    assert wrong_organization["statusCode"] == 400
+
+    group = _invoke(
+        module,
+        _event(
+            "/enterprise/groups",
+            "POST",
+            body={
+                "groupId": "group-pilot",
+                "name": "Pilot agents",
+                "policyId": "policy-safe-default",
+            },
+            claims=claims,
+        ),
+    )
+    assert group["statusCode"] == 201
+    assert json.loads(group["body"])["organizationId"] == "org-trial"
+
+    registered = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/register",
+            "POST",
+            body={
+                "deploymentId": "deployment-pilot",
+                "agentId": "claude-pilot",
+                "host": "claude-code",
+                "projectRoot": "/synthetic/pilot",
+                "organizationId": "org-forged",
+                "projectId": "project-forged",
+                "environment": "prod",
+                "region": "us-east-1",
+            },
+            claims=claims,
+        ),
+    )
+    assert registered["statusCode"] == 201
+    stored = table.items[(f"TENANT#{tenant}", "AGENT#deployment-pilot:claude-pilot")]
+    assert stored["organization_id"] == "org-trial"
+    assert stored["project_id"] == "project-pilot"
+    assert stored["environment"] == "pilot"
+    assert stored["region"] == "eu-west-2"
+    assert stored["status"] == "offline"
+    assert stored["last_heartbeat"] == 0
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/enterprise/agents/deployment-pilot/claude-pilot/verify",
+                "GET",
+                claims=claims,
+            ),
+        )["statusCode"]
+        == 200
+    )
+    verification = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/enterprise/agents/deployment-pilot/claude-pilot/verify",
+                "GET",
+                claims=claims,
+            ),
+        )["body"]
+    )
+    assert verification["verified"] is False
+    assert verification["checks"]["heartbeat"]["passed"] is False
+
+    missing_deployment = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/register",
+            "POST",
+            body={
+                "deploymentId": "deployment-missing",
+                "agentId": "agent-missing",
+                "host": "codex-cli",
+            },
+            claims=claims,
+        ),
+    )
+    assert missing_deployment["statusCode"] == 400
+
+
 def test_agent_enrollment_is_one_time_and_identity_bound(monkeypatch: Any) -> None:
     module, table = _load_handler(monkeypatch)
     tenant = "tenant-a"
@@ -226,6 +420,9 @@ def test_agent_enrollment_is_one_time_and_identity_bound(monkeypatch: Any) -> No
     )
     assert enrolled["statusCode"] == 201
     payload = json.loads(enrolled["body"])
+    # Enrollment proves token possession only. Presence remains offline until
+    # the enrolled runtime sends its authenticated heartbeat.
+    assert table.items[(f"TENANT#{tenant}", "AGENT#dep-a:agent-a")]["status"] == "offline"
     replay = _invoke(module, _event("/agent/enroll", "POST", body={"bootstrapToken": bootstrap}))
     assert replay["statusCode"] == 403
     heartbeat = _invoke(
@@ -256,6 +453,7 @@ def test_agent_enrollment_is_one_time_and_identity_bound(monkeypatch: Any) -> No
     )
     assert heartbeat["statusCode"] == 200
     stored_agent = table.items[(f"TENANT#{tenant}", "AGENT#dep-a:agent-a")]
+    assert stored_agent["status"] == "connected"
     assert stored_agent["telemetry"]["actionsTotal"] == 4
     bad_telemetry = _invoke(
         module,

@@ -1,5 +1,11 @@
 # Changelog
 
+- Fixed fresh-trial activation by implementing tenant-safe project and
+  deployment registration, deriving agent ownership from the selected
+  deployment, rejecting identity replacement, and requiring a real runtime
+  heartbeat before an enrolled agent is reported connected. The enterprise UI
+  now prepares the project, deployment, safe-policy group, and desired template
+  as one guided pilot foundation before showing Claude Code or Codex setup.
 - Added a first-class enterprise approval queue instead of routing held actions
   to a read-only audit page. Enrolled agents can submit bounded, exact-action
   requests; authorized operators can approve or deny them with a recorded

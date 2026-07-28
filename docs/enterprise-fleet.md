@@ -65,6 +65,8 @@ The reference WSGI application exposes these authenticated endpoints:
 | `GET /api/enterprise/audit` | Bounded redaction-safe lifecycle evidence index for investigations |
 | `GET /api/enterprise/approvals` | Tenant-scoped pending and historical exact-action approval requests |
 | `GET /api/enterprise/alerts` | Derived fleet alerts |
+| `POST /api/enterprise/projects` | Create a tenant-scoped project under an existing organization |
+| `POST /api/enterprise/deployments` | Create a deployment whose ownership is derived from its existing project |
 | `POST /api/enterprise/agents/register` | Register an authenticated agent |
 | `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence and optionally publish bounded aggregate SDK telemetry |
 | `POST /api/enterprise/agents/{deployment}/{agent}/disconnect` | Mark offline |

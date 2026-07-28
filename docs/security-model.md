@@ -235,6 +235,15 @@ results, prompts, and credentials are deliberately excluded from the queue;
 deployments that need richer business context must provide it through a
 separate authenticated domain-authorization system rather than weakening the
 SDK action binding.
+First-run project and deployment registration is also an authority boundary.
+The browser may propose bounded names and stable identifiers, but the API
+requires each parent organization/project to exist in the authenticated tenant.
+Agent registration requires an existing deployment and copies ownership,
+environment, and region from that server-owned record rather than request JSON.
+Neither agent registration nor bootstrap exchange is accepted as liveness:
+presence remains offline until the deployment-bound session sends a successful
+heartbeat. Duplicate project, deployment, group, and agent identifiers are
+rejected rather than overwriting an existing authority record.
 Fleet collection reads use bounded continuation cursors. Cursors carry no
 identity, role, or credential material and are treated as untrusted offsets;
 tenant and project authorization is re-evaluated on every page, and malformed,
