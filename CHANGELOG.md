@@ -98,7 +98,8 @@ authorization.
   imports now type-check without forcing provider dependencies, mutation tests
   include the AWS Lambda contract fixture, and local Docker isolation evidence
   uses Docker's immutable content-addressed image ID. Trial policy construction
-  also keeps the AWS provider import behind the deployed Lambda boundary.
+  also keeps the AWS provider import behind the deployed Lambda boundary, and
+  public SDK CI no longer assumes the separate private UI checkout is present.
 
 - Added a keyboard-accessible global command palette: press **⌘K** on macOS or
   **Ctrl+K** on other platforms to jump between the console's primary surfaces.

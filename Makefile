@@ -5,7 +5,11 @@ PYTHON ?= python3
 check: format-check lint type test coverage guardrails docs-check package-check security-check mutation-check ui-check
 
 ui-check:
-	cd aai-sec-ui && npm ci --ignore-scripts && npm run check
+	@if [ -d aai-sec-ui ]; then \
+		cd aai-sec-ui && npm ci --ignore-scripts && npm run check; \
+	else \
+		echo "Private UI checkout not present; SDK checks continue independently."; \
+	fi
 
 package-check:
 	rm -rf dist

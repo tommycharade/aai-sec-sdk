@@ -3,8 +3,12 @@
 `make check` is the required local and CI quality gate. It runs formatting,
 linting, strict typing, unit and adversarial tests, 90% branch coverage,
 guardrail checks, a strict documentation build, package validation, dependency
-audits, mutation-baseline validation, and the nested React UI typecheck,
-contract tests, and production build. `tests/test_enterprise_e2e.py` starts the
+audits, and mutation-baseline validation. When the separate private
+`aai-sec-ui` checkout is present beside the SDK sources, the same command also
+runs its React typecheck, contract tests, and production build. A clean public
+SDK checkout reports that the private UI is absent and completes the SDK gate;
+the UI repository enforces its own mandatory `npm run check` workflow.
+`tests/test_enterprise_e2e.py` starts the
 actual reference WSGI server on an ephemeral localhost port and exercises
 authenticated HTTP registration, template assignment, rollout, and compliance
 evidence. The browser smoke path for the live
