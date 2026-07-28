@@ -145,6 +145,16 @@ reports `CONSUMED`, the runtime records `approval_stop_after_consume=true` and
 does not start the handler; treat that approval as consumed until the provider
 proves otherwise.
 
+For the hosted central queue, confirm the request is still `pending` and has
+not expired before reviewing it. Verify the enrolled agent, principal, tool,
+task, resource identifiers, risk class, and action fingerprint; request
+out-of-band business-owner confirmation when those bounded fields are not
+sufficient. Record a concise rationale without secrets. Never approve from the
+audit event alone, copy an old approval ID to a new action, or grant a broader
+TTL to work around operator delay. If two operators race, the second decision
+must receive a conflict and must not be retried as a new request. A denied or
+expired action requires the agent to submit a fresh exact binding.
+
 ## Idempotency-store outage or corruption
 
 **Detect:** claim failure, collision, unavailable store, or

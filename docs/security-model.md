@@ -224,6 +224,17 @@ short-lived, scoped to one deployment and agent, and excluded from inventory
 responses. Every lifecycle and rollout mutation is auditable. Provider-backed
 authentication, policy, IAM, approval, audit retention, isolation, and runtime
 activation remain explicit adapters and are not simulated by the UI.
+Central approval requests cross two distinct trust boundaries. The agent
+session authenticates the deployment and agent, but request metadata is still
+untrusted and grants no authority. The operator API authenticates and
+authorizes the human decision, then conditionally turns one live pending record
+into an exact-action grant. The browser cannot choose tenant or agent identity,
+approve without a mutation role, replace an existing approval ID, extend the
+bounded grant TTL, or make a denied/expired request consumable. Tool arguments,
+results, prompts, and credentials are deliberately excluded from the queue;
+deployments that need richer business context must provide it through a
+separate authenticated domain-authorization system rather than weakening the
+SDK action binding.
 Fleet collection reads use bounded continuation cursors. Cursors carry no
 identity, role, or credential material and are treated as untrusted offsets;
 tenant and project authorization is re-evaluated on every page, and malformed,

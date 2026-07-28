@@ -275,6 +275,68 @@ def _audit(tenant, event_type, actor, payload):
     }
 
 
+def _approval_status(item, now=None):
+    """Return the externally visible approval state, including expiry.
+
+    Approval expiry is derived from the server clock rather than from browser
+    state.  A pending or approved record that has passed its exact action-bound
+    TTL can never be presented as actionable or consumable.
+    """
+    current = int(time.time()) if now is None else int(now)
+    status = item.get("status", "approved" if not item.get("consumed") else "consumed")
+    if status in {"pending", "approved"} and int(item.get("expires_at", 0)) <= current:
+        return "expired"
+    return status
+
+
+def _approval_view(item, now=None):
+    """Project one approval record into the secret-free operator API shape."""
+    agent_key = str(item.get("agent_key", ""))
+    deployment_id, _, agent_id = agent_key.partition(":")
+    return {
+        "id": item.get("id", ""),
+        "deploymentId": deployment_id,
+        "agentId": agent_id,
+        "agentKey": agent_key,
+        "toolName": item.get("tool_name", ""),
+        "proposalId": item.get("proposal_id", ""),
+        "taskId": item.get("task_id", ""),
+        "principalId": item.get("principal_id", ""),
+        "actionHash": item.get("action_hash", ""),
+        "riskClass": item.get("risk_class", "unspecified"),
+        "resourceIds": item.get("resource_ids", []),
+        "status": _approval_status(item, now),
+        "requestedAt": item.get("requested_at", item.get("created_at", 0)),
+        "expiresAt": item.get("expires_at", 0),
+        "decidedAt": item.get("decided_at"),
+        "decidedBy": item.get("decided_by"),
+        "decisionReason": item.get("decision_reason"),
+        "consumedAt": item.get("consumed_at"),
+    }
+
+
+def _approval_text(value, field, maximum=256):
+    """Validate one bounded approval binding supplied by an enrolled agent."""
+    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+        raise ValueError(f"{field} must be a non-empty string up to {maximum} characters")
+    return value.strip()
+
+
+def _approval_resources(value):
+    """Validate bounded resource identifiers without accepting action content."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > 20:
+        raise ValueError("resource_ids must be a list of at most 20 identifiers")
+    return [_approval_text(item, "resource_ids item", 256) for item in value]
+
+
+def _pending_approval_count(tenant):
+    """Count only live, operator-actionable approval requests for the tenant."""
+    now = int(time.time())
+    return sum(1 for item in _list(tenant, "APPROVAL") if _approval_status(item, now) == "pending")
+
+
 def _seed(tenant):
     # Signup provisioning creates the tenant root before the first console
     # request. Never replace that server-owned record with demo data: doing so
@@ -620,7 +682,7 @@ def _configuration(tenant):
             "activeSessions": len(_all_agents(tenant)),
             "decisionsToday": 0,
             "deniedToday": 0,
-            "approvalQueue": 0,
+            "approvalQueue": _pending_approval_count(tenant),
             "timedOutWorkers": 0,
             "emergencyStop": fleet_stopped,
             "agents": [
@@ -899,6 +961,75 @@ def handler(event, context):
                         ),
                     },
                 )
+            if method == "POST" and action == ["approvals", "request"]:
+                body = _body(event)
+                if not TABLE.get_item(
+                    Key=_item_key(tenant, "AGENT", agent_key),
+                    ConsistentRead=True,
+                ).get("Item"):
+                    return _response(404, {"error": "agent not found"})
+                approval_id = _approval_text(body.get("approval_id"), "approval_id")
+                now = int(time.time())
+                review_ttl = min(max(int(body.get("review_ttl_seconds", 900)), 60), 3600)
+                grant_ttl = min(max(int(body.get("grant_ttl_seconds", 120)), 1), 600)
+                risk_class = body.get("risk_class", "unspecified")
+                if risk_class not in {
+                    "write",
+                    "destructive",
+                    "external_egress",
+                    "code_execution",
+                    "secret_read",
+                    "unspecified",
+                }:
+                    raise ValueError("risk_class is unsupported")
+                item = {
+                    **_item_key(tenant, "APPROVAL", approval_id),
+                    "tenant_id": tenant,
+                    "id": approval_id,
+                    # Agent identity comes from the authenticated session, not
+                    # from the request body or model-generated metadata.
+                    "agent_key": agent_key,
+                    "tool_name": _approval_text(body.get("tool_name"), "tool_name"),
+                    "proposal_id": _approval_text(body.get("proposal_id"), "proposal_id"),
+                    "task_id": _approval_text(body.get("task_id"), "task_id"),
+                    "principal_id": _approval_text(body.get("principal_id"), "principal_id"),
+                    "action_hash": _approval_text(body.get("action_hash"), "action_hash", 128),
+                    "risk_class": risk_class,
+                    "resource_ids": _approval_resources(body.get("resource_ids")),
+                    "status": "pending",
+                    "consumed": False,
+                    "requested_at": now,
+                    "expires_at": now + review_ttl,
+                    "grant_ttl_seconds": grant_ttl,
+                    "ttl": now + review_ttl,
+                }
+                try:
+                    # Approval IDs are one-shot action capabilities.  Never
+                    # allow an agent to replace a reviewed or consumed record.
+                    TABLE.put_item(
+                        Item=item,
+                        ConditionExpression="attribute_not_exists(pk)",
+                    )
+                except Exception as error:
+                    if (
+                        getattr(error, "response", {}).get("Error", {}).get("Code")
+                        == "ConditionalCheckFailedException"
+                    ):
+                        return _response(409, {"error": "approval request already exists"})
+                    raise
+                _audit(
+                    tenant,
+                    "approval_requested",
+                    f"agent:{agent_key}",
+                    {
+                        "approval_id": approval_id,
+                        "agent_key": agent_key,
+                        "tool_name": item["tool_name"],
+                        "risk_class": risk_class,
+                        "expires_at": item["expires_at"],
+                    },
+                )
+                return _response(201, _approval_view(item, now))
             if method == "POST" and action == ["approvals", "consume"]:
                 body = _body(event)
                 approval_id = body.get("approval_id")
@@ -907,10 +1038,11 @@ def handler(event, context):
                 try:
                     updated = TABLE.update_item(
                         Key=_item_key(tenant, "APPROVAL", approval_id),
-                        UpdateExpression="SET #consumed = :true, consumed_at = :now",
-                        ConditionExpression="attribute_exists(pk) AND #consumed = :false AND #expires_at > :now AND #agent_key = :agent AND #action_hash = :action_hash AND #tool_name = :tool_name AND #proposal_id = :proposal_id AND #task_id = :task_id AND #principal_id = :principal_id",
+                        UpdateExpression="SET #consumed = :true, #status = :consumed_status, consumed_at = :now",
+                        ConditionExpression="attribute_exists(pk) AND #status = :approved_status AND #consumed = :false AND #expires_at > :now AND #agent_key = :agent AND #action_hash = :action_hash AND #tool_name = :tool_name AND #proposal_id = :proposal_id AND #task_id = :task_id AND #principal_id = :principal_id",
                         ExpressionAttributeNames={
                             "#consumed": "consumed",
+                            "#status": "status",
                             "#expires_at": "expires_at",
                             "#agent_key": "agent_key",
                             "#action_hash": "action_hash",
@@ -922,6 +1054,8 @@ def handler(event, context):
                         ExpressionAttributeValues={
                             ":true": True,
                             ":false": False,
+                            ":approved_status": "approved",
+                            ":consumed_status": "consumed",
                             ":now": int(time.time()),
                             ":agent": agent_key,
                             ":action_hash": body.get("action_hash", ""),
@@ -932,9 +1066,18 @@ def handler(event, context):
                         },
                         ReturnValues="ALL_NEW",
                     )
-                    return _response(
-                        200, {"approved": True, "approval": updated.get("Attributes", {})}
+                    approval = updated.get("Attributes", {})
+                    _audit(
+                        tenant,
+                        "approval_consumed",
+                        f"agent:{agent_key}",
+                        {
+                            "approval_id": approval_id,
+                            "agent_key": agent_key,
+                            "tool_name": approval.get("tool_name", ""),
+                        },
                     )
+                    return _response(200, {"approved": True, "approval": approval})
                 except Exception as error:
                     if (
                         getattr(error, "response", {}).get("Error", {}).get("Code")
@@ -988,6 +1131,7 @@ def handler(event, context):
                     "slo",
                     "alerts",
                     "audit",
+                    "approvals",
                 }
             ):
                 key = {
@@ -1006,6 +1150,7 @@ def handler(event, context):
                     "slo": "SLO",
                     "alerts": "ALERT",
                     "audit": "AUDIT",
+                    "approvals": "APPROVAL",
                 }[parts[0]]
                 items = (
                     _fleet(tenant).get("mcpServers" if parts[0] == "mcp-servers" else parts[0], [])
@@ -1013,6 +1158,12 @@ def handler(event, context):
                     in {"groups", "agents", "health", "policies", "drift", "skills", "mcp-servers"}
                     else _list(tenant, key)
                 )
+                if parts[0] == "approvals":
+                    items = sorted(
+                        (_approval_view(item) for item in items),
+                        key=lambda item: int(item.get("requestedAt", 0)),
+                        reverse=True,
+                    )
                 return _response(200, {"items": items, "nextCursor": None})
             if method == "GET" and parts == ["capabilities"]:
                 return _response(200, _fleet(tenant)["capabilities"])
@@ -1334,36 +1485,128 @@ def handler(event, context):
                     not isinstance(body.get(key), str) or not body.get(key) for key in required
                 ):
                     raise ValueError("approval identity and action binding are required")
+                agent_key = _approval_text(body["agentKey"], "agentKey")
+                if not TABLE.get_item(
+                    Key=_item_key(tenant, "AGENT", agent_key),
+                    ConsistentRead=True,
+                ).get("Item"):
+                    return _response(400, {"error": "approval agent is not enrolled"})
+                risk_class = body.get("riskClass", "unspecified")
+                if risk_class not in {
+                    "write",
+                    "destructive",
+                    "external_egress",
+                    "code_execution",
+                    "secret_read",
+                    "unspecified",
+                }:
+                    raise ValueError("riskClass is unsupported")
                 expires_at = int(time.time()) + min(max(int(body.get("ttlSeconds", 120)), 1), 3600)
-                item = _put(
-                    tenant,
-                    "APPROVAL",
-                    approval_id,
-                    {
-                        "id": approval_id,
-                        "agent_key": body["agentKey"],
-                        "tool_name": body["toolName"],
-                        "proposal_id": body["proposalId"],
-                        "task_id": body["taskId"],
-                        "principal_id": body["principalId"],
-                        "action_hash": body["actionHash"],
-                        "consumed": False,
-                        "expires_at": expires_at,
-                        "ttl": expires_at,
-                        "created_at": int(time.time()),
-                    },
-                )
+                item = {
+                    **_item_key(tenant, "APPROVAL", approval_id),
+                    "tenant_id": tenant,
+                    "id": approval_id,
+                    "agent_key": agent_key,
+                    "tool_name": _approval_text(body["toolName"], "toolName"),
+                    "proposal_id": _approval_text(body["proposalId"], "proposalId"),
+                    "task_id": _approval_text(body["taskId"], "taskId"),
+                    "principal_id": _approval_text(body["principalId"], "principalId"),
+                    "action_hash": _approval_text(body["actionHash"], "actionHash", 128),
+                    "risk_class": risk_class,
+                    "resource_ids": _approval_resources(body.get("resourceIds")),
+                    "status": "approved",
+                    "consumed": False,
+                    "expires_at": expires_at,
+                    "ttl": expires_at,
+                    "created_at": int(time.time()),
+                    "requested_at": int(time.time()),
+                    "decided_at": int(time.time()),
+                    "decided_by": actor,
+                    "decision_reason": "Direct operator grant",
+                }
+                try:
+                    TABLE.put_item(
+                        Item=item,
+                        ConditionExpression="attribute_not_exists(pk)",
+                    )
+                except Exception as error:
+                    if (
+                        getattr(error, "response", {}).get("Error", {}).get("Code")
+                        == "ConditionalCheckFailedException"
+                    ):
+                        return _response(409, {"error": "approval ID already exists"})
+                    raise
                 _audit(
                     tenant,
                     "approval_created",
                     actor,
                     {
                         "approval_id": approval_id,
-                        "agent_key": body["agentKey"],
+                        "agent_key": agent_key,
                         "expires_at": expires_at,
                     },
                 )
                 return _response(201, {"id": item["id"], "expiresAt": expires_at})
+            if (
+                method == "POST"
+                and len(parts) == 3
+                and parts[0] == "approvals"
+                and parts[2] == "decision"
+            ):
+                approval_id = parts[1]
+                body = _body(event)
+                decision = body.get("decision")
+                reason = body.get("reason")
+                if decision not in {"approved", "denied"}:
+                    raise ValueError("decision must be approved or denied")
+                reason = _approval_text(reason, "reason", 500)
+                now = int(time.time())
+                current = TABLE.get_item(
+                    Key=_item_key(tenant, "APPROVAL", approval_id),
+                    ConsistentRead=True,
+                ).get("Item")
+                if not current:
+                    return _response(404, {"error": "approval request not found"})
+                grant_expiry = now + int(current.get("grant_ttl_seconds", 120))
+                try:
+                    updated = TABLE.update_item(
+                        Key=_item_key(tenant, "APPROVAL", approval_id),
+                        UpdateExpression="SET #status = :decision, decided_at = :now, decided_by = :actor, decision_reason = :reason, expires_at = :expires_at, #ttl = :ttl",
+                        ConditionExpression="attribute_exists(pk) AND #status = :pending AND expires_at > :now",
+                        ExpressionAttributeNames={"#status": "status", "#ttl": "ttl"},
+                        ExpressionAttributeValues={
+                            ":decision": decision,
+                            ":pending": "pending",
+                            ":now": now,
+                            ":actor": actor,
+                            ":reason": reason,
+                            ":expires_at": grant_expiry if decision == "approved" else now,
+                            ":ttl": grant_expiry if decision == "approved" else now + 86400,
+                        },
+                        ReturnValues="ALL_NEW",
+                    )
+                except Exception as error:
+                    if (
+                        getattr(error, "response", {}).get("Error", {}).get("Code")
+                        == "ConditionalCheckFailedException"
+                    ):
+                        return _response(
+                            409,
+                            {"error": "approval request is expired or already decided"},
+                        )
+                    raise
+                item = updated.get("Attributes", {})
+                _audit(
+                    tenant,
+                    "approval_decided",
+                    actor,
+                    {
+                        "approval_id": approval_id,
+                        "agent_key": item.get("agent_key", ""),
+                        "decision": decision,
+                    },
+                )
+                return _response(200, _approval_view(item, now))
             if method == "POST" and parts == ["groups"]:
                 body = _body(event)
                 policy = next(

@@ -408,6 +408,142 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
     assert aws_client.disconnect(TOKEN) == {"status": "disconnect_pending_expiry"}
 
 
+def test_agent_client_submits_content_minimised_exact_approval_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public client must not need custom HTTP glue for central review."""
+    import agentic_security.ui_control_plane as control_plane
+
+    captured: list[tuple[str, dict[str, str], dict[str, object]]] = []
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(
+                {"id": "approval-a", "status": "pending", "agentKey": "dep-a:agent-a"}
+            ).encode()
+
+    def fake_urlopen(request: Any, *, timeout: float, **_kwargs: Any) -> Response:
+        captured.append((request.full_url, dict(request.headers), json.loads(request.data)))
+        return Response()
+
+    monkeypatch.setattr(control_plane, "urlopen", fake_urlopen)
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="agent-a",
+        project_root="/workspace/synthetic",
+        deployment_id="dep-a",
+        aws_agent_session=True,
+    )
+
+    response = client.request_approval(
+        approval_id="approval-a",
+        tool_name="publish_artifact",
+        proposal_id="proposal-a",
+        task_id="task-a",
+        principal_id="principal-a",
+        action_hash="a" * 64,
+        risk_class="external_egress",
+        resource_ids=("artifact:synthetic-report",),
+    )
+
+    assert response["status"] == "pending"
+    assert captured[0][0].endswith("/agent/dep-a/agent-a/approvals/request")
+    assert captured[0][1]["Authorization"] == f"Bearer {TOKEN}"
+    assert captured[0][2] == {
+        "approval_id": "approval-a",
+        "tool_name": "publish_artifact",
+        "proposal_id": "proposal-a",
+        "task_id": "task-a",
+        "principal_id": "principal-a",
+        "action_hash": "a" * 64,
+        "risk_class": "external_egress",
+        "resource_ids": ["artifact:synthetic-report"],
+        "review_ttl_seconds": 900,
+        "grant_ttl_seconds": 120,
+    }
+    assert "arguments" not in captured[0][2]
+    assert "credentials" not in captured[0][2]
+    with pytest.raises(ControlPlaneConfigurationError):
+        client.request_approval(
+            approval_id="approval-b",
+            tool_name="publish_artifact",
+            proposal_id="proposal-b",
+            task_id="task-b",
+            principal_id="principal-a",
+            action_hash="b" * 64,
+            risk_class="unknown-risk",
+        )
+
+    legacy = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="agent-a",
+        project_root="/workspace/synthetic",
+    )
+    with pytest.raises(ControlPlaneDependencyError):
+        legacy.request_approval(
+            approval_id="approval-c",
+            tool_name="publish_artifact",
+            proposal_id="proposal-c",
+            task_id="task-c",
+            principal_id="principal-a",
+            action_hash="c" * 64,
+        )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"approval_id": ""},
+        {"action_hash": "a" * 129},
+        {"resource_ids": ["resource:a"]},
+        {"resource_ids": tuple(f"resource:{index}" for index in range(21))},
+        {"resource_ids": ("",)},
+        {"review_ttl_seconds": True},
+        {"review_ttl_seconds": 59},
+        {"review_ttl_seconds": 3601},
+        {"grant_ttl_seconds": True},
+        {"grant_ttl_seconds": 0},
+        {"grant_ttl_seconds": 601},
+    ],
+)
+def test_agent_client_rejects_malformed_approval_bindings(
+    override: dict[str, object],
+) -> None:
+    """Malformed or over-broad approval requests must fail before network I/O."""
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="agent-a",
+        project_root="/workspace/synthetic",
+        deployment_id="dep-a",
+        aws_agent_session=True,
+    )
+    request_values: dict[str, object] = {
+        "approval_id": "approval-a",
+        "tool_name": "publish_artifact",
+        "proposal_id": "proposal-a",
+        "task_id": "task-a",
+        "principal_id": "principal-a",
+        "action_hash": "a" * 64,
+        "risk_class": "external_egress",
+        "resource_ids": (),
+        "review_ttl_seconds": 900,
+        "grant_ttl_seconds": 120,
+    }
+    request_values.update(override)
+
+    with pytest.raises(ControlPlaneConfigurationError):
+        client.request_approval(**request_values)  # type: ignore[arg-type]
+
+
 def test_agent_client_adopts_rotated_session_from_heartbeat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

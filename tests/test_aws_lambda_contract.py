@@ -26,8 +26,11 @@ class FakeTable:
         item = self.items.get((Key["pk"], Key.get("sk", "")))
         return {} if item is None else {"Item": dict(item)}
 
-    def put_item(self, *, Item: dict[str, Any], **_: Any) -> None:
-        self.items[(Item["pk"], Item.get("sk", ""))] = dict(Item)
+    def put_item(self, *, Item: dict[str, Any], **kwargs: Any) -> None:
+        key = (Item["pk"], Item.get("sk", ""))
+        if kwargs.get("ConditionExpression") and key in self.items:
+            raise ConditionalFailure()
+        self.items[key] = dict(Item)
 
     def delete_item(self, *, Key: dict[str, str], **_: Any) -> None:
         key = (Key["pk"], Key.get("sk", ""))
@@ -40,7 +43,30 @@ class FakeTable:
     ) -> dict[str, Any]:
         key = (Key["pk"], Key.get("sk", ""))
         item = self.items.get(key)
-        if item is None or item.get("consumed") is not ExpressionAttributeValues[":false"]:
+        if item is None:
+            raise ConditionalFailure()
+        if ":pending" in ExpressionAttributeValues:
+            if (
+                item.get("status") != ExpressionAttributeValues[":pending"]
+                or item.get("expires_at", 0) <= ExpressionAttributeValues[":now"]
+            ):
+                raise ConditionalFailure()
+            item.update(
+                {
+                    "status": ExpressionAttributeValues[":decision"],
+                    "decided_at": ExpressionAttributeValues[":now"],
+                    "decided_by": ExpressionAttributeValues[":actor"],
+                    "decision_reason": ExpressionAttributeValues[":reason"],
+                    "expires_at": ExpressionAttributeValues[":expires_at"],
+                    "ttl": ExpressionAttributeValues[":ttl"],
+                }
+            )
+            self.items[key] = item
+            return {"Attributes": dict(item)}
+        if (
+            item.get("status") != ExpressionAttributeValues[":approved_status"]
+            or item.get("consumed") is not ExpressionAttributeValues[":false"]
+        ):
             raise ConditionalFailure()
         for name in (
             "expires_at",
@@ -66,12 +92,25 @@ class FakeTable:
             elif item.get(name) != ExpressionAttributeValues[expected]:
                 raise ConditionalFailure()
         item["consumed"] = True
+        item["status"] = ExpressionAttributeValues[":consumed_status"]
         item["consumed_at"] = ExpressionAttributeValues[":now"]
         self.items[key] = item
         return {"Attributes": dict(item)}
 
-    def query(self, **_: Any) -> dict[str, Any]:
-        return {"Items": [dict(item) for item in self.items.values()]}
+    def query(self, **kwargs: Any) -> dict[str, Any]:
+        condition = kwargs.get("KeyConditionExpression")
+        values = list(self.items.values())
+        if isinstance(condition, FakeCondition):
+            for field, operation, expected in condition.predicates:
+                if operation == "eq":
+                    values = [item for item in values if item.get(field) == expected]
+                elif operation == "begins_with":
+                    values = [
+                        item
+                        for item in values
+                        if str(item.get(field, "")).startswith(str(expected))
+                    ]
+        return {"Items": [dict(item) for item in values]}
 
 
 class FakeS3:
@@ -79,6 +118,18 @@ class FakeS3:
 
     def put_object(self, **_: Any) -> None:
         return None
+
+
+class FakeCondition:
+    """Composable placeholder for boto3 key expressions ignored by FakeTable."""
+
+    def __init__(self, predicates: list[tuple[str, str, Any]]) -> None:
+        self.predicates = predicates
+
+    def __and__(self, other: Any) -> "FakeCondition":
+        return FakeCondition(
+            self.predicates + (other.predicates if isinstance(other, FakeCondition) else [])
+        )
 
 
 def _load_handler(monkeypatch: Any) -> Any:
@@ -92,8 +143,8 @@ def _load_handler(monkeypatch: Any) -> Any:
     dynamodb = types.ModuleType("boto3.dynamodb")
     conditions = types.ModuleType("boto3.dynamodb.conditions")
     conditions.Key = lambda name: types.SimpleNamespace(  # type: ignore[attr-defined]
-        eq=lambda value: (name, "eq", value),
-        begins_with=lambda value: (name, "begins_with", value),
+        eq=lambda value: FakeCondition([(name, "eq", value)]),
+        begins_with=lambda value: FakeCondition([(name, "begins_with", value)]),
     )
     monkeypatch.setitem(sys.modules, "boto3", boto3)
     monkeypatch.setitem(sys.modules, "boto3.dynamodb", dynamodb)
@@ -608,6 +659,10 @@ def test_remote_approval_requires_exact_binding_and_is_single_use(monkeypatch: A
     }
     created = _invoke(module, _event("/enterprise/approvals", "POST", body=grant, claims=claims))
     assert created["statusCode"] == 201
+    duplicate_grant = _invoke(
+        module, _event("/enterprise/approvals", "POST", body=grant, claims=claims)
+    )
+    assert duplicate_grant["statusCode"] == 409
     consume = {
         "approval_id": "approval-a",
         "tool_name": "write",
@@ -633,6 +688,252 @@ def test_remote_approval_requires_exact_binding_and_is_single_use(monkeypatch: A
             )["body"]
         )["approved"]
         is False
+    )
+
+
+def test_operator_approval_queue_is_action_bound_audited_and_fail_closed(
+    monkeypatch: Any,
+) -> None:
+    """An agent request must need one live operator decision before consumption."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-approval-queue"
+    agent_key = "dep-a:agent-a"
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant, "status": "active"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", agent_key)
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "tenant_id": tenant,
+            "host": "Claude Code",
+            "status": "connected",
+            "expires_at": int(time.time()) + 300,
+        }
+    )
+    token = "synthetic-agent-session"  # noqa: S105 - synthetic test credential
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", token),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "expires_at": int(time.time()) + 300,
+        }
+    )
+    audit_events: list[tuple[str, str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        module,
+        "_audit",
+        lambda _tenant, event_type, actor, payload: audit_events.append(
+            (event_type, actor, payload)
+        ),
+    )
+    request = {
+        "approval_id": "approval-pending-a",
+        "tool_name": "publish_artifact",
+        "proposal_id": "proposal-a",
+        "task_id": "task-a",
+        "principal_id": "principal-a",
+        "action_hash": "a" * 64,
+        "risk_class": "external_egress",
+        "resource_ids": ["artifact:synthetic-report"],
+        "review_ttl_seconds": 900,
+        "grant_ttl_seconds": 120,
+        # This value is deliberately ignored: agent identity is session-owned.
+        "agent_key": "dep-forged:agent-forged",
+    }
+    created = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/approvals/request",
+            "POST",
+            body=request,
+            token=token,
+        ),
+    )
+    assert created["statusCode"] == 201
+    created_body = json.loads(created["body"])
+    assert created_body["status"] == "pending"
+    assert created_body["agentKey"] == agent_key
+    assert created_body["resourceIds"] == ["artifact:synthetic-report"]
+    duplicate = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/approvals/request",
+            "POST",
+            body=request,
+            token=token,
+        ),
+    )
+    assert duplicate["statusCode"] == 409
+    malformed = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/approvals/request",
+            "POST",
+            body=dict(request, approval_id="approval-malformed", risk_class="allow_all"),
+            token=token,
+        ),
+    )
+    assert malformed["statusCode"] == 400
+    assert (
+        f"TENANT#{tenant}",
+        "APPROVAL#approval-malformed",
+    ) not in table.items
+
+    operator_claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "operator-a",
+    }
+    dashboard = _invoke(module, _event("/dashboard", "GET", claims=operator_claims))
+    assert json.loads(dashboard["body"])["approvalQueue"] == 1
+    listed = _invoke(module, _event("/enterprise/approvals", "GET", claims=operator_claims))
+    assert json.loads(listed["body"])["items"][0]["status"] == "pending"
+
+    unauthorised = _invoke(
+        module,
+        _event(
+            "/enterprise/approvals/approval-pending-a/decision",
+            "POST",
+            body={"decision": "approved", "reason": "Validated release destination"},
+            claims={"custom:tenant_id": tenant, "sub": "read-only-operator"},
+        ),
+    )
+    assert unauthorised["statusCode"] == 403
+    approved = _invoke(
+        module,
+        _event(
+            "/enterprise/approvals/approval-pending-a/decision",
+            "POST",
+            body={"decision": "approved", "reason": "Validated release destination"},
+            claims=operator_claims,
+        ),
+    )
+    assert approved["statusCode"] == 200
+    assert json.loads(approved["body"])["status"] == "approved"
+    assert (
+        json.loads(_invoke(module, _event("/dashboard", "GET", claims=operator_claims))["body"])[
+            "approvalQueue"
+        ]
+        == 0
+    )
+    replayed_decision = _invoke(
+        module,
+        _event(
+            "/enterprise/approvals/approval-pending-a/decision",
+            "POST",
+            body={"decision": "denied", "reason": "Too late"},
+            claims=operator_claims,
+        ),
+    )
+    assert replayed_decision["statusCode"] == 409
+
+    consume = {
+        "approval_id": request["approval_id"],
+        "tool_name": request["tool_name"],
+        "proposal_id": request["proposal_id"],
+        "task_id": request["task_id"],
+        "principal_id": request["principal_id"],
+        "action_hash": request["action_hash"],
+    }
+    consumed = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/approvals/consume",
+            "POST",
+            body=consume,
+            token=token,
+        ),
+    )
+    assert json.loads(consumed["body"])["approved"] is True
+    assert (
+        json.loads(
+            _invoke(
+                module,
+                _event(
+                    "/agent/dep-a/agent-a/approvals/consume",
+                    "POST",
+                    body=consume,
+                    token=token,
+                ),
+            )["body"]
+        )["approved"]
+        is False
+    )
+    assert [event[0] for event in audit_events].count("approval_requested") == 1
+    assert [event[0] for event in audit_events].count("approval_decided") == 1
+    assert (
+        next(event[2]["decision"] for event in audit_events if event[0] == "approval_decided")
+        == "approved"
+    )
+    assert [event[0] for event in audit_events].count("approval_consumed") == 1
+
+    denied_request = dict(
+        request,
+        approval_id="approval-denied-a",
+        proposal_id="proposal-denied-a",
+        action_hash="b" * 64,
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/agent/dep-a/agent-a/approvals/request",
+                "POST",
+                body=denied_request,
+                token=token,
+            ),
+        )["statusCode"]
+        == 201
+    )
+    denied = _invoke(
+        module,
+        _event(
+            "/enterprise/approvals/approval-denied-a/decision",
+            "POST",
+            body={"decision": "denied", "reason": "Destination is not approved"},
+            claims=operator_claims,
+        ),
+    )
+    assert json.loads(denied["body"])["status"] == "denied"
+    denied_consume = dict(
+        consume,
+        approval_id="approval-denied-a",
+        proposal_id="proposal-denied-a",
+        action_hash="b" * 64,
+    )
+    assert (
+        json.loads(
+            _invoke(
+                module,
+                _event(
+                    "/agent/dep-a/agent-a/approvals/consume",
+                    "POST",
+                    body=denied_consume,
+                    token=token,
+                ),
+            )["body"]
+        )["approved"]
+        is False
+    )
+
+    expired = dict(
+        table.items[(f"TENANT#{tenant}", "APPROVAL#approval-denied-a")],
+        id="approval-expired-a",
+        sk="APPROVAL#approval-expired-a",
+        status="pending",
+        expires_at=int(time.time()) - 1,
+    )
+    table.put_item(Item=expired)
+    assert (
+        json.loads(_invoke(module, _event("/dashboard", "GET", claims=operator_claims))["body"])[
+            "approvalQueue"
+        ]
+        == 0
     )
 
 

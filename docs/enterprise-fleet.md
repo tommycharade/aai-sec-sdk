@@ -63,10 +63,13 @@ The reference WSGI application exposes these authenticated endpoints:
 | `GET /api/enterprise/slo` | Sample-based availability and SLO status in the bounded window |
 | `GET /api/enterprise/compliance/evidence` | Redacted tenant-scoped evidence bundle for review/export |
 | `GET /api/enterprise/audit` | Bounded redaction-safe lifecycle evidence index for investigations |
+| `GET /api/enterprise/approvals` | Tenant-scoped pending and historical exact-action approval requests |
 | `GET /api/enterprise/alerts` | Derived fleet alerts |
 | `POST /api/enterprise/agents/register` | Register an authenticated agent |
 | `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence and optionally publish bounded aggregate SDK telemetry |
 | `POST /api/enterprise/agents/{deployment}/{agent}/disconnect` | Mark offline |
+| `POST /api/agent/{deployment}/{agent}/approvals/request` | Submit a bounded approval request using the authenticated agent session |
+| `POST /api/agent/{deployment}/{agent}/approvals/consume` | Atomically consume one approved exact-action grant |
 | `POST /api/enterprise/templates` | Create a configuration template |
 | `POST /api/enterprise/policies` | Create a configuration policy |
 | `POST /api/enterprise/groups` | Create a group and bind it to a policy |
@@ -86,6 +89,8 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/alerts/{alertId}/ack` | Acknowledge an alert without deleting evidence |
 | `POST /api/enterprise/alerts/dispatch` | Deliver unacknowledged alerts through an alert adapter |
 | `POST /api/enterprise/slo/sample` | Record one redaction-safe health sample for an authorized deployment |
+| `POST /api/enterprise/approvals` | Create a direct operator grant for compatibility and automation |
+| `POST /api/enterprise/approvals/{approvalId}/decision` | Approve or deny one live pending request with an operator rationale |
 
 The tenant-wide emergency stop accepts `{"active": true}` or
 `{"active": false}` from a `security-operator` or `platform-admin`. It is
@@ -94,6 +99,30 @@ requests fail closed with HTTP 409 while it is active, including requests from
 agents enrolled after activation. Clearing the fleet stop does not clear a
 narrower stop. Every transition records the operator identity, resulting state,
 and affected-agent count in the redacted audit trail.
+
+### Central action approvals
+
+An enrolled agent submits a held action through its deployment/agent-bound
+session. The server derives `agentKey` from that session and accepts only the
+bounded tool, proposal, task, principal, action hash, risk class, and resource
+identifiers needed for review. It does not accept tool arguments, outputs,
+credentials, prompts, or a caller-selected agent identity. Descriptive request
+metadata remains untrusted evidence; an operator must verify it against the
+authenticated agent, policy, task, and intended resource.
+
+Only `security-operator` and `platform-admin` identities may decide a request.
+The decision requires a non-empty rationale and uses a conditional state
+transition, so two operators cannot both decide the same pending request. A
+denial is never consumable. An approval becomes a short-lived grant bound to
+the exact tenant, agent, tool, proposal, task, principal, and action hash. It
+can be consumed once by that same enrolled agent. Expiry, replay, mismatched
+bindings, missing state, or a concurrent decision returns no authority.
+
+The dashboard count is derived from live, unexpired `pending` records. The UI
+shows pending work and decision history on a dedicated **Approvals** page;
+the audit trail remains read-only evidence. `approval_requested` and
+`approval_decided` lifecycle events contain bounded identifiers and hashes,
+not action content.
 
 Inventory and fleet collection endpoints accept `limit=1..200` and an opaque
 numeric continuation `cursor`; responses contain `nextCursor` until the
