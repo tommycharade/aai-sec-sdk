@@ -1441,6 +1441,12 @@ AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
   alarms (subscribe the enterprise SOC endpoint before production);</li>
 <li>a private S3 UI bucket behind CloudFront.</li>
 </ul>
+<p>API Gateway exposes JWT claim values to Lambda as strings even when Cognito's
+source claim is an array. The handler therefore applies bounded parsing to
+<code>cognito:groups</code> and compares only exact role names. Verify both an authorized
+group member and a lookalike unauthorized group through API Gateway after each
+authorizer or Cognito configuration change; direct Lambda test events alone do
+not prove the deployed claim projection.</p>
 <p>The control plane also exposes a separate agent boundary. An operator creates a
 short-lived bootstrap secret for a registered agent; the agent exchanges it
 once at <code>POST /agent/enroll</code> and receives a 15-minute bearer session. The
