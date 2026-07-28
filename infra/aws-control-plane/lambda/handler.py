@@ -218,6 +218,36 @@ def _list(tenant, kind):
     return result.get("Items", [])
 
 
+def _fleet_emergency_stop_active(tenant):
+    """Return the tenant-wide stop state from server-owned control data.
+
+    The value is never inferred from browser input or from a single agent
+    record. Keeping the fleet stop as its own durable control means newly
+    enrolled agents also fail closed while an incident is active, and clearing
+    it cannot silently clear a narrower agent, group, or deployment stop.
+    """
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "CONTROL", "fleet-emergency-stop"),
+        ConsistentRead=True,
+    ).get("Item")
+    return bool(item and item.get("active") is True)
+
+
+def _set_fleet_emergency_stop(tenant, active, actor):
+    """Persist a reversible fleet stop and return the authoritative state."""
+    return _put(
+        tenant,
+        "CONTROL",
+        "fleet-emergency-stop",
+        {
+            "id": "fleet-emergency-stop",
+            "active": bool(active),
+            "updatedAt": int(time.time()),
+            "updatedBy": actor,
+        },
+    )
+
+
 def _audit(tenant, event_type, actor, payload):
     redacted = {
         "event_type": event_type,
@@ -508,6 +538,8 @@ def _verify_agent(tenant, deployment_id, agent_id):
             ConsistentRead=True,
         ).get("Item")
         policy_assigned = bool(policy)
+    fleet_stopped = _fleet_emergency_stop_active(tenant)
+    agent_stopped = bool(agent and agent.get("emergencyStop", False))
     checks = {
         "registered": {
             "passed": bool(agent),
@@ -528,10 +560,17 @@ def _verify_agent(tenant, deployment_id, agent_id):
             else "No valid policy group is assigned.",
         },
         "emergencyStop": {
-            "passed": bool(agent and not agent.get("emergencyStop", False)),
+            "passed": bool(agent and not fleet_stopped and not agent_stopped),
             "detail": "No emergency stop is active."
-            if agent and not agent.get("emergencyStop", False)
-            else "An emergency stop is active or the agent is missing.",
+            if agent and not fleet_stopped and not agent_stopped
+            else (
+                "A fleet-wide emergency stop is active."
+                if fleet_stopped
+                else (
+                    "An agent, group, or deployment emergency stop is active "
+                    "or the agent is missing."
+                )
+            ),
         },
     }
     return {
@@ -573,16 +612,17 @@ def _managed_policy_configuration(tenant, configuration):
 
 def _configuration(tenant):
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    fleet_stopped = _fleet_emergency_stop_active(tenant)
     return {
         "dashboard": {
             "generatedAt": now,
-            "posture": "healthy",
+            "posture": "critical" if fleet_stopped else "healthy",
             "activeSessions": len(_all_agents(tenant)),
             "decisionsToday": 0,
             "deniedToday": 0,
             "approvalQueue": 0,
             "timedOutWorkers": 0,
-            "emergencyStop": False,
+            "emergencyStop": fleet_stopped,
             "agents": [
                 {
                     "id": a["id"],
@@ -817,9 +857,23 @@ def handler(event, context):
                 agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key)).get("Item")
                 if not agent:
                     return _response(404, {"error": "agent not found"})
+                if _fleet_emergency_stop_active(tenant):
+                    return _response(
+                        409,
+                        {
+                            "error": "fleet-wide emergency stop is active",
+                            "emergencyStop": True,
+                            "scope": "fleet",
+                        },
+                    )
                 if agent.get("emergencyStop") is True:
                     return _response(
-                        409, {"error": "agent emergency stop is active", "emergencyStop": True}
+                        409,
+                        {
+                            "error": "agent emergency stop is active",
+                            "emergencyStop": True,
+                            "scope": "agent",
+                        },
                     )
                 group = next(
                     (g for g in _fleet(tenant)["groups"] if agent_key in g.get("agent_keys", [])),
@@ -898,6 +952,17 @@ def handler(event, context):
         if path in ("/configuration", "/api/configuration") and method == "GET":
             return _response(200, _configuration(tenant))
         if path in ("/dashboard", "/api/dashboard") and method == "GET":
+            return _response(200, _configuration(tenant)["dashboard"])
+        if path in ("/emergency-stop", "/api/emergency-stop") and method == "POST":
+            body = _body(event)
+            active = bool(body.get("active", True))
+            _set_fleet_emergency_stop(tenant, active, actor)
+            _audit(
+                tenant,
+                "fleet_emergency_stop",
+                actor,
+                {"active": active, "agent_count": len(_all_agents(tenant))},
+            )
             return _response(200, _configuration(tenant)["dashboard"])
         if path.startswith("/enterprise/") or path.startswith("/api/enterprise/"):
             suffix = path.split("/enterprise/", 1)[1]
@@ -1447,6 +1512,27 @@ def handler(event, context):
                 and parts[3] == "effective-policy"
             ):
                 agent_key = f"{parts[1]}:{parts[2]}"
+                agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key)).get("Item")
+                if not agent:
+                    return _response(404, {"error": "agent not found"})
+                if _fleet_emergency_stop_active(tenant):
+                    return _response(
+                        409,
+                        {
+                            "error": "fleet-wide emergency stop is active",
+                            "emergencyStop": True,
+                            "scope": "fleet",
+                        },
+                    )
+                if agent.get("emergencyStop") is True:
+                    return _response(
+                        409,
+                        {
+                            "error": "agent emergency stop is active",
+                            "emergencyStop": True,
+                            "scope": "agent",
+                        },
+                    )
                 group = next(
                     (g for g in _fleet(tenant)["groups"] if agent_key in g.get("agent_keys", [])),
                     None,

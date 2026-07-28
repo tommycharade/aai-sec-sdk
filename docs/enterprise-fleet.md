@@ -79,12 +79,21 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/deployment-config/batch-rollout` | Apply one rollout command to up to 200 deployments |
 | `POST /api/enterprise/deployment-config/rollback` | Restore a known prior version as a new staged version |
 | `POST /api/enterprise/deployment-config/applied` | Record an applied configuration hash |
+| `POST /api/emergency-stop` | Activate or clear the durable tenant-wide stop used by every enrolled agent |
 | `POST /api/enterprise/emergency-stop` | Stop or clear one deployment through its authority |
 | `POST /api/enterprise/groups/{group}/emergency-stop` | Stop or clear all agents in one group |
 | `POST /api/enterprise/agents/{deployment}/{agent}/emergency-stop` | Stop or clear one enrolled agent |
 | `POST /api/enterprise/alerts/{alertId}/ack` | Acknowledge an alert without deleting evidence |
 | `POST /api/enterprise/alerts/dispatch` | Deliver unacknowledged alerts through an alert adapter |
 | `POST /api/enterprise/slo/sample` | Record one redaction-safe health sample for an authorized deployment |
+
+The tenant-wide emergency stop accepts `{"active": true}` or
+`{"active": false}` from a `security-operator` or `platform-admin`. It is
+stored independently from deployment, group, and agent stops. Effective-policy
+requests fail closed with HTTP 409 while it is active, including requests from
+agents enrolled after activation. Clearing the fleet stop does not clear a
+narrower stop. Every transition records the operator identity, resulting state,
+and affected-agent count in the redacted audit trail.
 
 Inventory and fleet collection endpoints accept `limit=1..200` and an opaque
 numeric continuation `cursor`; responses contain `nextCursor` until the
