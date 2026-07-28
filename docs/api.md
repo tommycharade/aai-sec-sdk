@@ -300,7 +300,11 @@ deployment and agent identity, writes atomically outside the project with
 directory mode `0700` and file mode `0600`, and rejects symlinks, foreign
 ownership, broad permissions, malformed content and expired credentials. The
 cache transfers a bearer; it does not validate or authorize it. The control
-plane remains authoritative on every request.
+plane remains authoritative on every request. The reference implementation is
+POSIX-only and refuses construction when numeric ownership and private file
+modes cannot be verified; Windows deployments require an ACL-aware credential
+store adapter. Reads use a no-follow descriptor, revalidate its metadata, and
+are bounded to 4096 bytes before decoding.
 
 ::: agentic_security.ControlPlaneAgentClient
 

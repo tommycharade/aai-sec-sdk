@@ -170,6 +170,26 @@ def test_session_store_missing_oversized_and_invalid_credentials_fail_closed(
     assert store.load() is None
 
 
+def test_session_store_bounds_cache_read_before_allocation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Untrusted cache size is bounded at the filesystem read boundary."""
+    store = session_store(tmp_path)
+    store.path.write_bytes(b"{}")
+    os.chmod(store.path, 0o600)
+    requested: list[int] = []
+
+    def observed_read(_descriptor: int, size: int) -> bytes:
+        requested.append(size)
+        return b"x" * size
+
+    monkeypatch.setattr(os, "read", observed_read)
+
+    assert store.load() is None
+    assert requested == [4_097]
+
+
 def test_session_store_removes_temporary_file_when_atomic_replace_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -204,3 +224,22 @@ def test_session_store_rejects_symlinked_parent_and_foreign_owner(
     monkeypatch.setattr(os, "getuid", lambda: actual_uid + 1)
     with pytest.raises(AgentSessionStoreError, match="owned by this user"):
         owned_store.load()
+
+
+def test_session_store_rejects_hosts_without_posix_file_security(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A plaintext bearer is never persisted under unverified ACL semantics."""
+    monkeypatch.setattr(
+        "agentic_security.agent_sessions._supports_private_posix_storage",
+        lambda: False,
+    )
+
+    with pytest.raises(AgentSessionStoreError, match="requires POSIX"):
+        AgentSessionStore(
+            "https://fleet.example.test",
+            "deployment-test",
+            "agent-test",
+            directory=tmp_path,
+        )

@@ -81,8 +81,13 @@ values. A copied or cached token can still be exposed through the clipboard,
 compromised shell, backup, or another process running as the same OS user; the
 reference cache is not an OS keychain. Sessions therefore remain short-lived,
 deployment/agent-bound, rotated by heartbeat and revocable by the control
-plane. Higher-assurance deployments should replace the reference cache with an
-OS/device credential broker while preserving the same rotation contract.
+plane. The reference cache supports POSIX hosts only and fails closed where
+numeric ownership plus `0700`/`0600` modes cannot be verified, including
+Windows. Windows and higher-assurance deployments must replace it with an
+ACL-aware OS/device credential broker while preserving the same rotation
+contract. Cache records are opened without following symlinks, revalidated
+from the open descriptor, and read with a strict 4096-byte allocation bound
+before decoding or parsing.
 
 The registry expires missing heartbeats, records registration, heartbeat, and
 disconnect transitions through the configured audit sink, and the example MCP

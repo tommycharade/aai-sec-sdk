@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
 import pytest
 from scripts.onboard_codex import onboard
 
-from agentic_security import AgentSessionCredential, AgentSessionStore
+from agentic_security import AgentSessionCredential, AgentSessionStore, AgentSessionStoreError
 
 
 def _onboard(project: Path) -> Path:
@@ -111,3 +113,58 @@ def test_onboard_codex_secures_session_without_project_secret(
     assert cache.load() == AgentSessionCredential(token, 1_900)
     assert token not in config_path.read_text(encoding="utf-8")
     assert token not in capsys.readouterr().out
+
+
+def test_onboard_codex_leaves_configuration_untouched_when_cache_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed credential transfer cannot leave a half-enrolled project."""
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    config_path = codex_dir / "config.toml"
+    original = 'model = "synthetic-model"\n'
+    config_path.write_text(original, encoding="utf-8")
+    monkeypatch.setenv("AAI_SEC_AGENT_TOKEN", "synthetic-cache-failure-1234")
+
+    def fail_save(_store: object, _credential: object) -> None:
+        raise AgentSessionStoreError("synthetic cache failure")
+
+    monkeypatch.setattr(AgentSessionStore, "save", fail_save)
+    with pytest.raises(AgentSessionStoreError, match="synthetic cache failure"):
+        _onboard(tmp_path)
+
+    assert config_path.read_text(encoding="utf-8") == original
+
+
+def test_onboard_codex_checks_session_store_before_project_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unsupported host credential security fails before creating TOML."""
+
+    def fail_store(*_args: object, **_kwargs: object) -> AgentSessionStore:
+        raise AgentSessionStoreError("synthetic unsupported host")
+
+    monkeypatch.setattr("scripts.onboard_codex.AgentSessionStore", fail_store)
+    with pytest.raises(AgentSessionStoreError, match="unsupported host"):
+        _onboard(tmp_path)
+
+    assert not (tmp_path / ".codex").exists()
+
+
+@pytest.mark.parametrize("script", ["onboard_claude.py", "onboard_codex.py"])
+def test_onboarding_script_imports_adjacent_checkout_without_install(
+    script: str,
+) -> None:
+    """Documented direct-checkout entry points load the adjacent src package."""
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and repository script
+        [sys.executable, str(Path.cwd() / "scripts" / script), "--help"],
+        cwd="/",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "usage:" in result.stdout

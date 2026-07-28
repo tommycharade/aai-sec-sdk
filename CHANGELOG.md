@@ -4,7 +4,11 @@
   the MCP gateway share heartbeat-rotated AWS agent bearers beyond the original
   15-minute session. The reference cache is outside project configuration,
   atomic, user-only, bounded and fail-closed for symlinks, unsafe permissions,
-  foreign ownership, malformed content and expiry.
+  foreign ownership, malformed content and expiry. Repeat enterprise
+  onboarding now preserves fail-closed AWS mode, direct-checkout scripts load
+  their adjacent SDK source, Codex secures the session before changing project
+  TOML, record reads are allocation-bounded, and unsupported non-POSIX storage
+  fails closed pending an ACL-aware credential adapter.
 - Fixed AWS operator mutation RBAC for the string-shaped `cognito:groups`
   claims emitted by API Gateway. Bounded single, JSON-array, and
   bracket/comma projections now normalize to exact role names, while malformed,

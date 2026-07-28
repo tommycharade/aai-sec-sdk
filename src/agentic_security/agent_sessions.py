@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+_MAX_RECORD_BYTES = 4_096
+
 
 class AgentSessionStoreError(RuntimeError):
     """Report an unsafe, unreadable, or unwritable host session cache."""
@@ -75,7 +77,13 @@ class AgentSessionStore:
 
         Raises:
             ValueError: If routing identity or the endpoint is malformed.
+            AgentSessionStoreError: If the host cannot verify POSIX owner-only
+                storage semantics for the plaintext reference cache.
         """
+        if not _supports_private_posix_storage():
+            raise AgentSessionStoreError(
+                "agent session cache requires POSIX ownership and file-mode enforcement"
+            )
         parsed = urlsplit(base_url.rstrip("/"))
         local_http = parsed.scheme == "http" and parsed.hostname in {
             "localhost",
@@ -110,15 +118,26 @@ class AgentSessionStore:
             return None
         self._prepare_directory()
         self._validate_file()
+        descriptor = -1
         try:
-            raw = self.path.read_text(encoding="utf-8")
-            if len(raw.encode("utf-8")) > 4_096:
+            # Read one byte beyond the contract limit so attacker-controlled
+            # cache content cannot force an unbounded allocation before it is
+            # rejected. O_NOFOLLOW plus descriptor metadata validation closes
+            # the symlink-swap race between the preceding path check and read.
+            descriptor = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)
+            self._validate_file_details(os.fstat(descriptor))
+            encoded = os.read(descriptor, _MAX_RECORD_BYTES + 1)
+            if len(encoded) > _MAX_RECORD_BYTES:
                 return None
+            raw = encoded.decode("utf-8")
             value = json.loads(raw)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             if isinstance(exc, OSError):
                 raise AgentSessionStoreError("agent session cache could not be read") from exc
             return None
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
         if not isinstance(value, dict) or set(value) != {
             "version",
             "deploymentId",
@@ -216,6 +235,10 @@ class AgentSessionStore:
             details = self.path.lstat()
         except OSError as exc:
             raise AgentSessionStoreError("agent session cache metadata is unavailable") from exc
+        self._validate_file_details(details)
+
+    def _validate_file_details(self, details: os.stat_result) -> None:
+        """Validate file metadata obtained from either a path or descriptor."""
         if stat.S_ISLNK(details.st_mode) or not stat.S_ISREG(details.st_mode):
             raise AgentSessionStoreError("agent session cache must be a regular non-symlink file")
         if details.st_mode & 0o077:
@@ -229,3 +252,14 @@ def _identifier(value: object) -> bool:
     return isinstance(value, str) and bool(
         re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value)
     )
+
+
+def _supports_private_posix_storage() -> bool:
+    """Return whether owner-only POSIX file protections can be verified.
+
+    The reference store intentionally fails closed on Windows and other hosts
+    without a numeric effective user identity. Those deployments need an
+    adapter backed by a platform keychain, protected credential service, or
+    equivalent ACL-aware broker rather than this plaintext-on-disk cache.
+    """
+    return os.name == "posix" and hasattr(os, "getuid") and hasattr(os, "O_NOFOLLOW")

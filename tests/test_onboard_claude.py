@@ -79,7 +79,7 @@ def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path)
         "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL": "https://fleet.example.test/api",
         "AAI_SEC_DEPLOYMENT_ID": "deployment-prod-eu",
         "AAI_SEC_AGENT_ID": "claude-platform-prod",
-        "AAI_SEC_AGENT_SESSION_MODE": "local",
+        "AAI_SEC_AGENT_SESSION_MODE": "aws",
     }
     assert "AAI_SEC_AGENT_TOKEN" not in environment
     hook_command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
@@ -92,7 +92,7 @@ def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path)
         "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL=https://fleet.example.test/api",
         "AAI_SEC_DEPLOYMENT_ID=deployment-prod-eu",
         "AAI_SEC_AGENT_ID=claude-platform-prod",
-        "AAI_SEC_AGENT_SESSION_MODE=local",
+        "AAI_SEC_AGENT_SESSION_MODE=aws",
     ]
 
 
@@ -132,3 +132,55 @@ def test_onboard_secures_ui_session_outside_project_configuration(
     assert token not in (project / ".mcp.json").read_text(encoding="utf-8")
     assert token not in (project / ".claude/settings.json").read_text(encoding="utf-8")
     assert token not in capsys.readouterr().out
+
+
+def test_repeat_enterprise_onboarding_stays_aws_and_replaces_managed_hook(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Clearing the one-time token cannot downgrade or duplicate enforcement."""
+    user_home = tmp_path / "home"
+    user_home.mkdir(mode=0o700)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.setenv("AAI_SEC_AGENT_TOKEN", "synthetic-repeat-session-1234")
+
+    def run_onboarding() -> None:
+        onboard(
+            project,
+            Path.cwd(),
+            python="python3",
+            dry_run=False,
+            enterprise_control_plane_url="https://fleet.example.test/api",
+            deployment_id="deployment-prod-eu",
+            agent_id="claude-platform-prod",
+        )
+
+    run_onboarding()
+    monkeypatch.delenv("AAI_SEC_AGENT_TOKEN")
+    run_onboarding()
+
+    settings = json.loads((project / ".claude/settings.json").read_text(encoding="utf-8"))
+    managed = settings["hooks"]["PreToolUse"]
+    assert len(managed) == 1
+    assert "AAI_SEC_AGENT_SESSION_MODE=aws" in managed[0]["hooks"][0]["command"]
+    mcp = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+    assert mcp["mcpServers"]["agentic-security"]["env"]["AAI_SEC_AGENT_SESSION_MODE"] == "aws"
+
+
+def test_enterprise_onboarding_validates_scope_before_writing_project(
+    tmp_path: Path,
+) -> None:
+    """Missing deployment identity cannot produce an unusable host config."""
+    with pytest.raises(SystemExit, match="requires --deployment-id"):
+        onboard(
+            tmp_path,
+            Path.cwd(),
+            python="python3",
+            dry_run=False,
+            enterprise_control_plane_url="https://fleet.example.test/api",
+        )
+
+    assert not (tmp_path / ".claude").exists()
+    assert not (tmp_path / ".mcp.json").exists()
