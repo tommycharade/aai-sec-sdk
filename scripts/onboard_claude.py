@@ -13,11 +13,17 @@ import json
 import os
 import shlex
 import shutil
+import ssl
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+
+import certifi
 
 
 def _timestamp() -> str:
@@ -85,6 +91,33 @@ def _copy_policy(source: Path, destination: Path, *, dry_run: bool) -> None:
     os.chmod(destination, 0o600)
 
 
+def _enroll_agent(base_url: str, bootstrap_token: str) -> str:
+    """Consume one AWS bootstrap token and return the short-lived session."""
+    parsed = urlsplit(base_url.rstrip("/"))
+    local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    if parsed.scheme != "https" and not local_http:
+        raise SystemExit("enterprise control-plane URL must use HTTPS outside localhost")
+    request = urllib.request.Request(  # noqa: S310 - scheme is validated above
+        f"{base_url.rstrip('/')}/agent/enroll",
+        data=json.dumps({"bootstrapToken": bootstrap_token}).encode("utf-8"),
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(  # noqa: S310 - HTTPS and CA bundle are explicit
+            request,
+            timeout=15,
+            context=ssl.create_default_context(cafile=certifi.where()),
+        ) as response:
+            value = json.loads(response.read(1_000_000))
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("agent bootstrap enrollment failed") from exc
+    token = value.get("accessToken") if isinstance(value, dict) else None
+    if not isinstance(token, str) or len(token) < 16:
+        raise SystemExit("agent enrollment returned no valid session token")
+    return token
+
+
 def onboard(
     project_root: Path,
     sdk_root: Path,
@@ -95,6 +128,7 @@ def onboard(
     enterprise_control_plane_url: str | None = None,
     deployment_id: str | None = None,
     agent_id: str = "claude-code-local",
+    bootstrap_token: str | None = None,
 ) -> None:
     """Create or update Claude hook and MCP configuration for one project."""
     project_root = project_root.expanduser().resolve()
@@ -105,7 +139,30 @@ def onboard(
     if not hook.is_file() or not gateway.is_file() or not policy.is_file():
         raise SystemExit(f"SDK examples were not found under {sdk_root}")
 
-    command = shlex.join([python, str(hook)])
+    agent_session_token = None
+    if bootstrap_token:
+        if not enterprise_control_plane_url or not deployment_id:
+            raise SystemExit(
+                "--bootstrap-token requires --enterprise-control-plane-url and --deployment-id"
+            )
+        if not dry_run:
+            agent_session_token = _enroll_agent(enterprise_control_plane_url, bootstrap_token)
+
+    command_parts = [python, str(hook)]
+    if enterprise_control_plane_url:
+        # Routing metadata is safe to embed in the hook command. The agent
+        # bearer token is intentionally inherited from the Claude process and
+        # is never written to project configuration.
+        aws_session = bool(bootstrap_token or os.environ.get("AAI_SEC_AGENT_TOKEN"))
+        command_parts = [
+            "env",
+            f"AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL={enterprise_control_plane_url.rstrip('/')}",
+            f"AAI_SEC_DEPLOYMENT_ID={deployment_id or ''}",
+            f"AAI_SEC_AGENT_ID={agent_id}",
+            f"AAI_SEC_AGENT_SESSION_MODE={'aws' if aws_session else 'local'}",
+            *command_parts,
+        ]
+    command = shlex.join(command_parts)
     settings_path = project_root / ".claude" / "settings.json"
     policy_path = project_root / ".claude" / "aai-sec-config.json"
     mcp_path = project_root / ".mcp.json"
@@ -133,6 +190,9 @@ def onboard(
         if enterprise_control_plane_url:
             server["env"]["AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL"] = (
                 enterprise_control_plane_url.rstrip("/")
+            )
+            server["env"]["AAI_SEC_AGENT_SESSION_MODE"] = (
+                "aws" if (bootstrap_token or os.environ.get("AAI_SEC_AGENT_TOKEN")) else "local"
             )
         elif control_plane_url:
             server["env"]["AAI_SEC_CONTROL_PLANE_URL"] = control_plane_url.rstrip("/")
@@ -163,6 +223,9 @@ def onboard(
     print("  4. Test an allowed read, an approval-required command, and a denied command")
     if control_plane_url or enterprise_control_plane_url:
         print("  5. Export AAI_SEC_AGENT_TOKEN before starting Claude Code")
+        if agent_session_token:
+            print(f"     export AAI_SEC_AGENT_TOKEN={shlex.quote(agent_session_token)}")
+            print("     (This token is short-lived; do not commit it.)")
         print("  6. Confirm the live Claude agent appears in the management UI")
     else:
         print("  5. Add a control-plane URL and export AAI_SEC_AGENT_TOKEN for live UI presence")
@@ -207,6 +270,10 @@ def main() -> int:
         help="Authenticated agent identity for live registration",
     )
     parser.add_argument(
+        "--bootstrap-token",
+        help="One-time AWS agent bootstrap token; exchange it for a short-lived session",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="Print changes without writing files"
     )
     args = parser.parse_args()
@@ -219,6 +286,7 @@ def main() -> int:
         enterprise_control_plane_url=args.enterprise_control_plane_url,
         deployment_id=args.deployment_id,
         agent_id=args.agent_id,
+        bootstrap_token=args.bootstrap_token,
     )
     return 0
 

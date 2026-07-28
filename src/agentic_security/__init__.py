@@ -5,6 +5,7 @@ output trustworthy. The public entry point is :class:`GuardedRuntime`.
 """
 
 from .adapters import (
+    DockerSandboxToolHandler,
     HttpApprovalProvider,
     HttpAuditExporter,
     HttpCedarPolicyEngine,
@@ -28,6 +29,7 @@ from .audit import (
     InMemoryAuditSink,
     ReplicatedAuditSink,
 )
+from .aws import AwsScopePolicy, AwsStsCredentialBroker, DynamoDbIdempotencyStore
 from .budgets import Budget
 from .claude_code import (
     ClaudeCodeHook,
@@ -196,6 +198,9 @@ __all__ = [
     "IdempotencyState",
     "IdempotencyStore",
     "InMemoryIdempotencyStore",
+    "DynamoDbIdempotencyStore",
+    "AwsScopePolicy",
+    "AwsStsCredentialBroker",
     "ClaudeCodeHook",
     "ClaudeHookDecision",
     "ClaudeHookResult",
@@ -299,6 +304,7 @@ __all__ = [
     "RuntimeOperationTimeoutError",
     "ScopedCredential",
     "SubprocessToolHandler",
+    "DockerSandboxToolHandler",
     "TokenCredentialBroker",
     "ProviderToken",
     "SecurityConfigurationError",

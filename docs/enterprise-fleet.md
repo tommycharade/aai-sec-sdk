@@ -49,6 +49,8 @@ The reference WSGI application exposes these authenticated endpoints:
 | `GET /api/enterprise/projects` | Project inventory |
 | `GET /api/enterprise/deployments` | SDK deployment inventory |
 | `GET /api/enterprise/agents` | Claude and other agent presence |
+| `GET /api/enterprise/agents/{deployment}/{agent}/effective-policy` | Authenticated policy resolved from the agent's group assignment |
+| `GET /api/enterprise/agents/{deployment}/{agent}/verify` | Redacted enrollment-readiness checks for operations |
 | `GET /api/enterprise/sessions` | Active/expired session inventory without session tokens |
 | `GET /api/enterprise/capabilities` | Persistence adapter and HA capability metadata |
 | `GET /api/enterprise/drift` | Desired/applied configuration drift |
@@ -60,13 +62,15 @@ The reference WSGI application exposes these authenticated endpoints:
 | `GET /api/enterprise/health` | Deployment health and rollout indicators |
 | `GET /api/enterprise/slo` | Sample-based availability and SLO status in the bounded window |
 | `GET /api/enterprise/compliance/evidence` | Redacted tenant-scoped evidence bundle for review/export |
+| `GET /api/enterprise/audit` | Bounded redaction-safe lifecycle evidence index for investigations |
 | `GET /api/enterprise/alerts` | Derived fleet alerts |
 | `POST /api/enterprise/agents/register` | Register an authenticated agent |
-| `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence |
+| `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence and optionally publish bounded aggregate SDK telemetry |
 | `POST /api/enterprise/agents/{deployment}/{agent}/disconnect` | Mark offline |
 | `POST /api/enterprise/templates` | Create a configuration template |
 | `POST /api/enterprise/policies` | Create a configuration policy |
 | `POST /api/enterprise/groups` | Create a group and bind it to a policy |
+| `POST /api/enterprise/groups/{group}/policy` | Change a group's immutable policy assignment and audit the change |
 | `POST /api/enterprise/groups/{group}/agents` | Enroll an existing agent in a group |
 | `DELETE /api/enterprise/groups/{group}/agents/{deployment}/{agent}` | Remove an agent from a group |
 | `POST /api/enterprise/templates/validate` | Validate safe configuration without persisting it |
@@ -76,6 +80,8 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/deployment-config/rollback` | Restore a known prior version as a new staged version |
 | `POST /api/enterprise/deployment-config/applied` | Record an applied configuration hash |
 | `POST /api/enterprise/emergency-stop` | Stop or clear one deployment through its authority |
+| `POST /api/enterprise/groups/{group}/emergency-stop` | Stop or clear all agents in one group |
+| `POST /api/enterprise/agents/{deployment}/{agent}/emergency-stop` | Stop or clear one enrolled agent |
 | `POST /api/enterprise/alerts/{alertId}/ack` | Acknowledge an alert without deleting evidence |
 | `POST /api/enterprise/alerts/dispatch` | Deliver unacknowledged alerts through an alert adapter |
 | `POST /api/enterprise/slo/sample` | Record one redaction-safe health sample for an authorized deployment |
@@ -93,12 +99,28 @@ agent/deployment scope, timestamps, and active/expired status; the opaque
 session token is never returned. Expired heartbeats are marked offline and
 lifecycle events are written to the configured audit sink.
 
+An authenticated heartbeat may include a `telemetry` object containing only
+bounded numeric aggregates: action totals, admitted cost units, allowed,
+denied, approval-required, executed, failed, timed-out and cancelled counts,
+plus average and maximum guarded-action latency in milliseconds. Unknown,
+negative, non-finite, oversized, or secret-like fields are rejected. The
+control plane stores the latest snapshot with the agent metadata and exposes
+only that fixed projection to operators; it never stores tool arguments,
+resources, outputs, or credentials as telemetry.
+
 Policies are immutable, tenant-scoped configuration records in this reference
 implementation. A group selects one policy, and membership changes affect only
 group assignment; they do not create, rotate, or revoke the agent's session.
 Every policy, group, enrollment, and removal is authorized against the live
 operator identity and recorded as redacted fleet audit evidence. Runtime
 enforcement still occurs in each deployment's SDK authority.
+
+An enrolled runtime can resolve its policy before serving tools through the
+effective-policy endpoint. The lookup is scoped to the authenticated agent and
+fails closed when no group is assigned or when multiple groups select different
+policies. The response is configuration data, not an executable decision; the
+deployment adapter must map it to typed SDK policy objects and cannot weaken
+immutable SDK safeguards.
 
 ## Configuration governance
 

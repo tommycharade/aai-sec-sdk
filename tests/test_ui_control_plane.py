@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from agentic_security import (
+    AgentHost,
     AgentPresenceStore,
     CallbackControlPlaneAuthority,
     ControlPlaneAgentClient,
@@ -316,7 +317,7 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
         def read(self, _limit: int) -> bytes:
             return self.payload
 
-    def fake_urlopen(request: Any, *, timeout: float) -> Response:
+    def fake_urlopen(request: Any, *, timeout: float, **_kwargs: Any) -> Response:
         requests.append((request.full_url, dict(request.headers), json.loads(request.data)))
         if request.full_url.endswith("/register"):
             return Response({"sessionId": "opaque-session"})
@@ -331,11 +332,14 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
     )
 
     assert client.register() == "opaque-session"
-    assert client.heartbeat("opaque-session") == {"status": "connected"}
+    assert client.heartbeat("opaque-session", {"actionsTotal": 3, "averageLatencyMs": 4.5}) == {
+        "status": "connected"
+    }
     assert client.disconnect("opaque-session") == {"status": "connected"}
     assert requests[0][0].endswith("/agents/register")
     assert requests[2][0].endswith("/agents/claude-code-local/disconnect")
     assert requests[0][2]["projectRoot"] == "/workspace/kratos"
+    assert requests[1][2]["telemetry"] == {"actionsTotal": 3, "averageLatencyMs": 4.5}
     assert requests[0][1]["Authorization"] == f"Bearer {TOKEN}"
 
     enterprise_client = ControlPlaneAgentClient(
@@ -348,6 +352,102 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
     assert enterprise_client.register() == "opaque-session"
     assert requests[3][0].endswith("/enterprise/agents/register")
     assert requests[3][2]["deploymentId"] == "deployment-prod"
+
+    codex_client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="codex-cli-local",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        host=AgentHost.CODEX_CLI,
+    )
+    assert codex_client.register() == "opaque-session"
+    assert requests[4][2]["host"] == "codex-cli"
+
+    def effective_urlopen(request: Any, *, timeout: float, **_kwargs: Any) -> Response:
+        requests.append((request.full_url, dict(request.headers), {}))
+        return Response({"policy": {"id": "policy-safe"}})
+
+    monkeypatch.setattr(control_plane, "urlopen", effective_urlopen)
+    assert enterprise_client.effective_policy()["policy"]["id"] == "policy-safe"
+    assert requests[-1][0].endswith(
+        "/enterprise/agents/deployment-prod/claude-code-local/effective-policy"
+    )
+
+    aws_requests: list[str] = []
+
+    def aws_urlopen(request: Any, *, timeout: float, **_kwargs: Any) -> Response:
+        aws_requests.append(request.full_url)
+        if request.full_url.endswith("/effective-policy"):
+            return Response(
+                {
+                    "policyId": "policy-aws",
+                    "version": 3,
+                    "configuration": {"runtime": {"allowedTools": ["read_repository"]}},
+                }
+            )
+        return Response({"status": "connected"})
+
+    monkeypatch.setattr(control_plane, "urlopen", aws_urlopen)
+    aws_client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-code-local",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+    )
+    assert aws_client.register() == TOKEN
+    assert aws_client.heartbeat(TOKEN) == {"status": "connected"}
+    assert aws_client.effective_policy()["policy"]["id"] == "policy-aws"
+    assert aws_requests == [
+        "https://control.example.test/api/agent/deployment-prod/claude-code-local/heartbeat",
+        "https://control.example.test/api/agent/deployment-prod/claude-code-local/heartbeat",
+        "https://control.example.test/api/agent/deployment-prod/claude-code-local/effective-policy",
+    ]
+    assert aws_client.disconnect(TOKEN) == {"status": "disconnect_pending_expiry"}
+
+
+def test_agent_client_adopts_rotated_session_from_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A renewed AWS bearer is kept in memory and used by later requests."""
+    import agentic_security.ui_control_plane as control_plane
+
+    seen_authorizations: list[str] = []
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(
+                {"status": "connected", "accessToken": "new-session-token-123456"}
+            ).encode()
+
+    def fake_urlopen(request: Any, *, timeout: float, **_kwargs: Any) -> Response:
+        del timeout
+        seen_authorizations.append(request.headers["Authorization"])
+        return Response()
+
+    monkeypatch.setattr(control_plane, "urlopen", fake_urlopen)
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="codex-cli-local",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+        host=AgentHost.CODEX_CLI,
+    )
+
+    response = client.heartbeat(TOKEN)
+    assert response["accessToken"] == "new-session-token-123456"
+    client.heartbeat("new-session-token-123456")
+    assert seen_authorizations == [f"Bearer {TOKEN}", "Bearer new-session-token-123456"]
 
 
 def test_agent_client_rejects_unsafe_endpoints_and_transport_failures(
@@ -375,10 +475,18 @@ def test_agent_client_rejects_unsafe_endpoints_and_transport_failures(
             project_root="/workspace",
             timeout_seconds=0,
         )
+    with pytest.raises(ValueError, match="host is not supported"):
+        ControlPlaneAgentClient(
+            "https://control.example.test/api",
+            TOKEN,
+            agent_id="agent",
+            project_root="/workspace",
+            host="not-a-supported-host",
+        )
 
     import agentic_security.ui_control_plane as control_plane
 
-    def failing_urlopen(_request: Any, *, timeout: float) -> Any:
+    def failing_urlopen(_request: Any, *, timeout: float, **_kwargs: Any) -> Any:
         raise OSError("synthetic network outage")
 
     monkeypatch.setattr(control_plane, "urlopen", failing_urlopen)

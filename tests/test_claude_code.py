@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 
+import examples.claude_code_hook as claude_hook_example
 import pytest
 
 from agentic_security import (
@@ -135,3 +136,42 @@ def test_claude_hook_denies_when_audit_persistence_fails() -> None:
     )
     result = hook.handle(event("Read", {}))
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_claude_native_hook_resolves_central_policy_and_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Native tools use the same authenticated group policy as the MCP gateway."""
+
+    class Client:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def effective_policy(self) -> dict[str, object]:
+            return {
+                "policy": {
+                    "configuration": {
+                        "policy": {"denyByDefault": True},
+                        "tools": {"allowed": ["lookup_record"]},
+                        "claudeCode": {
+                            "allowedBuiltInTools": ["Read"],
+                            "fileTools": ["Read"],
+                            "deniedCommandPatterns": [r"rm\s+-rf"],
+                            "approvalCommandPatterns": [r"git\s+push"],
+                        },
+                        "audit": {"redactSensitiveData": True},
+                    }
+                }
+            }
+
+    monkeypatch.setenv("AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL", "https://fleet.example.test/api")
+    monkeypatch.setenv("AAI_SEC_AGENT_TOKEN", "synthetic-agent-token-1234")
+    monkeypatch.setenv("AAI_SEC_DEPLOYMENT_ID", "deployment-a")
+    monkeypatch.setattr(claude_hook_example, "ControlPlaneAgentClient", Client)
+    config = claude_hook_example._load_central_config(tmp_path)
+    assert config is not None
+    assert config["allowedTools"] == ["Read"]
+    assert config["allowedCommandPatterns"] == []
+
+    monkeypatch.delenv("AAI_SEC_AGENT_TOKEN")
+    assert claude_hook_example._load_central_config(tmp_path) is None

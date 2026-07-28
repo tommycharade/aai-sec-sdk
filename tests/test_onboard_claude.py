@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 from scripts.onboard_claude import onboard
@@ -68,11 +69,25 @@ def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path)
         agent_id="claude-platform-prod",
     )
 
+    settings = json.loads((tmp_path / ".claude/settings.json").read_text())
     mcp = json.loads((tmp_path / ".mcp.json").read_text())
     environment = mcp["mcpServers"]["agentic-security"]["env"]
     assert environment == {
         "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL": "https://fleet.example.test/api",
         "AAI_SEC_DEPLOYMENT_ID": "deployment-prod-eu",
         "AAI_SEC_AGENT_ID": "claude-platform-prod",
+        "AAI_SEC_AGENT_SESSION_MODE": "local",
     }
     assert "AAI_SEC_AGENT_TOKEN" not in environment
+    hook_command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert "AAI_SEC_AGENT_TOKEN" not in hook_command
+    assert "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL" in hook_command
+    assert "deployment-prod-eu" in hook_command
+    command_tokens = shlex.split(hook_command)
+    assert command_tokens[:5] == [
+        "env",
+        "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL=https://fleet.example.test/api",
+        "AAI_SEC_DEPLOYMENT_ID=deployment-prod-eu",
+        "AAI_SEC_AGENT_ID=claude-platform-prod",
+        "AAI_SEC_AGENT_SESSION_MODE=local",
+    ]

@@ -406,6 +406,38 @@ def test_agent_registration_heartbeat_expiry_and_disconnect_are_secret_safe(tmp_
         host="claude-code",
         project_root="/workspace/payments",
     )
+    reported = store.heartbeat(
+        identity("org-a"),
+        "deploy-a",
+        "claude-a",
+        fresh["sessionId"],
+        telemetry={
+            "actionsTotal": 12,
+            "actionsAdmitted": 10,
+            "allowed": 9,
+            "denied": 2,
+            "approvalRequired": 1,
+            "executed": 9,
+            "failed": 0,
+            "timedOut": 0,
+            "cancelled": 0,
+            "resultRejected": 0,
+            "runtimeErrors": 0,
+            "costUnits": 14,
+            "averageLatencyMs": 12.5,
+            "maxLatencyMs": 43.0,
+        },
+    )
+    assert reported["telemetry"]["actionsTotal"] == 12
+    assert store.list_inventory(identity("org-a"), "agents").items[0]["telemetry"]["denied"] == 2
+    with pytest.raises(FleetConfigurationError):
+        store.heartbeat(
+            identity("org-a"),
+            "deploy-a",
+            "claude-a",
+            fresh["sessionId"],
+            telemetry={"secret": 1},
+        )
     disconnected = store.disconnect(identity("org-a"), "deploy-a", "claude-a", fresh["sessionId"])
     assert disconnected["status"] == "offline"
     assert {event.event_type for event in audit.events()} >= {
@@ -807,9 +839,45 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
         app,
         "POST",
         "/api/enterprise/agents/deploy-a/claude-a/heartbeat",
-        {"sessionId": registered["sessionId"]},
+        {
+            "sessionId": registered["sessionId"],
+            "telemetry": {
+                "actionsTotal": 2,
+                "actionsAdmitted": 2,
+                "allowed": 1,
+                "denied": 1,
+                "approvalRequired": 0,
+                "executed": 1,
+                "failed": 0,
+                "timedOut": 0,
+                "cancelled": 0,
+                "resultRejected": 0,
+                "runtimeErrors": 0,
+                "costUnits": 2,
+                "averageLatencyMs": 5.5,
+                "maxLatencyMs": 8.0,
+            },
+        },
     )
     assert status.startswith("200") and heartbeat["status"] == "connected"
+    status, agents = call_api(app, "GET", "/api/enterprise/agents")
+    assert status.startswith("200")
+    assert agents["items"][0]["telemetry"]["averageLatencyMs"] == 5.5
+    bad_status, _ = call_api(
+        app,
+        "POST",
+        "/api/enterprise/agents/deploy-a/claude-a/heartbeat",
+        {"sessionId": registered["sessionId"], "telemetry": {"secret": 1}},
+    )
+    assert bad_status.startswith("400")
+    status, verification = call_api(app, "GET", "/api/enterprise/agents/deploy-a/claude-a/verify")
+    assert status.startswith("200")
+    assert verification["verified"] is False
+    assert verification["checks"]["policyAssignment"]["passed"] is False
+    status, audit = call_api(app, "GET", "/api/enterprise/audit")
+    assert status.startswith("200")
+    assert audit["items"]
+    assert "payloadHash" in audit["items"][0]
     assert call_api(
         app,
         "POST",
@@ -988,6 +1056,125 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
     assert status.startswith("201") and policy["id"] == "policy-safe"
     status, policies = call_api(app, "GET", "/api/enterprise/policies")
     assert status.startswith("200") and policies["items"][0]["id"] == "policy-safe"
+    status, updated_policy = call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions",
+        {
+            "name": "Safe default v2",
+            "configuration": {"policy": {"denyByDefault": True}, "budgets": {"maxActions": 10}},
+        },
+    )
+    assert status.startswith("200") and updated_policy["version"] == 2
+    assert updated_policy["author"] == "operator-1"
+    status, skill = call_api(
+        app,
+        "POST",
+        "/api/enterprise/skills",
+        {
+            "skillId": "skill-review",
+            "name": "Review",
+            "description": "Synthetic",
+            "version": "1.0.0",
+            "content": "# Review",
+            "enabled": True,
+        },
+    )
+    assert status.startswith("201") and skill["digest"].startswith("sha256:")
+    status, mcp = call_api(
+        app,
+        "POST",
+        "/api/enterprise/mcp-servers",
+        {
+            "serverId": "mcp-review",
+            "name": "Review MCP",
+            "description": "Synthetic",
+            "version": "1.0.0",
+            "transport": "stdio",
+            "command": "python",
+            "args": ["server.py"],
+            "environmentReferences": ["TOKEN"],
+            "enabled": True,
+        },
+    )
+    assert status.startswith("201") and mcp["environmentReferences"] == ["TOKEN"]
+    status, skills = call_api(app, "GET", "/api/enterprise/skills")
+    assert status.startswith("200") and skills["items"][0]["id"] == "skill-review"
+    status, mcp_servers = call_api(app, "GET", "/api/enterprise/mcp-servers")
+    assert status.startswith("200") and mcp_servers["items"][0]["id"] == "mcp-review"
+    status, invalid_skill = call_api(
+        app,
+        "POST",
+        "/api/enterprise/skills",
+        {
+            "skillId": "skill-too-large",
+            "name": "Too large",
+            "description": "Synthetic",
+            "content": "x" * 100001,
+        },
+    )
+    assert status.startswith("400") and "too large" in invalid_skill["error"]
+    status, invalid_empty_skill = call_api(
+        app,
+        "POST",
+        "/api/enterprise/skills",
+        {
+            "skillId": "skill-empty",
+            "name": "Empty",
+            "description": "Synthetic",
+            "content": "   ",
+        },
+    )
+    assert status.startswith("400") and "non-empty" in invalid_empty_skill["error"]
+    status, duplicate_skill = call_api(
+        app,
+        "POST",
+        "/api/enterprise/skills",
+        {
+            "skillId": "skill-review",
+            "name": "Duplicate",
+            "description": "Synthetic",
+            "content": "# Duplicate",
+        },
+    )
+    assert status.startswith("400") and "already exists" in duplicate_skill["error"]
+    status, invalid_mcp = call_api(
+        app,
+        "POST",
+        "/api/enterprise/mcp-servers",
+        {
+            "serverId": "mcp-invalid",
+            "name": "Invalid",
+            "description": "Synthetic",
+            "version": "1.0.0",
+            "transport": "tcp",
+        },
+    )
+    assert status.startswith("400") and "transport" in invalid_mcp["error"]
+    status, missing_command = call_api(
+        app,
+        "POST",
+        "/api/enterprise/mcp-servers",
+        {
+            "serverId": "mcp-no-command",
+            "name": "No command",
+            "description": "Synthetic",
+            "transport": "stdio",
+        },
+    )
+    assert status.startswith("400") and "command" in missing_command["error"]
+    status, missing_url = call_api(
+        app,
+        "POST",
+        "/api/enterprise/mcp-servers",
+        {
+            "serverId": "mcp-no-url",
+            "name": "No URL",
+            "description": "Synthetic",
+            "transport": "http",
+        },
+    )
+    assert status.startswith("400") and "URL" in missing_url["error"]
     status, duplicate_policy = call_api(
         app,
         "POST",
@@ -1002,8 +1189,17 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
         {"groupId": "group-platform", "name": "Platform", "policyId": "policy-safe"},
     )
     assert (
-        status.startswith("201") and group["policyName"] == "Safe default" and group["agents"] == []
+        status.startswith("201")
+        and group["policyName"] == "Safe default v2"
+        and group["agents"] == []
     )
+    status, reassigned = call_api(
+        app,
+        "POST",
+        "/api/enterprise/groups/group-platform/policy",
+        {"policyId": "policy-safe"},
+    )
+    assert status.startswith("200") and reassigned["policyId"] == "policy-safe"
     status, duplicate_group = call_api(
         app,
         "POST",
@@ -1018,6 +1214,35 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
         {"deploymentId": "deploy-a", "agentId": "claude-a"},
     )
     assert status.startswith("201") and enrolled["agents"][0]["id"] == "claude-a"
+    status, selected_version = call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions",
+        {
+            "name": "Safe default with managed resources",
+            "configuration": {
+                "policy": {"denyByDefault": True},
+                "audit": {"redactSensitiveData": True},
+                "claudeCode": {
+                    "allowedSkills": ["skill-review"],
+                    "allowedMcpServers": ["mcp-review"],
+                },
+            },
+        },
+    )
+    assert status.startswith("200") and selected_version["version"] == 3
+    status, effective = call_api(
+        app, "GET", "/api/enterprise/agents/deploy-a/claude-a/effective-policy"
+    )
+    assert status.startswith("200")
+    assert (
+        effective["policy"]["configuration"]["claudeCode"]["managedSkills"][0]["id"]
+        == "skill-review"
+    )
+    assert (
+        effective["policy"]["configuration"]["claudeCode"]["managedMcpServers"][0]["id"]
+        == "mcp-review"
+    )
     status, duplicate_member = call_api(
         app,
         "POST",
@@ -1027,6 +1252,32 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
     assert (
         status.startswith("400") and duplicate_member["error"] == "agent is already in this group"
     )
+    status, stopped_group = call_api(
+        app,
+        "POST",
+        "/api/enterprise/groups/group-platform/emergency-stop",
+        {"active": True},
+    )
+    assert status.startswith("200") and stopped_group["emergencyStop"] is True
+    status, stopped_agent = call_api(
+        app,
+        "POST",
+        "/api/enterprise/agents/deploy-a/claude-a/emergency-stop",
+        {"active": True},
+    )
+    assert status.startswith("200") and stopped_agent["emergencyStop"] is True
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/agents/deploy-a/claude-a/emergency-stop",
+        {"active": False},
+    )[0].startswith("200")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/groups/group-platform/emergency-stop",
+        {"active": False},
+    )[0].startswith("200")
     status, groups = call_api(app, "GET", "/api/enterprise/groups")
     assert status.startswith("200") and groups["items"][0]["policyId"] == "policy-safe"
     status, removed = call_api(
@@ -1037,3 +1288,185 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
         app, "DELETE", "/api/enterprise/groups/group-platform/agents/deploy-a/claude-a"
     )
     assert status.startswith("404") and duplicate["error"] == "agent group membership not found"
+
+
+def test_effective_policy_requires_one_unambiguous_group_assignment(tmp_path: Path) -> None:
+    """An enrolled agent receives only its tenant-scoped, unambiguous policy."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    operator = identity("org-a")
+    seed(store)
+    store.register_agent(
+        operator,
+        deployment_id="deploy-a",
+        agent_id="claude-a",
+        host="claude-code",
+        project_root="/workspace/payments",
+    )
+    store.create_policy(
+        operator,
+        policy_id="policy-safe",
+        name="Safe",
+        configuration={"tools": {"allowed": ["lookup_record"]}},
+    )
+    store.create_group(
+        operator, group_id="group-platform", name="Platform", policy_id="policy-safe"
+    )
+    agent = FleetIdentity("claude-a", "org-a", frozenset({"agent"}))
+    with pytest.raises(FleetNotFoundError, match="not assigned"):
+        store.effective_agent_policy(agent, deployment_id="deploy-a", agent_id="claude-a")
+    store.add_agent_to_group(
+        operator, group_id="group-platform", deployment_id="deploy-a", agent_id="claude-a"
+    )
+    effective = store.effective_agent_policy(agent, deployment_id="deploy-a", agent_id="claude-a")
+    assert effective["policy"]["id"] == "policy-safe"
+    assert effective["groupId"] == "group-platform"
+
+    store.create_policy(
+        operator,
+        policy_id="policy-restricted",
+        name="Restricted",
+        configuration={"tools": {"allowed": []}},
+    )
+    store.create_group(
+        operator, group_id="group-restricted", name="Restricted", policy_id="policy-restricted"
+    )
+    store.add_agent_to_group(
+        operator, group_id="group-restricted", deployment_id="deploy-a", agent_id="claude-a"
+    )
+    with pytest.raises(FleetConfigurationError, match="conflicting policies"):
+        store.effective_agent_policy(agent, deployment_id="deploy-a", agent_id="claude-a")
+
+
+def test_effective_policy_http_route_is_agent_scoped(tmp_path: Path) -> None:
+    """The effective-policy endpoint authenticates the agent and returns no session."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    operator_token = "fleet-admin-token-1234"  # noqa: S105 - synthetic test credential
+    agent_token = "fleet-agent-token-1234"  # noqa: S105 - synthetic test credential
+    operator = identity("org-a")
+    agent = FleetIdentity("claude-a", "org-a", frozenset({"agent"}))
+    app = EnterpriseFleetApplication(
+        store,
+        authenticator=StaticFleetAuthenticator({operator_token: operator, agent_token: agent}),
+    )
+    seed(store)
+    store.register_agent(
+        operator,
+        deployment_id="deploy-a",
+        agent_id="claude-a",
+        host="claude-code",
+        project_root="/workspace/payments",
+    )
+    store.create_policy(
+        operator,
+        policy_id="policy-safe",
+        name="Safe",
+        configuration={"tools": {"allowed": ["lookup_record"]}},
+    )
+    store.create_group(
+        operator, group_id="group-platform", name="Platform", policy_id="policy-safe"
+    )
+    store.add_agent_to_group(
+        operator, group_id="group-platform", deployment_id="deploy-a", agent_id="claude-a"
+    )
+    status, payload = call_api(
+        app,
+        "GET",
+        "/api/enterprise/agents/deploy-a/claude-a/effective-policy",
+        token=agent_token,
+    )
+    assert status.startswith("200")
+    assert payload["policy"]["id"] == "policy-safe"
+    assert "sessionId" not in json.dumps(payload)
+
+
+def test_incident_stops_cover_agent_group_and_deployment_scopes(tmp_path: Path) -> None:
+    """Every incident stop scope is visible to the enrolled runtime and auditable."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    operator = identity("org-a")
+    seed(store)
+    store.register_agent(
+        operator,
+        deployment_id="deploy-a",
+        agent_id="claude-a",
+        host="claude-code",
+        project_root="/workspace/payments",
+    )
+    store.create_policy(
+        operator,
+        policy_id="policy-safe",
+        name="Safe",
+        configuration={"tools": {"allowed": ["lookup_record"]}},
+    )
+    store.create_group(
+        operator, group_id="group-platform", name="Platform", policy_id="policy-safe"
+    )
+    store.add_agent_to_group(
+        operator, group_id="group-platform", deployment_id="deploy-a", agent_id="claude-a"
+    )
+    assert (
+        store.set_agent_emergency_stop(
+            operator, deployment_id="deploy-a", agent_id="claude-a", active=True
+        )["emergencyStop"]
+        is True
+    )
+    assert (
+        store.effective_agent_policy(
+            FleetIdentity("claude-a", "org-a", frozenset({"agent"})),
+            deployment_id="deploy-a",
+            agent_id="claude-a",
+        )["emergencyStop"]
+        is True
+    )
+    store.set_agent_emergency_stop(
+        operator, deployment_id="deploy-a", agent_id="claude-a", active=False
+    )
+    assert (
+        store.set_group_emergency_stop(operator, group_id="group-platform", active=True)[
+            "emergencyStop"
+        ]
+        is True
+    )
+    assert store.set_emergency_stop(operator, "deploy-a", active=True)["emergencyStop"] is True
+    evidence = store.audit_evidence(operator)
+    assert evidence.items
+    assert all("payloadHash" in item and "sessionId" not in item for item in evidence.items)
+    filtered = store.audit_evidence(operator, event_type="fleet_agent_emergency_stop_changed")
+    assert all(item["eventType"] == "fleet_agent_emergency_stop_changed" for item in filtered.items)
+
+
+def test_agent_verification_reports_each_enrollment_prerequisite(tmp_path: Path) -> None:
+    """Operations can prove why an enrolled agent is or is not ready."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    operator = identity("org-a")
+    seed(store)
+    store.register_agent(
+        operator,
+        deployment_id="deploy-a",
+        agent_id="claude-a",
+        host="claude-code",
+        project_root="/workspace/payments",
+    )
+    store.create_policy(
+        operator,
+        policy_id="policy-safe",
+        name="Safe",
+        configuration={"tools": {"allowed": ["lookup_record"]}},
+    )
+    store.create_group(
+        operator, group_id="group-platform", name="Platform", policy_id="policy-safe"
+    )
+    result = store.verify_agent(operator, deployment_id="deploy-a", agent_id="claude-a")
+    assert result["verified"] is False
+    assert result["checks"]["registered"]["passed"] is True
+    assert result["checks"]["policyAssignment"]["passed"] is False
+    store.add_agent_to_group(
+        operator, group_id="group-platform", deployment_id="deploy-a", agent_id="claude-a"
+    )
+    result = store.verify_agent(operator, deployment_id="deploy-a", agent_id="claude-a")
+    assert result["verified"] is True
+    store.set_agent_emergency_stop(
+        operator, deployment_id="deploy-a", agent_id="claude-a", active=True
+    )
+    stopped = store.verify_agent(operator, deployment_id="deploy-a", agent_id="claude-a")
+    assert stopped["verified"] is False
+    assert stopped["checks"]["emergencyStop"]["passed"] is False

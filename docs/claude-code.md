@@ -34,10 +34,19 @@ Use this sequence when onboarding a new project:
 From the project you want Claude Code to use, run:
 
 ```bash
-python3 /absolute/path/to/aai-sec-sdk/scripts/onboard_claude.py \
-  --project-root "$PWD" \
+SDK_ROOT="${AAI_SEC_SDK_ROOT:-$HOME/.aai-sec-sdk}"
+if [ ! -f "$SDK_ROOT/scripts/onboard_claude.py" ]; then
+  git clone https://github.com/tommycharade/aai-sec-sdk.git "$SDK_ROOT"
+fi
+python3 "$SDK_ROOT/scripts/onboard_claude.py" \
+  --project-root "$PWD" --sdk-root "$SDK_ROOT" \
   --control-plane-url http://localhost:8000/api
 ```
+
+Review the repository and command before running it in a regulated
+environment. Set `AAI_SEC_SDK_ROOT` when the SDK is already checked out at a
+different path. The script writes only project-scoped files and creates
+timestamped backups before changing existing configuration.
 
 The script creates or updates `.claude/settings.json` and `.mcp.json`, keeps
 existing entries, and creates timestamped backups before modifying either
@@ -62,26 +71,52 @@ claude
 
 The MCP process then registers the project as `claude-code-local`, sends
 heartbeats, and stops its guarded runtime if the control plane becomes
-unavailable. The UI shows the connected project under **Agents**; heartbeat
-expiry changes it to `offline` and records an audited lifecycle event.
+unavailable. The gateway also reports content-free runtime aggregates on each
+heartbeat—action outcomes, cost units, and guarded-action latency—so the UI
+can show performance without receiving tool arguments or outputs. The UI shows
+the connected project under **Agents**; heartbeat expiry changes it to
+`offline` and records an audited lifecycle event.
 
 For an enterprise deployment, onboard the project with a deployment scope:
+
+First, have an authenticated platform operator create a one-time bootstrap
+token for the registered deployment. The AWS hosted control plane exposes this
+as `POST /enterprise/agents/bootstrap`; the response contains the token once
+and it must not be stored in the project. Then run onboarding with that token:
 
 ```bash
 python3 /path/to/aai-sec-sdk/scripts/onboard_claude.py \
   --project-root "$PWD" \
-  --enterprise-control-plane-url https://fleet.example.test/api \
+  --enterprise-control-plane-url https://<api-id>.execute-api.eu-west-2.amazonaws.com \
   --deployment-id deployment-prod-eu \
-  --agent-id claude-platform-prod
-export AAI_SEC_AGENT_TOKEN="short-lived-agent-token"
+  --agent-id claude-platform-prod \
+  --bootstrap-token "<one-time-token>"
+# The script prints this export after a successful exchange.
+export AAI_SEC_AGENT_TOKEN="<short-lived-session-token>"
 claude
 ```
+
+The script consumes the bootstrap token at `/agent/enroll`, writes only
+non-secret routing metadata to Claude's files, and prints the short-lived
+session token for the current shell. The token is deployment/agent-bound and
+expires; repeat enrollment with a newly issued bootstrap token when it expires.
+
+The real-device acceptance run for Claude Code 2.1.220 is recorded in
+[real Claude Code acceptance evidence](real-claude-code-acceptance-evidence-2026-07-27.md).
 
 The deployment ID determines which organization/project fleet receives the
 agent registration. The enterprise UI can then show the project alongside
 other deployments, report heartbeat health and drift, and apply staged
 configuration rollouts. Do not put the agent token in `.mcp.json`; inherit it
 from the process environment or a secret manager.
+
+Enterprise onboarding also embeds only the control-plane URL, deployment ID
+and agent ID in the hook command. When `AAI_SEC_AGENT_TOKEN` is inherited by
+Claude Code, the native-tool hook resolves the same authenticated effective
+group policy as the MCP gateway before each event. Missing credentials,
+unassigned or conflicting groups, malformed policy, or control-plane failure
+deny the native action. This keeps central policy enforcement consistent for
+Claude's built-in tools and SDK-owned MCP tools.
 
 The hook configuration and MCP configuration are separate Claude Code host
 boundaries. Put the `hooks` object in `.claude/settings.json`; put the
@@ -154,6 +189,47 @@ The hook writes a redaction-aware audit chain to
 rules. Replace them with the authenticated identity and policy boundary used
 by your organization before production use.
 
+## 2a. Run the local policy coverage harness
+
+After onboarding a deployed project, run the SDK's non-destructive policy
+harness from the project root:
+
+```bash
+python3 /absolute/path/to/aai-sec-sdk/scripts/test_claude_policy.py \
+  --project-root "$PWD" \
+  --sdk-root /absolute/path/to/aai-sec-sdk \
+  --report .claude/policy-test-report.json \
+  --allow-untested
+```
+
+The harness temporarily applies a synthetic policy, sends synthetic
+`PreToolUse` events to the configured hook, checks allow/deny/approval/path,
+malformed-input and audit behaviour, then restores the previous project policy.
+It never invokes Claude or executes a proposed command. Omit
+`--allow-untested` when the run must prove complete coverage; the command then
+exits non-zero until runtime-only controls have a GuardedRuntime/MCP test.
+
+To create and verify the matching enterprise policy and group, provide the
+local control-plane URL and operator token. To verify live membership, also
+provide the deployment and agent identifiers:
+
+```bash
+AAI_SEC_UI_TOKEN="synthetic-enterprise-ui-token-1234" \
+python3 /absolute/path/to/aai-sec-sdk/scripts/test_claude_policy.py \
+  --project-root "$PWD" \
+  --control-plane-url http://localhost:8001/api \
+  --deployment-id deployment-local \
+  --agent-id claude-code-local \
+  --report .claude/policy-test-report.json
+```
+
+The JSON report lists every check as `passed`, `failed` or `not_tested`. Native
+Claude hook coverage includes tool allow-lists, command rules, path boundaries,
+unknown tools, malformed input and audit output. Budgets, credentials,
+isolation, durable audit sinks, telemetry and idempotency are explicitly
+reported as runtime controls requiring MCP/GuardedRuntime or deployment tests;
+they are not falsely treated as enforced by a Claude hook.
+
 ## 3. Add SDK-owned application tools through MCP
 
 The MCP example is a separate process that exposes an explicit registered
@@ -182,7 +258,30 @@ project file should be reviewed like source code because it controls which
 external processes Claude can start. [Claude Code MCP configuration](https://code.claude.com/docs/en/mcp)
 describes project, user, and local scopes.
 
-## 4. Choosing hook versus MCP
+## 5. Choosing hook versus MCP
+
+## 4. Managed Skills and MCP servers
+
+The enterprise UI can register reviewed Skills and MCP servers. A policy may
+select their IDs under `claudeCode.allowedSkills` and
+`claudeCode.allowedMcpServers`. The authenticated effective-policy response
+resolves those IDs into `managedSkills` and `managedMcpServers` definitions.
+
+The deployment-owned reconciliation helper can then apply that manifest to a
+project:
+
+```bash
+python3 /path/to/aai-sec-sdk/scripts/reconcile_claude_resources.py \
+  --project-root "$PWD" \
+  --effective-policy .claude/effective-policy.json
+```
+
+It writes selected Skills to `.claude/skills/` and selected MCP entries to
+`.mcp.json`, preserving unrelated entries and removing only resources from its
+own managed manifest. It validates Skill digests and rejects insecure HTTP
+MCP URLs. Secret values are supplied by the deployment environment, never by
+the UI or policy JSON. This is configuration provisioning, not sandboxing;
+the SDK gateway and host isolation controls remain necessary.
 
 Use the hook for host-native operations where Claude Code remains the executor:
 
@@ -208,7 +307,7 @@ still have access to the host outside the matched tools. For hostile or
 regulated workloads, combine the hook and MCP gateway with OS/container
 isolation, restricted credentials, and network egress controls.
 
-## 5. Customize the policy
+## 6. Customize the policy
 
 The hook API is extensible through ordered rules:
 

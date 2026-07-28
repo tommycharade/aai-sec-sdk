@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import re
 import secrets
 import sqlite3
@@ -29,6 +30,28 @@ from .audit import AuditSink
 
 _MAX_TEXT = 256
 _MAX_PAGE_SIZE = 200
+_AGENT_TELEMETRY_FIELDS = frozenset(
+    {
+        "actionsTotal",
+        "actionsAdmitted",
+        "allowed",
+        "denied",
+        "approvalRequired",
+        "executed",
+        "failed",
+        "timedOut",
+        "cancelled",
+        "resultRejected",
+        "runtimeErrors",
+        "costUnits",
+        "averageLatencyMs",
+        "maxLatencyMs",
+    }
+)
+_AGENT_TELEMETRY_INTEGER_FIELDS = _AGENT_TELEMETRY_FIELDS - {
+    "averageLatencyMs",
+    "maxLatencyMs",
+}
 _FLEET_GOVERNANCE_KEYS: dict[str, frozenset[str]] = {
     "policy": frozenset({"provider", "endpoint", "allowedPrincipals", "denyByDefault"}),
     "approvals": frozenset({"provider", "endpoint", "ttlSeconds", "requiredFor"}),
@@ -90,6 +113,8 @@ _FLEET_GOVERNANCE_KEYS: dict[str, frozenset[str]] = {
             "deniedCommandPatterns",
             "approvalCommandPatterns",
             "fileTools",
+            "allowedSkills",
+            "allowedMcpServers",
         }
     ),
 }
@@ -503,14 +528,62 @@ def _optional_text(value: object, name: str) -> str | None:
 
 def _json_object(value: Mapping[str, Any] | None, name: str) -> str:
     """Serialize bounded metadata while rejecting secret-like fields."""
-    safe_keys = {"environment", "region", "team", "labels", "version"}
+    safe_keys = {"environment", "region", "team", "labels", "version", "telemetry"}
     data = dict(value or {})
     if len(data) > 20 or any(str(key) not in safe_keys for key in data):
         raise FleetConfigurationError(f"{name} contains unsupported metadata")
     for key, item in data.items():
+        if key == "telemetry":
+            data[key] = _normalize_agent_telemetry(item, name)
+            continue
         if not isinstance(key, str) or not isinstance(item, (str, int, float, bool, list)):
             raise FleetConfigurationError(f"{name} must contain JSON scalar metadata")
     return json.dumps(data, sort_keys=True, separators=(",", ":"))
+
+
+def _normalize_agent_telemetry(value: object, name: str = "telemetry") -> dict[str, int | float]:
+    """Validate the fixed aggregate telemetry schema stored with an agent."""
+    if not isinstance(value, Mapping) or len(value) > len(_AGENT_TELEMETRY_FIELDS):
+        raise FleetConfigurationError(f"{name} must be a bounded telemetry object")
+    result: dict[str, int | float] = {}
+    for key, item in value.items():
+        if key not in _AGENT_TELEMETRY_FIELDS:
+            raise FleetConfigurationError(f"{name} contains an unsupported field")
+        if key in _AGENT_TELEMETRY_INTEGER_FIELDS:
+            if not isinstance(item, int) or isinstance(item, bool):
+                raise FleetConfigurationError(f"{name} count fields must be integers")
+        elif isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise FleetConfigurationError(f"{name} latency fields must be numeric")
+        if not math.isfinite(float(item)) or item < 0 or item > 1_000_000_000:
+            raise FleetConfigurationError(f"{name} contains an out-of-bounds value")
+        result[key] = item
+    return result
+
+
+def _agent_telemetry(metadata: object) -> dict[str, int | float] | None:
+    """Read only the validated telemetry projection from stored agent metadata."""
+    if not isinstance(metadata, str):
+        return None
+    try:
+        value = json.loads(metadata)
+    except (TypeError, ValueError):
+        return None
+    telemetry = value.get("telemetry") if isinstance(value, Mapping) else None
+    if not isinstance(telemetry, Mapping):
+        return None
+    try:
+        return _normalize_agent_telemetry(telemetry)
+    except FleetConfigurationError:
+        return None
+
+
+def _agent_inventory_projection(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Project an agent row without returning the free-form metadata column."""
+    result = dict(row)
+    telemetry = _agent_telemetry(result.pop("metadata", None))
+    if telemetry is not None:
+        result["telemetry"] = telemetry
+    return result
 
 
 def validate_fleet_configuration(configuration: Mapping[str, Any]) -> dict[str, Any]:
@@ -788,7 +861,7 @@ class EnterpriseFleetStore:
                 self._expire_agents()
                 rows = self._connection.execute(
                     "SELECT id,organization_id,project_id,deployment_id,host,project_root,"
-                    "environment,region,status,last_heartbeat,expires_at FROM agents "
+                    "environment,region,status,last_heartbeat,expires_at,metadata FROM agents "
                     "WHERE organization_id=? ORDER BY last_heartbeat DESC",
                     (org,),
                 ).fetchall()
@@ -807,7 +880,7 @@ class EnterpriseFleetStore:
                     for row in rows
                     if not identity.project_ids or row["project_id"] in identity.project_ids
                 ]
-            items = tuple(dict(row) for row in rows)
+            items = tuple(_agent_inventory_projection(row) for row in rows)
         return _paginate(items, cursor, limit)
 
     def create_template(
@@ -861,6 +934,143 @@ class EnterpriseFleetStore:
             items = tuple(self._template(row["id"]) for row in rows)
         return _paginate(items, cursor, limit)
 
+    def create_skill(
+        self,
+        identity: FleetIdentity,
+        *,
+        skill_id: str,
+        name: str,
+        description: str,
+        version: str,
+        content: str,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        """Register reviewed project-scoped Skill content without executable authority."""
+        skill_id, name, description, version = (
+            _text(skill_id, "skillId"),
+            _text(name, "name"),
+            _text(description, "description"),
+            _text(version, "version"),
+        )
+        if not isinstance(content, str) or not content.strip():
+            raise FleetConfigurationError("content must be bounded non-empty text")
+        if len(content) > 100_000:
+            raise FleetConfigurationError("skill content is too large")
+        digest = f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}"
+        with self._lock:
+            self._assert_identity_org(identity, identity.organization_id)
+            try:
+                self._connection.execute(
+                    "INSERT INTO skills(id,organization_id,name,description,version,"
+                    "content,digest,enabled,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        skill_id,
+                        identity.organization_id,
+                        name,
+                        description,
+                        version,
+                        content,
+                        digest,
+                        int(enabled),
+                        self._now(),
+                        identity.subject,
+                    ),
+                )
+                self._connection.commit()
+            except sqlite3.IntegrityError as exc:
+                raise FleetConfigurationError("skill already exists") from exc
+        result = self._skill(skill_id)
+        self._audit(
+            "fleet_skill_created",
+            identity.subject,
+            {**result, "content": "redacted"},
+            identity.organization_id,
+        )
+        return result
+
+    def list_skills(
+        self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
+    ) -> FleetPage:
+        """Return tenant-scoped Skill metadata and content for deployment reconciliation."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT id FROM skills WHERE organization_id=? ORDER BY name,id",
+                (identity.organization_id,),
+            ).fetchall()
+            items = tuple(self._skill(row["id"]) for row in rows)
+        return _paginate(items, cursor, limit)
+
+    def create_mcp_server(
+        self,
+        identity: FleetIdentity,
+        *,
+        server_id: str,
+        name: str,
+        description: str,
+        version: str,
+        transport: str,
+        command: str | None,
+        args: Sequence[str],
+        url: str | None,
+        environment_references: Sequence[str],
+        enabled: bool,
+    ) -> dict[str, Any]:
+        """Register an MCP definition; secret values and credentials remain deployment-owned."""
+        server_id, name, description, version, transport = (
+            _text(server_id, "serverId"),
+            _text(name, "name"),
+            _text(description, "description"),
+            _text(version, "version"),
+            _text(transport, "transport"),
+        )
+        if transport not in {"stdio", "http"}:
+            raise FleetConfigurationError("unsupported MCP transport")
+        if transport == "stdio" and not command:
+            raise FleetConfigurationError("stdio MCP servers require a command")
+        if transport == "http" and not url:
+            raise FleetConfigurationError("HTTP MCP servers require a URL")
+        with self._lock:
+            self._assert_identity_org(identity, identity.organization_id)
+            try:
+                self._connection.execute(
+                    "INSERT INTO mcp_servers(id,organization_id,name,description,version,"
+                    "transport,command,args,url,environment_references,enabled,created_at,"
+                    "created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        server_id,
+                        identity.organization_id,
+                        name,
+                        description,
+                        version,
+                        transport,
+                        command,
+                        json.dumps(list(args)),
+                        url,
+                        json.dumps(list(environment_references)),
+                        int(enabled),
+                        self._now(),
+                        identity.subject,
+                    ),
+                )
+                self._connection.commit()
+            except sqlite3.IntegrityError as exc:
+                raise FleetConfigurationError("MCP server already exists") from exc
+        result = self._mcp_server(server_id)
+        self._audit("fleet_mcp_server_created", identity.subject, result, identity.organization_id)
+        return result
+
+    def list_mcp_servers(
+        self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
+    ) -> FleetPage:
+        """Return tenant-scoped MCP metadata without secret values."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT id FROM mcp_servers WHERE organization_id=? ORDER BY name,id",
+                (identity.organization_id,),
+            ).fetchall()
+            items = tuple(self._mcp_server(row["id"]) for row in rows)
+        return _paginate(items, cursor, limit)
+
     def create_policy(
         self,
         identity: FleetIdentity,
@@ -877,15 +1087,48 @@ class EnterpriseFleetStore:
             try:
                 self._connection.execute(
                     "INSERT INTO policies(id,organization_id,name,configuration,version,"
-                    "created_at) "
-                    "VALUES(?,?,?,?,?,?)",
-                    (policy_id, identity.organization_id, name, configuration_json, 1, self._now()),
+                    "created_at,created_by) "
+                    "VALUES(?,?,?,?,?,?,?)",
+                    (
+                        policy_id,
+                        identity.organization_id,
+                        name,
+                        configuration_json,
+                        1,
+                        self._now(),
+                        identity.subject,
+                    ),
                 )
                 self._connection.commit()
             except sqlite3.IntegrityError as exc:
                 raise FleetConfigurationError("policy already exists") from exc
         result = self._policy(policy_id)
         self._audit("fleet_policy_created", identity.subject, result, identity.organization_id)
+        return result
+
+    def update_policy(
+        self,
+        identity: FleetIdentity,
+        *,
+        policy_id: str,
+        name: str,
+        configuration: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Apply a validated policy change as the next version of a policy."""
+        policy_id, name = _text(policy_id, "policyId"), _text(name, "name")
+        configuration_json = self._configuration_json(configuration)
+        with self._lock:
+            current = self._policy(policy_id)
+            if current["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            self._assert_identity_org(identity, identity.organization_id)
+            self._connection.execute(
+                "UPDATE policies SET name=?,configuration=?,version=version+1 WHERE id=?",
+                (name, configuration_json, policy_id),
+            )
+            self._connection.commit()
+        result = self._policy(policy_id)
+        self._audit("fleet_policy_updated", identity.subject, result, identity.organization_id)
         return result
 
     def list_policies(
@@ -943,6 +1186,42 @@ class EnterpriseFleetStore:
             ).fetchall()
             items = tuple(self._group(row["id"]) for row in rows)
         return _paginate(items, cursor, limit)
+
+    def update_group_policy(
+        self, identity: FleetIdentity, *, group_id: str, policy_id: str
+    ) -> dict[str, Any]:
+        """Change a group's policy assignment as an audited control operation.
+
+        Policies remain immutable records. Reassigning a group therefore
+        preserves policy history while making the new effective policy
+        explicit for every enrolled runtime on its next refresh.
+        """
+        group_id, policy_id = _text(group_id, "groupId"), _text(policy_id, "policyId")
+        with self._lock:
+            group = self._group(group_id)
+            policy = self._policy(policy_id)
+            if group["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            if policy["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            self._assert_identity_org(identity, identity.organization_id)
+            self._connection.execute(
+                "UPDATE agent_groups SET policy_id=? WHERE id=?",
+                (policy_id, group_id),
+            )
+            self._connection.commit()
+        result = self._group(group_id)
+        self._audit(
+            "fleet_group_policy_changed",
+            identity.subject,
+            {
+                "groupId": group_id,
+                "policyId": policy_id,
+                "previousPolicyId": group["policyId"],
+            },
+            identity.organization_id,
+        )
+        return result
 
     def add_agent_to_group(
         self, identity: FleetIdentity, *, group_id: str, deployment_id: str, agent_id: str
@@ -1005,6 +1284,145 @@ class EnterpriseFleetStore:
             "fleet_group_agent_removed",
             identity.subject,
             {"groupId": group_id, "deploymentId": deployment_id, "agentId": agent_id},
+            identity.organization_id,
+        )
+        return result
+
+    def effective_agent_policy(
+        self, identity: FleetIdentity, *, deployment_id: str, agent_id: str
+    ) -> dict[str, Any]:
+        """Return the one policy currently effective for an enrolled agent.
+
+        The lookup is authenticated and tenant-scoped. An agent with no group
+        assignment, or with memberships that resolve to different policies,
+        fails closed instead of receiving an arbitrary policy. The returned
+        policy is configuration data; the deployment-owned runtime remains
+        responsible for translating it into its typed policy and adapters.
+        """
+        deployment_id, agent_id = _text(deployment_id, "deploymentId"), _text(agent_id, "agentId")
+        with self._lock:
+            agent = self._agent(deployment_id, agent_id)
+            self._assert_identity_scope(identity, agent["organizationId"], agent["projectId"])
+            self._assert_agent_identity(identity, agent_id)
+            rows = self._connection.execute(
+                "SELECT g.id,g.name,g.policy_id FROM agent_group_members m "
+                "JOIN agent_groups g ON g.id=m.group_id "
+                "WHERE m.deployment_id=? AND m.agent_id=? ORDER BY g.id",
+                (deployment_id, agent_id),
+            ).fetchall()
+            if not rows:
+                raise FleetNotFoundError("agent is not assigned to a policy group")
+            policy_ids = {str(row["policy_id"]) for row in rows}
+            if len(policy_ids) != 1:
+                raise FleetConfigurationError("agent belongs to groups with conflicting policies")
+            policy = self._policy(next(iter(policy_ids)))
+            configuration = json.loads(json.dumps(policy["configuration"]))
+            claude_value = configuration.get("claudeCode")
+            if isinstance(claude_value, Mapping):
+                claude = dict(claude_value)
+                configuration["claudeCode"] = claude
+                resolved_skills = []
+                for resource_id in claude.get("allowedSkills", []):
+                    resource = self._skill(_text(resource_id, "skillId"))
+                    if not resource["enabled"]:
+                        raise FleetConfigurationError("policy references a disabled Skill")
+                    resolved_skills.append(resource)
+                resolved_mcp = []
+                for resource_id in claude.get("allowedMcpServers", []):
+                    resource = self._mcp_server(_text(resource_id, "serverId"))
+                    if not resource["enabled"]:
+                        raise FleetConfigurationError("policy references a disabled MCP server")
+                    resolved_mcp.append(resource)
+                claude["managedSkills"] = resolved_skills
+                claude["managedMcpServers"] = resolved_mcp
+                policy = {**policy, "configuration": configuration}
+            result = {
+                "agentId": agent_id,
+                "deploymentId": deployment_id,
+                "groupId": rows[0]["id"],
+                "groupName": rows[0]["name"],
+                "emergencyStop": self._agent_emergency_stop(deployment_id, agent_id),
+                "policy": policy,
+            }
+        self._audit(
+            "fleet_effective_policy_read",
+            identity.subject,
+            {"agentId": agent_id, "deploymentId": deployment_id, "policyId": policy["id"]},
+            identity.organization_id,
+        )
+        return result
+
+    def verify_agent(
+        self, identity: FleetIdentity, *, deployment_id: str, agent_id: str
+    ) -> dict[str, Any]:
+        """Verify enrollment, liveness, policy assignment, and stop state.
+
+        This is an operational read, not a trust grant.  It reports each
+        prerequisite independently so an operator can distinguish an offline
+        process from a missing policy or an intentionally stopped agent.
+        """
+        deployment_id, agent_id = _text(deployment_id, "deploymentId"), _text(agent_id, "agentId")
+        with self._lock:
+            agent = self._agent(deployment_id, agent_id)
+            self._assert_identity_scope(identity, agent["organizationId"], agent["projectId"])
+            groups = self._connection.execute(
+                "SELECT g.id,g.name,g.policy_id FROM agent_group_members m "
+                "JOIN agent_groups g ON g.id=m.group_id "
+                "WHERE m.deployment_id=? AND m.agent_id=? ORDER BY g.id",
+                (deployment_id, agent_id),
+            ).fetchall()
+            policy_ids = {str(row["policy_id"]) for row in groups}
+            stopped = self._agent_emergency_stop(deployment_id, agent_id)
+            now = float(self._now())
+            checks = {
+                "registered": {"passed": True, "detail": "Agent is registered to this deployment."},
+                "heartbeat": {
+                    "passed": agent["status"] == "connected" and agent["expiresAt"] > now,
+                    "detail": (
+                        "Heartbeat is current."
+                        if agent["status"] == "connected" and agent["expiresAt"] > now
+                        else "Heartbeat is expired or the agent is offline."
+                    ),
+                },
+                "projectRoot": {
+                    "passed": bool(agent["projectRoot"]),
+                    "detail": (
+                        "Project root is recorded."
+                        if agent["projectRoot"]
+                        else "Project root is missing."
+                    ),
+                },
+                "policyAssignment": {
+                    "passed": len(policy_ids) == 1,
+                    "detail": (
+                        "Exactly one policy group is assigned."
+                        if len(policy_ids) == 1
+                        else "Agent must belong to exactly one policy group."
+                    ),
+                },
+                "emergencyStop": {
+                    "passed": not stopped,
+                    "detail": (
+                        "No emergency stop is active."
+                        if not stopped
+                        else "An emergency stop is active."
+                    ),
+                },
+            }
+            result = {
+                "agentId": agent_id,
+                "deploymentId": deployment_id,
+                "verified": all(item["passed"] for item in checks.values()),
+                "checkedAt": now,
+                "checks": checks,
+                "host": agent["host"],
+                "status": agent["status"],
+                "groups": [row["id"] for row in groups],
+            }
+        self._audit(
+            "fleet_agent_verification_read",
+            identity.subject,
+            {"agentId": agent_id, "deploymentId": deployment_id, "verified": result["verified"]},
             identity.organization_id,
         )
         return result
@@ -1372,6 +1790,58 @@ class EnterpriseFleetStore:
         )
         return result
 
+    def set_agent_emergency_stop(
+        self, identity: FleetIdentity, *, deployment_id: str, agent_id: str, active: bool
+    ) -> dict[str, Any]:
+        """Stop or release one agent without revoking its enrollment session."""
+        if not isinstance(active, bool):
+            raise FleetConfigurationError("emergency stop state must be boolean")
+        deployment_id, agent_id = _text(deployment_id, "deploymentId"), _text(agent_id, "agentId")
+        with self._lock:
+            agent = self._agent(deployment_id, agent_id)
+            self._assert_identity_scope(identity, agent["organizationId"], agent["projectId"])
+            self._connection.execute(
+                "INSERT INTO agent_controls(deployment_id,agent_id,emergency_stop,updated_at) "
+                "VALUES(?,?,?,?) ON CONFLICT(deployment_id,agent_id) DO UPDATE SET "
+                "emergency_stop=excluded.emergency_stop,updated_at=excluded.updated_at",
+                (deployment_id, agent_id, int(active), self._now()),
+            )
+            self._connection.commit()
+            result = self._agent(deployment_id, agent_id)
+        self._audit(
+            "fleet_agent_emergency_stop_changed",
+            identity.subject,
+            result,
+            identity.organization_id,
+        )
+        return result
+
+    def set_group_emergency_stop(
+        self, identity: FleetIdentity, *, group_id: str, active: bool
+    ) -> dict[str, Any]:
+        """Stop or release all agents assigned to one tenant-scoped group."""
+        if not isinstance(active, bool):
+            raise FleetConfigurationError("emergency stop state must be boolean")
+        group_id = _text(group_id, "groupId")
+        with self._lock:
+            group = self._group(group_id)
+            self._assert_identity_org(identity, group["organizationId"])
+            self._connection.execute(
+                "INSERT INTO group_controls(group_id,emergency_stop,updated_at) VALUES(?,?,?) "
+                "ON CONFLICT(group_id) DO UPDATE SET emergency_stop=excluded.emergency_stop,"
+                "updated_at=excluded.updated_at",
+                (group_id, int(active), self._now()),
+            )
+            self._connection.commit()
+            result = self._group(group_id)
+        self._audit(
+            "fleet_group_emergency_stop_changed",
+            identity.subject,
+            {"groupId": group_id, "emergencyStop": active, "agentCount": len(result["agents"])},
+            identity.organization_id,
+        )
+        return result
+
     def health(
         self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
     ) -> FleetPage:
@@ -1544,6 +2014,43 @@ class EnterpriseFleetStore:
             },
         }
 
+    def audit_evidence(
+        self,
+        identity: FleetIdentity,
+        *,
+        cursor: str | None = None,
+        limit: int = 200,
+        event_type: str | None = None,
+    ) -> FleetPage:
+        """Return bounded, redaction-safe lifecycle evidence for investigations.
+
+        Raw audit payloads and credential material remain in the deployment's
+        immutable audit sink. This endpoint exposes only the evidence index
+        needed to scope an investigation and correlate an external record.
+        """
+        query = (
+            "SELECT event_type,actor,deployment_id,payload_hash,occurred_at "
+            "FROM fleet_audit_evidence WHERE organization_id=?"
+        )
+        values: list[Any] = [identity.organization_id]
+        if event_type:
+            query += " AND event_type=?"
+            values.append(_text(event_type, "eventType"))
+        query += " ORDER BY occurred_at DESC, rowid DESC"
+        with self._lock:
+            rows = self._connection.execute(query, values).fetchall()
+        items = tuple(
+            {
+                "eventType": row["event_type"],
+                "actor": row["actor"],
+                "deploymentId": row["deployment_id"],
+                "payloadHash": row["payload_hash"],
+                "occurredAt": row["occurred_at"],
+            }
+            for row in rows
+        )
+        return _paginate(items, cursor, limit)
+
     def alerts(
         self, identity: FleetIdentity, *, cursor: str | None = None, limit: int = 200
     ) -> FleetPage:
@@ -1704,9 +2211,14 @@ class EnterpriseFleetStore:
         return result
 
     def heartbeat(
-        self, identity: FleetIdentity, deployment_id: str, agent_id: str, session_id: str
+        self,
+        identity: FleetIdentity,
+        deployment_id: str,
+        agent_id: str,
+        session_id: str,
+        telemetry: Mapping[str, int | float] | None = None,
     ) -> dict[str, Any]:
-        """Refresh a session only when its opaque session belongs to this agent."""
+        """Refresh a session and persist only validated aggregate telemetry."""
         deployment_id, agent_id, session_id = (
             _text(deployment_id, "deploymentId"),
             _text(agent_id, "agentId"),
@@ -1726,10 +2238,25 @@ class EnterpriseFleetStore:
                 raise FleetAuthorizationError("agent session is invalid or expired")
             now = float(self._now())
             expires = now + self.heartbeat_ttl_seconds
+            metadata_row = self._connection.execute(
+                "SELECT metadata FROM agents WHERE deployment_id=? AND id=?",
+                (deployment_id, agent_id),
+            ).fetchone()
+            metadata: dict[str, Any] = {}
+            if metadata_row is not None:
+                try:
+                    stored = json.loads(metadata_row["metadata"] or "{}")
+                    if isinstance(stored, Mapping):
+                        metadata = dict(stored)
+                except (TypeError, ValueError):
+                    metadata = {}
+            if telemetry is not None:
+                metadata["telemetry"] = _normalize_agent_telemetry(telemetry)
+            metadata_json = _json_object(metadata, "metadata")
             self._connection.execute(
-                "UPDATE agents SET status='connected',last_heartbeat=?,expires_at=? "
+                "UPDATE agents SET status='connected',last_heartbeat=?,expires_at=?,metadata=? "
                 "WHERE deployment_id=? AND id=?",
-                (now, expires, deployment_id, agent_id),
+                (now, expires, metadata_json, deployment_id, agent_id),
             )
             self._connection.execute(
                 "UPDATE agent_sessions SET expires_at=? WHERE deployment_id=? "
@@ -1794,7 +2321,21 @@ class EnterpriseFleetStore:
                 CREATE TABLE IF NOT EXISTS policies(
                     id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
                     name TEXT NOT NULL, configuration TEXT NOT NULL, version INTEGER NOT NULL,
-                    created_at REAL NOT NULL, UNIQUE(organization_id,name));
+                    created_at REAL NOT NULL, created_by TEXT NOT NULL DEFAULT 'system',
+                    UNIQUE(organization_id,name));
+                CREATE TABLE IF NOT EXISTS skills(
+                    id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    name TEXT NOT NULL, description TEXT NOT NULL, version TEXT NOT NULL,
+                    content TEXT NOT NULL, digest TEXT NOT NULL, enabled INTEGER NOT NULL,
+                    created_at REAL NOT NULL, created_by TEXT NOT NULL DEFAULT 'system',
+                    UNIQUE(organization_id,name));
+                CREATE TABLE IF NOT EXISTS mcp_servers(
+                    id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    name TEXT NOT NULL, description TEXT NOT NULL, version TEXT NOT NULL,
+                    transport TEXT NOT NULL, command TEXT, args TEXT, url TEXT,
+                    environment_references TEXT NOT NULL, enabled INTEGER NOT NULL,
+                    created_at REAL NOT NULL, created_by TEXT NOT NULL DEFAULT 'system',
+                    UNIQUE(organization_id,name));
                 CREATE TABLE IF NOT EXISTS agent_groups(
                     id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
                     name TEXT NOT NULL, policy_id TEXT NOT NULL REFERENCES policies(id),
@@ -1816,6 +2357,15 @@ class EnterpriseFleetStore:
                 CREATE TABLE IF NOT EXISTS deployment_controls(
                     deployment_id TEXT PRIMARY KEY REFERENCES deployments(id),
                     emergency_stop INTEGER NOT NULL, updated_at REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS group_controls(
+                    group_id TEXT PRIMARY KEY REFERENCES agent_groups(id) ON DELETE CASCADE,
+                    emergency_stop INTEGER NOT NULL, updated_at REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS agent_controls(
+                    deployment_id TEXT NOT NULL, agent_id TEXT NOT NULL,
+                    emergency_stop INTEGER NOT NULL, updated_at REAL NOT NULL,
+                    PRIMARY KEY(deployment_id,agent_id),
+                    FOREIGN KEY(deployment_id,agent_id) REFERENCES agents(deployment_id,id)
+                        ON DELETE CASCADE);
                 CREATE TABLE IF NOT EXISTS deployment_config_history(
                     deployment_id TEXT NOT NULL REFERENCES deployments(id),
                     version INTEGER NOT NULL, template_id TEXT NOT NULL,
@@ -1853,6 +2403,13 @@ class EnterpriseFleetStore:
             if "team" not in deployment_columns:
                 self._connection.execute(
                     "ALTER TABLE deployments ADD COLUMN team TEXT NOT NULL DEFAULT ''"
+                )
+            policy_columns = {
+                row["name"] for row in self._connection.execute("PRAGMA table_info(policies)")
+            }
+            if "created_by" not in policy_columns:
+                self._connection.execute(
+                    "ALTER TABLE policies ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'"
                 )
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(2)")
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(3)")
@@ -1929,7 +2486,7 @@ class EnterpriseFleetStore:
     def _policy(self, policy_id: str) -> dict[str, Any]:
         """Load one policy without exposing credentials or bearer material."""
         row = self._connection.execute(
-            "SELECT id,organization_id,name,configuration,version,created_at "
+            "SELECT id,organization_id,name,configuration,version,created_at,created_by "
             "FROM policies WHERE id=?",
             (policy_id,),
         ).fetchone()
@@ -1942,6 +2499,55 @@ class EnterpriseFleetStore:
             "configuration": json.loads(row["configuration"]),
             "version": row["version"],
             "createdAt": row["created_at"],
+            "author": row["created_by"],
+            "updatedAt": row["created_at"],
+        }
+
+    def _skill(self, skill_id: str) -> dict[str, Any]:
+        """Load one Skill and preserve its content digest for deployment verification."""
+        row = self._connection.execute(
+            "SELECT id,organization_id,name,description,version,content,digest,enabled,"
+            "created_at,created_by FROM skills WHERE id=?",
+            (skill_id,),
+        ).fetchone()
+        if row is None:
+            raise FleetNotFoundError("skill not found")
+        return {
+            "id": row["id"],
+            "organizationId": row["organization_id"],
+            "name": row["name"],
+            "description": row["description"],
+            "version": row["version"],
+            "content": row["content"],
+            "digest": row["digest"],
+            "enabled": bool(row["enabled"]),
+            "createdAt": row["created_at"],
+            "author": row["created_by"],
+        }
+
+    def _mcp_server(self, server_id: str) -> dict[str, Any]:
+        """Load one MCP definition without resolving deployment-owned secrets."""
+        row = self._connection.execute(
+            "SELECT id,organization_id,name,description,version,transport,command,args,"
+            "url,environment_references,enabled,created_at,created_by FROM mcp_servers WHERE id=?",
+            (server_id,),
+        ).fetchone()
+        if row is None:
+            raise FleetNotFoundError("MCP server not found")
+        return {
+            "id": row["id"],
+            "organizationId": row["organization_id"],
+            "name": row["name"],
+            "description": row["description"],
+            "version": row["version"],
+            "transport": row["transport"],
+            "command": row["command"],
+            "args": json.loads(row["args"] or "[]"),
+            "url": row["url"],
+            "environmentReferences": json.loads(row["environment_references"]),
+            "enabled": bool(row["enabled"]),
+            "createdAt": row["created_at"],
+            "author": row["created_by"],
         }
 
     def _group(self, group_id: str) -> dict[str, Any]:
@@ -1954,12 +2560,15 @@ class EnterpriseFleetStore:
             raise FleetNotFoundError("group not found")
         members = self._connection.execute(
             "SELECT a.id,a.organization_id,a.project_id,a.deployment_id,a.host,a.project_root,"
-            "a.environment,a.region,a.status,a.last_heartbeat,a.expires_at "
+            "a.environment,a.region,a.status,a.last_heartbeat,a.expires_at,a.metadata "
             "FROM agent_group_members m JOIN agents a ON a.deployment_id=m.deployment_id "
             "AND a.id=m.agent_id WHERE m.group_id=? ORDER BY a.id",
             (group_id,),
         ).fetchall()
         policy = self._policy(row["policy_id"])
+        control = self._connection.execute(
+            "SELECT emergency_stop FROM group_controls WHERE group_id=?", (group_id,)
+        ).fetchone()
         return {
             "id": row["id"],
             "organizationId": row["organization_id"],
@@ -1967,7 +2576,8 @@ class EnterpriseFleetStore:
             "policyId": row["policy_id"],
             "policyName": policy["name"],
             "createdAt": row["created_at"],
-            "agents": [dict(member) for member in members],
+            "emergencyStop": bool(control is not None and control["emergency_stop"]),
+            "agents": [_agent_inventory_projection(member) for member in members],
         }
 
     def _effective_template(self, template_id: str) -> dict[str, Any]:
@@ -2130,12 +2740,13 @@ class EnterpriseFleetStore:
         row = self._connection.execute(
             "SELECT id,organization_id,project_id,deployment_id,host,project_root,"
             "environment,region,"
-            "status,last_heartbeat,expires_at FROM agents WHERE deployment_id=? AND id=?",
+            "status,last_heartbeat,expires_at,metadata FROM agents WHERE deployment_id=? AND id=?",
             (deployment_id, agent_id),
         ).fetchone()
         if row is None:
             raise FleetNotFoundError("agent not found")
-        return {
+        emergency_stop = self._agent_emergency_stop(deployment_id, agent_id)
+        result = {
             "id": row["id"],
             "organizationId": row["organization_id"],
             "projectId": row["project_id"],
@@ -2147,7 +2758,33 @@ class EnterpriseFleetStore:
             "status": row["status"],
             "lastHeartbeat": row["last_heartbeat"],
             "expiresAt": row["expires_at"],
+            "emergencyStop": emergency_stop,
         }
+        telemetry = _agent_telemetry(row["metadata"])
+        if telemetry is not None:
+            result["telemetry"] = telemetry
+        return result
+
+    def _agent_emergency_stop(self, deployment_id: str, agent_id: str) -> bool:
+        """Resolve the effective stop from agent, group and deployment scopes."""
+        agent_stop = self._connection.execute(
+            "SELECT emergency_stop FROM agent_controls WHERE deployment_id=? AND agent_id=?",
+            (deployment_id, agent_id),
+        ).fetchone()
+        deployment_stop = self._connection.execute(
+            "SELECT emergency_stop FROM deployment_controls WHERE deployment_id=?",
+            (deployment_id,),
+        ).fetchone()
+        group_stop = self._connection.execute(
+            "SELECT 1 FROM agent_group_members m JOIN group_controls c ON c.group_id=m.group_id "
+            "WHERE m.deployment_id=? AND m.agent_id=? AND c.emergency_stop=1 LIMIT 1",
+            (deployment_id, agent_id),
+        ).fetchone()
+        return bool(
+            (agent_stop is not None and agent_stop["emergency_stop"])
+            or (deployment_stop is not None and deployment_stop["emergency_stop"])
+            or group_stop is not None
+        )
 
     def _expire_agents(self) -> None:
         """Make heartbeat expiry visible before any inventory read."""
@@ -2245,6 +2882,29 @@ class EnterpriseFleetApplication:
             inventory_prefix = "/api/enterprise/"
             if method == "GET" and path.startswith(inventory_prefix):
                 resource = path[len(inventory_prefix) :]
+                effective_prefix = "/api/enterprise/agents/"
+                if resource.startswith("agents/") and resource.endswith("/verify"):
+                    self._authorize(identity, "read")
+                    deployment_id, agent_id = self._agent_route(path, effective_prefix, "/verify")
+                    return self._respond(
+                        start_response,
+                        200,
+                        self.store.verify_agent(
+                            identity, deployment_id=deployment_id, agent_id=agent_id
+                        ),
+                    )
+                if resource.startswith("agents/") and resource.endswith("/effective-policy"):
+                    self._authorize_any(identity, {"read", "agent_presence"})
+                    deployment_id, agent_id = self._agent_route(
+                        path, effective_prefix, "/effective-policy"
+                    )
+                    return self._respond(
+                        start_response,
+                        200,
+                        self.store.effective_agent_policy(
+                            identity, deployment_id=deployment_id, agent_id=agent_id
+                        ),
+                    )
                 if resource in {"health", "slo", "alerts"}:
                     self._authorize(identity, "read")
                     query = parse_qs(str(environ.get("QUERY_STRING", "")))
@@ -2270,6 +2930,20 @@ class EnterpriseFleetApplication:
                     self._authorize(identity, "read")
                     return self._respond(
                         start_response, 200, self.store.compliance_evidence(identity)
+                    )
+                if resource == "audit":
+                    self._authorize(identity, "read")
+                    query = parse_qs(str(environ.get("QUERY_STRING", "")))
+                    page = self.store.audit_evidence(
+                        identity,
+                        cursor=query.get("cursor", [None])[0],
+                        limit=int(query.get("limit", ["200"])[0]),
+                        event_type=query.get("eventType", [None])[0],
+                    )
+                    return self._respond(
+                        start_response,
+                        200,
+                        {"items": list(page.items), "nextCursor": page.next_cursor},
                     )
                 if resource == "capabilities":
                     self._authorize(identity, "read")
@@ -2317,7 +2991,7 @@ class EnterpriseFleetApplication:
                         200,
                         {"items": list(page.items), "nextCursor": page.next_cursor},
                     )
-                if resource in {"policies", "groups"}:
+                if resource in {"policies", "groups", "skills", "mcp-servers"}:
                     self._authorize(identity, "read")
                     query = parse_qs(str(environ.get("QUERY_STRING", "")))
                     requested_cursor = query.get("cursor", [None])[0]
@@ -2328,6 +3002,14 @@ class EnterpriseFleetApplication:
                         )
                         if resource == "policies"
                         else self.store.list_groups(
+                            identity, cursor=requested_cursor, limit=requested_limit
+                        )
+                        if resource == "groups"
+                        else self.store.list_skills(
+                            identity, cursor=requested_cursor, limit=requested_limit
+                        )
+                        if resource == "skills"
+                        else self.store.list_mcp_servers(
                             identity, cursor=requested_cursor, limit=requested_limit
                         )
                     )
@@ -2463,6 +3145,65 @@ class EnterpriseFleetApplication:
                     configuration=configuration,
                 )
                 return self._respond(start_response, 201, result)
+            if method == "POST" and path == "/api/enterprise/skills":
+                self._authorize(identity, "manage_configuration")
+                skill_content = body.get("content")
+                if not isinstance(skill_content, str):
+                    raise FleetConfigurationError("content must be bounded non-empty text")
+                result = self.store.create_skill(
+                    identity,
+                    skill_id=_text(body.get("skillId"), "skillId"),
+                    name=_text(body.get("name"), "name"),
+                    description=_text(body.get("description", ""), "description"),
+                    version=_text(body.get("version", "1.0.0"), "version"),
+                    # Content is validated by the store so the size limit can
+                    # produce a useful error instead of the generic field limit.
+                    content=skill_content,
+                    enabled=body.get("enabled", True) is True,
+                )
+                return self._respond(start_response, 201, result)
+            if method == "POST" and path == "/api/enterprise/mcp-servers":
+                self._authorize(identity, "manage_configuration")
+                args = body.get("args", [])
+                environment_references = body.get("environmentReferences", [])
+                if not isinstance(args, list) or not isinstance(environment_references, list):
+                    raise FleetConfigurationError(
+                        "MCP args and environmentReferences must be arrays"
+                    )
+                result = self.store.create_mcp_server(
+                    identity,
+                    server_id=_text(body.get("serverId"), "serverId"),
+                    name=_text(body.get("name"), "name"),
+                    description=_text(body.get("description", ""), "description"),
+                    version=_text(body.get("version", "1.0.0"), "version"),
+                    transport=_text(body.get("transport"), "transport"),
+                    command=_optional_text(body.get("command"), "command"),
+                    args=[_text(item, "arg") for item in args],
+                    url=_optional_text(body.get("url"), "url"),
+                    environment_references=[
+                        _text(item, "environmentReference") for item in environment_references
+                    ],
+                    enabled=body.get("enabled", True) is True,
+                )
+                return self._respond(start_response, 201, result)
+            policy_versions_prefix = "/api/enterprise/policies/"
+            if (
+                method == "POST"
+                and path.startswith(policy_versions_prefix)
+                and path.endswith("/versions")
+            ):
+                self._authorize(identity, "manage_configuration")
+                configuration = body.get("configuration")
+                if not isinstance(configuration, Mapping):
+                    raise FleetConfigurationError("configuration must be an object")
+                policy_id = path[len(policy_versions_prefix) : -len("/versions")].strip("/")
+                result = self.store.update_policy(
+                    identity,
+                    policy_id=_text(policy_id, "policyId"),
+                    name=_text(body.get("name"), "name"),
+                    configuration=configuration,
+                )
+                return self._respond(start_response, 200, result)
             if method == "POST" and path == "/api/enterprise/groups":
                 self._authorize(identity, "manage_inventory")
                 result = self.store.create_group(
@@ -2473,6 +3214,29 @@ class EnterpriseFleetApplication:
                 )
                 return self._respond(start_response, 201, result)
             membership_prefix = "/api/enterprise/groups/"
+            if (
+                method == "POST"
+                and path.startswith(membership_prefix)
+                and path.endswith("/emergency-stop")
+            ):
+                self._authorize(identity, "emergency_stop")
+                group_id = path[len(membership_prefix) : -len("/emergency-stop")].strip("/")
+                active = body.get("active")
+                if not isinstance(active, bool):
+                    raise FleetConfigurationError("active must be boolean")
+                result = self.store.set_group_emergency_stop(
+                    identity, group_id=_text(group_id, "groupId"), active=active
+                )
+                return self._respond(start_response, 200, result)
+            if method == "POST" and path.startswith(membership_prefix) and path.endswith("/policy"):
+                self._authorize(identity, "manage_configuration")
+                group_id = path[len(membership_prefix) : -len("/policy")].strip("/")
+                result = self.store.update_group_policy(
+                    identity,
+                    group_id=_text(group_id, "groupId"),
+                    policy_id=_text(body.get("policyId"), "policyId"),
+                )
+                return self._respond(start_response, 200, result)
             if method == "POST" and path.startswith(membership_prefix) and path.endswith("/agents"):
                 self._authorize(identity, "manage_inventory")
                 group_id = _text(
@@ -2566,6 +3330,19 @@ class EnterpriseFleetApplication:
                 )
                 return self._respond(start_response, 200, result)
             prefix = "/api/enterprise/agents/"
+            if method == "POST" and path.startswith(prefix) and path.endswith("/emergency-stop"):
+                self._authorize(identity, "emergency_stop")
+                deployment_id, agent_id = self._agent_route(path, prefix, "/emergency-stop")
+                active = body.get("active")
+                if not isinstance(active, bool):
+                    raise FleetConfigurationError("active must be boolean")
+                result = self.store.set_agent_emergency_stop(
+                    identity,
+                    deployment_id=deployment_id,
+                    agent_id=agent_id,
+                    active=active,
+                )
+                return self._respond(start_response, 200, result)
             if method == "POST" and path.startswith(prefix) and path.endswith("/heartbeat"):
                 self._authorize_any(identity, {"manage_inventory", "agent_presence"})
                 deployment_id, agent_id = self._agent_route(path, prefix, "/heartbeat")
@@ -2574,6 +3351,7 @@ class EnterpriseFleetApplication:
                     deployment_id,
                     agent_id,
                     _text(body.get("sessionId"), "sessionId"),
+                    body.get("telemetry"),
                 )
                 return self._respond(start_response, 200, result)
             if method == "POST" and path.startswith(prefix) and path.endswith("/disconnect"):

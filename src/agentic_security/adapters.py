@@ -6,12 +6,14 @@ import hashlib
 import json
 import math
 import os
+import re
 import selectors
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from shutil import which
 from threading import Lock
 from typing import Any, cast
 
@@ -204,6 +206,67 @@ class SubprocessToolHandler:
         if process.returncode != 0:
             raise RuntimeError("sandbox worker failed")
         return json.loads(bytes(output))
+
+
+@dataclass(frozen=True, slots=True)
+class DockerSandboxToolHandler:
+    """Run a fixed worker image inside a restrictive Docker container.
+
+    The image is deployment-owned and must be pinned by digest in production.
+    The worker receives the same bounded JSON contract as
+    :class:`SubprocessToolHandler`, while Docker enforces no network, a
+    read-only root filesystem, dropped Linux capabilities, non-root UID,
+    disabled privilege escalation, and bounded PIDs/memory. This is a real
+    container boundary, but Docker daemon and host kernel hardening remain
+    deployment responsibilities; hostile workloads should use a separately
+    managed microVM when that trust boundary is insufficient.
+    """
+
+    image: str
+    timeout_seconds: float = 10.0
+    max_output_bytes: int = 1_000_000
+    memory_limit: str = "256m"
+    pids_limit: int = 64
+
+    def __post_init__(self) -> None:
+        """Reject image names and resource settings that make isolation ambiguous."""
+        if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", self.image):
+            raise ValueError("sandbox image must be an immutable sha256 digest reference")
+        if (
+            not math.isfinite(self.timeout_seconds)
+            or self.pids_limit <= 0
+            or self.max_output_bytes <= 0
+        ):
+            raise ValueError("sandbox limits must be positive")
+        if not self.memory_limit or any(character.isspace() for character in self.memory_limit):
+            raise ValueError("sandbox memory limit must be a single Docker value")
+
+    def __call__(self, context: Any, arguments: Any) -> Any:
+        """Invoke the pinned image with fixed isolation flags and no shell."""
+        docker_executable = which("docker")
+        if docker_executable is None:
+            raise RuntimeError("Docker executable is not available on the host")
+        command = (
+            docker_executable,
+            "run",
+            "--interactive",
+            "--rm",
+            "--network=none",
+            "--read-only",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges:true",
+            "--user=65532:65532",
+            f"--memory={self.memory_limit}",
+            f"--pids-limit={self.pids_limit}",
+            "--tmpfs=/tmp:rw,noexec,nosuid,size=64m",
+            self.image,
+        )
+        return SubprocessToolHandler(
+            command=command,
+            timeout_seconds=self.timeout_seconds,
+            max_output_bytes=self.max_output_bytes,
+            environment={},
+        )(context, arguments)
 
 
 class JsonlAuditSink:

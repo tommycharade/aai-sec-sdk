@@ -69,6 +69,17 @@ principal, credential, or tool authority. Heartbeat session identifiers are
 opaque bearer values and are returned only to the registering process, never
 to the operator dashboard.
 
+Host onboarding treats shell history and host configuration as persistence
+boundaries. The UI never embeds an exchanged bearer in its generated command:
+the operator copies the session separately and pastes it into a hidden shell
+prompt. Claude inherits that value without writing it to `.mcp.json`; Codex's
+project-scoped installer stores only `env_vars = ["AAI_SEC_AGENT_TOKEN"]` and
+non-secret routing metadata. The installer rejects symlinked, invalid, or
+ambiguously owned TOML rather than following or overwriting it. A copied token
+can still be exposed through the operator's clipboard or compromised shell, so
+sessions remain short-lived, deployment/agent-bound, rotated by heartbeat and
+revocable by the control plane.
+
 The registry expires missing heartbeats, records registration, heartbeat, and
 disconnect transitions through the configured audit sink, and the example MCP
 gateway stops its guarded runtime when heartbeat delivery fails. The control
@@ -163,15 +174,21 @@ profile, expiry, action binding, and capabilities. The verifier is the adapter
 boundary for containers, microVMs, WASM runtimes, or platform attestation.
 `SubprocessToolHandler` intentionally makes no isolation claim: it is a
 no-shell process boundary and must be deployed inside a real sandbox when
-handling hostile code.
+handling hostile code. `DockerSandboxToolHandler` is the concrete container
+option; it fixes `--network=none`, read-only root, dropped capabilities,
+non-root UID, no-new-privileges, PID/memory bounds, and a restricted temporary
+filesystem. Pin the image by digest and retain host/daemon hardening and
+the adapter rejects mutable image tags before execution; retain host/daemon
+hardening and escape-test evidence. It is not a microVM and is not sufficient for a threat
+model that includes a malicious Docker daemon or host kernel.
 
 ## Production readiness checklist
 
 - Use authenticated policy, approval, and IAM endpoints over HTTPS.
 - Require `ProviderToken` attestations and test provider-side scope contracts.
 - Treat in-process handlers as trusted; require `requires_isolation=True` for
-  hostile or model-generated code and deploy a real container/microVM/WASM
-  sandbox around the subprocess adapter.
+  hostile or model-generated code and use `DockerSandboxToolHandler` or a
+  separately managed microVM/WASM adapter.
 - Export local audit events to encrypted, access-controlled WORM/SIEM storage.
 - Alert on `GuardedRuntime.health()["timed_out_workers"]` before retrying
   uncertain actions.
@@ -188,12 +205,13 @@ handling hostile code.
 ## Deployment adapters and process boundaries
 
 `JsonlAuditSink`, HTTP OPA/Cedar and approval adapters, and
-`SubprocessToolHandler` are concrete integration surfaces. The HTTP client
+`SubprocessToolHandler`/`DockerSandboxToolHandler` are concrete integration
+surfaces. The HTTP client
 requires HTTPS, explicit headers, and bounded transport waits. The subprocess
-adapter never invokes a shell and passes only a JSON context/argument payload;
-it is a process boundary, not a complete sandbox. Deployments handling hostile
-code must place that worker in an OS/container sandbox with a restricted
-filesystem, network, identity, and resource policy.
+adapters never invoke a shell and pass only a JSON context/argument payload.
+The Docker adapter adds a real container boundary but deployments handling
+hostile code must still retain image provenance, daemon/host hardening, and
+filesystem, network, identity, resource, and escape-denial evidence.
 ## Enterprise fleet trust boundaries
 
 The enterprise fleet layer adds organization, project, and deployment scope

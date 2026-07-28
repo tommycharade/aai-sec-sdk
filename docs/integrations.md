@@ -45,6 +45,11 @@ See the complete synthetic bootstrap in
 an application and the host profile changed without changing the security
 runtime.
 
+The reference bootstrap selects its host profile from `AAI_SEC_AGENT_HOST`
+(for example `codex-cli` or `github-copilot`) and defaults to `claude-code`.
+This value is audit metadata only; authenticated identity and the effective
+policy still come from the control plane and runtime.
+
 Equivalent named factories are available when an application wants an
 explicit host dependency: `opencode_integration`, `openhands_integration`,
 `claude_code_integration`, `cline_integration`, `gemini_cli_integration`,
@@ -122,7 +127,38 @@ configuration documentation for the final location:
 - [Cline hooks](https://docs.cline.bot/customization/hooks)
 - [Gemini CLI extensions](https://google-gemini.github.io/gemini-cli/docs/extensions/)
 - [GitHub Copilot hooks and MCP](https://docs.github.com/en/copilot/concepts/agents/hooks)
-- [Codex CLI MCP](https://github.com/openai/codex/blob/main/codex-rs/README.md)
+- [Codex Model Context Protocol](https://learn.chatgpt.com/docs/extend/mcp.md)
+
+### Project-scoped Codex CLI setup
+
+The guided UI uses `scripts/onboard_codex.py` rather than persisting a bearer
+through `codex mcp add --env`. Run the generated command from the project being
+secured. The script preserves unrelated TOML and owns only a marked
+`agentic-security` block:
+
+```bash
+python3 /path/to/aai-sec-sdk/scripts/onboard_codex.py \
+  --project-root "$PWD" \
+  --sdk-root /path/to/aai-sec-sdk \
+  --enterprise-control-plane-url https://control.example.test \
+  --deployment-id synthetic-deployment \
+  --agent-id synthetic-codex-agent
+```
+
+The generated `.codex/config.toml` uses
+`env_vars = ["AAI_SEC_AGENT_TOKEN"]`. It stores non-secret routing metadata,
+but reads the short-lived bearer from the environment of the Codex process.
+Export the session only in the launching shell, run
+`codex mcp get agentic-security --json`, and then start `codex` from that same
+shell. The installer rejects invalid TOML, unmanaged duplicate server entries,
+unsafe identifiers and symlinked configuration rather than overwriting them.
+
+For Copilot cloud agent, a deployment-specific credential broker must provide
+and renew agent sessions without serializing them into repository MCP
+configuration. Copilot's repository MCP configuration can run local MCP
+servers, but it does not provide an approval prompt before using their tools,
+so the SDK gateway remains deny-by-default and policy-authoritative. The UI
+labels this integration admin-managed until that broker is present.
 
 ## Live Claude presence
 

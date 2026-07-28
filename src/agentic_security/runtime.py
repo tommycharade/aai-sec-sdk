@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
@@ -108,6 +109,108 @@ class RuntimeConfig:
             raise SecurityConfigurationError("idempotency TTL must be positive")
 
 
+class _RuntimeTelemetry:
+    """Track bounded, content-free execution metrics for one runtime.
+
+    The telemetry boundary intentionally contains no tool names, arguments,
+    resources, principals, or outputs. Counters saturate rather than growing
+    without bound, and latency is an aggregate duration only. The control
+    plane can therefore monitor a host without turning telemetry into a second
+    audit stream or a source of sensitive data.
+    """
+
+    _MAX_COUNTER = 1_000_000_000
+
+    def __init__(self) -> None:
+        """Create a thread-safe aggregate metric set."""
+        self._lock = RLock()
+        self._values: dict[str, int | float] = {
+            "actions_total": 0,
+            "actions_admitted": 0,
+            "allowed": 0,
+            "denied": 0,
+            "approval_required": 0,
+            "executed": 0,
+            "failed": 0,
+            "timed_out": 0,
+            "cancelled": 0,
+            "result_rejected": 0,
+            "runtime_errors": 0,
+            "cost_units": 0,
+            "latency_count": 0,
+            "latency_total_ms": 0.0,
+            "latency_max_ms": 0.0,
+        }
+
+    def admit(self, cost_units: int) -> None:
+        """Record one action that passed the budget admission gate."""
+        with self._lock:
+            self._increment("actions_admitted")
+            self._increment("cost_units", max(0, cost_units))
+
+    def record(self, result: ExecutionResult | None, elapsed_seconds: float) -> None:
+        """Record one completed proposal without retaining proposal data."""
+        elapsed_ms = min(max(float(elapsed_seconds) * 1_000.0, 0.0), 86_400_000.0)
+        with self._lock:
+            self._increment("actions_total")
+            self._increment("latency_count")
+            self._values["latency_total_ms"] = min(
+                float(self._values["latency_total_ms"]) + elapsed_ms,
+                float(self._MAX_COUNTER) * 86_400_000.0,
+            )
+            self._values["latency_max_ms"] = max(float(self._values["latency_max_ms"]), elapsed_ms)
+            if result is None:
+                self._increment("runtime_errors")
+                return
+            status = result.status
+            if status is ExecutionStatus.DENIED:
+                self._increment("denied")
+            elif status is ExecutionStatus.APPROVAL_REQUIRED:
+                self._increment("approval_required")
+            elif status in {
+                ExecutionStatus.EXECUTED,
+                ExecutionStatus.EXECUTED_UNRECORDED,
+                ExecutionStatus.EXECUTED_RESULT_REJECTED,
+            }:
+                self._increment("allowed")
+                self._increment("executed")
+                if status is ExecutionStatus.EXECUTED_RESULT_REJECTED:
+                    self._increment("result_rejected")
+            elif status is ExecutionStatus.FAILED:
+                self._increment("failed")
+            elif status is ExecutionStatus.TIMED_OUT:
+                self._increment("timed_out")
+            elif status is ExecutionStatus.CANCELLED:
+                self._increment("cancelled")
+
+    def snapshot(self) -> dict[str, int | float]:
+        """Return the stable wire shape used by agent heartbeats."""
+        with self._lock:
+            actions = int(self._values["latency_count"])
+            total = float(self._values["latency_total_ms"])
+            return {
+                "actionsTotal": int(self._values["actions_total"]),
+                "actionsAdmitted": int(self._values["actions_admitted"]),
+                "allowed": int(self._values["allowed"]),
+                "denied": int(self._values["denied"]),
+                "approvalRequired": int(self._values["approval_required"]),
+                "executed": int(self._values["executed"]),
+                "failed": int(self._values["failed"]),
+                "timedOut": int(self._values["timed_out"]),
+                "cancelled": int(self._values["cancelled"]),
+                "resultRejected": int(self._values["result_rejected"]),
+                "runtimeErrors": int(self._values["runtime_errors"]),
+                "costUnits": int(self._values["cost_units"]),
+                "averageLatencyMs": round(total / actions, 3) if actions else 0.0,
+                "maxLatencyMs": round(float(self._values["latency_max_ms"]), 3),
+            }
+
+    def _increment(self, name: str, amount: int = 1) -> None:
+        """Saturate a counter so telemetry cannot become an unbounded store."""
+        current = int(self._values[name])
+        self._values[name] = min(self._MAX_COUNTER, current + max(0, amount))
+
+
 class GuardedRuntime:
     """Execute only actions that pass every configured security control.
 
@@ -151,6 +254,7 @@ class GuardedRuntime:
         # idempotent tools. This is intentionally conservative: a later
         # adapter can provide per-key locks without weakening the invariant.
         self._idempotency_lock = RLock()
+        self._telemetry = _RuntimeTelemetry()
 
     def stop(self) -> None:
         """Activate the emergency stop and request cooperative cancellation."""
@@ -159,12 +263,25 @@ class GuardedRuntime:
             for token in self._active_tokens.values():
                 token.cancel()
 
+    def replace_policy(self, policy: PolicyEngine) -> None:
+        """Atomically replace the policy used by subsequent action decisions.
+
+        Deployments use this for a controlled policy refresh from an
+        authenticated authority. An in-flight decision keeps the policy
+        snapshot it already captured; the next decision observes the new
+        policy. The runtime never accepts policy data from an agent or model.
+        """
+        if not hasattr(policy, "decide"):
+            raise SecurityConfigurationError("replacement policy must implement decide")
+        with self._stop_lock:
+            self.policy = policy
+
     def is_stopped(self) -> bool:
         """Return whether the emergency stop is active."""
         with self._stop_lock:
             return self._stopped
 
-    def health(self) -> dict[str, int | bool]:
+    def health(self) -> dict[str, int | float | bool]:
         """Return non-sensitive lifecycle counters for operational monitoring.
 
         ``timed_out_workers`` counts workers that outlived the caller wait.
@@ -176,7 +293,12 @@ class GuardedRuntime:
                 "stopped": self._stopped,
                 "active_actions": len(self._active_tokens),
                 **self._operation_tracker.snapshot(),
+                **self._telemetry.snapshot(),
             }
+
+    def telemetry(self) -> dict[str, int | float]:
+        """Return content-free aggregate metrics suitable for a heartbeat."""
+        return self._telemetry.snapshot()
 
     def execute(self, proposal: ActionProposal) -> ExecutionResult:
         """Mediate and, if allowed, execute one untrusted action proposal."""
@@ -186,8 +308,14 @@ class GuardedRuntime:
             if tool is not None and tool.idempotency_required
             else nullcontext()
         )
-        with guard:
-            return self._execute_unlocked(proposal)
+        started = time.perf_counter()
+        result: ExecutionResult | None = None
+        try:
+            with guard:
+                result = self._execute_unlocked(proposal)
+            return result
+        finally:
+            self._telemetry.record(result, time.perf_counter() - started)
 
     def _execute_unlocked(self, proposal: ActionProposal) -> ExecutionResult:
         """Run one proposal while the caller owns any required idempotency lock."""
@@ -203,6 +331,7 @@ class GuardedRuntime:
             return self._deny(
                 request_id, proposal, "task budget exhausted or concurrency limit reached"
             )
+        self._telemetry.admit(tool.cost_units)
         cancellation = CancellationToken()
         # Mutable because timeout callbacks run after the caller returns. A
         # timed-out bounded operation owns the action lease until its worker
@@ -254,8 +383,10 @@ class GuardedRuntime:
             if self.is_stopped():
                 return self._deny(request_id, proposal, "runtime emergency stop is active")
             try:
+                with self._stop_lock:
+                    live_policy = self.policy
                 policy_result = self._run_bounded(
-                    lambda: self.policy.decide(self.context, tool, arguments, resources),
+                    lambda: live_policy.decide(self.context, tool, arguments, resources),
                     "policy evaluation",
                     request_id=request_id,
                     on_timeout_observed=lambda: self._defer_action_budget_release(

@@ -132,7 +132,10 @@ def main() -> None:
             name="Safe default policy",
             configuration={
                 "policy": {"provider": "local_allow_list", "denyByDefault": True},
-                "tools": {"allowed": ["read_repository"]},
+                # The reference MCP gateway exposes this synthetic read tool;
+                # production deployments should replace the seed with their
+                # own reviewed tool inventory.
+                "tools": {"allowed": ["read_repository", "lookup_record"]},
                 "budgets": {"maxActions": 25, "maxConcurrent": 2},
             },
         )

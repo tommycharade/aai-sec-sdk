@@ -16,3 +16,8 @@ build/
 site/
 .mutmut-cache/
 mutants/
+.DS_Store
+.playwright-mcp/
+infra/**/node_modules/
+infra/**/cdk.out/
+infra/**/cdk-outputs.json

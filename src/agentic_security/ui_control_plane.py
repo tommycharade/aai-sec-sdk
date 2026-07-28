@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import hmac
 import json
+import math
 import os
 import re
 import secrets
 import shlex
+import ssl
 import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -35,14 +37,47 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
+import certifi
+
+from .audit import AuditSink
+from .integrations import AgentHost
+
 try:  # pragma: no cover - platform branch; control-plane reference targets Unix hosts.
     import fcntl
 except ImportError:  # pragma: no cover - Windows has no fcntl equivalent in the stdlib.
     fcntl = None  # type: ignore[assignment]
 
-from .audit import AuditSink
+_AGENT_TELEMETRY_FIELDS = frozenset(
+    {
+        "actionsTotal",
+        "actionsAdmitted",
+        "allowed",
+        "denied",
+        "approvalRequired",
+        "executed",
+        "failed",
+        "timedOut",
+        "cancelled",
+        "resultRejected",
+        "runtimeErrors",
+        "costUnits",
+        "averageLatencyMs",
+        "maxLatencyMs",
+    }
+)
 
 JsonObject = dict[str, Any]
+
+
+def _open_https(request: Request, timeout: float) -> Any:
+    """Open an HTTPS request with the packaged Mozilla CA bundle."""
+    return urlopen(  # noqa: S310 - callers validate the endpoint scheme.
+        request,
+        timeout=timeout,
+        context=ssl.create_default_context(cafile=certifi.where()),
+    )
+
+
 _RUNTIME_KEYS: Final[frozenset[str]] = frozenset(
     {
         "policyProvider",
@@ -239,7 +274,7 @@ class InMemoryControlPlaneAuthority:
 
 @dataclass(slots=True)
 class AgentPresence:
-    """Authenticated Claude/MCP presence tracked by the control plane."""
+    """Authenticated Claude Code or Codex CLI presence tracked by the control plane."""
 
     agent_id: str
     host: str
@@ -411,9 +446,11 @@ class ControlPlaneAgentClient:
         agent_id: str,
         project_root: str,
         deployment_id: str | None = None,
+        aws_agent_session: bool = False,
+        host: AgentHost | str = AgentHost.CLAUDE_CODE,
         timeout_seconds: float = 5,
     ) -> None:
-        """Bind one agent token to one explicit project registration."""
+        """Bind one agent token to one explicit project and host registration."""
         parsed = urlsplit(base_url.rstrip("/"))
         local_http = parsed.scheme == "http" and parsed.hostname in {
             "localhost",
@@ -426,20 +463,33 @@ class ControlPlaneAgentClient:
             raise ValueError("agent client requires a token, agent ID, and project root")
         if timeout_seconds <= 0:
             raise ValueError("agent client timeout must be positive")
+        try:
+            self.host = host if isinstance(host, AgentHost) else AgentHost(host)
+        except ValueError as exc:
+            raise ValueError("agent client host is not supported") from exc
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.agent_id = agent_id
         self.project_root = project_root
         self.deployment_id = deployment_id
+        self.aws_agent_session = aws_agent_session
         self.timeout_seconds = timeout_seconds
 
     def register(self) -> str:
         """Register the MCP process and return its opaque heartbeat session."""
+        if self.aws_agent_session:
+            # The AWS enrollment exchange has already consumed a one-time
+            # bootstrap secret and issued this bearer session. Do not replay
+            # enrollment or send an AWS agent token to the operator route. An
+            # immediate heartbeat proves that the running MCP process, rather
+            # than enrollment alone, is present before it serves tools.
+            self.heartbeat(self.token)
+            return self.token
         response = self._request(
             "/enterprise/agents/register" if self.deployment_id else "/agents/register",
             {
                 "agentId": self.agent_id,
-                "host": "claude-code",
+                "host": self.host.value,
                 "projectRoot": self.project_root,
                 **({"deploymentId": self.deployment_id} if self.deployment_id else {}),
             },
@@ -449,16 +499,83 @@ class ControlPlaneAgentClient:
             raise ControlPlaneDependencyError("control plane returned no agent session")
         return session_id
 
-    def heartbeat(self, session_id: str) -> JsonObject:
-        """Refresh the registered process presence."""
-        return self._request(self._agent_path("heartbeat"), {"sessionId": session_id})
+    def heartbeat(
+        self,
+        session_id: str,
+        telemetry: Mapping[str, int | float] | None = None,
+    ) -> JsonObject:
+        """Refresh presence and optionally report bounded aggregate metrics.
+
+        Telemetry is operational evidence only. It cannot alter identity,
+        policy, approvals, credentials, or execution state, and the client
+        rejects unknown or unbounded fields before they leave the host.
+        """
+        body: JsonObject = {"sessionId": session_id}
+        if telemetry is not None:
+            body["telemetry"] = _bounded_agent_telemetry(telemetry)
+        response = self._request(self._agent_path("heartbeat"), body)
+        refreshed = response.get("accessToken")
+        if isinstance(refreshed, str) and len(refreshed) >= 16:
+            self.token = refreshed
+        return response
 
     def disconnect(self, session_id: str) -> JsonObject:
         """Mark the agent offline during an orderly MCP process shutdown."""
+        if self.aws_agent_session:
+            # The AWS presence record expires conservatively after missed
+            # heartbeats; there is intentionally no agent-authorized stop or
+            # disconnect mutation on this route.
+            return {"status": "disconnect_pending_expiry"}
         return self._request(self._agent_path("disconnect"), {"sessionId": session_id})
+
+    def effective_policy(self) -> JsonObject:
+        """Fetch the authenticated agent's centrally assigned policy.
+
+        A deployment should call this after registration and before serving
+        tools. Missing or conflicting group policy is a dependency failure and
+        must prevent the runtime from starting.
+        """
+        if not self.deployment_id:
+            raise ControlPlaneDependencyError(
+                "effective policy requires a deployment-scoped agent client"
+            )
+        request = Request(  # noqa: S310 - URL scheme is validated above.
+            f"{self.base_url}{self._agent_path('effective-policy')}",
+            headers={"Accept": "application/json", "Authorization": f"Bearer {self.token}"},
+            method="GET",
+        )
+        try:
+            with _open_https(request, self.timeout_seconds) as response:
+                value = json.loads(response.read(1_000_000))
+        except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
+            raise ControlPlaneDependencyError("effective policy lookup failed") from exc
+        response = dict(_mapping(value, "effective policy response"))
+        if self.aws_agent_session and "policy" not in response:
+            # Normalize the AWS route's flat response to the provider-neutral
+            # shape consumed by host integrations.
+            configuration = response.get("configuration")
+            if isinstance(configuration, Mapping):
+                return {
+                    "emergencyStop": False,
+                    "policy": {
+                        "id": response.get("policyId"),
+                        "version": response.get("version"),
+                        "configuration": dict(configuration),
+                    },
+                }
+        return response
 
     def _agent_path(self, action: str) -> str:
         """Build a deployment-scoped or legacy agent lifecycle path."""
+        if self.aws_agent_session:
+            if not self.deployment_id:
+                raise ControlPlaneDependencyError(
+                    "AWS agent session requires a deployment identifier"
+                )
+            return (
+                f"/agent/{quote(self.deployment_id, safe='')}/"
+                f"{quote(self.agent_id, safe='')}/{action}"
+            )
         if self.deployment_id:
             return (
                 f"/enterprise/agents/{quote(self.deployment_id, safe='')}/"
@@ -468,6 +585,23 @@ class ControlPlaneAgentClient:
 
     def _request(self, path: str, body: JsonObject) -> JsonObject:
         """Send one bounded JSON request without logging the bearer token."""
+        if self.aws_agent_session and path.endswith("/heartbeat"):
+            request = Request(  # noqa: S310 - URL scheme is validated above.
+                f"{self.base_url}{path}",
+                data=json.dumps(body).encode("utf-8"),
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {self.token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with _open_https(request, self.timeout_seconds) as response:
+                    value = json.loads(response.read(1_000_000))
+            except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
+                raise ControlPlaneDependencyError("control-plane heartbeat failed") from exc
+            return dict(_mapping(value, "control-plane heartbeat response"))
         request = Request(  # noqa: S310 - URL scheme is validated above.
             f"{self.base_url}{path}",
             data=json.dumps(body).encode("utf-8"),
@@ -479,7 +613,7 @@ class ControlPlaneAgentClient:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:  # noqa: S310
+            with _open_https(request, self.timeout_seconds) as response:
                 value = json.loads(response.read(1_000_000))
         except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
             raise ControlPlaneDependencyError("control-plane agent request failed") from exc
@@ -496,6 +630,22 @@ def _mapping(value: object, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ControlPlaneConfigurationError(f"{name} must be an object")
     return value
+
+
+def _bounded_agent_telemetry(value: Mapping[str, int | float]) -> dict[str, int | float]:
+    """Validate the fixed, non-sensitive metric schema at the client boundary."""
+    if not isinstance(value, Mapping) or len(value) > len(_AGENT_TELEMETRY_FIELDS):
+        raise ControlPlaneConfigurationError("agent telemetry must be a bounded object")
+    result: dict[str, int | float] = {}
+    for key, item in value.items():
+        if key not in _AGENT_TELEMETRY_FIELDS or isinstance(item, bool):
+            raise ControlPlaneConfigurationError("agent telemetry contains an unsupported field")
+        if not isinstance(item, (int, float)) or not math.isfinite(float(item)):
+            raise ControlPlaneConfigurationError("agent telemetry values must be finite numbers")
+        if item < 0 or item > 1_000_000_000:
+            raise ControlPlaneConfigurationError("agent telemetry values are out of bounds")
+        result[key] = item
+    return result
 
 
 def _text(value: object, name: str, *, allow_empty: bool = True) -> str:
@@ -1145,8 +1295,8 @@ class ControlPlaneApplication:
                         "agentId must match the authenticated agent identity"
                     )
                 host = _text(body.get("host"), "host", allow_empty=False)
-                if host != "claude-code":
-                    raise ControlPlaneConfigurationError("host must be claude-code")
+                if host not in {AgentHost.CLAUDE_CODE.value, AgentHost.CODEX_CLI.value}:
+                    raise ControlPlaneConfigurationError("host must be claude-code or codex-cli")
                 return self._respond(
                     start_response,
                     200,

@@ -147,6 +147,14 @@ workers remain tracked and count against `max_timed_out_workers` until they
 return. Use `GuardedRuntime.health()` for operational alerts. Configure a
 custom `redactor` for domain-specific secret or PII rules.
 
+`GuardedRuntime.telemetry()` returns the bounded, content-free aggregate
+execution counters used by the agent heartbeat. It reports action outcomes,
+admission and cost units, and aggregate latency; it never includes tool names,
+arguments, resources, principals, credentials, or handler output. Deployments
+may send this snapshot to the enterprise control plane for fleet performance
+views. It is an operational metric snapshot, not a replacement for the
+redacted audit stream.
+
 ## Tools
 
 ::: agentic_security.tools.ToolDefinition
