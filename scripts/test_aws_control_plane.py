@@ -213,7 +213,11 @@ def main() -> int:
         enrolled_status, enrolled = _request(
             f"{arguments.api_url.rstrip('/')}/agent/enroll",
             "POST",
-            {"bootstrapToken": bootstrap_token, "host": "AWS control-plane smoke"},
+            {
+                "bootstrapToken": bootstrap_token,
+                "projectRoot": "/synthetic/project",
+                "host": "AWS control-plane smoke",
+            },
         )
         if enrolled_status != 201:
             raise RuntimeError(f"agent enrollment failed: {enrolled_status} {enrolled}")

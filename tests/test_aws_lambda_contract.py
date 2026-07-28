@@ -1,5 +1,6 @@
 """Contract tests for the deployed AWS control-plane Lambda boundary."""
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -47,6 +48,12 @@ class FakeTable:
         item = self.items.get(key)
         if item is None:
             raise ConditionalFailure()
+        if ":project_root" in ExpressionAttributeValues:
+            if item.get("project_root") not in (None, ""):
+                raise ConditionalFailure()
+            item["project_root"] = ExpressionAttributeValues[":project_root"]
+            self.items[key] = item
+            return {"Attributes": dict(item)}
         if ":pending" in ExpressionAttributeValues:
             if (
                 item.get("status") != ExpressionAttributeValues[":pending"]
@@ -170,8 +177,11 @@ def _event(
     body: dict[str, Any] | None = None,
     claims: dict[str, Any] | None = None,
     token: str | None = None,
+    project_root: str = "/synthetic/project",
 ) -> dict[str, Any]:
     headers = {"authorization": f"Bearer {token}"} if token else {}
+    if token:
+        headers["x-aai-project-root-digest"] = hashlib.sha256(project_root.encode()).hexdigest()
     return {
         "rawPath": path,
         "headers": headers,
@@ -383,6 +393,77 @@ def test_trial_foundation_creation_is_tenant_scoped_and_agent_identity_is_derive
     assert stored["region"] == "eu-west-2"
     assert stored["status"] == "offline"
     assert stored["last_heartbeat"] == 0
+    immutable_scope = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/register",
+            "POST",
+            body={
+                "deploymentId": "deployment-pilot",
+                "agentId": "claude-pilot",
+                "host": "claude-code",
+                "projectRoot": "/synthetic/other",
+            },
+            claims=claims,
+        ),
+    )
+    assert immutable_scope["statusCode"] == 409
+
+    legacy = dict(stored)
+    legacy["id"] = "legacy-agent"
+    legacy["project_root"] = ""
+    legacy.update(module._item_key(tenant, "AGENT", "deployment-pilot:legacy-agent"))
+    table.put_item(Item=legacy)
+    repaired_scope = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/register",
+            "POST",
+            body={
+                "deploymentId": "deployment-pilot",
+                "agentId": "legacy-agent",
+                "host": "codex-cli",
+                "projectRoot": "/synthetic/legacy",
+            },
+            claims=claims,
+        ),
+    )
+    assert repaired_scope["statusCode"] == 200
+    assert json.loads(repaired_scope["body"])["project_root"] == "/synthetic/legacy"
+
+    raced = dict(stored)
+    raced["id"] = "raced-agent"
+    raced["project_root"] = ""
+    raced_key = module._item_key(tenant, "AGENT", "deployment-pilot:raced-agent")
+    raced.update(raced_key)
+    table.put_item(Item=raced)
+    original_update = table.update_item
+
+    def racing_update(**kwargs: Any) -> dict[str, Any]:
+        if ":project_root" in kwargs.get("ExpressionAttributeValues", {}):
+            stored_race = table.items[(raced_key["pk"], raced_key["sk"])]
+            stored_race["project_root"] = "/synthetic/winner"
+            raise ConditionalFailure()
+        return cast(dict[str, Any], original_update(**kwargs))
+
+    monkeypatch.setattr(table, "update_item", racing_update)
+    lost_repair = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/register",
+            "POST",
+            body={
+                "deploymentId": "deployment-pilot",
+                "agentId": "raced-agent",
+                "host": "codex-cli",
+                "projectRoot": "/synthetic/loser",
+            },
+            claims=claims,
+        ),
+    )
+    assert lost_repair["statusCode"] == 409
+    assert table.items[(raced_key["pk"], raced_key["sk"])]["project_root"] == "/synthetic/winner"
+    monkeypatch.setattr(table, "update_item", original_update)
     assert (
         _invoke(
             module,
@@ -421,6 +502,43 @@ def test_trial_foundation_creation_is_tenant_scoped_and_agent_identity_is_derive
         ),
     )
     assert missing_deployment["statusCode"] == 400
+    missing_scope = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/register",
+            "POST",
+            body={
+                "deploymentId": "deployment-pilot",
+                "agentId": "agent-without-scope",
+                "host": "codex-cli",
+            },
+            claims=claims,
+        ),
+    )
+    assert missing_scope["statusCode"] == 400
+    for unsafe_root in (
+        "relative/project",
+        "/",
+        "/synthetic/project/",
+        "/synthetic/../project",
+        "/synthetic//project",
+    ):
+        invalid_scope = _invoke(
+            module,
+            _event(
+                "/enterprise/agents/register",
+                "POST",
+                body={
+                    "deploymentId": "deployment-pilot",
+                    "agentId": "agent-invalid-scope",
+                    "host": "codex-cli",
+                    "projectRoot": unsafe_root,
+                },
+                claims=claims,
+            ),
+        )
+        assert invalid_scope["statusCode"] == 400
+        assert "canonical absolute project path" in json.loads(invalid_scope["body"])["error"]
 
 
 def test_agent_enrollment_is_one_time_and_identity_bound(monkeypatch: Any) -> None:
@@ -431,7 +549,13 @@ def test_agent_enrollment_is_one_time_and_identity_bound(monkeypatch: Any) -> No
     )
     table.put_item(
         Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
-        | {"id": "agent-a", "deployment_id": "dep-a", "tenant_id": tenant, "status": "offline"}
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "tenant_id": tenant,
+            "status": "offline",
+            "project_root": "/synthetic/project",
+        }
     )
     claims = {"custom:tenant_id": tenant, "cognito:groups": ["platform-admin"], "sub": "operator"}
     issued = _invoke(
@@ -445,9 +569,26 @@ def test_agent_enrollment_is_one_time_and_identity_bound(monkeypatch: Any) -> No
     )
     assert issued["statusCode"] == 201
     bootstrap = json.loads(issued["body"])["bootstrapToken"]
+    wrong_scope_enrollment = _invoke(
+        module,
+        _event(
+            "/agent/enroll",
+            "POST",
+            body={"bootstrapToken": bootstrap, "projectRoot": "/synthetic/other"},
+        ),
+    )
+    assert wrong_scope_enrollment["statusCode"] == 403
     enrolled = _invoke(
         module,
-        _event("/agent/enroll", "POST", body={"bootstrapToken": bootstrap, "host": "Claude Code"}),
+        _event(
+            "/agent/enroll",
+            "POST",
+            body={
+                "bootstrapToken": bootstrap,
+                "projectRoot": "/synthetic/project",
+                "host": "Claude Code",
+            },
+        ),
     )
     assert enrolled["statusCode"] == 201
     payload = json.loads(enrolled["body"])
@@ -483,6 +624,16 @@ def test_agent_enrollment_is_one_time_and_identity_bound(monkeypatch: Any) -> No
         ),
     )
     assert heartbeat["statusCode"] == 200
+    wrong_scope_heartbeat = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/heartbeat",
+            "POST",
+            token=payload["accessToken"],
+            project_root="/synthetic/other",
+        ),
+    )
+    assert wrong_scope_heartbeat["statusCode"] == 403
     stored_agent = table.items[(f"TENANT#{tenant}", "AGENT#dep-a:agent-a")]
     assert stored_agent["status"] == "connected"
     assert stored_agent["telemetry"]["actionsTotal"] == 4
@@ -534,6 +685,7 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
             "deployment_id": "dep-a",
             "host": "claude-code",
             "status": "connected",
+            "project_root": "/synthetic/project",
         }
     )
     table.put_item(
@@ -555,6 +707,7 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
             "tenant_id": tenant,
             "deployment_id": "dep-a",
             "agent_id": "agent-a",
+            "project_root_hash": hashlib.sha256(b"/synthetic/project").hexdigest(),
             "expires_at": int(time.time()) + 600,
         }
     )
@@ -565,6 +718,7 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
         "decision": "approval_required",
         "resourceKind": "shell_command",
         "reasonCode": "approval_rule",
+        "actionDigest": "d" * 64,
     }
     recorded = _invoke(
         module,
@@ -580,6 +734,7 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
     assert stored["policy_id"] == "policy-a"
     assert stored["policy_version"] == 7
     assert stored["reported_by_agent"] is True
+    assert stored["action_digest"] == "d" * 64
     assert stored["timeline_pk"] == f"TENANT#{tenant}#DECISION"
     assert stored["timeline_sk"].endswith(f"#dep-a:agent-a:{'a' * 64}")
     assert "command" not in stored and "path" not in stored and "prompt" not in stored
@@ -590,6 +745,24 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
     )
     assert duplicate["statusCode"] == 202
     assert json.loads(duplicate["body"])["duplicate"] is True
+    legacy_body = {key: value for key, value in body.items() if key != "actionDigest"}
+    legacy_body["decisionId"] = "e" * 64
+    legacy = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/decisions", "POST", body=legacy_body, token=token),
+    )
+    assert legacy["statusCode"] == 202
+    del table.items[(f"TENANT#{tenant}", f"DECISION#dep-a:agent-a:{'e' * 64}")]
+    invalid_digest = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/decisions",
+            "POST",
+            body={**body, "decisionId": "f" * 64, "actionDigest": "invalid"},
+            token=token,
+        ),
+    )
+    assert invalid_digest["statusCode"] == 400
     conflict = _invoke(
         module,
         _event(
@@ -656,6 +829,7 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
         "deploymentId": "dep-a",
         "policyId": "policy-a",
         "policyVersion": 7,
+        "actionDigest": "d" * 64,
         "reportedByAgent": True,
     }
 
@@ -669,7 +843,13 @@ def test_agent_heartbeat_rotates_session_near_expiry(monkeypatch: Any) -> None:
     )
     table.put_item(
         Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
-        | {"id": "agent-a", "deployment_id": "dep-a", "tenant_id": tenant, "status": "offline"}
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "tenant_id": tenant,
+            "status": "offline",
+            "project_root": "/synthetic/project",
+        }
     )
     claims = {"custom:tenant_id": tenant, "cognito:groups": ["platform-admin"], "sub": "operator"}
     issued = _invoke(
@@ -682,7 +862,14 @@ def test_agent_heartbeat_rotates_session_near_expiry(monkeypatch: Any) -> None:
         ),
     )
     bootstrap = json.loads(issued["body"])["bootstrapToken"]
-    enrolled = _invoke(module, _event("/agent/enroll", "POST", body={"bootstrapToken": bootstrap}))
+    enrolled = _invoke(
+        module,
+        _event(
+            "/agent/enroll",
+            "POST",
+            body={"bootstrapToken": bootstrap, "projectRoot": "/synthetic/project"},
+        ),
+    )
     old_token = json.loads(enrolled["body"])["accessToken"]
     session_key = {"pk": module._token_key("AGENT_SESSION", old_token), "sk": "SESSION"}
     session = table.get_item(Key=session_key)["Item"]
@@ -718,6 +905,7 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
             "expires_at": now + 300,
             "emergencyStop": False,
             "host": "Claude Code",
+            "project_root": "/synthetic/project",
         }
     )
     table.put_item(
@@ -742,6 +930,10 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
     payload = json.loads(verified["body"])
     assert payload["verified"] is True
     assert all(check["passed"] for check in payload["checks"].values())
+    assert payload["host"] == "Claude Code"
+    assert payload["groups"] == ["group-a"]
+    assert payload["policyId"] == "policy-a"
+    assert payload["policyVersion"] == 1
 
     group["agent_keys"] = []
     unassigned = _invoke(
@@ -749,6 +941,8 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
     )
     unassigned_payload = json.loads(unassigned["body"])
     assert unassigned_payload["verified"] is False
+    assert unassigned_payload["policyId"] is None
+    assert unassigned_payload["policyVersion"] is None
     assert unassigned_payload["checks"]["policyAssignment"]["passed"] is False
 
     agent = table.get_item(Key=module._item_key(tenant, "AGENT", "dep-a:agent-a"))["Item"]
@@ -777,6 +971,26 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
         "passed": False,
         "detail": "Conflicting policy-group assignments must be resolved.",
     }
+    agent_token = "synthetic-agent-session-conflict"  # noqa: S105 - synthetic test bearer
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", agent_token),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "project_root_hash": hashlib.sha256(b"/synthetic/project").hexdigest(),
+            "expires_at": now + 300,
+        }
+    )
+    effective = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/effective-policy", "GET", token=agent_token),
+    )
+    assert effective["statusCode"] == 409
+    assert json.loads(effective["body"])["error"] == (
+        "agent has conflicting policy-group assignments"
+    )
 
     missing = json.loads(
         _invoke(
@@ -953,6 +1167,7 @@ def test_fleet_emergency_stop_is_reversible_durable_and_enforced(monkeypatch: An
             "expires_at": now + 300,
             "emergencyStop": False,
             "host": "Claude Code",
+            "project_root": "/synthetic/project",
         }
     )
     table.put_item(
@@ -971,6 +1186,7 @@ def test_fleet_emergency_stop_is_reversible_durable_and_enforced(monkeypatch: An
             "tenant_id": tenant,
             "deployment_id": "dep-a",
             "agent_id": "agent-a",
+            "project_root_hash": hashlib.sha256(b"/synthetic/project").hexdigest(),
             "expires_at": now + 900,
         }
     )
@@ -1172,7 +1388,13 @@ def test_remote_approval_requires_exact_binding_and_is_single_use(monkeypatch: A
     )
     table.put_item(
         Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
-        | {"id": "agent-a", "deployment_id": "dep-a", "tenant_id": tenant, "status": "offline"}
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "tenant_id": tenant,
+            "status": "offline",
+            "project_root": "/synthetic/project",
+        }
     )
     claims = {"custom:tenant_id": tenant, "cognito:groups": ["platform-admin"], "sub": "operator"}
     issued = _invoke(
@@ -1185,7 +1407,14 @@ def test_remote_approval_requires_exact_binding_and_is_single_use(monkeypatch: A
         ),
     )
     bootstrap = json.loads(issued["body"])["bootstrapToken"]
-    enrolled = _invoke(module, _event("/agent/enroll", "POST", body={"bootstrapToken": bootstrap}))
+    enrolled = _invoke(
+        module,
+        _event(
+            "/agent/enroll",
+            "POST",
+            body={"bootstrapToken": bootstrap, "projectRoot": "/synthetic/project"},
+        ),
+    )
     token = json.loads(enrolled["body"])["accessToken"]
     grant = {
         "approvalId": "approval-a",
@@ -1249,6 +1478,7 @@ def test_operator_approval_queue_is_action_bound_audited_and_fail_closed(
             "host": "Claude Code",
             "status": "connected",
             "expires_at": int(time.time()) + 300,
+            "project_root": "/synthetic/project",
         }
     )
     token = "synthetic-agent-session"  # noqa: S105 - synthetic test credential
@@ -1259,6 +1489,7 @@ def test_operator_approval_queue_is_action_bound_audited_and_fail_closed(
             "tenant_id": tenant,
             "deployment_id": "dep-a",
             "agent_id": "agent-a",
+            "project_root_hash": hashlib.sha256(b"/synthetic/project").hexdigest(),
             "expires_at": int(time.time()) + 300,
         }
     )

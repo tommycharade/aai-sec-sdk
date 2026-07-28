@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -31,6 +30,16 @@ from agentic_security import (
     exact_tool_rule,
     path_within_rule,
 )
+from agentic_security._command_patterns import compile_command_patterns
+
+
+def _patterns_are_safe(patterns: list[str]) -> bool:
+    """Reject invalid or availability-hostile policy regex before hook startup."""
+    try:
+        compile_command_patterns(patterns)
+    except ValueError:
+        return False
+    return True
 
 
 def _load_safe_config(project_dir: Path) -> dict[str, Any] | None:
@@ -57,11 +66,7 @@ def _load_safe_config(project_dir: Path) -> dict[str, Any] | None:
         for field in list_fields
     ):
         return None
-    try:
-        for field in list_fields[1:4]:
-            for pattern in value[field]:
-                re.compile(pattern)
-    except re.error:
+    if any(not _patterns_are_safe(value[field]) for field in list_fields[1:4]):
         return None
     audit_file = value.get("auditFile")
     if not isinstance(audit_file, str) or not audit_file:
@@ -91,7 +96,9 @@ def _control_plane_client(project_dir: Path) -> ControlPlaneAgentClient | None:
     token = os.environ.get("AAI_SEC_AGENT_TOKEN")
     if os.environ.get("AAI_SEC_AGENT_SESSION_MODE") == "aws":
         try:
-            session_store = AgentSessionStore(control_plane_url, deployment_id, agent_id)
+            session_store = AgentSessionStore(
+                control_plane_url, deployment_id, agent_id, str(project_dir)
+            )
             cached = session_store.load()
         except (AgentSessionStoreError, ValueError):
             return None
@@ -138,6 +145,11 @@ def _load_central_config(
         effective = client.effective_policy()
     except (ControlPlaneDependencyError, ValueError):
         return None
+    # The server-owned kill switch is mandatory. Absence, malformed values,
+    # and an active stop all fail closed; only explicit JSON false activates
+    # native rules from the returned policy.
+    if effective.get("emergencyStop") is not False:
+        return None
     policy = effective.get("policy")
     configuration = policy.get("configuration") if isinstance(policy, Mapping) else None
     if not isinstance(configuration, Mapping):
@@ -159,8 +171,21 @@ def _load_central_config(
     file_tools = _string_list(claude.get("fileTools"))
     denied_patterns = _string_list(claude.get("deniedCommandPatterns"))
     approval_patterns = _string_list(claude.get("approvalCommandPatterns"))
+    allowed_patterns = _string_list(claude.get("allowedCommandPatterns", []))
     if any(
-        value is None for value in (allowed_tools, file_tools, denied_patterns, approval_patterns)
+        value is None
+        for value in (
+            allowed_tools,
+            file_tools,
+            denied_patterns,
+            approval_patterns,
+            allowed_patterns,
+        )
+    ):
+        return None
+    if not all(
+        _patterns_are_safe(patterns or [])
+        for patterns in (denied_patterns, approval_patterns, allowed_patterns)
     ):
         return None
     # Native-tool policy is intentionally separate from SDK-owned MCP tools.
@@ -172,14 +197,14 @@ def _load_central_config(
         "allowedTools": allowed_tools,
         "deniedCommandPatterns": denied_patterns,
         "approvalCommandPatterns": approval_patterns,
-        "allowedCommandPatterns": [],
+        "allowedCommandPatterns": allowed_patterns,
         "fileTools": file_tools,
         "auditFile": ".claude/security-audit.jsonl",
     }
 
 
-def main() -> None:
-    """Read one Claude event and emit one decision."""
+def _build_hook() -> ClaudeCodeHook:
+    """Construct the configured hook without consuming the event from stdin."""
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())).resolve()
     central_client = _control_plane_client(project_dir)
     config = _load_central_config(project_dir, central_client)
@@ -189,8 +214,18 @@ def main() -> None:
         audit_path = (
             configured_audit if configured_audit.is_absolute() else project_dir / configured_audit
         )
-    audit_path.parent.mkdir(parents=True, exist_ok=True)
-    local_audit = JsonlAuditSink(audit_path)
+    try:
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        local_audit = JsonlAuditSink(audit_path)
+    except Exception:
+        # Claude may continue after a hook process failure. Always produce an
+        # explicit deny when the required local audit chain is unavailable.
+        return ClaudeCodeHook(
+            rules=[],
+            default=ClaudeHookResult(
+                ClaudeHookDecision.DENY, "Claude security audit is unavailable"
+            ),
+        )
     audit = (
         ReplicatedAuditSink(
             local_audit,
@@ -207,9 +242,8 @@ def main() -> None:
             ),
             audit=audit,
         )
-        hook.serve_stdio()
-        return
-    hook = ClaudeCodeHook(
+        return hook
+    return ClaudeCodeHook(
         rules=[
             command_rule(
                 tuple(config["deniedCommandPatterns"]),
@@ -225,6 +259,7 @@ def main() -> None:
                 tuple(config["allowedCommandPatterns"]),
                 decision=ClaudeHookDecision.ALLOW,
                 reason="read-only or test command is approved",
+                allowed_root=project_dir,
             ),
             # The allow-list is an authority boundary. Restrict path checks to
             # file tools that are also explicitly allowed; otherwise a
@@ -240,6 +275,22 @@ def main() -> None:
         ],
         audit=audit,
     )
+
+
+def main() -> None:
+    """Read a Claude event and deny explicitly after any unexpected setup failure."""
+    try:
+        hook = _build_hook()
+    except Exception:
+        # Provider and filesystem adapters can fail outside their documented
+        # exception sets. Never let a startup crash become a missing host
+        # decision that Claude could treat as non-authoritative.
+        hook = ClaudeCodeHook(
+            rules=[],
+            default=ClaudeHookResult(
+                ClaudeHookDecision.DENY, "Claude security hook initialization failed"
+            ),
+        )
     hook.serve_stdio()
 
 

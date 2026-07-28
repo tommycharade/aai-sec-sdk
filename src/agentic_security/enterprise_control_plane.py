@@ -26,10 +26,14 @@ from typing import Any, Protocol
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
 
+from ._command_patterns import compile_command_patterns
 from .audit import AuditSink
 
 _MAX_TEXT = 256
 _MAX_PAGE_SIZE = 200
+_COMMAND_PATTERN_FIELDS = frozenset(
+    {"allowedCommandPatterns", "deniedCommandPatterns", "approvalCommandPatterns"}
+)
 _AGENT_TELEMETRY_FIELDS = frozenset(
     {
         "actionsTotal",
@@ -112,6 +116,7 @@ _FLEET_GOVERNANCE_KEYS: dict[str, frozenset[str]] = {
             "allowedBuiltInTools",
             "deniedCommandPatterns",
             "approvalCommandPatterns",
+            "allowedCommandPatterns",
             "fileTools",
             "allowedSkills",
             "allowedMcpServers",
@@ -519,6 +524,16 @@ def _text(value: object, name: str) -> str:
     return value.strip()
 
 
+def _command_pattern(value: object, name: str) -> str:
+    """Accept only bounded regex syntax screened against common ReDoS forms."""
+    try:
+        compile_command_patterns([value])
+    except ValueError as exc:
+        raise FleetConfigurationError(f"{name} is unsafe or invalid: {exc}") from exc
+    assert isinstance(value, str)
+    return value
+
+
 def _optional_text(value: object, name: str) -> str | None:
     """Validate optional bounded metadata."""
     if value is None or value == "":
@@ -608,7 +623,18 @@ def validate_fleet_configuration(configuration: Mapping[str, Any]) -> dict[str, 
             if unknown:
                 fields = ", ".join(sorted(map(str, unknown)))
                 raise FleetConfigurationError(f"{key_text} contains unsupported fields: {fields}")
-            normalized[key_text] = dict(value)
+            section = dict(value)
+            if key_text == "claudeCode":
+                for field in _COMMAND_PATTERN_FIELDS:
+                    patterns = section.get(field)
+                    if patterns is None:
+                        continue
+                    if not isinstance(patterns, list) or len(patterns) > 100:
+                        raise FleetConfigurationError(f"claudeCode.{field} must be a bounded list")
+                    section[field] = [
+                        _command_pattern(pattern, f"claudeCode.{field}") for pattern in patterns
+                    ]
+            normalized[key_text] = section
         else:
             # Preserve legacy extension sections; the recursive bounded and
             # secret-safe serializer remains the final storage boundary.
@@ -1293,9 +1319,9 @@ class EnterpriseFleetStore:
     ) -> dict[str, Any]:
         """Return the one policy currently effective for an enrolled agent.
 
-        The lookup is authenticated and tenant-scoped. An agent with no group
-        assignment, or with memberships that resolve to different policies,
-        fails closed instead of receiving an arbitrary policy. The returned
+        The lookup is authenticated and tenant-scoped. An agent must have
+        exactly one group membership; duplicate memberships fail closed even
+        when they reference the same policy. The returned
         policy is configuration data; the deployment-owned runtime remains
         responsible for translating it into its typed policy and adapters.
         """
@@ -1312,6 +1338,8 @@ class EnterpriseFleetStore:
             ).fetchall()
             if not rows:
                 raise FleetNotFoundError("agent is not assigned to a policy group")
+            if len(rows) != 1:
+                raise FleetConfigurationError("agent must belong to exactly one policy group")
             policy_ids = {str(row["policy_id"]) for row in rows}
             if len(policy_ids) != 1:
                 raise FleetConfigurationError("agent belongs to groups with conflicting policies")
@@ -1372,6 +1400,12 @@ class EnterpriseFleetStore:
                 (deployment_id, agent_id),
             ).fetchall()
             policy_ids = {str(row["policy_id"]) for row in groups}
+            assigned_policy = None
+            if len(groups) == 1 and len(policy_ids) == 1:
+                try:
+                    assigned_policy = self._policy(next(iter(policy_ids)))
+                except FleetNotFoundError:
+                    assigned_policy = None
             stopped = self._agent_emergency_stop(deployment_id, agent_id)
             now = float(self._now())
             checks = {
@@ -1393,11 +1427,11 @@ class EnterpriseFleetStore:
                     ),
                 },
                 "policyAssignment": {
-                    "passed": len(policy_ids) == 1,
+                    "passed": assigned_policy is not None,
                     "detail": (
-                        "Exactly one policy group is assigned."
-                        if len(policy_ids) == 1
-                        else "Agent must belong to exactly one policy group."
+                        "Exactly one valid policy group is assigned."
+                        if assigned_policy is not None
+                        else "Agent must belong to exactly one group with a valid policy."
                     ),
                 },
                 "emergencyStop": {
@@ -1418,6 +1452,10 @@ class EnterpriseFleetStore:
                 "host": agent["host"],
                 "status": agent["status"],
                 "groups": [row["id"] for row in groups],
+                "policyId": assigned_policy["id"] if assigned_policy is not None else None,
+                "policyVersion": (
+                    assigned_policy["version"] if assigned_policy is not None else None
+                ),
             }
         self._audit(
             "fleet_agent_verification_read",

@@ -25,6 +25,14 @@ def test_guardrails_define_security_invariants() -> None:
         assert phrase in text
 
 
+def test_quality_gate_propagates_coverage_failure() -> None:
+    """A failed coverage command must make ``make check`` fail in CI."""
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "coverage:\n\t@set -e;" in makefile
+    assert "fail_under = 90\nprecision = 2" in project
+
+
 def test_license_policy_is_explicit() -> None:
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
     docs_text = (ROOT / "docs/license.md").read_text(encoding="utf-8")

@@ -61,6 +61,7 @@ class AgentSessionStore:
         base_url: str,
         deployment_id: str,
         agent_id: str,
+        project_root: str,
         *,
         directory: Path | None = None,
         now: Callable[[], float] | None = None,
@@ -71,6 +72,7 @@ class AgentSessionStore:
             base_url: HTTPS control-plane origin, or localhost HTTP for tests.
             deployment_id: Server-registered deployment identifier.
             agent_id: Server-registered agent identifier.
+            project_root: Canonical absolute scope registered for this agent.
             directory: Optional user-private cache directory for integration
                 tests or a deployment-owned host location.
             now: Injectable clock used only to reject expired credentials.
@@ -94,15 +96,26 @@ class AgentSessionStore:
             raise ValueError("agent session control-plane URL must use HTTPS outside localhost")
         if not _identifier(deployment_id) or not _identifier(agent_id):
             raise ValueError("agent session deployment and agent IDs must be safe identifiers")
+        if (
+            not isinstance(project_root, str)
+            or not project_root.strip()
+            or not Path(project_root).is_absolute()
+        ):
+            raise ValueError("agent session project root must be an absolute path")
         if now is not None and not callable(now):
             raise ValueError("agent session clock must be callable")
         self.base_url = base_url.rstrip("/")
         self.deployment_id = deployment_id
         self.agent_id = agent_id
+        self.project_root = str(Path(project_root).resolve(strict=False))
+        if self.project_root == Path(self.project_root).anchor:
+            raise ValueError(
+                "agent session project root must name one project, not a filesystem root"
+            )
         self.directory = (
             directory or Path.home() / ".local" / "state" / "aai-sec" / "agent-sessions"
         )
-        scope = f"{self.base_url}\0{deployment_id}\0{agent_id}".encode()
+        scope = f"{self.base_url}\0{deployment_id}\0{agent_id}\0{self.project_root}".encode()
         self.path = self.directory / f"{hashlib.sha256(scope).hexdigest()}.json"
         self._now = now or time.time
 
@@ -142,14 +155,16 @@ class AgentSessionStore:
             "version",
             "deploymentId",
             "agentId",
+            "projectRoot",
             "token",
             "expiresAt",
         }:
             return None
         if (
-            value.get("version") != 1
+            value.get("version") != 2
             or value.get("deploymentId") != self.deployment_id
             or value.get("agentId") != self.agent_id
+            or value.get("projectRoot") != self.project_root
         ):
             return None
         try:
@@ -176,9 +191,10 @@ class AgentSessionStore:
             self._validate_file()
         payload = json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "deploymentId": self.deployment_id,
                 "agentId": self.agent_id,
+                "projectRoot": self.project_root,
                 "token": credential.token,
                 "expiresAt": credential.expires_at,
             },

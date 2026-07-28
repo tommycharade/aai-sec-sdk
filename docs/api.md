@@ -99,6 +99,12 @@ The example is synthetic and does not connect to a model or external service.
 
 ::: agentic_security.enterprise_control_plane.EnterpriseFleetApplication
 
+## Native agent host hooks
+
+::: agentic_security.claude_code
+
+::: agentic_security.codex_cli
+
 Applications normally continue to use `GuardedRuntime`; these contracts are
 provided for integrations and contract tests. Do not construct a permit from
 model output or bypass the runtime lifecycle.
@@ -372,7 +378,9 @@ The package includes explicit adapters for common deployment infrastructure.
 uses a bounded timeout, and never invents authentication or retry behavior.
 `HttpOpaPolicyEngine`, `HttpCedarPolicyEngine`, and `HttpApprovalProvider` use
 that transport. `JsonlAuditSink` provides fsync-backed append-only audit
-storage, a multi-process lock, a size fail-closed limit, and verification. It
+storage, a multi-process lock, a size fail-closed limit, verification, and a
+bounded tail reserved for fail-closed replication compensation. Individual
+ordinary records are capped at half that reserve. It
 is local evidence, not a forensic/WORM service: production deployments should
 replicate to access-controlled encrypted remote storage. On restart, the local
 sink verifies the complete existing chain before appending; corruption is a

@@ -124,6 +124,9 @@ if __name__ == "__main__":
             deployment_id = os.environ.get("AAI_SEC_DEPLOYMENT_ID")
             agent_id = os.environ.get("AAI_SEC_AGENT_ID", "claude-code-local")
             aws_session = os.environ.get("AAI_SEC_AGENT_SESSION_MODE") == "aws"
+            project_root = str(
+                Path(os.environ.get("CLAUDE_PROJECT_DIR", str(Path.cwd()))).resolve()
+            )
             session_store = None
             agent_token = os.environ.get("AAI_SEC_AGENT_TOKEN")
             if aws_session:
@@ -134,6 +137,7 @@ if __name__ == "__main__":
                         control_plane_url,
                         deployment_id,
                         agent_id,
+                        project_root,
                     )
                     cached = session_store.load()
                 except (AgentSessionStoreError, ValueError) as exc:
@@ -148,7 +152,7 @@ if __name__ == "__main__":
                 control_plane_url,
                 agent_token,
                 agent_id=agent_id,
-                project_root=os.environ.get("CLAUDE_PROJECT_DIR", str(Path.cwd())),
+                project_root=project_root,
                 deployment_id=deployment_id,
                 aws_agent_session=aws_session,
                 session_store=session_store,

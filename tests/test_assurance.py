@@ -80,10 +80,10 @@ def test_remote_audit_replication_is_required_and_redacted() -> None:
             raise OSError("collector unavailable")
 
     with pytest.raises(AuditReplicationError) as error:
-        ReplicatedAuditSink(InMemoryAuditSink(), BrokenExporter()).append(
-            "decision", "request:2", {}
-        )
+        failed_primary = InMemoryAuditSink()
+        ReplicatedAuditSink(failed_primary, BrokenExporter()).append("decision", "request:2", {})
     assert str(error.value) == "required audit replication failed"
+    assert error.value.local_event == failed_primary.events()[0]
 
 
 def test_in_memory_audit_verification_checks_each_hash_chain_invariant() -> None:

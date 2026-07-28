@@ -43,6 +43,7 @@ nav:
   - Architecture: architecture.md
   - Agent integrations: integrations.md
   - Claude Code example: claude-code.md
+  - Codex CLI example: codex-cli.md
   - Management UI: ui.md
   - Enterprise fleet: enterprise-fleet.md
   - Policy editor: policy-editor.md

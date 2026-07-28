@@ -159,7 +159,7 @@ def _hook_configuration(audit_file: str) -> dict[str, Any]:
         "allowedTools": ["Read", "Glob", "Grep"],
         "deniedCommandPatterns": [r"(^|\s)rm\s+-rf(\s|$)", r"(^|\s)sudo(\s|$)"],
         "approvalCommandPatterns": [r"\bgit\s+push\b", r"\bnpm\s+publish\b"],
-        "allowedCommandPatterns": [r"^git\s+status(\s|$)", r"^pwd(\s|$)"],
+        "allowedCommandPatterns": [r"^git[ \t]+status([ \t]|$)", r"^pwd([ \t]|$)"],
         "fileTools": ["Read", "Glob", "Grep", "Edit", "Write"],
         "auditFile": audit_file,
     }
@@ -182,12 +182,23 @@ def _run_hook(hook_path: Path, project_root: Path, events: list[str]) -> list[di
     """Run the hook in a bounded subprocess and parse only JSON stdout."""
     environment = os.environ.copy()
     environment["CLAUDE_PROJECT_DIR"] = str(project_root)
+    # Bind the child to the selected checkout exactly as onboarding does. An
+    # ambient editable install must not replace the hook implementation under
+    # test or make release evidence depend on another local repository.
+    environment["PYTHONPATH"] = str(hook_path.parent.parent / "src")
+    # Mutmut's instrumented package reads its checked-in configuration when a
+    # child trampoline starts. Keep that child at the selected mutation
+    # checkout while CLAUDE_PROJECT_DIR and each event continue to supply the
+    # synthetic project boundary under test.
+    selected_checkout = hook_path.parent.parent
+    mutation_metadata = selected_checkout / "src" / "agentic_security" / "claude_code.py.meta"
+    child_directory = selected_checkout if mutation_metadata.is_file() else project_root
     completed = subprocess.run(  # noqa: S603 - hook path is derived from the selected SDK checkout
         [sys.executable, str(hook_path)],
         input="\n".join(events) + "\n",
         capture_output=True,
         text=True,
-        cwd=project_root,
+        cwd=child_directory,
         env=environment,
         timeout=15,
         check=False,

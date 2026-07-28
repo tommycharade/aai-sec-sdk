@@ -1,5 +1,113 @@
 # Changelog
 
+- Added fail-closed Codex CLI native-tool enforcement using the documented
+  `PreToolUse` hook. Project onboarding now installs a required SDK MCP gateway
+  and a secret-free native hook; Bash, `apply_patch`, MCP and unknown-tool
+  behavior are adversarially tested; native decisions export content-minimised
+  `codex_native` evidence. Because Codex does not currently support an
+  approval-producing hook result, approval-rule matches are audited and denied
+  with an explicit governed-MCP route. Documentation distinguishes pilot
+  project trust from enterprise-managed `requirements.toml` deployment.
+  Current-CLI acceptance also records that `--ignore-user-config` bypasses the
+  project hook layer; enterprise launch controls must prohibit that flag and
+  verify the managed hook requirement independently.
+  Allowed Codex calls now use the documented zero-output success contract;
+  bare allow responses no longer create a host-reported, fail-open hook error.
+- Minimized Claude and Codex native-hook persistence so raw commands,
+  arguments, file paths and working directories are replaced by stable digests
+  before local JSONL or remote replication.
+- Bound enterprise bootstrap exchange, cached credentials, bearer sessions and
+  every authenticated agent request to the registered immutable project root.
+  A credential copied from another checkout or an agent whose registered scope
+  changed now fails closed; legacy unscoped cache records are invalidated.
+- Hardened native shell-entry detection across POSIX and Windows command forms:
+  entry-point names are case-insensitive and executable suffixes such as
+  `.exe`, `.cmd`, `.com`, and `.bat` cannot disguise `sh`, `bash`, or another
+  prohibited command interpreter.
+- Hardened `JsonlAuditSink` against path substitution. Its directory, audit
+  file and lock file are opened descriptor-relative without following
+  symlinks, and opened objects are verified as regular files before reading,
+  locking, appending or validating the chain.
+- Hardened native command and patch matching: allow regexes must cover the
+  complete shell command, deny/approval regexes search every component, Codex
+  move destinations receive the same root-confinement check as source paths,
+  and malformed central allow patterns fail closed before hook construction.
+  Claude native writes and Codex patches now deny all targets under `.claude`,
+  `.codex`, and `.git`, plus `.mcp.json`, so agents cannot rewrite their own
+  policy, hook, MCP, repository execution configuration, or local evidence
+  state.
+  Native allow rules now also reject newlines, command substitution, shell
+  lists, pipelines, redirections and subshell syntax even if a custom regex
+  would match them; shipped whitespace rules use spaces/tabs rather than `\s`.
+  Codex patch authorization now grants Add, Update, Delete, and Move separately:
+  `Write` permits Add, `Edit` permits Update/Delete, and Move requires both.
+  Allowed Claude commands now require the live event working directory to
+  resolve inside the approved project root. Codex applies the same check to
+  both event and tool-level working-directory scopes.
+  Native decision evidence now carries a content-minimised action digest so
+  activation proof can bind each result to the exact prompted check and its
+  working-directory scope. Claude evidence projects the authority-bearing Bash
+  command or resolved Read path, so optional presentation fields cannot create
+  false positives or make the guided proof unreliable. Codex exact-name rules
+  now reject Bash, patch and process tools that require argument-aware
+  authorization instead.
+  Native command allow paths reject parameter-expanded executables such as
+  `$SHELL -c`, and the AWS effective-policy route rejects ambiguous group
+  membership before returning any policy. New agents require a project root;
+  legacy empty scope can be repaired once and then becomes immutable through a
+  conditional write. Patch-relative paths now resolve from the live Codex hook
+  working directory, preventing outside-root and protected-subdirectory scope
+  confusion. Claude and Codex native writes reject case variants of every
+  protected authority path, including on case-insensitive macOS filesystems.
+  Bounded JSONL audit reserves capacity for the linked effective
+  denial so a failed required replica cannot leave local evidence ending in a
+  provisional allow, while small explicit file limits retain at least half of
+  their capacity for normal events. Provider-neutral effective-policy lookup
+  now rejects multiple group memberships even when they reference one policy,
+  matching verification and AWS fail-closed semantics. Python-only named
+  Unicode regex escapes are rejected to keep browser and SDK policy semantics
+  identical at the command boundary.
+- Unified command-pattern validation across the enterprise API, legacy local
+  policy files, Claude and Codex hook startup, and the core matchers. Patterns
+  are count/length bounded and reject backreferences, lookarounds and
+  quantified groups, wildcard repetition, and ambiguous overlapping repetition
+  associated with catastrophic backtracking, even when overlapping repeats are
+  separated by consumable characters; oversized command input denies
+  before matching. Existing patterns that use `.*` must migrate to a bounded
+  character class around a mandatory delimiter, such as `curl[^|]+\\|`.
+  Audit-directory, permission and
+  corrupt-chain startup failures now emit an explicit host denial instead of
+  crashing a hook that the host could otherwise treat as non-authoritative.
+  A final setup boundary converts unexpected provider/filesystem adapter
+  exceptions into the same explicit denial for both Claude and Codex.
+  Source-checkout onboarding now pins hook and MCP imports to the adjacent SDK,
+  preventing a missing global installation from disabling host enforcement.
+  Oversized regex repeat bounds are normalized into closed policy validation.
+  Quoted shell-control syntax in nested shell/eval arguments is no longer
+  eligible for native allow. Shell/eval command entry points are rejected even
+  when their nested command contains no punctuation; `source`/`.` file
+  execution is rejected as the same hidden parsing boundary. Malformed direct
+  Codex hook API payloads now return a structured denial. UI policy writes enforce whole-list pattern
+  limits, and failed required audit replication records a linked local
+  effective-denial event that supersedes the provisional decision.
+  The local coverage target now reports two-decimal precision and propagates a
+  failed threshold instead of allowing rounding or later checks to mask it.
+  Mutation evidence now includes the native Claude/Codex hooks and shared
+  command-pattern validator as a separately thresholded security component.
+  Central Claude and Codex policy now require an explicitly false emergency-stop state;
+  patch text/target processing and per-invocation local audit-chain scans are
+  bounded before untrusted work. A full local chain fails closed for explicit
+  export/rotation instead of approaching the host timeout or dropping evidence.
+  The shipped offline fallback no longer admits arbitrary Git option tails or
+  project test runners; only narrowly enumerated, non-writing inspection forms
+  are eligible for native allow, preventing output flags from overwriting hook,
+  policy, MCP, or audit state.
+  Agent verification responses now include the consistently read effective
+  policy ID/version, allowing consoles to bind activation to the exact host,
+  deployment, agent, group, and policy revision rather than stale inventory.
+  The local Claude policy harness now binds hook subprocess imports to the
+  selected SDK checkout, preventing an ambient editable install from replacing
+  the implementation under test.
 - Made hosted agent verification details truth-preserving: missing, offline,
   expired, healthy, and conflicting-policy states now return distinct fixed
   messages, and multiple policy-group assignments fail the UI's exactly-one

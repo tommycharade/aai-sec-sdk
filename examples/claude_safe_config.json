@@ -7,7 +7,7 @@
   ],
   "deniedCommandPatterns": [
     "(^|\\s)(rm\\s+-rf|git\\s+reset\\s+--hard|sudo|chmod\\s+777)(\\s|$)",
-    "curl\\s+[^|]+\\|\\s*(sh|bash)"
+    "curl[^|]+\\|\\s*(sh|bash)"
   ],
   "approvalCommandPatterns": [
     "\\bgit\\s+(push|commit)\\b",
@@ -15,7 +15,10 @@
     "\\b(deploy|terraform\\s+apply)\\b"
   ],
   "allowedCommandPatterns": [
-    "^(pwd|ls|git\\s+(status|diff|log)|pytest|python\\s+-m\\s+pytest)(\\s|$)"
+    "^(pwd|ls)$",
+    "^(git[ \\t]+status|git[ \\t]+status[ \\t]+--short)$",
+    "^(git[ \\t]+diff|git[ \\t]+diff[ \\t]+--stat)$",
+    "^(git[ \\t]+log|git[ \\t]+log[ \\t]+--oneline)$"
   ],
   "fileTools": [
     "Read",

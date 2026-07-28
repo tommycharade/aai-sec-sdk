@@ -103,6 +103,9 @@ Agent verification messages are derived from the same boolean condition they
 describe. Missing registration, offline status, expired heartbeat, conflicting
 group assignment, missing policy and emergency-stop states each return a fixed,
 non-sensitive explanation; a failed check never carries healthy-state copy.
+Activation additionally requires the returned host, sole group, effective
+policy ID, and policy version to match the UI selection exactly. Changing any
+part of that tuple invalidates prior verification.
 Strongly consistent tenant list reads paginate to obtain complete
 policy-assignment state, but fixed page and item limits prevent unbounded
 Lambda work. Exceeding either limit fails the request closed instead of

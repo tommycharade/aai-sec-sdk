@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,11 +33,48 @@ def test_onboard_creates_separate_hook_and_mcp_configuration(tmp_path: Path) -> 
     )
     assert mcp["mcpServers"]["agentic-security"]["args"][0].endswith("examples/mcp_gateway.py")
     assert mcp["mcpServers"]["agentic-security"]["env"] == {
+        "PYTHONPATH": str(Path.cwd() / "src"),
         "AAI_SEC_CONTROL_PLANE_URL": "http://localhost:8000/api",
         "AAI_SEC_AGENT_ID": "claude-code-local",
     }
     assert policy["allowedTools"] == ["Read", "Glob", "Grep"]
     assert "rm\\s+-rf" in policy["deniedCommandPatterns"][0]
+
+
+def test_generated_claude_hook_runs_from_checkout_without_installed_sdk(tmp_path: Path) -> None:
+    """Generated configuration imports its adjacent SDK and emits a real decision."""
+    onboard(tmp_path, Path.cwd(), python=sys.executable, dry_run=False)
+    settings = json.loads((tmp_path / ".claude/settings.json").read_text(encoding="utf-8"))
+    handler = settings["hooks"]["PreToolUse"][0]["hooks"][0]
+    environment = dict(os.environ)
+    environment.pop("PYTHONPATH", None)
+    environment["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(tmp_path / "README.md")},
+        "tool_use_id": "tool:onboarded",
+        "session_id": "session:synthetic",
+        "cwd": str(tmp_path),
+    }
+
+    result = subprocess.run(  # noqa: S603 - generated fixed checkout command
+        shlex.split(handler["command"]),
+        # Keep the SDK checkout as cwd so mutmut's instrumented subprocess can
+        # read its test configuration. With a src layout and PYTHONPATH removed
+        # above, cwd alone still cannot make agentic_security importable.
+        cwd=Path.cwd(),
+        input=json.dumps(payload) + "\n",
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    decision = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
+    assert decision == "allow"
+    assert "ModuleNotFoundError" not in result.stderr
 
 
 def test_onboard_preserves_existing_configuration_and_is_idempotent(tmp_path: Path) -> None:
@@ -76,6 +116,7 @@ def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path)
     mcp = json.loads((tmp_path / ".mcp.json").read_text())
     environment = mcp["mcpServers"]["agentic-security"]["env"]
     assert environment == {
+        "PYTHONPATH": str(Path.cwd() / "src"),
         "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL": "https://fleet.example.test/api",
         "AAI_SEC_DEPLOYMENT_ID": "deployment-prod-eu",
         "AAI_SEC_AGENT_ID": "claude-platform-prod",
@@ -87,8 +128,9 @@ def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path)
     assert "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL" in hook_command
     assert "deployment-prod-eu" in hook_command
     command_tokens = shlex.split(hook_command)
-    assert command_tokens[:5] == [
+    assert command_tokens[:6] == [
         "env",
+        f"PYTHONPATH={Path.cwd() / 'src'}",
         "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL=https://fleet.example.test/api",
         "AAI_SEC_DEPLOYMENT_ID=deployment-prod-eu",
         "AAI_SEC_AGENT_ID=claude-platform-prod",
@@ -126,6 +168,7 @@ def test_onboard_secures_ui_session_outside_project_configuration(
         "https://fleet.example.test/api",
         "deployment-prod-eu",
         "claude-platform-prod",
+        str(project.resolve()),
         now=lambda: 1_000,
     )
     assert cache.load() == AgentSessionCredential(token, 1_900)

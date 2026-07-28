@@ -19,7 +19,7 @@ The package includes profiles for:
 | Cline | `cline` | MCP gateway |
 | Gemini CLI | `gemini-cli` | MCP gateway through an extension |
 | GitHub Copilot CLI/cloud agent | `github-copilot` | MCP gateway |
-| Codex CLI | `codex-cli` | MCP server configured with `codex mcp` |
+| Codex CLI | `codex-cli` | MCP gateway and SDK `PreToolUse` adapter |
 
 These profiles are integration labels, not identities or permissions. See
 [`AgentHost`][agentic_security.integrations.AgentHost] and
@@ -145,14 +145,24 @@ python3 /path/to/aai-sec-sdk/scripts/onboard_codex.py \
   --agent-id synthetic-codex-agent
 ```
 
-The generated `.codex/config.toml` stores only non-secret routing metadata.
+The generated `.codex/config.toml` stores only non-secret routing metadata and
+configures both a required MCP gateway and the SDK's deny-by-default
+`PreToolUse` hook. See the complete [Codex CLI guide](codex-cli.md).
 During onboarding the short-lived bearer is copied to the SDK's
 identity-scoped, user-private host cache; it is never serialized into project
 TOML or forwarded through `env_vars`. You can unset the variable, run
 `codex mcp get agentic-security --json`, and start `codex`. The gateway reads
-and rotates the cache. The installer rejects invalid TOML, unmanaged duplicate
+and rotates the cache. Start Codex, review the project hook trust prompt, and
+inspect `/hooks`; a project-local hook does not run until its project layer and
+command have been trusted. The installer rejects invalid TOML, unmanaged duplicate
 server entries, unsafe identifiers and symlinked configuration rather than
 overwriting them.
+
+Codex cannot currently turn a `PreToolUse` result into an interactive approval.
+The SDK records an approval-rule match as approval-required evidence but denies
+the native call. Route actions needing approval through the governed MCP
+gateway. Enterprise deployments should move the hook to managed
+`requirements.toml` configuration distributed with device management.
 
 For Copilot cloud agent, a deployment-specific credential broker must provide
 and renew agent sessions without serializing them into repository MCP
