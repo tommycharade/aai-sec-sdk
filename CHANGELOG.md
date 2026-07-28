@@ -1,5 +1,10 @@
 # Changelog
 
+- Added a real reversible tenant-wide emergency stop to the AWS control plane.
+  The dashboard now reports the durable state, every agent effective-policy
+  request fails closed while it is active, newly enrolled agents are covered,
+  narrower stop scopes are preserved, and activation/clear transitions are
+  operator-authorized and audited.
 - Rebuilt Integrations as a three-stage connection journey for Claude Code and
   Codex CLI: define scope, install secret-free project configuration, and prove
   the live heartbeat/policy binding. Added a hardened project-scoped Codex

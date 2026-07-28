@@ -221,11 +221,15 @@ unchanged and the action must be escalated. Validate health and drift after
 rollback, then record the decision and evidence.
 
 **Emergency stop:** use the deployment-scoped stop control for a localized
-incident or the application-owned global stop for a wider incident. The
-authority must acknowledge the stop before the control plane records it as
-active. Preserve the incident ID, last heartbeat, configuration hashes, and
-audit references. Clear the stop only after incident-command approval and a
-synthetic read-only validation.
+incident or the tenant-wide stop for a wider incident. The hosted fleet stop is
+durable server-owned state and causes every enrolled agent's effective-policy
+request to fail closed, including agents enrolled after activation. Fleet,
+deployment, group, and agent stops are independent; clearing the fleet scope
+must not clear a narrower stop. Preserve the incident ID, last heartbeat,
+configuration hashes, operator identity, and audit references. Clear the stop
+only after incident-command approval, then verify the dashboard posture and a
+synthetic read-only action. A still-active narrower stop should continue to
+deny that agent after fleet recovery.
 
 **Operational limitation:** the bundled SQLite store, static bearer
 authenticator, and reference server are demonstration/development adapters.

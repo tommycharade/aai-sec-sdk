@@ -339,6 +339,153 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
     assert offline_payload["checks"]["heartbeat"]["passed"] is False
 
 
+def test_fleet_emergency_stop_is_reversible_durable_and_enforced(monkeypatch: Any) -> None:
+    """The top-level incident control must stop every enrolled agent boundary."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-fleet-stop"
+    now = int(time.time())
+    monkeypatch.setattr(
+        module,
+        "_list",
+        lambda selected_tenant, kind: [
+            dict(item)
+            for (pk, sk), item in table.items.items()
+            if pk == f"TENANT#{selected_tenant}" and sk.startswith(f"{kind}#")
+        ],
+    )
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "status": "connected",
+            "expires_at": now + 300,
+            "emergencyStop": False,
+            "host": "Claude Code",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-a")
+        | {"id": "policy-a", "version": 1, "configuration": {"policy": {}}}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-a")
+        | {"id": "group-a", "policyId": "policy-a", "agent_keys": ["dep-a:agent-a"]}
+    )
+    session_value = "synthetic-agent-session"
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", session_value),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "expires_at": now + 900,
+        }
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "operator-a",
+    }
+    audit_events: list[tuple[str, str, str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        module,
+        "_audit",
+        lambda audited_tenant, event, actor, evidence: audit_events.append(
+            (audited_tenant, event, actor, evidence)
+        ),
+    )
+
+    initial = _invoke(module, _event("/dashboard", "GET", claims=claims))
+    assert json.loads(initial["body"])["emergencyStop"] is False
+    unauthorized = _invoke(
+        module,
+        _event(
+            "/emergency-stop",
+            "POST",
+            body={"active": True},
+            claims={"custom:tenant_id": tenant, "sub": "viewer"},
+        ),
+    )
+    assert unauthorized["statusCode"] == 403
+
+    activated = _invoke(
+        module,
+        _event("/emergency-stop", "POST", body={"active": True}, claims=claims),
+    )
+    activated_payload = json.loads(activated["body"])
+    assert activated_payload["emergencyStop"] is True
+    assert activated_payload["posture"] == "critical"
+    assert (
+        table.get_item(Key=module._item_key(tenant, "CONTROL", "fleet-emergency-stop"))["Item"][
+            "active"
+        ]
+        is True
+    )
+    denied = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/effective-policy", "GET", token=session_value),
+    )
+    denied_payload = json.loads(denied["body"])
+    assert denied["statusCode"] == 409
+    assert denied_payload == {
+        "error": "fleet-wide emergency stop is active",
+        "emergencyStop": True,
+        "scope": "fleet",
+    }
+    verification = _invoke(
+        module,
+        _event("/enterprise/agents/dep-a/agent-a/verify", "GET", claims=claims),
+    )
+    verification_payload = json.loads(verification["body"])
+    assert verification_payload["verified"] is False
+    assert verification_payload["checks"]["emergencyStop"] == {
+        "passed": False,
+        "detail": "A fleet-wide emergency stop is active.",
+    }
+    narrower_stop = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/emergency-stop",
+            "POST",
+            body={"active": True},
+            claims=claims,
+        ),
+    )
+    assert narrower_stop["statusCode"] == 200
+
+    cleared = _invoke(
+        module,
+        _event("/api/emergency-stop", "POST", body={"active": False}, claims=claims),
+    )
+    assert json.loads(cleared["body"])["emergencyStop"] is False
+    still_denied = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/effective-policy", "GET", token=session_value),
+    )
+    assert still_denied["statusCode"] == 409
+    assert json.loads(still_denied["body"])["scope"] == "agent"
+    narrower_clear = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/emergency-stop",
+            "POST",
+            body={"active": False},
+            claims=claims,
+        ),
+    )
+    assert narrower_clear["statusCode"] == 200
+    restored = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/effective-policy", "GET", token=session_value),
+    )
+    assert restored["statusCode"] == 200
+    fleet_events = [event for event in audit_events if event[1] == "fleet_emergency_stop"]
+    assert [event[3]["active"] for event in fleet_events] == [True, False]
+
+
 def test_deployment_configuration_rollout_tracks_drift_and_activation(monkeypatch: Any) -> None:
     """The AWS control plane exposes the rollout states consumed by the UI."""
     module, table = _load_handler(monkeypatch)
