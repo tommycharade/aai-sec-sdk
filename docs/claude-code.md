@@ -54,7 +54,9 @@ Review the repository and command before running it in a regulated
 environment. Set `AAI_SEC_SDK_ROOT` when the SDK is already checked out at a
 different path. The private virtual environment ensures the generated hook and
 MCP commands use an interpreter where the SDK is actually installed. The
-script writes only project-scoped configuration plus, for enterprise
+generated environments also pin imports to the selected checkout's `src`
+directory, preventing a different global package from replacing that checkout.
+The script writes only project-scoped configuration plus, for enterprise
 enrollment, the separate user-private session cache. It creates timestamped
 backups before changing existing project configuration.
 
@@ -108,9 +110,14 @@ The script consumes the bootstrap token at `/agent/enroll`, writes only
 non-secret routing metadata to Claude's files, and places the short-lived
 session in the SDK's user-private host cache. The cache is outside the project,
 uses a `0700` directory and `0600` file, and is scoped to the control-plane URL,
-deployment and agent. You can unset `AAI_SEC_AGENT_TOKEN` before starting
+deployment, agent, and canonical project root. Bootstrap exchange, the issued
+session and every authenticated agent request are checked against that same
+registered root, so a credential copied to another checkout fails closed. You
+can unset `AAI_SEC_AGENT_TOKEN` before starting
 Claude. The MCP heartbeat rotates the cache and each native hook process reads
 the current value, so a healthy session continues beyond the original bearer.
+Use the exact value from `pwd -P` when registering the agent; broad, relative,
+or lexically non-canonical roots are rejected.
 
 The real-device acceptance run for Claude Code 2.1.220 is recorded in
 [real Claude Code acceptance evidence](real-claude-code-acceptance-evidence-2026-07-27.md).
@@ -142,11 +149,14 @@ After the UI verifies a live heartbeat and policy assignment, **Connect
 agents** presents a three-step activation proof. Run the supplied safe read,
 approval-bound `git push`, and blocked destructive-command prompts in Claude
 Code. Decline the approval prompt. The UI completes the proof only after it
-observes matching `claude_native` evidence for that enrolled agent. The denied
-test targets a deliberately nonexistent project path and must be blocked before
-execution. Codex CLI does not yet expose equivalent native shell/file evidence
-through this integration, so the UI states that limitation instead of showing
-synthetic success.
+observes matching `claude_native` evidence for that enrolled agent, policy
+version, project root, tool, and exact semantic action. Unrelated allowed,
+approval, or denial events cannot complete a displayed step. The denied test
+targets a deliberately nonexistent project path and must be blocked before
+execution. Codex CLI now exports equivalent content-minimised `codex_native`
+decisions through its own `PreToolUse` adapter; see the [Codex CLI guide](codex-cli.md).
+Unlike Claude Code, Codex cannot currently convert a native hook result into an
+interactive approval, so approval-rule matches deny and route to governed MCP.
 
 The hook configuration and MCP configuration are separate Claude Code host
 boundaries. Put the `hooks` object in `.claude/settings.json`; put the
@@ -362,8 +372,36 @@ hook = ClaudeCodeHook(
 ```
 
 Rules are evaluated in order and the default decision is deny. A rule
-exception also denies. Add tests for every new command or path rule and run
+exception also denies. Command patterns are count/length bounded and reject
+lookarounds, inline flags, backreferences and quantified groups before Python's
+regex engine sees live command text. Wildcard repetition and ambiguous
+overlapping repetitions are also rejected, including repeats separated by a
+character the earlier repeat can consume; use delimiter-bounded character
+classes such as `[^|]+` instead of `.*`. Commands over 8,192 characters deny
+before matching. Native allow decisions additionally reject newlines, command
+substitution, lists, pipelines, redirections and subshell syntax regardless of
+the regex, including control operators quoted inside nested shell or `eval`
+arguments; use `[ \\t]` rather than `\s` for horizontal whitespace. If the
+decision is `ALLOW`, `command_rule` also requires `allowed_root`; the live
+Claude event `cwd` must resolve inside that root or the result is an explicit
+denial. Deny and approval rules intentionally remain global. If the
+audit directory or existing hash chain cannot be
+opened safely, the runnable hook emits an explicit deny-only response rather
+than crashing. Unexpected provider and filesystem setup exceptions cross the
+same final deny boundary. Add tests for every new command or path rule and run
 `make check` before distributing the hook configuration.
+
+Native `Edit` and `Write` calls cannot change `.claude`, `.codex`, or
+`.mcp.json`, even when those paths are under the approved project root. Reads
+remain available for diagnosis. This blocks agent-initiated changes to policy,
+hooks, MCP registration, and native audit evidence; enterprise deployment must
+still protect managed configuration from the host user at the OS layer.
+
+If required remote audit export fails after the provisional local decision is
+written, the hook denies and writes a linked local effective-denial event. The
+second event's `supersedes_event_hash` is the authoritative relationship for
+incident review; `replication_status=failed` records that it is not remotely
+durable.
 
 ::: agentic_security.claude_code
     options:

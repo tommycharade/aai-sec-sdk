@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -39,11 +41,59 @@ def test_onboard_codex_uses_host_cache_without_project_bearer_configuration(
     assert server["command"] == "python3"
     assert server["args"][0].endswith("examples/mcp_gateway.py")
     assert server["cwd"] == str(tmp_path)
+    assert server["required"] is True
     assert "env_vars" not in server
     assert server["env"]["AAI_SEC_AGENT_HOST"] == "codex-cli"
     assert server["env"]["AAI_SEC_DEPLOYMENT_ID"] == "deployment-test"
+    assert server["env"]["PYTHONPATH"] == str(Path.cwd() / "src")
     assert "synthetic-token" not in content
     assert config_path.stat().st_mode & 0o777 == 0o600
+    hook = parsed["hooks"]["PreToolUse"][0]
+    assert hook["matcher"] == "*"
+    handler = hook["hooks"][0]
+    assert handler["type"] == "command"
+    assert handler["timeout"] == 10
+    assert "examples/codex_cli_hook.py" in handler["command"]
+    assert "AAI_SEC_AGENT_SESSION_MODE=aws" in handler["command"]
+    assert f"AAI_SEC_PROJECT_ROOT={tmp_path}" in handler["command"]
+    assert f"PYTHONPATH={Path.cwd() / 'src'}" in handler["command"]
+    assert "AAI_SEC_AGENT_TOKEN" not in handler["command"]
+
+
+def test_generated_codex_hook_runs_from_checkout_without_installed_sdk(tmp_path: Path) -> None:
+    """Generated configuration imports its adjacent SDK and emits a real decision."""
+    config_path = _onboard(tmp_path)
+    handler = tomllib.loads(config_path.read_text(encoding="utf-8"))["hooks"]["PreToolUse"][0][
+        "hooks"
+    ][0]
+    environment = dict(os.environ)
+    environment.pop("PYTHONPATH", None)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "git status"},
+        "tool_use_id": "tool:onboarded",
+        "session_id": "session:synthetic",
+        "cwd": str(tmp_path),
+    }
+
+    result = subprocess.run(  # noqa: S603 - generated fixed checkout command
+        shlex.split(handler["command"]),
+        # Keep the SDK checkout as cwd so mutmut's instrumented subprocess can
+        # read its test configuration. With a src layout and PYTHONPATH removed
+        # above, cwd alone still cannot make agentic_security importable.
+        cwd=Path.cwd(),
+        input=json.dumps(payload) + "\n",
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    decision = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
+    assert decision == "deny"
+    assert "ModuleNotFoundError" not in result.stderr
 
 
 def test_onboard_codex_preserves_unrelated_configuration_and_is_idempotent(
@@ -62,6 +112,8 @@ def test_onboard_codex_preserves_unrelated_configuration_and_is_idempotent(
     assert tomllib.loads(content)["model"] == "synthetic-model"
     assert content.count("# BEGIN AAI SECURITY MANAGED MCP") == 1
     assert content.count('[mcp_servers."agentic-security"]') == 1
+    assert content.count("[[hooks.PreToolUse]]") == 1
+    assert content.count("[[hooks.PreToolUse.hooks]]") == 1
 
 
 def test_onboard_codex_rejects_unowned_or_symlinked_configuration(
@@ -108,6 +160,7 @@ def test_onboard_codex_secures_session_without_project_secret(
         "https://fleet.example.test/api",
         "deployment-test",
         "codex-test",
+        str(project.resolve()),
         now=lambda: 1_000,
     )
     assert cache.load() == AgentSessionCredential(token, 1_900)

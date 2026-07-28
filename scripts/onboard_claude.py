@@ -104,7 +104,11 @@ def _copy_policy(source: Path, destination: Path, *, dry_run: bool) -> None:
     os.chmod(destination, 0o600)
 
 
-def _enroll_agent(base_url: str, bootstrap_token: str) -> AgentSessionCredential:
+def _enroll_agent(
+    base_url: str,
+    bootstrap_token: str,
+    project_root: Path,
+) -> AgentSessionCredential:
     """Consume one AWS bootstrap token and return the short-lived session."""
     parsed = urlsplit(base_url.rstrip("/"))
     local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
@@ -112,7 +116,9 @@ def _enroll_agent(base_url: str, bootstrap_token: str) -> AgentSessionCredential
         raise SystemExit("enterprise control-plane URL must use HTTPS outside localhost")
     request = urllib.request.Request(  # noqa: S310 - scheme is validated above
         f"{base_url.rstrip('/')}/agent/enroll",
-        data=json.dumps({"bootstrapToken": bootstrap_token}).encode("utf-8"),
+        data=json.dumps(
+            {"bootstrapToken": bootstrap_token, "projectRoot": str(project_root)}
+        ).encode("utf-8"),
         headers={"Accept": "application/json", "Content-Type": "application/json"},
         method="POST",
     )
@@ -169,6 +175,7 @@ def onboard(
                 enterprise_control_plane_url,
                 deployment_id,
                 agent_id,
+                str(project_root),
             )
         except (ValueError, AgentSessionStoreError) as exc:
             raise SystemExit(f"enterprise session storage is unavailable: {exc}") from exc
@@ -180,7 +187,9 @@ def onboard(
                 "--bootstrap-token requires --enterprise-control-plane-url and --deployment-id"
             )
         if not dry_run:
-            agent_session = _enroll_agent(enterprise_control_plane_url, bootstrap_token)
+            agent_session = _enroll_agent(
+                enterprise_control_plane_url, bootstrap_token, project_root
+            )
 
     inherited_token = os.environ.get("AAI_SEC_AGENT_TOKEN")
     if agent_session is None and inherited_token:
@@ -193,20 +202,27 @@ def onboard(
         session_store.save(agent_session)
         session_cached = True
 
-    command_parts = [python, str(hook)]
+    source_root = sdk_root / "src"
+    hook_environment = {"PYTHONPATH": str(source_root)}
     if enterprise_control_plane_url:
         # Selecting an enterprise endpoint always selects fail-closed AWS
         # session mode. Deriving authority mode from a transient shell token
         # made repeat onboarding silently downgrade to local policy after the
         # token was correctly cleared.
-        command_parts = [
-            "env",
-            f"AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL={enterprise_control_plane_url.rstrip('/')}",
-            f"AAI_SEC_DEPLOYMENT_ID={deployment_id or ''}",
-            f"AAI_SEC_AGENT_ID={agent_id}",
-            "AAI_SEC_AGENT_SESSION_MODE=aws",
-            *command_parts,
-        ]
+        hook_environment.update(
+            {
+                "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL": enterprise_control_plane_url.rstrip("/"),
+                "AAI_SEC_DEPLOYMENT_ID": deployment_id or "",
+                "AAI_SEC_AGENT_ID": agent_id,
+                "AAI_SEC_AGENT_SESSION_MODE": "aws",
+            }
+        )
+    command_parts = [
+        "env",
+        *[f"{key}={value}" for key, value in hook_environment.items()],
+        python,
+        str(hook),
+    ]
     command = shlex.join(command_parts)
     settings_path = project_root / ".claude" / "settings.json"
     policy_path = project_root / ".claude" / "aai-sec-config.json"
@@ -242,9 +258,13 @@ def onboard(
     servers = mcp.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
         raise SystemExit(f"{mcp_path}: mcpServers must be a JSON object")
-    server: dict[str, Any] = {"command": python, "args": [str(gateway)]}
+    server: dict[str, Any] = {
+        "command": python,
+        "args": [str(gateway)],
+        "env": {"PYTHONPATH": str(source_root)},
+    }
     if control_plane_url or enterprise_control_plane_url:
-        server["env"] = {"AAI_SEC_AGENT_ID": agent_id}
+        server["env"]["AAI_SEC_AGENT_ID"] = agent_id
         if enterprise_control_plane_url:
             server["env"]["AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL"] = (
                 enterprise_control_plane_url.rstrip("/")

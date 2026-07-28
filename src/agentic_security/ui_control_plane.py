@@ -30,6 +30,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from threading import RLock
 from typing import Any, Final, Protocol
@@ -39,6 +40,7 @@ from urllib.request import Request, urlopen
 
 import certifi
 
+from ._command_patterns import compile_command_patterns
 from .agent_sessions import AgentSessionCredential, AgentSessionStore
 from .audit import AuditEvent, AuditSink
 from .integrations import AgentHost
@@ -120,9 +122,11 @@ _CLAUDE_KEYS: Final[frozenset[str]] = frozenset(
         "allowedBuiltInTools",
         "deniedCommandPatterns",
         "approvalCommandPatterns",
+        "allowedCommandPatterns",
         "fileTools",
     }
 )
+_CLAUDE_OPTIONAL_KEYS: Final[frozenset[str]] = frozenset({"allowedCommandPatterns"})
 _POLICY_PROVIDERS: Final[frozenset[str]] = frozenset({"local_allow_list", "opa", "cedar"})
 _APPROVAL_PROVIDERS: Final[frozenset[str]] = frozenset({"in_memory", "http"})
 _AUDIT_PROVIDERS: Final[frozenset[str]] = frozenset(
@@ -466,7 +470,13 @@ class ControlPlaneAgentClient:
         }
         if not parsed.hostname or parsed.scheme != "https" and not local_http:
             raise ValueError("control-plane agent URL must use HTTPS outside localhost")
-        if not token or len(token) < 16 or not agent_id or not project_root:
+        if (
+            not token
+            or len(token) < 16
+            or not agent_id
+            or not project_root
+            or not Path(project_root).is_absolute()
+        ):
             raise ValueError("agent client requires a token, agent ID, and project root")
         if timeout_seconds <= 0:
             raise ValueError("agent client timeout must be positive")
@@ -474,18 +484,23 @@ class ControlPlaneAgentClient:
             self.host = host if isinstance(host, AgentHost) else AgentHost(host)
         except ValueError as exc:
             raise ValueError("agent client host is not supported") from exc
+        normalized_project_root = str(Path(project_root).resolve(strict=False))
+        if normalized_project_root == Path(normalized_project_root).anchor:
+            raise ValueError("agent client project root must not be the filesystem root")
         if session_store is not None and (
             not aws_agent_session
             or deployment_id is None
             or session_store.base_url != base_url.rstrip("/")
             or session_store.deployment_id != deployment_id
             or session_store.agent_id != agent_id
+            or session_store.project_root != normalized_project_root
         ):
             raise ValueError("agent session store identity must match the AWS agent client")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.agent_id = agent_id
-        self.project_root = project_root
+        self.project_root = normalized_project_root
+        self.project_root_digest = sha256(self.project_root.encode("utf-8")).hexdigest()
         self.deployment_id = deployment_id
         self.aws_agent_session = aws_agent_session
         self.session_store = session_store
@@ -556,6 +571,7 @@ class ControlPlaneAgentClient:
         decision: str,
         resource_kind: str,
         reason_code: str,
+        action_digest: str | None = None,
     ) -> JsonObject:
         """Report one content-minimised decision from this enrolled process.
 
@@ -570,6 +586,8 @@ class ControlPlaneAgentClient:
             )
         if not re.fullmatch(r"[0-9a-f]{64}", decision_id):
             raise ControlPlaneConfigurationError("decision ID must be a SHA-256 event digest")
+        if action_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", action_digest):
+            raise ControlPlaneConfigurationError("decision action digest must be SHA-256")
         vocabularies = {
             "source": ({"claude_native", "codex_native", "mcp", "sdk_runtime"}, source),
             "decision": ({"allowed", "denied", "approval_required"}, decision),
@@ -598,17 +616,17 @@ class ControlPlaneAgentClient:
             raise ControlPlaneConfigurationError(
                 "decision tool name must be non-empty text up to 128 characters"
             )
-        response = self._request(
-            self._agent_path("decisions"),
-            {
-                "decisionId": decision_id,
-                "source": source,
-                "toolName": tool_name.strip(),
-                "decision": decision,
-                "resourceKind": resource_kind,
-                "reasonCode": reason_code,
-            },
-        )
+        report = {
+            "decisionId": decision_id,
+            "source": source,
+            "toolName": tool_name.strip(),
+            "decision": decision,
+            "resourceKind": resource_kind,
+            "reasonCode": reason_code,
+        }
+        if action_digest is not None:
+            report["actionDigest"] = action_digest
+        response = self._request(self._agent_path("decisions"), report)
         if response.get("accepted") is not True:
             raise ControlPlaneDependencyError("control plane did not acknowledge decision evidence")
         return response
@@ -635,7 +653,15 @@ class ControlPlaneAgentClient:
             )
         request = Request(  # noqa: S310 - URL scheme is validated above.
             f"{self.base_url}{self._agent_path('effective-policy')}",
-            headers={"Accept": "application/json", "Authorization": f"Bearer {self.token}"},
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.token}",
+                **(
+                    {"X-AAI-Project-Root-Digest": self.project_root_digest}
+                    if self.aws_agent_session
+                    else {}
+                ),
+            },
             method="GET",
         )
         try:
@@ -776,6 +802,7 @@ class ControlPlaneAgentClient:
                     "Accept": "application/json",
                     "Authorization": f"Bearer {self.token}",
                     "Content-Type": "application/json",
+                    "X-AAI-Project-Root-Digest": self.project_root_digest,
                 },
                 method="POST",
             )
@@ -792,6 +819,11 @@ class ControlPlaneAgentClient:
                 "Accept": "application/json",
                 "Authorization": f"Bearer {self.token}",
                 "Content-Type": "application/json",
+                **(
+                    {"X-AAI-Project-Root-Digest": self.project_root_digest}
+                    if self.aws_agent_session
+                    else {}
+                ),
             },
             method="POST",
         )
@@ -822,7 +854,7 @@ class ControlPlaneDecisionExporter:
     @staticmethod
     def _decision(event: AuditEvent) -> str | None:
         """Normalize host and runtime outcomes into the dashboard vocabulary."""
-        if event.event_type == "claude_pre_tool_decision":
+        if event.event_type in {"claude_pre_tool_decision", "codex_pre_tool_decision"}:
             value = event.payload.get("decision")
             return {"allow": "allowed", "deny": "denied", "ask": "approval_required"}.get(
                 value if isinstance(value, str) else ""
@@ -859,8 +891,40 @@ class ControlPlaneDecisionExporter:
         tool_name = event.payload.get("tool_name")
         if not isinstance(tool_name, str) or not tool_name.strip():
             raise ControlPlaneConfigurationError("decision event has no valid tool name")
-        if self.source == "claude_native":
-            resource_kind = "shell_command" if tool_name == "Bash" else "project_file"
+        is_native_hook = (
+            self.source == "claude_native" and event.event_type == "claude_pre_tool_decision"
+        ) or (self.source == "codex_native" and event.event_type == "codex_pre_tool_decision")
+        action_digest = None
+        if is_native_hook:
+            correlated_digest = event.payload.get("action_digest")
+            if correlated_digest is not None and (
+                not isinstance(correlated_digest, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", correlated_digest)
+            ):
+                raise ControlPlaneConfigurationError(
+                    "native decision event has an invalid action correlation digest"
+                )
+            tool_input_hash = event.payload.get("tool_input_hash")
+            cwd_hash = event.payload.get("cwd_hash")
+            if not isinstance(tool_input_hash, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", tool_input_hash
+            ):
+                raise ControlPlaneConfigurationError(
+                    "native decision event has no valid action digest"
+                )
+            if not isinstance(cwd_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", cwd_hash):
+                raise ControlPlaneConfigurationError(
+                    "native decision event has no valid working-directory digest"
+                )
+            action_digest = correlated_digest or _native_action_digest(
+                tool_name, tool_input_hash, cwd_hash
+            )
+            if tool_name == "Bash":
+                resource_kind = "shell_command"
+            elif tool_name.startswith("mcp__"):
+                resource_kind = "mcp_tool"
+            else:
+                resource_kind = "project_file"
         elif self.source == "mcp":
             resource_kind = "mcp_tool"
         else:
@@ -872,7 +936,29 @@ class ControlPlaneDecisionExporter:
             decision=decision,
             resource_kind=resource_kind,
             reason_code=self._reason(event, decision),
+            action_digest=action_digest,
         )
+
+
+def _native_action_digest(tool_name: str, tool_input_hash: str, cwd_hash: str) -> str:
+    """Bind redacted native action evidence to tool, arguments, and project scope.
+
+    The inputs are already content-minimised hashes produced at the host trust
+    boundary. Canonical JSON makes the version-one correlation algorithm
+    deterministic across Python and browser clients without exporting raw
+    commands, paths, prompts, or arguments.
+    """
+    encoded = json.dumps(
+        {
+            "cwd_hash": cwd_hash,
+            "tool_input_hash": tool_input_hash,
+            "tool_name": tool_name,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()
 
 
 def _now() -> str:
@@ -982,16 +1068,21 @@ def _command(value: object, name: str) -> str:
 
 def _pattern(value: str, name: str) -> str:
     """Validate bounded command matching syntax before it reaches ``re``."""
-    if len(value) > 256:
-        raise ControlPlaneConfigurationError(f"{name} pattern is too long")
-    nested_quantifier = re.search(r"\([^)]*[+*][^)]*\)[+*]", value)
-    if "\\1" in value or "(?" in value or nested_quantifier:
-        raise ControlPlaneConfigurationError(f"{name} pattern uses unsupported backtracking syntax")
     try:
-        re.compile(value)
-    except re.error as exc:
-        raise ControlPlaneConfigurationError(f"{name} pattern is invalid") from exc
+        compile_command_patterns([value])
+    except ValueError as exc:
+        raise ControlPlaneConfigurationError(f"{name} pattern is unsafe or invalid: {exc}") from exc
     return value
+
+
+def _pattern_list(value: object, name: str) -> list[str]:
+    """Validate one complete decision-class pattern list with shared limits."""
+    patterns = _list_of_text(value, name)
+    try:
+        compile_command_patterns(patterns)
+    except ValueError as exc:
+        raise ControlPlaneConfigurationError(f"{name} is unsafe or invalid: {exc}") from exc
+    return patterns
 
 
 def validate_configuration(value: object) -> JsonObject:
@@ -1006,7 +1097,9 @@ def validate_configuration(value: object) -> JsonObject:
     claude = _mapping(root.get("claudeCode"), "claudeCode")
     if set(runtime) != _RUNTIME_KEYS:
         raise ControlPlaneConfigurationError("runtime must contain exactly the documented fields")
-    if set(claude) != _CLAUDE_KEYS:
+    if not set(claude).issubset(_CLAUDE_KEYS) or not (
+        _CLAUDE_KEYS - _CLAUDE_OPTIONAL_KEYS
+    ).issubset(claude):
         raise ControlPlaneConfigurationError(
             "claudeCode must contain exactly the documented fields"
         )
@@ -1107,18 +1200,15 @@ def validate_configuration(value: object) -> JsonObject:
         "allowedBuiltInTools": _list_of_text(
             claude["allowedBuiltInTools"], "claudeCode.allowedBuiltInTools"
         ),
-        "deniedCommandPatterns": [
-            _pattern(pattern, "claudeCode.deniedCommandPatterns")
-            for pattern in _list_of_text(
-                claude["deniedCommandPatterns"], "claudeCode.deniedCommandPatterns"
-            )
-        ],
-        "approvalCommandPatterns": [
-            _pattern(pattern, "claudeCode.approvalCommandPatterns")
-            for pattern in _list_of_text(
-                claude["approvalCommandPatterns"], "claudeCode.approvalCommandPatterns"
-            )
-        ],
+        "deniedCommandPatterns": _pattern_list(
+            claude["deniedCommandPatterns"], "claudeCode.deniedCommandPatterns"
+        ),
+        "approvalCommandPatterns": _pattern_list(
+            claude["approvalCommandPatterns"], "claudeCode.approvalCommandPatterns"
+        ),
+        "allowedCommandPatterns": _pattern_list(
+            claude.get("allowedCommandPatterns", []), "claudeCode.allowedCommandPatterns"
+        ),
         "fileTools": _list_of_text(claude["fileTools"], "claudeCode.fileTools"),
     }
     return {"runtime": normalized_runtime, "claudeCode": normalized_claude}
@@ -1163,8 +1253,9 @@ def _default_configuration() -> JsonObject:
             "mcpServerName": "agentic-security-gateway",
             "mcpGatewayCommand": "python examples/mcp_gateway.py",
             "allowedBuiltInTools": ["Read", "Glob", "Grep"],
-            "deniedCommandPatterns": [r"rm\s+-rf", r"curl\s+.*\|\s*sh"],
+            "deniedCommandPatterns": [r"rm\s+-rf", r"curl[^|]+\|\s*sh"],
             "approvalCommandPatterns": [r"git\s+push", r"npm\s+publish"],
+            "allowedCommandPatterns": [r"^(pwd|git[ \t]+status)([ \t]|$)"],
             "fileTools": ["Read", "Edit", "Write", "Glob", "Grep"],
         },
         "configVersion": 1,

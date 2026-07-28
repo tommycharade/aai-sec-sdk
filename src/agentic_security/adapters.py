@@ -8,14 +8,16 @@ import math
 import os
 import re
 import selectors
+import stat
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from shutil import which
 from threading import Lock
-from typing import Any, cast
+from typing import Any, TextIO, cast
 
 try:  # pragma: no cover - platform import
     import fcntl
@@ -279,18 +281,91 @@ class JsonlAuditSink:
     Production deployments should replicate events to an access-controlled
     WORM/object-lock or SIEM destination. ``max_bytes`` fails closed before a
     write so operators cannot silently lose the audit chain during rotation.
+    A bounded tail is reserved for one linked fail-closed outcome after remote
+    replication fails; ordinary events can never consume that capacity.
     """
 
-    def __init__(self, path: str | Path, max_bytes: int = 100_000_000) -> None:
-        """Open a deployment-selected audit path without creating parent trees."""
+    def __init__(
+        self,
+        path: str | Path,
+        max_bytes: int = 100_000_000,
+        emergency_reserve_bytes: int = 65_536,
+    ) -> None:
+        """Open a deployment-selected path with fail-closed evidence capacity."""
         if max_bytes <= 0:
             raise ValueError("audit maximum size must be positive")
+        if emergency_reserve_bytes <= 0:
+            raise ValueError("audit emergency reserve must be positive")
         self.path = Path(path)
         self.max_bytes = max_bytes
+        # Existing deployments may intentionally use small bounded files. Keep
+        # at least half of every configured limit available to ordinary audit
+        # records instead of allowing the default reserve to consume it all.
+        self.emergency_reserve_bytes = min(emergency_reserve_bytes, max_bytes // 2)
+        self.max_event_bytes = self.emergency_reserve_bytes // 2
+        self.normal_capacity_bytes = max_bytes - self.emergency_reserve_bytes
+        if self.path.parent.is_symlink():
+            raise ValueError("audit directory must not be a symlink")
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.parent.is_symlink() or self.path.is_symlink():
+            raise ValueError("audit path must not contain a final symlink")
         self._lock = Lock()
         self._lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        if self._lock_path.is_symlink():
+            raise ValueError("audit lock must not be a symlink")
         self._previous_hash = self._read_previous_hash()
+
+    @contextmanager
+    def _open_regular_text(
+        self,
+        path: Path,
+        flags: int,
+        mode: str,
+    ) -> Iterator[TextIO]:
+        """Open a regular audit file relative to a non-symlink directory.
+
+        Descriptor-relative opening closes the directory replacement race, and
+        ``O_NOFOLLOW`` closes the final-component symlink race. Platforms that
+        do not expose those flags still receive explicit metadata checks.
+        """
+        parent_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        no_follow = getattr(os, "O_NOFOLLOW", 0)
+        parent_descriptor = -1
+        descriptor = -1
+        try:
+            if path.parent.is_symlink() or path.is_symlink():
+                raise ValueError("audit path must not be a symlink")
+            parent_descriptor = os.open(path.parent, parent_flags | no_follow)
+            try:
+                descriptor = os.open(
+                    path.name,
+                    flags | no_follow,
+                    0o600,
+                    dir_fd=parent_descriptor,
+                )
+            except FileNotFoundError:
+                if not flags & os.O_CREAT:
+                    raise
+                # Concurrent first creation can transiently report ENOENT on
+                # some host filesystems. Retry against the already-open,
+                # non-symlink directory descriptor; authority cannot move.
+                descriptor = os.open(
+                    path.name,
+                    flags | no_follow,
+                    0o600,
+                    dir_fd=parent_descriptor,
+                )
+            details = os.fstat(descriptor)
+            if not stat.S_ISREG(details.st_mode):
+                raise ValueError("audit path must be a regular file")
+            with cast(TextIO, os.fdopen(descriptor, mode, encoding="utf-8")) as stream:
+                descriptor = -1
+                yield stream
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            if parent_descriptor >= 0:
+                os.close(parent_descriptor)
 
     def _read_previous_hash(self) -> str:
         """Validate the existing chain and return its final event hash.
@@ -300,39 +375,68 @@ class JsonlAuditSink:
         append to a chain that cannot be fully verified so operators cannot
         accidentally extend corrupted evidence.
         """
-        if not self.path.exists() or self.path.stat().st_size == 0:
+        try:
+            with self._open_regular_text(self.path, os.O_RDONLY, "r") as stream:
+                if os.fstat(stream.fileno()).st_size == 0:
+                    return "0" * 64
+                previous_hash = "0" * 64
+                for line in stream:
+                    value = json.loads(line)
+                    payload = value["payload"]
+                    canonical = json.dumps(
+                        [
+                            value["event_type"],
+                            value["request_id"],
+                            payload,
+                            value["timestamp"],
+                            previous_hash,
+                        ],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                    event_hash = value["event_hash"]
+                    if (
+                        value["previous_hash"] != previous_hash
+                        or not isinstance(event_hash, str)
+                        or hashlib.sha256(canonical).hexdigest() != event_hash
+                    ):
+                        raise ValueError("audit file hash chain is corrupt")
+                    previous_hash = event_hash
+                return previous_hash
+        except FileNotFoundError:
             return "0" * 64
-        with self.path.open(encoding="utf-8") as stream:
-            previous_hash = "0" * 64
-            for line in stream:
-                value = json.loads(line)
-                payload = value["payload"]
-                canonical = json.dumps(
-                    [
-                        value["event_type"],
-                        value["request_id"],
-                        payload,
-                        value["timestamp"],
-                        previous_hash,
-                    ],
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode()
-                event_hash = value["event_hash"]
-                if (
-                    value["previous_hash"] != previous_hash
-                    or not isinstance(event_hash, str)
-                    or hashlib.sha256(canonical).hexdigest() != event_hash
-                ):
-                    raise ValueError("audit file hash chain is corrupt")
-                previous_hash = event_hash
-            return previous_hash
 
-    def append(self, event_type: str, request_id: str, payload: dict[str, Any]) -> Any:
+    def append(self, event_type: str, request_id: str, payload: dict[str, Any]) -> AuditEvent:
         """Append one redacted event atomically and flush it to durable storage."""
+        return self._append(event_type, request_id, payload, emergency=False)
+
+    def append_emergency(
+        self, event_type: str, request_id: str, payload: dict[str, Any]
+    ) -> AuditEvent:
+        """Use reserved capacity for one local fail-closed compensation event.
+
+        Callers must use this only to supersede a provisional event after its
+        required remote replication failed. The payload remains redacted and
+        hash chained, and an oversized or exhausted reserve still fails closed.
+        """
+        return self._append(event_type, request_id, payload, emergency=True)
+
+    def _append(
+        self,
+        event_type: str,
+        request_id: str,
+        payload: dict[str, Any],
+        *,
+        emergency: bool,
+    ) -> AuditEvent:
+        """Append under the normal boundary or the isolated emergency reserve."""
         with self._lock:
             safe_payload = redact(payload)
-            with self._lock_path.open("a+", encoding="utf-8") as lock_stream:
+            with self._open_regular_text(
+                self._lock_path,
+                os.O_RDWR | os.O_APPEND | os.O_CREAT,
+                "a+",
+            ) as lock_stream:
                 if fcntl is not None:
                     fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
                 try:
@@ -369,10 +473,22 @@ class JsonlAuditSink:
                         )
                         + "\n"
                     )
-                    current_size = self.path.stat().st_size if self.path.exists() else 0
-                    if current_size + len(serialized.encode()) > self.max_bytes:
-                        raise RuntimeError("audit sink is full; rotate or export before continuing")
-                    with self.path.open("a", encoding="utf-8") as stream:
+                    serialized_size = len(serialized.encode())
+                    with self._open_regular_text(
+                        self.path,
+                        os.O_WRONLY | os.O_APPEND | os.O_CREAT,
+                        "a",
+                    ) as stream:
+                        current_size = os.fstat(stream.fileno()).st_size
+                        capacity = self.max_bytes if emergency else self.normal_capacity_bytes
+                        if current_size + serialized_size > capacity:
+                            raise RuntimeError(
+                                "audit sink is full; rotate or export before continuing"
+                            )
+                        if not emergency and serialized_size > self.max_event_bytes:
+                            raise RuntimeError("audit event exceeds its bounded record size")
+                        if emergency and serialized_size > self.emergency_reserve_bytes:
+                            raise RuntimeError("audit compensation exceeds its reserved capacity")
                         stream.write(serialized)
                         stream.flush()
                         os.fsync(stream.fileno())
@@ -386,7 +502,7 @@ class JsonlAuditSink:
         """Verify every JSONL event and return false for corruption."""
         previous_hash = "0" * 64
         try:
-            with self.path.open(encoding="utf-8") as stream:
+            with self._open_regular_text(self.path, os.O_RDONLY, "r") as stream:
                 for line in stream:
                     value = json.loads(line)
                     payload = value["payload"]

@@ -493,6 +493,34 @@ def test_store_rejects_unsafe_metadata_and_invalid_configuration_limits(tmp_path
         EnterpriseFleetStore(tmp_path / "bad.sqlite", heartbeat_ttl_seconds=1)
 
 
+@pytest.mark.parametrize(
+    "patterns",
+    [
+        ["(a+)+"],
+        ["("],
+        ["a" * 257],
+        "not-a-list",
+        ["safe"] * 101,
+    ],
+)
+def test_fleet_configuration_rejects_unsafe_command_patterns(patterns: object) -> None:
+    """Every enterprise write path rejects unbounded or backtracking hook policy."""
+    with pytest.raises(FleetConfigurationError):
+        fleet_module.validate_fleet_configuration(
+            {"claudeCode": {"allowedCommandPatterns": patterns}}
+        )
+
+
+def test_fleet_configuration_accepts_bounded_command_patterns() -> None:
+    """A practical full-command allow rule remains available to operators."""
+    configuration = fleet_module.validate_fleet_configuration(
+        {"claudeCode": {"allowedCommandPatterns": [r"^(git\s+status|git\s+status\s+--short)$"]}}
+    )
+    assert configuration["claudeCode"]["allowedCommandPatterns"] == [
+        r"^(git\s+status|git\s+status\s+--short)$"
+    ]
+
+
 def test_inventory_and_duplicate_errors_are_explicit(tmp_path: Path) -> None:
     """Inventory branches and persistence conflicts fail without ambiguous success."""
     store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
@@ -1226,6 +1254,7 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
                 "claudeCode": {
                     "allowedSkills": ["skill-review"],
                     "allowedMcpServers": ["mcp-review"],
+                    "allowedCommandPatterns": [r"^git\s+status(\s|$)"],
                 },
             },
         },
@@ -1243,6 +1272,9 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
         effective["policy"]["configuration"]["claudeCode"]["managedMcpServers"][0]["id"]
         == "mcp-review"
     )
+    assert effective["policy"]["configuration"]["claudeCode"]["allowedCommandPatterns"] == [
+        r"^git\s+status(\s|$)"
+    ]
     status, duplicate_member = call_api(
         app,
         "POST",
@@ -1321,6 +1353,18 @@ def test_effective_policy_requires_one_unambiguous_group_assignment(tmp_path: Pa
     assert effective["policy"]["id"] == "policy-safe"
     assert effective["groupId"] == "group-platform"
 
+    store.create_group(
+        operator, group_id="group-same-policy", name="Same policy", policy_id="policy-safe"
+    )
+    store.add_agent_to_group(
+        operator, group_id="group-same-policy", deployment_id="deploy-a", agent_id="claude-a"
+    )
+    with pytest.raises(FleetConfigurationError, match="exactly one policy group"):
+        store.effective_agent_policy(agent, deployment_id="deploy-a", agent_id="claude-a")
+    store.remove_agent_from_group(
+        operator, group_id="group-same-policy", deployment_id="deploy-a", agent_id="claude-a"
+    )
+
     store.create_policy(
         operator,
         policy_id="policy-restricted",
@@ -1333,7 +1377,7 @@ def test_effective_policy_requires_one_unambiguous_group_assignment(tmp_path: Pa
     store.add_agent_to_group(
         operator, group_id="group-restricted", deployment_id="deploy-a", agent_id="claude-a"
     )
-    with pytest.raises(FleetConfigurationError, match="conflicting policies"):
+    with pytest.raises(FleetConfigurationError, match="exactly one policy group"):
         store.effective_agent_policy(agent, deployment_id="deploy-a", agent_id="claude-a")
 
 
@@ -1464,6 +1508,10 @@ def test_agent_verification_reports_each_enrollment_prerequisite(tmp_path: Path)
     )
     result = store.verify_agent(operator, deployment_id="deploy-a", agent_id="claude-a")
     assert result["verified"] is True
+    assert result["host"] == "claude-code"
+    assert result["groups"] == ["group-platform"]
+    assert result["policyId"] == "policy-safe"
+    assert result["policyVersion"] == 1
     store.set_agent_emergency_stop(
         operator, deployment_id="deploy-a", agent_id="claude-a", active=True
     )

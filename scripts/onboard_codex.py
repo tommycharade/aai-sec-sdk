@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sys
 import tempfile
 import time
@@ -64,29 +65,49 @@ def _validate_control_plane_url(value: str) -> str:
 def _managed_block(
     *,
     gateway: Path,
+    hook: Path,
     project_root: Path,
     python: str,
     control_plane_url: str,
     deployment_id: str,
     agent_id: str,
 ) -> str:
-    """Build the non-secret project-scoped MCP configuration block."""
+    """Build the non-secret project-scoped MCP and native-hook block."""
+    source_root = hook.parents[1] / "src"
     values = {
         "AAI_SEC_AGENT_HOST": "codex-cli",
         "AAI_SEC_AGENT_SESSION_MODE": "aws",
         "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL": control_plane_url,
         "AAI_SEC_DEPLOYMENT_ID": deployment_id,
         "AAI_SEC_AGENT_ID": agent_id,
+        "AAI_SEC_PROJECT_ROOT": str(project_root),
+        # The documented onboarding flow runs directly from a checkout. Pin
+        # imports to that checkout for both MCP and hook subprocesses instead
+        # of relying on an unrelated or absent global package installation.
+        "PYTHONPATH": str(source_root),
     }
+    hook_command = shlex.join(
+        ["env", *[f"{key}={value}" for key, value in values.items()], python, str(hook)]
+    )
     lines = [
         _BEGIN,
         '[mcp_servers."agentic-security"]',
         f"command = {_toml_string(python)}",
         f"args = [{_toml_string(str(gateway))}]",
         f"cwd = {_toml_string(str(project_root))}",
+        "required = true",
         "",
         '[mcp_servers."agentic-security".env]',
         *[f"{key} = {_toml_string(value)}" for key, value in values.items()],
+        "",
+        "[[hooks.PreToolUse]]",
+        'matcher = "*"',
+        "",
+        "[[hooks.PreToolUse.hooks]]",
+        'type = "command"',
+        f"command = {_toml_string(hook_command)}",
+        "timeout = 10",
+        'status_message = "Checking enterprise security policy"',
         _END,
     ]
     return "\n".join(lines)
@@ -155,14 +176,15 @@ def onboard(
     if not project_root.is_dir():
         raise SystemExit(f"project root does not exist: {project_root}")
     gateway = sdk_root / "examples" / "mcp_gateway.py"
-    if not gateway.is_file():
-        raise SystemExit(f"SDK MCP gateway was not found under {sdk_root}")
+    hook = sdk_root / "examples" / "codex_cli_hook.py"
+    if not gateway.is_file() or not hook.is_file():
+        raise SystemExit(f"SDK Codex integration was not found under {sdk_root}")
     deployment_id = _validate_identifier(deployment_id, "deployment ID")
     agent_id = _validate_identifier(agent_id, "agent ID")
     control_plane_url = _validate_control_plane_url(control_plane_url)
     # Validate host credential protection before touching project state, even
     # on repeat onboarding where the rotating session already exists.
-    session_store = AgentSessionStore(control_plane_url, deployment_id, agent_id)
+    session_store = AgentSessionStore(control_plane_url, deployment_id, agent_id, str(project_root))
     config_path = project_root / ".codex" / "config.toml"
     if config_path.is_symlink() or config_path.parent.is_symlink():
         raise SystemExit("refusing to read Codex configuration through a symbolic link")
@@ -174,6 +196,7 @@ def onboard(
             raise SystemExit(f"cannot update invalid TOML at {config_path}: {exc}") from exc
     block = _managed_block(
         gateway=gateway,
+        hook=hook,
         project_root=project_root,
         python=python,
         control_plane_url=control_plane_url,
@@ -205,6 +228,8 @@ def onboard(
     else:
         print("No agent token was written to project configuration.")
     print("Verify with: codex mcp get agentic-security --json")
+    print("Then start Codex, review the project hook trust prompt, and inspect /hooks.")
+    print("Approval-required native commands are denied; run them through the governed MCP path.")
     return config_path
 
 

@@ -12,18 +12,84 @@ credentials, idempotency, or reconciliation.
 from __future__ import annotations
 
 import json
-import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Final, TextIO
 
-from .audit import AuditSink
+from ._command_patterns import (
+    MAX_COMMAND_TEXT_LENGTH,
+    command_is_single_invocation,
+    compile_command_patterns,
+)
+from .audit import AuditReplicationError, AuditSink, ReplicatedAuditSink
 
 JsonObject = dict[str, Any]
 _HOOK_EVENT: Final[str] = "PreToolUse"
+_PROTECTED_PROJECT_STATE: Final = (
+    Path(".claude"),
+    Path(".codex"),
+    Path(".git"),
+    Path(".mcp.json"),
+)
+_PROTECTED_PROJECT_ROOT_NAMES: Final = frozenset(
+    path.name.casefold() for path in _PROTECTED_PROJECT_STATE
+)
+
+
+def _is_protected_project_state(relative: Path) -> bool:
+    """Conservatively detect authority roots across host case semantics."""
+    # macOS commonly resolves case variants to the same inode while pathlib
+    # preserves caller spelling. Case-fold the first project-relative
+    # component on every platform so policy does not depend on filesystem mode.
+    return bool(relative.parts) and relative.parts[0].casefold() in _PROTECTED_PROJECT_ROOT_NAMES
+
+
+def _content_digest(value: object) -> str:
+    """Return a stable digest without persisting untrusted tool content."""
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()
+
+
+def _canonical_path(value: str) -> str:
+    """Normalize a host path before deriving content-free evidence."""
+    return str(Path(value).resolve(strict=False))
+
+
+def _action_correlation_digest(event: ClaudeToolEvent) -> str | None:
+    """Bind evidence to the proposed Claude action without retaining its content.
+
+    Claude may add presentation-only fields such as a Bash description or Read
+    offsets. Correlation therefore projects the authority-bearing command or
+    resolved file path while the ordinary audit hash still covers the complete
+    tool input. This digest is evidence only and is never authorization input.
+    """
+    if event.cwd is None:
+        return None
+    cwd = _canonical_path(event.cwd)
+    projected_input: object = dict(event.tool_input)
+    if event.tool_name == "Bash" and isinstance(event.tool_input.get("command"), str):
+        projected_input = {"command": event.tool_input["command"]}
+    elif event.tool_name == "Read" and isinstance(event.tool_input.get("file_path"), str):
+        file_path = Path(event.tool_input["file_path"])
+        if not file_path.is_absolute():
+            file_path = Path(cwd) / file_path
+        projected_input = {"file_path": str(file_path.resolve(strict=False))}
+    return _content_digest(
+        {
+            "cwd_hash": _content_digest(cwd),
+            "tool_input_hash": _content_digest(projected_input),
+            "tool_name": event.tool_name,
+        }
+    )
 
 
 class ClaudeHookDecision(StrEnum):
@@ -99,10 +165,40 @@ class ClaudeCodeHook:
                         "decision": result.decision.value,
                         "reason": result.reason,
                         "session_id": event.session_id,
-                        "cwd": event.cwd,
-                        "tool_input": dict(event.tool_input),
+                        "cwd_hash": _content_digest(_canonical_path(event.cwd))
+                        if event.cwd
+                        else None,
+                        "tool_input_hash": _content_digest(dict(event.tool_input)),
+                        "action_digest": _action_correlation_digest(event),
                     },
                 )
+            except AuditReplicationError as exc:
+                result = ClaudeHookResult(ClaudeHookDecision.DENY, "hook audit persistence failed")
+                if isinstance(self.audit, ReplicatedAuditSink):
+                    try:
+                        self.audit.record_local_replication_failure(
+                            "claude_pre_tool_effective_decision",
+                            event.tool_use_id,
+                            {
+                                "tool_name": event.tool_name,
+                                "decision": result.decision.value,
+                                "reason": result.reason,
+                                "session_id": event.session_id,
+                                "cwd_hash": _content_digest(_canonical_path(event.cwd))
+                                if event.cwd
+                                else None,
+                                "tool_input_hash": _content_digest(dict(event.tool_input)),
+                                "action_digest": _action_correlation_digest(event),
+                            },
+                            exc.local_event,
+                        )
+                    except Exception:
+                        # Host denial is still authoritative if even local
+                        # compensating evidence cannot be written.
+                        result = ClaudeHookResult(
+                            ClaudeHookDecision.DENY,
+                            "hook audit persistence failed; local failure evidence unavailable",
+                        )
             except Exception:
                 result = ClaudeHookResult(ClaudeHookDecision.DENY, "hook audit persistence failed")
         return {
@@ -189,16 +285,48 @@ def command_rule(
     *,
     decision: ClaudeHookDecision,
     reason: str,
+    allowed_root: str | Path | None = None,
 ) -> HookRule:
-    """Create a rule matching Bash ``command`` values with regex patterns."""
-    compiled = tuple(re.compile(pattern) for pattern in patterns)
+    """Match Bash ``command`` text, confining allow results to ``allowed_root``."""
+    compiled = compile_command_patterns(patterns)
+    if decision is ClaudeHookDecision.ALLOW and allowed_root is None:
+        raise ValueError("Claude command allow rules require an approved project root")
+    approved_root = Path(allowed_root).expanduser().resolve() if allowed_root is not None else None
     result = ClaudeHookResult(decision, reason)
 
     def rule(event: ClaudeToolEvent) -> ClaudeHookResult | None:
         command = event.tool_input.get("command")
         if event.tool_name != "Bash" or not isinstance(command, str):
             return None
-        return result if any(pattern.search(command) for pattern in compiled) else None
+        if len(command) > MAX_COMMAND_TEXT_LENGTH:
+            return ClaudeHookResult(
+                ClaudeHookDecision.DENY, "command exceeds the policy evaluation limit"
+            )
+        if decision is ClaudeHookDecision.ALLOW and not command_is_single_invocation(command):
+            return ClaudeHookResult(
+                ClaudeHookDecision.DENY, "shell control syntax requires governed execution"
+            )
+        matches = (
+            any(pattern.fullmatch(command) for pattern in compiled)
+            if decision is ClaudeHookDecision.ALLOW
+            else any(pattern.search(command) for pattern in compiled)
+        )
+        if not matches:
+            return None
+        if decision is ClaudeHookDecision.ALLOW:
+            if approved_root is None or not isinstance(event.cwd, str) or not event.cwd.strip():
+                return ClaudeHookResult(
+                    ClaudeHookDecision.DENY,
+                    "command working directory is outside the approved project",
+                )
+            try:
+                Path(event.cwd).expanduser().resolve().relative_to(approved_root)
+            except (OSError, RuntimeError, ValueError):
+                return ClaudeHookResult(
+                    ClaudeHookDecision.DENY,
+                    "command working directory is outside the approved project",
+                )
+        return result
 
     return rule
 
@@ -209,7 +337,7 @@ def path_within_rule(
     *,
     reason: str = "path is outside the approved project directory",
 ) -> HookRule:
-    """Allow file tools only when their path is lexically under ``root``."""
+    """Allow file tools under ``root`` without granting writes to SDK authority."""
     names = frozenset(tool_names)
     allowed_root = Path(root).expanduser().resolve()
     denied = ClaudeHookResult(ClaudeHookDecision.DENY, reason)
@@ -227,7 +355,9 @@ def path_within_rule(
             return denied
         try:
             candidate = Path(value).expanduser().resolve()
-            candidate.relative_to(allowed_root)
+            relative = candidate.relative_to(allowed_root)
+            if event.tool_name in {"Edit", "Write"} and _is_protected_project_state(relative):
+                return denied
         except (OSError, RuntimeError, ValueError):
             return denied
         return allowed

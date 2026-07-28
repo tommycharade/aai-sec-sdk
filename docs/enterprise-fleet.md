@@ -103,6 +103,11 @@ agents enrolled after activation. Clearing the fleet stop does not clear a
 narrower stop. Every transition records the operator identity, resulting state,
 and affected-agent count in the redacted audit trail.
 
+Agent verification returns `host`, the exact sole `group`, and the consistently
+read `policyId`/`policyVersion` alongside liveness and stop checks. Missing or
+conflicting policy state returns null policy identity and cannot verify. A UI
+must compare this complete tuple with its selected activation scope.
+
 ### Central action approvals
 
 An enrolled agent submits a held action through its deployment/agent-bound

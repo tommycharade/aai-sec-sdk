@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import Lock
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
 _SECRET_PATTERNS = (
@@ -98,7 +98,12 @@ class AuditExporter(Protocol):
 
 
 class AuditReplicationError(RuntimeError):
-    """Raised when a required remote audit replica cannot acknowledge an event."""
+    """Raised when a required remote replica rejects a locally persisted event."""
+
+    def __init__(self, message: str, local_event: AuditEvent) -> None:
+        """Retain the provisional local event so callers can supersede it."""
+        super().__init__(message)
+        self.local_event = local_event
 
 
 class ReplicatedAuditSink:
@@ -123,8 +128,42 @@ class ReplicatedAuditSink:
         try:
             self.exporter.export(event)
         except Exception as exc:
-            raise AuditReplicationError("required audit replication failed") from exc
+            raise AuditReplicationError("required audit replication failed", event) from exc
         return event
+
+    def record_local_replication_failure(
+        self,
+        event_type: str,
+        request_id: str,
+        payload: dict[str, Any],
+        failed_event: AuditEvent,
+    ) -> AuditEvent:
+        """Append a local compensating outcome after required export failed.
+
+        The event is deliberately not presented as remotely durable evidence.
+        It links to and supersedes the provisional local event so operators do
+        not mistake a pre-export allow for the host's effective denial.
+        """
+        compensation = {
+            **payload,
+            "replication_status": "failed",
+            "supersedes_event_hash": failed_event.event_hash,
+        }
+        # Bounded local sinks keep a capacity tail that ordinary provisional
+        # events cannot consume. Use that path when available so an outage
+        # cannot leave the chain ending in an apparent allow.
+        emergency_append = getattr(self.primary, "append_emergency", None)
+        if callable(emergency_append):
+            return cast(Callable[..., AuditEvent], emergency_append)(
+                event_type,
+                request_id,
+                compensation,
+            )
+        return self.primary.append(
+            event_type,
+            request_id,
+            compensation,
+        )
 
 
 class InMemoryAuditExporter:

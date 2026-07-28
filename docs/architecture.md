@@ -95,7 +95,10 @@ OpenTelemetry is optional; applications install `opentelemetry-api` and pass
 their configured tracer to the adapter.
 
 Durable audit is an explicit two-stage boundary. `JsonlAuditSink` provides
-local fsync, locking, size limits, and chain verification. `ReplicatedAuditSink`
+local fsync, locking, size limits, chain verification, and a reserved tail for
+a linked fail-closed result when required export fails. The tail scales down to
+at most half of small explicit file limits so normal writes retain capacity.
+`ReplicatedAuditSink`
 requires an `AuditExporter` acknowledgement and raises on remote failure, so
 the runtime cannot report a normally recorded consequential action when the
 configured replica is unavailable. WORM storage, retention, signing, and

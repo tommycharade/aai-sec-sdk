@@ -120,23 +120,25 @@ still fails closed.
 
 ### Enforcement surface
 
-Codex CLI should use its authenticated MCP server configuration. The current
-Codex supports project-scoped MCP configuration for trusted projects; the
-server routes SDK-owned tools through the same `GuardedRuntime`. Set
+Codex CLI uses an authenticated MCP server plus a `PreToolUse` hook. The hook
+intercepts supported native `Bash`, `apply_patch`, MCP and local function tools;
+the server routes SDK-owned tools through the same `GuardedRuntime`. Set
 `AAI_SEC_AGENT_HOST=codex-cli` so audit events and MCP initialization identify
 the client as Codex rather than relying on model-supplied metadata.
 
 The shared agent client carries that host value into the authenticated
 registration request; Codex presence is not recorded as Claude Code by
-default. `scripts/onboard_codex.py` writes a project-scoped MCP entry with
-non-secret routing metadata only. The short-lived value is accepted during
+default. `scripts/onboard_codex.py` writes a project-scoped required MCP entry
+and native hook with non-secret routing metadata only. The short-lived value is accepted during
 onboarding and then rotated through the SDK-owned host credential cache; it is
 not forwarded through Codex project configuration.
 
-The first integration should not invent a Codex-specific policy language. It
-should translate Codex MCP tool calls into the existing typed
-`ActionProposal`, preserving the authenticated agent identity at the process
-boundary.
+The integration does not invent a Codex-specific policy language. It maps the
+shared native-tool policy onto canonical Codex events and translates MCP tool
+calls into the existing typed `ActionProposal`, preserving authenticated agent
+identity at the process boundary. Approval-rule matches are audited but denied
+at the native hook because Codex does not currently support an approval-producing
+`PreToolUse` result. Approval-bound operations must use the governed MCP path.
 
 ### UI onboarding flow
 
@@ -165,8 +167,11 @@ its user-local MCP entry and cached credential remain.
 ### Trust boundaries
 
 Codex MCP registration only starts the gateway. It does not itself authorize a
-tool or establish a principal. The gateway must require authenticated process
-context and fail closed when the control plane or runtime authority is absent.
+tool or establish a principal. The gateway requires authenticated process
+context and fails closed when the control plane or runtime authority is absent.
+Project hook trust is user-controlled and therefore suitable for pilots, not
+immutable enterprise enforcement. Production rollout distributes the hook with
+device management and pins managed hooks in `requirements.toml`.
 
 ## GitHub Copilot Agent
 
@@ -210,12 +215,12 @@ principals remain denied by the selected policy.
 
 | Capability | Claude Code | Codex CLI | GitHub Copilot Agent |
 | --- | --- | --- | --- |
-| Native host hook | `PreToolUse` | Host/version dependent; do not assume | Host/version dependent; verify deployment support |
+| Native host hook | `PreToolUse` | `PreToolUse`; native approval becomes deny + MCP route | Host/version dependent; verify deployment support |
 | MCP gateway | Required for SDK-owned tools | Required | Required |
 | Project/repository scope | `.claude/` and project MCP config | Project MCP scope | Repository/organization-managed config |
 | Central enrollment | MCP heartbeat plus deployment ID | MCP heartbeat plus deployment ID | MCP heartbeat plus repository/organization binding |
-| Policy enforcement | Hook plus runtime | Runtime gateway | Runtime gateway plus supported host controls |
-| Verification | `/mcp` and synthetic hook checks | MCP list/get and synthetic calls | MCP/agent configuration and synthetic calls |
+| Policy enforcement | Hook plus runtime | Hook plus runtime gateway | Runtime gateway plus supported host controls |
+| Verification | `/mcp` and synthetic hook checks | `/hooks`, MCP get and native/MCP synthetic calls | MCP/agent configuration and synthetic calls |
 | Main UI risk | Hook config mistaken for full runtime security | User-local MCP mistaken for enterprise enrollment | GitHub permission mistaken for SDK authorization |
 
 ## Rollout and response

@@ -57,7 +57,7 @@ test:
 	$(PYTHON) -m pytest
 
 coverage:
-	@if find src -name '*.py' -print -quit | grep -q .; then \
+	@set -e; if find src -name '*.py' -print -quit | grep -q .; then \
 		$(PYTHON) -m pytest --cov --cov-report=term-missing --cov-fail-under=90; \
 	else \
 		$(PYTHON) -m pytest; \

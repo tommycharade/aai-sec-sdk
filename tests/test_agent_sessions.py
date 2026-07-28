@@ -26,6 +26,7 @@ def session_store(directory: Path, *, now: int = 1_000) -> AgentSessionStore:
         "https://fleet.example.test",
         "deployment-test",
         "agent-test",
+        "/workspace/project",
         directory=directory,
         now=lambda: now,
     )
@@ -43,6 +44,17 @@ def test_session_store_round_trips_and_rotates_with_private_permissions(
     assert directory.stat().st_mode & 0o777 == 0o700
     assert store.path.stat().st_mode & 0o777 == 0o600
     assert TOKEN not in str(store.path)
+
+    other_scope = AgentSessionStore(
+        "https://fleet.example.test",
+        "deployment-test",
+        "agent-test",
+        "/workspace/other-project",
+        directory=directory,
+        now=lambda: 1_000,
+    )
+    assert other_scope.path != store.path
+    assert other_scope.load() is None
 
     store.save(AgentSessionCredential(ROTATED, 2_000))
     assert store.load() == AgentSessionCredential(ROTATED, 2_000)
@@ -117,6 +129,15 @@ def test_session_store_rejects_invalid_identity_and_expired_write(tmp_path: Path
             "https://fleet.example.test",
             "../deployment",
             "agent-test",
+            "/workspace/project",
+            directory=tmp_path,
+        )
+    with pytest.raises(ValueError, match="filesystem root"):
+        AgentSessionStore(
+            "https://fleet.example.test",
+            "deployment",
+            "agent-test",
+            "/",
             directory=tmp_path,
         )
     with pytest.raises(ValueError, match="expired"):
@@ -130,12 +151,13 @@ def test_session_store_rejects_invalid_endpoint_clock_and_credential_types(
 ) -> None:
     """Programmer errors cannot create an ambiguous credential boundary."""
     with pytest.raises(ValueError, match="HTTPS"):
-        AgentSessionStore("http://fleet.example.test", "deployment", "agent")
+        AgentSessionStore("http://fleet.example.test", "deployment", "agent", "/workspace/project")
     with pytest.raises(ValueError, match="clock"):
         AgentSessionStore(
             "https://fleet.example.test",
             "deployment",
             "agent",
+            "/workspace/project",
             now=cast(Callable[[], float], 123),
         )
     with pytest.raises(ValueError, match="Unix timestamp"):
@@ -241,5 +263,6 @@ def test_session_store_rejects_hosts_without_posix_file_security(
             "https://fleet.example.test",
             "deployment-test",
             "agent-test",
+            "/workspace/project",
             directory=tmp_path,
         )

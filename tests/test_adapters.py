@@ -21,6 +21,7 @@ from agentic_security import (
     SubprocessToolHandler,
     TokenCredentialBroker,
 )
+from agentic_security.audit import AuditEvent, AuditReplicationError, ReplicatedAuditSink
 from agentic_security.http import JsonHttpClient
 from agentic_security.policies import PolicyDecision
 from agentic_security.tools import ToolDefinition
@@ -159,6 +160,60 @@ def test_jsonl_audit_sink_fails_closed_when_full(tmp_path: Path) -> None:
         sink.append("action_denied", "request:full", {"value": "safe"})
 
 
+def test_jsonl_audit_scales_default_reserve_for_small_explicit_limits(tmp_path: Path) -> None:
+    """A small pre-existing max_bytes value retains ordinary event capacity."""
+    path = tmp_path / "small-audit.jsonl"
+    sink = JsonlAuditSink(path, max_bytes=4_096)
+
+    event = sink.append("decision", "request:small", {"decision": "deny"})
+
+    assert sink.emergency_reserve_bytes == 2_048
+    assert sink.normal_capacity_bytes == 2_048
+    assert event.payload["decision"] == "deny"
+    assert sink.verify()
+
+
+def test_jsonl_audit_reserves_space_for_replication_failure_compensation(
+    tmp_path: Path,
+) -> None:
+    """A provisional allow cannot consume its linked effective-denial capacity."""
+
+    class BrokenExporter:
+        def export(self, _event: AuditEvent) -> None:
+            raise OSError("synthetic collector outage")
+
+    path = tmp_path / "replication-outage.jsonl"
+    primary = JsonlAuditSink(path, max_bytes=1_500, emergency_reserve_bytes=750)
+    replicated = ReplicatedAuditSink(primary, BrokenExporter())
+    with pytest.raises(AuditReplicationError) as failure:
+        replicated.append("decision", "request:reserve", {"decision": "allow"})
+
+    compensation = replicated.record_local_replication_failure(
+        "effective_decision",
+        "request:reserve",
+        {"decision": "deny", "reason": "required replication failed"},
+        failure.value.local_event,
+    )
+
+    assert path.stat().st_size > primary.normal_capacity_bytes
+    assert compensation.payload["decision"] == "deny"
+    assert compensation.payload["supersedes_event_hash"] == failure.value.local_event.event_hash
+    assert primary.verify()
+
+
+def test_jsonl_audit_rejects_a_provisional_event_too_large_for_compensation(
+    tmp_path: Path,
+) -> None:
+    """An oversized provisional record cannot consume unserviceable authority."""
+    path = tmp_path / "oversized-provisional.jsonl"
+    sink = JsonlAuditSink(path, max_bytes=2_000, emergency_reserve_bytes=800)
+
+    with pytest.raises(RuntimeError, match="bounded record size"):
+        sink.append("decision", "request:oversized", {"value": "x" * 800})
+
+    assert not path.exists() or path.stat().st_size == 0
+
+
 def test_jsonl_audit_sink_refuses_to_extend_a_corrupt_chain(tmp_path: Path) -> None:
     """Appending cannot hide tampering that occurred before the chain head."""
     path = tmp_path / "corrupt.jsonl"
@@ -173,6 +228,31 @@ def test_jsonl_audit_sink_refuses_to_extend_a_corrupt_chain(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="hash chain is corrupt"):
         JsonlAuditSink(path)
+
+
+def test_jsonl_audit_rejects_symlinked_file_directory_and_lock(tmp_path: Path) -> None:
+    """Local evidence cannot be redirected into another same-user file."""
+    target = tmp_path / "target.txt"
+    target.write_text("unchanged", encoding="utf-8")
+
+    linked_file = tmp_path / "audit.jsonl"
+    linked_file.symlink_to(target)
+    with pytest.raises(ValueError, match="symlink"):
+        JsonlAuditSink(linked_file)
+
+    real_directory = tmp_path / "real-audit"
+    real_directory.mkdir()
+    linked_directory = tmp_path / "linked-audit"
+    linked_directory.symlink_to(real_directory, target_is_directory=True)
+    with pytest.raises(ValueError, match="directory"):
+        JsonlAuditSink(linked_directory / "audit.jsonl")
+
+    safe_path = tmp_path / "safe-audit.jsonl"
+    lock_path = safe_path.with_suffix(".jsonl.lock")
+    lock_path.symlink_to(target)
+    with pytest.raises(ValueError, match="lock"):
+        JsonlAuditSink(safe_path)
+    assert target.read_text(encoding="utf-8") == "unchanged"
 
 
 def test_jsonl_audit_verification_rejects_each_hash_chain_link_failure(tmp_path: Path) -> None:

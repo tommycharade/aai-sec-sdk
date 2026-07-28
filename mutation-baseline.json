@@ -10,9 +10,13 @@
     "budget admission",
     "idempotency claim and terminal persistence",
     "timeout and reconciliation",
-    "audit replication failure"
+    "audit replication failure",
+    "native hook fail-closed decisions and command-pattern availability"
   ],
   "source_scope": [
+    "src/agentic_security/_command_patterns.py",
+    "src/agentic_security/claude_code.py",
+    "src/agentic_security/codex_cli.py",
     "src/agentic_security/components.py",
     "src/agentic_security/runtime.py",
     "src/agentic_security/approvals.py",
@@ -29,6 +33,11 @@
   "minimum_killed_percent": 80,
   "minimum_component_killed_percent": 75,
   "components": {
+    "native_hooks": [
+      "src/agentic_security/_command_patterns.py",
+      "src/agentic_security/claude_code.py",
+      "src/agentic_security/codex_cli.py"
+    ],
     "runtime_boundary": ["src/agentic_security/components.py", "src/agentic_security/runtime.py"],
     "approvals": ["src/agentic_security/approvals.py"],
     "budgets": ["src/agentic_security/budgets.py"],

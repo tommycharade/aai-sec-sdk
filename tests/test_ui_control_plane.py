@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, cast
 
@@ -32,6 +33,7 @@ from agentic_security.ui_control_plane import (
     _bool,
     _command,
     _endpoint,
+    _native_action_digest,
     _number,
     _pattern,
     _positive_int,
@@ -382,6 +384,9 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
 
     def aws_urlopen(request: Any, *, timeout: float, **_kwargs: Any) -> Response:
         aws_requests.append(request.full_url)
+        assert (
+            request.headers["X-aai-project-root-digest"] == sha256(b"/workspace/kratos").hexdigest()
+        )
         if request.full_url.endswith("/effective-policy"):
             return Response(
                 {
@@ -451,8 +456,9 @@ def test_agent_client_and_exporter_report_only_bounded_decision_metadata(
             "tool_name": "Bash",
             "decision": "ask",
             "reason": "consequential command requires interactive approval",
-            "tool_input": {"command": "git push https://token@example.test/private"},
-            "cwd": "/workspace/secret-project",
+            "tool_input_hash": "c" * 64,
+            "cwd_hash": "d" * 64,
+            "action_digest": "e" * 64,
         },
         "2026-07-28T12:00:00Z",
         "0" * 64,
@@ -467,6 +473,7 @@ def test_agent_client_and_exporter_report_only_bounded_decision_metadata(
         "decision": "approval_required",
         "resourceKind": "shell_command",
         "reasonCode": "approval_rule",
+        "actionDigest": "e" * 64,
     }
     assert "token" not in json.dumps(captured[0][1]).lower()
     with pytest.raises(ControlPlaneConfigurationError):
@@ -478,6 +485,79 @@ def test_agent_client_and_exporter_report_only_bounded_decision_metadata(
             resource_kind="shell_command",
             reason_code="explicit_allow",
         )
+    with pytest.raises(ControlPlaneConfigurationError, match="action digest"):
+        client.report_decision(
+            decision_id="d" * 64,
+            source="claude_native",
+            tool_name="Bash",
+            decision="allowed",
+            resource_kind="shell_command",
+            reason_code="explicit_allow",
+            action_digest="invalid",
+        )
+
+
+def test_native_action_digest_is_bound_to_tool_input_and_working_directory() -> None:
+    """Identical native input in a different project cannot satisfy the same proof."""
+    baseline = _native_action_digest("Bash", "a" * 64, "b" * 64)
+
+    assert _native_action_digest("Read", "a" * 64, "b" * 64) != baseline
+    assert _native_action_digest("Bash", "c" * 64, "b" * 64) != baseline
+    assert _native_action_digest("Bash", "a" * 64, "d" * 64) != baseline
+
+
+def test_native_decision_export_rejects_missing_working_directory_scope() -> None:
+    """Central native evidence fails closed when the host omits project scope."""
+
+    class RecordingClient:
+        def report_decision(self, **_report: str) -> dict[str, object]:
+            return {"accepted": True}
+
+    event = AuditEvent(
+        "codex_pre_tool_decision",
+        "request-a",
+        {
+            "tool_name": "Bash",
+            "decision": "allow",
+            "tool_input_hash": "a" * 64,
+        },
+        "2026-07-28T12:00:00Z",
+        "0" * 64,
+        "b" * 64,
+    )
+
+    with pytest.raises(ControlPlaneConfigurationError, match="working-directory"):
+        ControlPlaneDecisionExporter(
+            cast(ControlPlaneAgentClient, RecordingClient()), source="codex_native"
+        ).export(event)
+
+
+def test_native_decision_export_rejects_malformed_precomputed_correlation() -> None:
+    """A host cannot smuggle malformed action correlation into central evidence."""
+
+    class RecordingClient:
+        def report_decision(self, **_report: str) -> dict[str, object]:
+            return {"accepted": True}
+
+    event = AuditEvent(
+        "claude_pre_tool_decision",
+        "request-a",
+        {
+            "tool_name": "Read",
+            "decision": "allow",
+            "tool_input_hash": "a" * 64,
+            "cwd_hash": "b" * 64,
+            "action_digest": "not-a-digest",
+        },
+        "2026-07-28T12:00:00Z",
+        "0" * 64,
+        "c" * 64,
+    )
+
+    with pytest.raises(ControlPlaneConfigurationError, match="correlation"):
+        ControlPlaneDecisionExporter(
+            cast(ControlPlaneAgentClient, RecordingClient()), source="claude_native"
+        ).export(event)
 
 
 @pytest.mark.parametrize(
@@ -555,6 +635,30 @@ def test_agent_client_and_exporter_report_only_bounded_decision_metadata(
             "Read",
             ("denied", "project_file", "deny_by_default"),
         ),
+        (
+            "codex_pre_tool_decision",
+            "allow",
+            "all patch targets are inside the approved project",
+            "codex_native",
+            "apply_patch",
+            ("allowed", "project_file", "explicit_allow"),
+        ),
+        (
+            "codex_pre_tool_decision",
+            "ask",
+            "command requires approval",
+            "codex_native",
+            "Bash",
+            ("approval_required", "shell_command", "approval_rule"),
+        ),
+        (
+            "codex_pre_tool_decision",
+            "deny",
+            "tool is not explicitly allowed",
+            "codex_native",
+            "mcp__unknown__execute",
+            ("denied", "mcp_tool", "deny_by_default"),
+        ),
     ],
 )
 def test_decision_exporter_normalizes_all_supported_host_outcomes(
@@ -577,6 +681,9 @@ def test_decision_exporter_normalizes_all_supported_host_outcomes(
 
     recording = RecordingClient()
     payload: dict[str, object] = {"tool_name": tool_name, "reason": reason}
+    if source in {"claude_native", "codex_native"}:
+        payload["tool_input_hash"] = "c" * 64
+        payload["cwd_hash"] = "d" * 64
     if decision is not None:
         payload["decision"] = decision
     event = AuditEvent(
@@ -846,6 +953,7 @@ def test_agent_client_secures_rotation_for_native_hook_processes(
         "https://control.example.test/api",
         "deployment-prod",
         "claude-code-local",
+        "/workspace/kratos",
         directory=tmp_path,
         now=lambda: 1_000,
     )
@@ -873,6 +981,7 @@ def test_agent_client_rejects_mismatched_session_store(tmp_path: Path) -> None:
         "https://control.example.test/api",
         "deployment-prod",
         "different-agent",
+        "/workspace/kratos",
         directory=tmp_path,
     )
     with pytest.raises(ValueError, match="identity must match"):
@@ -884,6 +993,24 @@ def test_agent_client_rejects_mismatched_session_store(tmp_path: Path) -> None:
             deployment_id="deployment-prod",
             aws_agent_session=True,
             session_store=mismatched,
+        )
+
+    wrong_scope = AgentSessionStore(
+        "https://control.example.test/api",
+        "deployment-prod",
+        "claude-code-local",
+        "/workspace/other",
+        directory=tmp_path,
+    )
+    with pytest.raises(ValueError, match="identity must match"):
+        ControlPlaneAgentClient(
+            "https://control.example.test/api",
+            TOKEN,
+            agent_id="claude-code-local",
+            project_root="/workspace/kratos",
+            deployment_id="deployment-prod",
+            aws_agent_session=True,
+            session_store=wrong_scope,
         )
 
 
@@ -911,6 +1038,13 @@ def test_agent_client_rejects_unsafe_endpoints_and_transport_failures(
             agent_id="agent",
             project_root="/workspace",
             timeout_seconds=0,
+        )
+    with pytest.raises(ValueError, match="filesystem root"):
+        ControlPlaneAgentClient(
+            "https://control.example.test/api",
+            TOKEN,
+            agent_id="agent",
+            project_root="/",
         )
     with pytest.raises(ValueError, match="host is not supported"):
         ControlPlaneAgentClient(
@@ -1066,6 +1200,7 @@ def test_control_plane_fails_closed_for_unsafe_capture_configuration(tmp_path: P
         ("claudeCode", "hookCommand", "python3 -c 'print(1)'", "inline code"),
         ("claudeCode", "mcpGatewayCommand", "sh -c echo unsafe", "python or python3"),
         ("claudeCode", "deniedCommandPatterns", ["(a+)+"], "backtracking"),
+        ("claudeCode", "allowedCommandPatterns", ["safe"] * 101, "supported limit"),
         ("runtime", "policyProvider", "unknown", "unknown policy provider"),
         ("runtime", "isolationVerifier", "disabled", "high-risk isolation"),
     ],

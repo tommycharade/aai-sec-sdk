@@ -158,13 +158,36 @@ def _agent_session(event):
 
 
 def _agent_identity(path, event):
-    """Require the URL agent identity to match the enrolled session identity."""
+    """Require URL identity and live project scope to match the agent session."""
     parts = [part for part in path.split("/") if part]
     if len(parts) < 3 or parts[0] != "agent":
         raise PermissionError("agent identity is required")
     session = _agent_session(event)
     if session.get("deployment_id") != parts[1] or session.get("agent_id") != parts[2]:
         raise PermissionError("agent session identity mismatch")
+    headers = {str(key).lower(): value for key, value in (event.get("headers") or {}).items()}
+    supplied_scope = headers.get("x-aai-project-root-digest")
+    session_scope = session.get("project_root_hash")
+    if (
+        not isinstance(supplied_scope, str)
+        or not isinstance(session_scope, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", supplied_scope)
+        or not secrets.compare_digest(supplied_scope, session_scope)
+    ):
+        raise PermissionError("agent session project scope mismatch")
+    agent = TABLE.get_item(
+        Key=_item_key(session["tenant_id"], "AGENT", f"{parts[1]}:{parts[2]}"),
+        ConsistentRead=True,
+    ).get("Item")
+    registered_root = agent.get("project_root") if agent else None
+    if (
+        not isinstance(registered_root, str)
+        or not registered_root
+        or not secrets.compare_digest(
+            hashlib.sha256(registered_root.encode()).hexdigest(), session_scope
+        )
+    ):
+        raise PermissionError("registered agent project scope mismatch")
     return session, parts[1], parts[2], parts[3:]
 
 
@@ -298,6 +321,26 @@ def _bounded_identifier(value, field):
     normalized = _bounded_text(value, field)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", normalized):
         raise ValueError(f"{field} contains unsupported characters")
+    return normalized
+
+
+def _project_root(value):
+    """Require the canonical POSIX path used as an immutable agent scope.
+
+    The browser cannot resolve paths on a remote host, so registration accepts
+    only the lexical form produced by ``pwd -P``. The host still resolves the
+    live directory before enrollment and must present this exact value.
+    """
+    normalized = _bounded_text(value, "projectRoot", 4096)
+    segments = normalized.split("/")
+    if (
+        not normalized.startswith("/")
+        or normalized == "/"
+        or normalized.endswith("/")
+        or "" in segments[1:]
+        or any(segment in {".", ".."} for segment in segments)
+    ):
+        raise ValueError("projectRoot must be a canonical absolute project path")
     return normalized
 
 
@@ -464,6 +507,7 @@ def _decision_view(item):
         "deploymentId": item.get("deployment_id", ""),
         "policyId": item.get("policy_id", ""),
         "policyVersion": int(item.get("policy_version", 0)),
+        "actionDigest": item.get("action_digest"),
         "reportedByAgent": True,
     }
 
@@ -483,7 +527,11 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
         "resourceKind",
         "reasonCode",
     }
-    if not isinstance(body, dict) or set(body) != required_fields:
+    supplied_fields = set(body) if isinstance(body, dict) else set()
+    if not isinstance(body, dict) or (
+        supplied_fields != required_fields
+        and supplied_fields != required_fields | {"actionDigest"}
+    ):
         raise ValueError("decision evidence contains unsupported fields")
     decision_id = body.get("decisionId")
     if (
@@ -498,6 +546,12 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
         body, "resourceKind", _DECISION_RESOURCE_KINDS
     )
     reason_code = _decision_value(body, "reasonCode", _DECISION_REASON_CODES)
+    action_digest = body.get("actionDigest")
+    if action_digest is not None and (
+        not isinstance(action_digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", action_digest)
+    ):
+        raise ValueError("actionDigest must be a SHA-256 action digest")
     agent_key = f"{deployment_id}:{agent_id}"
     agent = TABLE.get_item(
         Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True
@@ -538,6 +592,8 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
         "timeline_sk": f"{observed_at:010d}#{record_id}",
         "ttl": observed_at + (30 * 86400),
     }
+    if action_digest is not None:
+        values["action_digest"] = action_digest
     try:
         item = _create_item(tenant, "DECISION", record_id, values)
     except Exception as error:
@@ -554,8 +610,9 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
             "decision",
             "resource_kind",
             "reason_code",
+            "action_digest",
         )
-        if existing and all(existing.get(key) == values[key] for key in comparable):
+        if existing and all(existing.get(key) == values.get(key) for key in comparable):
             return {"accepted": True, "duplicate": True, "decisionId": decision_id}
         return {"accepted": False, "conflict": True, "decisionId": decision_id}
     _audit(
@@ -571,6 +628,7 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
             "decision": decision,
             "resource_kind": resource_kind,
             "reason_code": reason_code,
+            "action_digest": action_digest,
             "policy_id": policy["id"],
             "policy_version": int(policy.get("version", 0)),
         },
@@ -899,6 +957,7 @@ def _verify_agent(tenant, deployment_id, agent_id):
         for group in _list(tenant, "GROUP", consistent_read=True)
         if f"{deployment_id}:{agent_id}" in group.get("agent_keys", [])
     ]
+    policy = None
     policy_assigned = False
     if len(groups) == 1:
         policy = TABLE.get_item(
@@ -968,6 +1027,8 @@ def _verify_agent(tenant, deployment_id, agent_id):
         "host": agent.get("host", "") if agent else "",
         "status": agent.get("status", "offline") if agent else "offline",
         "groups": [group["id"] for group in groups],
+        "policyId": policy.get("id") if policy else None,
+        "policyVersion": int(policy.get("version", 0)) if policy else None,
     }
 
 
@@ -1095,6 +1156,9 @@ def _issue_agent_bootstrap(tenant, body, actor):
     agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key)).get("Item")
     if not agent:
         raise ValueError("agent must be registered before enrollment")
+    project_root = agent.get("project_root")
+    if not isinstance(project_root, str) or not project_root:
+        raise ValueError("agent must have a project root before enrollment")
     token = secrets.token_urlsafe(32)
     expires_at = int(time.time()) + min(max(int(body.get("ttlSeconds", 600)), 60), 3600)
     TABLE.put_item(
@@ -1104,6 +1168,7 @@ def _issue_agent_bootstrap(tenant, body, actor):
             "tenant_id": tenant,
             "deployment_id": deployment_id,
             "agent_id": agent_id,
+            "project_root_hash": hashlib.sha256(project_root.encode()).hexdigest(),
             "expires_at": expires_at,
             "ttl": expires_at,
         }
@@ -1132,15 +1197,29 @@ def _enroll_agent(event):
     item = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
     if not item or int(item.get("expires_at", 0)) <= int(time.time()):
         raise PermissionError("bootstrap token is missing or expired")
-    # Conditional delete makes reuse fail if two enrollment attempts race.
+    deployment_id = item["deployment_id"]
+    agent_id = item["agent_id"]
+    tenant = item["tenant_id"]
+    project_root = _project_root(body.get("projectRoot"))
+    project_root_hash = hashlib.sha256(project_root.encode()).hexdigest()
+    bootstrap_scope = item.get("project_root_hash")
+    if not isinstance(bootstrap_scope, str) or not secrets.compare_digest(
+        project_root_hash, bootstrap_scope
+    ):
+        raise PermissionError("bootstrap project scope mismatch")
+    agent = TABLE.get_item(
+        Key=_item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}"),
+        ConsistentRead=True,
+    ).get("Item")
+    if not agent or agent.get("project_root") != project_root:
+        raise PermissionError("registered agent project scope mismatch")
+    # Validate immutable scope before consuming the one-time secret. The
+    # conditional delete then makes successful exchange one-shot under races.
     TABLE.delete_item(
         Key=key,
         ConditionExpression="attribute_exists(pk) AND expires_at > :now",
         ExpressionAttributeValues={":now": int(time.time())},
     )
-    deployment_id = item["deployment_id"]
-    agent_id = item["agent_id"]
-    tenant = item["tenant_id"]
     now = int(time.time())
     session_token = secrets.token_urlsafe(32)
     session_expires = now + 900
@@ -1151,16 +1230,12 @@ def _enroll_agent(event):
             "tenant_id": tenant,
             "deployment_id": deployment_id,
             "agent_id": agent_id,
+            "project_root_hash": project_root_hash,
             "issued_at": now,
             "expires_at": session_expires,
             "ttl": session_expires,
         }
     )
-    agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}")).get(
-        "Item"
-    )
-    if not agent:
-        raise PermissionError("registered agent no longer exists")
     # Exchanging a bootstrap proves possession of enrollment material, not
     # that the runtime process is alive. Only the authenticated agent
     # heartbeat route may transition presence to connected.
@@ -1201,6 +1276,7 @@ def _renew_agent_session(tenant, session, current_token):
             "tenant_id": tenant,
             "deployment_id": session["deployment_id"],
             "agent_id": session["agent_id"],
+            "project_root_hash": session["project_root_hash"],
             "issued_at": now,
             "expires_at": refreshed_expires,
             "ttl": refreshed_expires,
@@ -1272,12 +1348,18 @@ def handler(event, context):
                             "scope": "agent",
                         },
                     )
-                group = next(
-                    (g for g in _fleet(tenant)["groups"] if agent_key in g.get("agent_keys", [])),
-                    None,
-                )
-                if not group:
+                groups = [
+                    group
+                    for group in _fleet(tenant)["groups"]
+                    if agent_key in group.get("agent_keys", [])
+                ]
+                if not groups:
                     return _response(409, {"error": "agent has no assigned policy"})
+                if len(groups) != 1:
+                    return _response(
+                        409, {"error": "agent has conflicting policy-group assignments"}
+                    )
+                group = groups[0]
                 policy = TABLE.get_item(Key=_item_key(tenant, "POLICY", group["policyId"])).get(
                     "Item"
                 )
@@ -2126,12 +2208,67 @@ def handler(event, context):
                 ).get("Item")
                 if not deployment:
                     return _response(400, {"error": "deployment not found"})
+                project_root = _project_root(body.get("projectRoot"))
+                agent_key = f"{deployment_id}:{agent_id}"
+                existing = TABLE.get_item(
+                    Key=_item_key(tenant, "AGENT", agent_key),
+                    ConsistentRead=True,
+                ).get("Item")
+                if existing:
+                    existing_root = existing.get("project_root")
+                    if existing_root:
+                        if existing_root != project_root:
+                            return _response(
+                                409, {"error": "agent project scope is immutable after enrollment"}
+                            )
+                        return _response(200, existing)
+                    # Legacy records could omit scope. Permit only the one-way
+                    # transition from empty to a bounded root; later scope
+                    # changes require a new agent identity and enrollment.
+                    try:
+                        updated = TABLE.update_item(
+                            Key=_item_key(tenant, "AGENT", agent_key),
+                            UpdateExpression="SET project_root = :project_root",
+                            ConditionExpression=(
+                                "attribute_exists(pk) AND "
+                                "(attribute_not_exists(project_root) OR project_root = :empty)"
+                            ),
+                            ExpressionAttributeValues={
+                                ":project_root": project_root,
+                                ":empty": "",
+                            },
+                            ReturnValues="ALL_NEW",
+                        )
+                    except Exception as error:
+                        if not _is_conditional_conflict(error):
+                            raise
+                        # Another operator may have won the one-time repair
+                        # after our consistent read. The same root is
+                        # idempotent; a different root is an immutable-scope
+                        # conflict and must never become last-writer-wins.
+                        current = TABLE.get_item(
+                            Key=_item_key(tenant, "AGENT", agent_key),
+                            ConsistentRead=True,
+                        ).get("Item")
+                        if current and current.get("project_root") == project_root:
+                            return _response(200, current)
+                        return _response(
+                            409, {"error": "agent project scope is immutable after enrollment"}
+                        )
+                    repaired = updated.get("Attributes", {**existing, "project_root": project_root})
+                    _audit(
+                        tenant,
+                        "agent_project_scope_recorded",
+                        actor,
+                        {"deployment_id": deployment_id, "agent_id": agent_id},
+                    )
+                    return _response(200, repaired)
                 now = int(time.time())
                 try:
                     item = _create_item(
                         tenant,
                         "AGENT",
-                        f"{deployment_id}:{agent_id}",
+                        agent_key,
                         {
                             "id": agent_id,
                             # Ownership and environment come from the trusted
@@ -2140,11 +2277,7 @@ def handler(event, context):
                             "project_id": deployment["project_id"],
                             "deployment_id": deployment_id,
                             "host": _bounded_text(body.get("host", "agent"), "host", 64),
-                            "project_root": (
-                                _bounded_text(body.get("projectRoot"), "projectRoot", 4096)
-                                if body.get("projectRoot")
-                                else ""
-                            ),
+                            "project_root": project_root,
                             "environment": deployment["environment"],
                             "region": deployment["region"],
                             "status": "offline",
@@ -2213,12 +2346,18 @@ def handler(event, context):
                             "scope": "agent",
                         },
                     )
-                group = next(
-                    (g for g in _fleet(tenant)["groups"] if agent_key in g.get("agent_keys", [])),
-                    None,
-                )
-                if not group:
+                groups = [
+                    group
+                    for group in _fleet(tenant)["groups"]
+                    if agent_key in group.get("agent_keys", [])
+                ]
+                if not groups:
                     return _response(409, {"error": "agent has no assigned policy"})
+                if len(groups) != 1:
+                    return _response(
+                        409, {"error": "agent has conflicting policy-group assignments"}
+                    )
+                group = groups[0]
                 policy = TABLE.get_item(Key=_item_key(tenant, "POLICY", group["policyId"])).get(
                     "Item"
                 )
