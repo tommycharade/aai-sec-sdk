@@ -288,6 +288,20 @@ audit, or isolation services.
 
 ::: agentic_security.AgentPresenceStore
 
+::: agentic_security.AgentSessionCredential
+
+::: agentic_security.AgentSessionStore
+
+::: agentic_security.AgentSessionStoreError
+
+`AgentSessionStore` is the reference same-user credential cache for native hook
+and MCP processes. It derives an opaque filename from the control-plane URL,
+deployment and agent identity, writes atomically outside the project with
+directory mode `0700` and file mode `0600`, and rejects symlinks, foreign
+ownership, broad permissions, malformed content and expired credentials. The
+cache transfers a bearer; it does not validate or authorize it. The control
+plane remains authoritative on every request.
+
 ::: agentic_security.ControlPlaneAgentClient
 
 `ControlPlaneAgentClient.report_decision` is available only for an enrolled AWS

@@ -39,6 +39,7 @@ from urllib.request import Request, urlopen
 
 import certifi
 
+from .agent_sessions import AgentSessionCredential, AgentSessionStore
 from .audit import AuditEvent, AuditSink
 from .integrations import AgentHost
 
@@ -447,10 +448,16 @@ class ControlPlaneAgentClient:
         project_root: str,
         deployment_id: str | None = None,
         aws_agent_session: bool = False,
+        session_store: AgentSessionStore | None = None,
         host: AgentHost | str = AgentHost.CLAUDE_CODE,
         timeout_seconds: float = 5,
     ) -> None:
-        """Bind one agent token to one explicit project and host registration."""
+        """Bind one agent token to one explicit project and host registration.
+
+        ``session_store`` is an optional user-private host cache used to share
+        heartbeat rotations with short-lived native hook processes. It never
+        supplies identity or authority and performs no I/O in this constructor.
+        """
         parsed = urlsplit(base_url.rstrip("/"))
         local_http = parsed.scheme == "http" and parsed.hostname in {
             "localhost",
@@ -467,12 +474,21 @@ class ControlPlaneAgentClient:
             self.host = host if isinstance(host, AgentHost) else AgentHost(host)
         except ValueError as exc:
             raise ValueError("agent client host is not supported") from exc
+        if session_store is not None and (
+            not aws_agent_session
+            or deployment_id is None
+            or session_store.base_url != base_url.rstrip("/")
+            or session_store.deployment_id != deployment_id
+            or session_store.agent_id != agent_id
+        ):
+            raise ValueError("agent session store identity must match the AWS agent client")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.agent_id = agent_id
         self.project_root = project_root
         self.deployment_id = deployment_id
         self.aws_agent_session = aws_agent_session
+        self.session_store = session_store
         self.timeout_seconds = timeout_seconds
 
     def register(self) -> str:
@@ -517,6 +533,18 @@ class ControlPlaneAgentClient:
         refreshed = response.get("accessToken")
         if isinstance(refreshed, str) and len(refreshed) >= 16:
             self.token = refreshed
+        if self.session_store is not None:
+            expires_at = response.get("expiresAt")
+            if isinstance(expires_at, bool) or not isinstance(expires_at, int):
+                raise ControlPlaneDependencyError(
+                    "control-plane heartbeat returned no valid session expiry"
+                )
+            try:
+                self.session_store.save(AgentSessionCredential(self.token, expires_at))
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                raise ControlPlaneDependencyError(
+                    "rotated agent session could not be secured on this host"
+                ) from exc
         return response
 
     def report_decision(

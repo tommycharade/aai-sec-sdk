@@ -34,19 +34,29 @@ Use this sequence when onboarding a new project:
 From the project you want Claude Code to use, run:
 
 ```bash
+set -euo pipefail
 SDK_ROOT="${AAI_SEC_SDK_ROOT:-$HOME/.aai-sec-sdk}"
 if [ ! -f "$SDK_ROOT/scripts/onboard_claude.py" ]; then
   git clone https://github.com/tommycharade/aai-sec-sdk.git "$SDK_ROOT"
+else
+  git -C "$SDK_ROOT" pull --ff-only
 fi
-python3 "$SDK_ROOT/scripts/onboard_claude.py" \
+python3 -m venv "$SDK_ROOT/.venv"
+"$SDK_ROOT/.venv/bin/python" -m pip install \
+  --disable-pip-version-check --quiet "$SDK_ROOT"
+"$SDK_ROOT/.venv/bin/python" "$SDK_ROOT/scripts/onboard_claude.py" \
   --project-root "$PWD" --sdk-root "$SDK_ROOT" \
+  --python "$SDK_ROOT/.venv/bin/python" \
   --control-plane-url http://localhost:8000/api
 ```
 
 Review the repository and command before running it in a regulated
 environment. Set `AAI_SEC_SDK_ROOT` when the SDK is already checked out at a
-different path. The script writes only project-scoped files and creates
-timestamped backups before changing existing configuration.
+different path. The private virtual environment ensures the generated hook and
+MCP commands use an interpreter where the SDK is actually installed. The
+script writes only project-scoped configuration plus, for enterprise
+enrollment, the separate user-private session cache. It creates timestamped
+backups before changing existing project configuration.
 
 The script creates or updates `.claude/settings.json` and `.mcp.json`, keeps
 existing entries, and creates timestamped backups before modifying either
@@ -91,15 +101,16 @@ python3 /path/to/aai-sec-sdk/scripts/onboard_claude.py \
   --deployment-id deployment-prod-eu \
   --agent-id claude-platform-prod \
   --bootstrap-token "<one-time-token>"
-# The script prints this export after a successful exchange.
-export AAI_SEC_AGENT_TOKEN="<short-lived-session-token>"
 claude
 ```
 
 The script consumes the bootstrap token at `/agent/enroll`, writes only
-non-secret routing metadata to Claude's files, and prints the short-lived
-session token for the current shell. The token is deployment/agent-bound and
-expires; repeat enrollment with a newly issued bootstrap token when it expires.
+non-secret routing metadata to Claude's files, and places the short-lived
+session in the SDK's user-private host cache. The cache is outside the project,
+uses a `0700` directory and `0600` file, and is scoped to the control-plane URL,
+deployment and agent. You can unset `AAI_SEC_AGENT_TOKEN` before starting
+Claude. The MCP heartbeat rotates the cache and each native hook process reads
+the current value, so a healthy session continues beyond the original bearer.
 
 The real-device acceptance run for Claude Code 2.1.220 is recorded in
 [real Claude Code acceptance evidence](real-claude-code-acceptance-evidence-2026-07-27.md).
@@ -107,13 +118,13 @@ The real-device acceptance run for Claude Code 2.1.220 is recorded in
 The deployment ID determines which organization/project fleet receives the
 agent registration. The enterprise UI can then show the project alongside
 other deployments, report heartbeat health and drift, and apply staged
-configuration rollouts. Do not put the agent token in `.mcp.json`; inherit it
-from the process environment or a secret manager.
+configuration rollouts. Do not put the agent token in `.mcp.json`.
 
 Enterprise onboarding also embeds only the control-plane URL, deployment ID
-and agent ID in the hook command. When `AAI_SEC_AGENT_TOKEN` is inherited by
-Claude Code, the native-tool hook resolves the same authenticated effective
-group policy as the MCP gateway before each event. Missing credentials,
+and agent ID in the hook command. The native-tool hook reads the current
+deployment-scoped session from the user-private cache and resolves the same
+authenticated effective group policy as the MCP gateway before each event.
+Missing credentials,
 unassigned or conflicting groups, malformed policy, or control-plane failure
 deny the native action. This keeps central policy enforcement consistent for
 Claude's built-in tools and SDK-owned MCP tools.

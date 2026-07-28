@@ -13,6 +13,11 @@ from .adapters import (
     JsonlAuditSink,
     SubprocessToolHandler,
 )
+from .agent_sessions import (
+    AgentSessionCredential,
+    AgentSessionStore,
+    AgentSessionStoreError,
+)
 from .approvals import (
     ApprovalConsumption,
     ApprovalGrant,
@@ -167,6 +172,9 @@ from .ui_control_plane import (
 )
 
 __all__ = [
+    "AgentSessionCredential",
+    "AgentSessionStore",
+    "AgentSessionStoreError",
     "ActionProposal",
     "ActionFacts",
     "ActionPreparation",

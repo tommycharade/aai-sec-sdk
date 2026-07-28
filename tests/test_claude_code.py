@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import io
 import json
+import time
 from pathlib import Path
 
 import examples.claude_code_hook as claude_hook_example
 import pytest
 
 from agentic_security import (
+    AgentSessionCredential,
+    AgentSessionStore,
     ClaudeCodeHook,
     ClaudeHookDecision,
     ClaudeHookResult,
@@ -175,3 +178,38 @@ def test_claude_native_hook_resolves_central_policy_and_fails_closed(
 
     monkeypatch.delenv("AAI_SEC_AGENT_TOKEN")
     assert claude_hook_example._load_central_config(tmp_path) is None
+
+
+def test_claude_native_hook_prefers_rotated_host_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each hook process adopts the gateway's latest cached bearer."""
+    user_home = tmp_path / "home"
+    user_home.mkdir(mode=0o700)
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.setenv("AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL", "https://fleet.example.test/api")
+    monkeypatch.setenv("AAI_SEC_AGENT_TOKEN", "synthetic-original-token-1234")
+    monkeypatch.setenv("AAI_SEC_DEPLOYMENT_ID", "deployment-a")
+    monkeypatch.setenv("AAI_SEC_AGENT_ID", "claude-a")
+    monkeypatch.setenv("AAI_SEC_AGENT_SESSION_MODE", "aws")
+    rotated = "synthetic-rotated-token-5678"
+    store = AgentSessionStore(
+        "https://fleet.example.test/api",
+        "deployment-a",
+        "claude-a",
+    )
+    store.save(AgentSessionCredential(rotated, int(time.time()) + 900))
+
+    class Client:
+        def __init__(self, _url: str, token: str, **kwargs: object) -> None:
+            self.token = token
+            self.session_store = kwargs.get("session_store")
+
+    monkeypatch.setattr(claude_hook_example, "ControlPlaneAgentClient", Client)
+
+    client = claude_hook_example._control_plane_client(tmp_path)
+
+    assert client is not None
+    assert client.token == rotated
+    assert isinstance(client.session_store, AgentSessionStore)

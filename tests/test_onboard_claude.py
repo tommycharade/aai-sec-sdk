@@ -6,7 +6,10 @@ import json
 import shlex
 from pathlib import Path
 
+import pytest
 from scripts.onboard_claude import onboard
+
+from agentic_security import AgentSessionCredential, AgentSessionStore
 
 
 def test_onboard_creates_separate_hook_and_mcp_configuration(tmp_path: Path) -> None:
@@ -91,3 +94,41 @@ def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path)
         "AAI_SEC_AGENT_ID=claude-platform-prod",
         "AAI_SEC_AGENT_SESSION_MODE=local",
     ]
+
+
+def test_onboard_secures_ui_session_outside_project_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A UI-issued bearer enters only the user-private rotating cache."""
+    user_home = tmp_path / "home"
+    user_home.mkdir(mode=0o700)
+    project = tmp_path / "project"
+    project.mkdir()
+    token = "synthetic-ui-session-token-1234"  # noqa: S105 - synthetic fixture
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.setenv("AAI_SEC_AGENT_TOKEN", token)
+    monkeypatch.setattr("scripts.onboard_claude.time.time", lambda: 1_000)
+    monkeypatch.setattr("agentic_security.agent_sessions.time.time", lambda: 1_000)
+
+    onboard(
+        project,
+        Path.cwd(),
+        python="python3",
+        dry_run=False,
+        enterprise_control_plane_url="https://fleet.example.test/api",
+        deployment_id="deployment-prod-eu",
+        agent_id="claude-platform-prod",
+    )
+
+    cache = AgentSessionStore(
+        "https://fleet.example.test/api",
+        "deployment-prod-eu",
+        "claude-platform-prod",
+        now=lambda: 1_000,
+    )
+    assert cache.load() == AgentSessionCredential(token, 1_900)
+    assert token not in (project / ".mcp.json").read_text(encoding="utf-8")
+    assert token not in (project / ".claude/settings.json").read_text(encoding="utf-8")
+    assert token not in capsys.readouterr().out

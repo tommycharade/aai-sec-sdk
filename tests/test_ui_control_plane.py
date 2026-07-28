@@ -12,6 +12,8 @@ import pytest
 from agentic_security import (
     AgentHost,
     AgentPresenceStore,
+    AgentSessionCredential,
+    AgentSessionStore,
     AuditEvent,
     CallbackControlPlaneAuthority,
     ControlPlaneAgentClient,
@@ -814,6 +816,75 @@ def test_agent_client_adopts_rotated_session_from_heartbeat(
     assert response["accessToken"] == "new-session-token-123456"
     client.heartbeat("new-session-token-123456")
     assert seen_authorizations == [f"Bearer {TOKEN}", "Bearer new-session-token-123456"]
+
+
+def test_agent_client_secures_rotation_for_native_hook_processes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A successful heartbeat atomically publishes the current bearer."""
+    import agentic_security.ui_control_plane as control_plane
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(
+                {
+                    "status": "connected",
+                    "accessToken": "new-session-token-123456",
+                    "expiresAt": 2_000,
+                }
+            ).encode()
+
+    monkeypatch.setattr(control_plane, "urlopen", lambda *_args, **_kwargs: Response())
+    session_store = AgentSessionStore(
+        "https://control.example.test/api",
+        "deployment-prod",
+        "claude-code-local",
+        directory=tmp_path,
+        now=lambda: 1_000,
+    )
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-code-local",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+        session_store=session_store,
+    )
+
+    client.heartbeat(TOKEN)
+
+    assert session_store.load() == AgentSessionCredential(
+        "new-session-token-123456",
+        2_000,
+    )
+
+
+def test_agent_client_rejects_mismatched_session_store(tmp_path: Path) -> None:
+    """A cache bound to another agent cannot receive this client's bearer."""
+    mismatched = AgentSessionStore(
+        "https://control.example.test/api",
+        "deployment-prod",
+        "different-agent",
+        directory=tmp_path,
+    )
+    with pytest.raises(ValueError, match="identity must match"):
+        ControlPlaneAgentClient(
+            "https://control.example.test/api",
+            TOKEN,
+            agent_id="claude-code-local",
+            project_root="/workspace/kratos",
+            deployment_id="deployment-prod",
+            aws_agent_session=True,
+            session_store=mismatched,
+        )
 
 
 def test_agent_client_rejects_unsafe_endpoints_and_transport_failures(

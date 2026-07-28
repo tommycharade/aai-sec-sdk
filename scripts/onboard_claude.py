@@ -16,6 +16,7 @@ import shutil
 import ssl
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -24,6 +25,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import certifi
+
+from agentic_security import AgentSessionCredential, AgentSessionStore
 
 
 def _timestamp() -> str:
@@ -91,7 +94,7 @@ def _copy_policy(source: Path, destination: Path, *, dry_run: bool) -> None:
     os.chmod(destination, 0o600)
 
 
-def _enroll_agent(base_url: str, bootstrap_token: str) -> str:
+def _enroll_agent(base_url: str, bootstrap_token: str) -> AgentSessionCredential:
     """Consume one AWS bootstrap token and return the short-lived session."""
     parsed = urlsplit(base_url.rstrip("/"))
     local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
@@ -113,9 +116,15 @@ def _enroll_agent(base_url: str, bootstrap_token: str) -> str:
     except (urllib.error.HTTPError, urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
         raise SystemExit("agent bootstrap enrollment failed") from exc
     token = value.get("accessToken") if isinstance(value, dict) else None
-    if not isinstance(token, str) or len(token) < 16:
+    expires_at = value.get("expiresAt") if isinstance(value, dict) else None
+    if (
+        not isinstance(token, str)
+        or len(token) < 16
+        or isinstance(expires_at, bool)
+        or not isinstance(expires_at, int)
+    ):
         raise SystemExit("agent enrollment returned no valid session token")
-    return token
+    return AgentSessionCredential(token, expires_at)
 
 
 def onboard(
@@ -139,14 +148,29 @@ def onboard(
     if not hook.is_file() or not gateway.is_file() or not policy.is_file():
         raise SystemExit(f"SDK examples were not found under {sdk_root}")
 
-    agent_session_token = None
+    agent_session: AgentSessionCredential | None = None
     if bootstrap_token:
         if not enterprise_control_plane_url or not deployment_id:
             raise SystemExit(
                 "--bootstrap-token requires --enterprise-control-plane-url and --deployment-id"
             )
         if not dry_run:
-            agent_session_token = _enroll_agent(enterprise_control_plane_url, bootstrap_token)
+            agent_session = _enroll_agent(enterprise_control_plane_url, bootstrap_token)
+
+    inherited_token = os.environ.get("AAI_SEC_AGENT_TOKEN")
+    if agent_session is None and inherited_token:
+        # Direct UI enrollment supplies a 15-minute session. The server remains
+        # authoritative for its real expiry; this conservative local bound is
+        # replaced by the first authenticated heartbeat.
+        agent_session = AgentSessionCredential(inherited_token, int(time.time()) + 900)
+    session_cached = False
+    if not dry_run and agent_session is not None and enterprise_control_plane_url and deployment_id:
+        AgentSessionStore(
+            enterprise_control_plane_url,
+            deployment_id,
+            agent_id,
+        ).save(agent_session)
+        session_cached = True
 
     command_parts = [python, str(hook)]
     if enterprise_control_plane_url:
@@ -222,10 +246,11 @@ def onboard(
     print("  3. In Claude Code, run /mcp and confirm agentic-security is connected")
     print("  4. Test an allowed read, an approval-required command, and a denied command")
     if control_plane_url or enterprise_control_plane_url:
-        print("  5. Export AAI_SEC_AGENT_TOKEN before starting Claude Code")
-        if agent_session_token:
-            print(f"     export AAI_SEC_AGENT_TOKEN={shlex.quote(agent_session_token)}")
-            print("     (This token is short-lived; do not commit it.)")
+        if session_cached:
+            print("  5. The short-lived session is secured in the user-private host cache")
+            print("     Unset AAI_SEC_AGENT_TOKEN before starting Claude Code.")
+        else:
+            print("  5. Export AAI_SEC_AGENT_TOKEN before starting Claude Code")
         print("  6. Confirm the live Claude agent appears in the management UI")
     else:
         print("  5. Add a control-plane URL and export AAI_SEC_AGENT_TOKEN for live UI presence")

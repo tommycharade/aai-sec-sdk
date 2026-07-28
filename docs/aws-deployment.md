@@ -62,8 +62,10 @@ does not accept a tenant or agent identity from an enrollment request body.
 During authenticated heartbeats, the control plane rotates the bearer when it
 is within five minutes of expiry and invalidates the previous bearer. The
 reference gateway adopts the replacement in memory, allowing a healthy process
-to remain enrolled without writing credentials into Claude Code or Codex CLI
-configuration. Missed heartbeats, failed renewal, and emergency stops remain
+and publishes it atomically to the SDK-owned, user-private host credential
+cache. Claude hooks and Codex/MCP processes can therefore adopt the current
+bearer without writing credentials into project configuration. Missed
+heartbeats, failed renewal, an unsafe cache, and emergency stops remain
 fail-closed.
 
 The stack also creates a synthetic least-privilege role for scope

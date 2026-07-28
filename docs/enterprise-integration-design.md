@@ -109,9 +109,12 @@ same fail-closed lifecycle with their deployment-specific shutdown mechanism.
 AWS agent sessions are deliberately short-lived. When an authenticated
 heartbeat is within five minutes of expiry, the control plane atomically issues
 a replacement bearer and invalidates the previous one. The gateway adopts the
-replacement in memory, so a healthy process can run indefinitely without
-writing a secret into the project or host configuration. A missed heartbeat,
-failed renewal, revoked session or emergency stop still fails closed.
+replacement and atomically writes it to the identity-scoped, user-private host
+cache. Claude's separate native-hook processes read that current cache rather
+than retaining the original inherited bearer. A healthy process can therefore
+run indefinitely without writing a secret into project configuration. A missed
+heartbeat, failed renewal, unsafe cache, revoked session or emergency stop
+still fails closed.
 
 ## Codex CLI
 
@@ -126,8 +129,9 @@ the client as Codex rather than relying on model-supplied metadata.
 The shared agent client carries that host value into the authenticated
 registration request; Codex presence is not recorded as Claude Code by
 default. `scripts/onboard_codex.py` writes a project-scoped MCP entry with
-`env_vars = ["AAI_SEC_AGENT_TOKEN"]`: only the variable name is stored, while
-the short-lived value is inherited from the launching shell.
+non-secret routing metadata only. The short-lived value is accepted during
+onboarding and then rotated through the SDK-owned host credential cache; it is
+not forwarded through Codex project configuration.
 
 The first integration should not invent a Codex-specific policy language. It
 should translate Codex MCP tool calls into the existing typed
@@ -153,9 +157,10 @@ The enrollment action consumes the one-time bootstrap secret before producing
 the short-lived session token used by the MCP process. Bootstrap and session
 credentials must never be committed to the repository or stored in the Codex
 configuration as long-lived secrets.
-The gateway renews the AWS session during its regular heartbeat loop and keeps
-the latest bearer only in process memory. Operators should treat a process
-that cannot heartbeat as unenrolled, even if its user-local MCP entry remains.
+The gateway renews the AWS session during its regular heartbeat loop and
+publishes the latest bearer to the SDK-owned, user-private host cache.
+Operators should treat a process that cannot heartbeat as unenrolled, even if
+its user-local MCP entry and cached credential remain.
 
 ### Trust boundaries
 

@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 from scripts.onboard_codex import onboard
 
+from agentic_security import AgentSessionCredential, AgentSessionStore
+
 
 def _onboard(project: Path) -> Path:
     """Run onboarding with synthetic routing metadata."""
@@ -23,7 +25,7 @@ def _onboard(project: Path) -> Path:
     )
 
 
-def test_onboard_codex_forwards_bearer_by_name_without_persisting_it(
+def test_onboard_codex_uses_host_cache_without_project_bearer_configuration(
     tmp_path: Path,
 ) -> None:
     """The project config contains routing metadata but never a bearer value."""
@@ -35,7 +37,7 @@ def test_onboard_codex_forwards_bearer_by_name_without_persisting_it(
     assert server["command"] == "python3"
     assert server["args"][0].endswith("examples/mcp_gateway.py")
     assert server["cwd"] == str(tmp_path)
-    assert server["env_vars"] == ["AAI_SEC_AGENT_TOKEN"]
+    assert "env_vars" not in server
     assert server["env"]["AAI_SEC_AGENT_HOST"] == "codex-cli"
     assert server["env"]["AAI_SEC_DEPLOYMENT_ID"] == "deployment-test"
     assert "synthetic-token" not in content
@@ -80,3 +82,32 @@ def test_onboard_codex_rejects_unowned_or_symlinked_configuration(
     os.symlink(external, config_path)
     with pytest.raises(SystemExit, match="symbolic link"):
         _onboard(tmp_path)
+
+
+def test_onboard_codex_secures_session_without_project_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Codex and its gateway share rotation through a user-private cache."""
+    user_home = tmp_path / "home"
+    user_home.mkdir(mode=0o700)
+    project = tmp_path / "project"
+    project.mkdir()
+    token = "synthetic-codex-session-token-1234"  # noqa: S105 - synthetic fixture
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.setenv("AAI_SEC_AGENT_TOKEN", token)
+    monkeypatch.setattr("scripts.onboard_codex.time.time", lambda: 1_000)
+    monkeypatch.setattr("agentic_security.agent_sessions.time.time", lambda: 1_000)
+
+    config_path = _onboard(project)
+
+    cache = AgentSessionStore(
+        "https://fleet.example.test/api",
+        "deployment-test",
+        "codex-test",
+        now=lambda: 1_000,
+    )
+    assert cache.load() == AgentSessionCredential(token, 1_900)
+    assert token not in config_path.read_text(encoding="utf-8")
+    assert token not in capsys.readouterr().out

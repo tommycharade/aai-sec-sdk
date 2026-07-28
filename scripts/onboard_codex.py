@@ -1,8 +1,8 @@
 """Prepare one trusted project for the SDK's Codex CLI integration.
 
 The script writes a project-scoped ``.codex/config.toml`` entry that starts the
-SDK MCP gateway and forwards ``AAI_SEC_AGENT_TOKEN`` from the launching shell.
-It never accepts, prints, or persists the bearer token. Existing configuration
+SDK MCP gateway. A short-lived bearer supplied during onboarding is placed in
+the user-private SDK host cache, never in project TOML. Existing configuration
 outside the marked AAI Security block is preserved.
 """
 
@@ -14,9 +14,12 @@ import os
 import re
 import sys
 import tempfile
+import time
 import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from agentic_security import AgentSessionCredential, AgentSessionStore
 
 _BEGIN = "# BEGIN AAI SECURITY MANAGED MCP"
 _END = "# END AAI SECURITY MANAGED MCP"
@@ -74,7 +77,6 @@ def _managed_block(
         f"command = {_toml_string(python)}",
         f"args = [{_toml_string(str(gateway))}]",
         f"cwd = {_toml_string(str(project_root))}",
-        'env_vars = ["AAI_SEC_AGENT_TOKEN"]',
         "",
         '[mcp_servers."agentic-security".env]',
         *[f"{key} = {_toml_string(value)}" for key, value in values.items()],
@@ -137,9 +139,9 @@ def onboard(
 ) -> Path:
     """Create or update a non-secret, project-scoped Codex MCP configuration.
 
-    The caller must launch Codex from an environment containing a short-lived
-    ``AAI_SEC_AGENT_TOKEN``. The token is forwarded by name through ``env_vars``
-    and is never serialized into this project.
+    If the caller supplies ``AAI_SEC_AGENT_TOKEN``, the installer transfers it
+    into the user-private rotating cache and never serializes it into this
+    project. Codex does not need to retain the variable after onboarding.
     """
     project_root = project_root.expanduser().resolve()
     sdk_root = sdk_root.expanduser().resolve()
@@ -178,10 +180,21 @@ def onboard(
         print(merged, end="")
     else:
         _atomic_write(config_path, merged)
+        inherited_token = os.environ.get("AAI_SEC_AGENT_TOKEN")
+        if inherited_token:
+            # The central service remains authoritative for expiry. The first
+            # gateway heartbeat replaces this conservative local bound.
+            AgentSessionStore(control_plane_url, deployment_id, agent_id).save(
+                AgentSessionCredential(inherited_token, int(time.time()) + 900)
+            )
     print("Codex CLI onboarding prepared.")
     print(f"Project root: {project_root}")
     print(f"Configuration: {config_path}")
-    print("The agent token was not written. Start Codex from the shell that exports it.")
+    if os.environ.get("AAI_SEC_AGENT_TOKEN") and not dry_run:
+        print("The short-lived session is secured in the user-private host cache.")
+        print("You can unset AAI_SEC_AGENT_TOKEN before starting Codex.")
+    else:
+        print("No agent token was written to project configuration.")
     print("Verify with: codex mcp get agentic-security --json")
     return config_path
 

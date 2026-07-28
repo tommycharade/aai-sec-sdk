@@ -72,13 +72,17 @@ to the operator dashboard.
 Host onboarding treats shell history and host configuration as persistence
 boundaries. The UI never embeds an exchanged bearer in its generated command:
 the operator copies the session separately and pastes it into a hidden shell
-prompt. Claude inherits that value without writing it to `.mcp.json`; Codex's
-project-scoped installer stores only `env_vars = ["AAI_SEC_AGENT_TOKEN"]` and
-non-secret routing metadata. The installer rejects symlinked, invalid, or
-ambiguously owned TOML rather than following or overwriting it. A copied token
-can still be exposed through the operator's clipboard or compromised shell, so
-sessions remain short-lived, deployment/agent-bound, rotated by heartbeat and
-revocable by the control plane.
+prompt. Neither Claude nor Codex writes it to project configuration. Instead,
+the installer places it in an SDK-owned host credential cache scoped by the
+control-plane URL, deployment and agent. The cache is outside the repository,
+written atomically in a `0700` directory with a `0600` file, and rejects
+symlinks, foreign ownership, broad permissions, malformed records and expired
+values. A copied or cached token can still be exposed through the clipboard,
+compromised shell, backup, or another process running as the same OS user; the
+reference cache is not an OS keychain. Sessions therefore remain short-lived,
+deployment/agent-bound, rotated by heartbeat and revocable by the control
+plane. Higher-assurance deployments should replace the reference cache with an
+OS/device credential broker while preserving the same rotation contract.
 
 The registry expires missing heartbeats, records registration, heartbeat, and
 disconnect transitions through the configured audit sink, and the example MCP
