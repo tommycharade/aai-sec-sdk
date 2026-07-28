@@ -11,8 +11,6 @@ import secrets
 import time
 from typing import Any
 
-import boto3
-
 
 def build_trial_records(subject: str, email: str, *, now: int | None = None, trial_days: int = 14) -> list[dict[str, Any]]:
     """Return deterministic-shape, credential-free records for a new trial.
@@ -50,6 +48,10 @@ def build_trial_records(subject: str, email: str, *, now: int | None = None, tri
 
 def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     """Idempotently create the tenant records and grant scoped UI access."""
+    # Keep the provider SDK behind the Lambda execution boundary. The pure
+    # policy builder remains usable and testable in core-only SDK installs.
+    import boto3
+
     subject = str(event.get("request", {}).get("userAttributes", {}).get("sub", ""))
     email = str(event.get("request", {}).get("userAttributes", {}).get("email", ""))
     user_pool_id = str(event.get("userPoolId", ""))

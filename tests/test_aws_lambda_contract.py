@@ -520,6 +520,9 @@ def test_cognito_subject_mapping_resolves_only_a_provisioned_trial(monkeypatch: 
 
 def test_trial_provisioner_builds_restrictive_credential_free_records(monkeypatch: Any) -> None:
     """The signup defaults are isolated, bounded, and safe to publish."""
+    # The pure policy builder must remain importable without AWS dependencies;
+    # boto3 is required only when the deployed Lambda handler executes.
+    monkeypatch.setitem(sys.modules, "boto3", None)
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/trial_onboarding.py"
     spec = importlib.util.spec_from_file_location("aai_trial_onboarding", path)
     assert spec and spec.loader
