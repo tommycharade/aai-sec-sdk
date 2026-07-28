@@ -1,0 +1,2085 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source execution security runtime for agentic AI systems">
+      
+      
+      
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/product-owner-enterprise-claude-rollout-review-2026-07-27/">
+      
+      
+        <link rel="prev" href="../enterprise-operations-readiness/">
+      
+      
+        <link rel="next" href="../enterprise-claude-rollout-plan/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Product Owner rollout review - Agentic AI Security SDK</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#product-owner-review-enterprise-claude-code-rollout" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Agentic AI Security SDK" class="md-header__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agentic AI Security SDK
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Product Owner rollout review
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Agentic AI Security SDK" class="md-nav__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agentic AI Security SDK
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operational runbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../production-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent integrations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Claude Code example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Management UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-fleet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise fleet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-editor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-managed-resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed Claude resources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Wider enterprise UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-integration-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise integration design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-user-journeys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise user journeys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-operations-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise operations readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product Owner rollout review
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product Owner rollout review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#executive-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Executive decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#product-outcome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Product outcome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#feedback-disposition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Feedback disposition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-information-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended information architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recommended information architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overview-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fleet-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fleet requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rollouts-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollouts requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#incidents-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incidents requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#admin-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Admin requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-journey-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User journey changes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="User journey changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#first-claude-code-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First Claude Code deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#policy-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy change
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#incident-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incident response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#enterprise-launch-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enterprise launch gates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prioritised-roadmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prioritised roadmap
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prioritised roadmap">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#now-remove-enterprise-rollout-blockers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Now: remove enterprise rollout blockers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#next-make-operations-efficient-at-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next: make operations efficient at scale
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#later-broaden-the-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Later: broaden the platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#product-acceptance-criteria-for-the-simplified-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Product acceptance criteria for the simplified UI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#final-po-recommendation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Final PO recommendation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-claude-rollout-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise Claude Code rollout plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../real-claude-code-acceptance-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real Claude Code acceptance evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aws-deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-owned-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code-owned controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end-to-end-example/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End-to-end example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guardrails/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering guardrails
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licensing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../p1-p2-closure-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    P1/P2 closure evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release-evidence-v1.0.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release evidence v1.0.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-25)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-26/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-26)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#executive-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Executive decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#product-outcome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Product outcome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#feedback-disposition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Feedback disposition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-information-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended information architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recommended information architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overview-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fleet-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fleet requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rollouts-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollouts requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#incidents-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incidents requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#admin-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Admin requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-journey-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User journey changes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="User journey changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#first-claude-code-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First Claude Code deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#policy-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy change
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#incident-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Incident response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#enterprise-launch-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enterprise launch gates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prioritised-roadmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prioritised roadmap
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prioritised roadmap">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#now-remove-enterprise-rollout-blockers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Now: remove enterprise rollout blockers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#next-make-operations-efficient-at-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next: make operations efficient at scale
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#later-broaden-the-platform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Later: broaden the platform
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#product-acceptance-criteria-for-the-simplified-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Product acceptance criteria for the simplified UI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#final-po-recommendation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Final PO recommendation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="product-owner-review-enterprise-claude-code-rollout">Product Owner review: enterprise Claude Code rollout</h1>
+<p><strong>Review date:</strong> 2026-07-27
+<strong>Decision owner:</strong> Product Owner
+<strong>Target outcome:</strong> safe, centrally managed, enterprise-wide Claude Code rollout</p>
+<h2 id="executive-decision">Executive decision</h2>
+<p>The product has a credible security foundation and a useful control-plane
+direction, but it is not yet ready for an unrestricted enterprise-wide Claude
+Code rollout.</p>
+<p>I recommend a <strong>conditional go for a design-partner rollout</strong> and a <strong>no-go
+for broad production rollout</strong> until the launch gates in this document have
+deployment evidence. The distinction matters: most remaining blockers are not
+missing UI fields. They are proof that the control plane is connected to the
+real Claude Code process, identity, credential, isolation, incident and
+enterprise operations systems.</p>
+<p>The product should now be Claude Code-first. Codex CLI and GitHub Copilot
+Agent remain important integration targets, but exposing all three as equal
+first-class experiences before Claude Code is proven increases complexity and
+weakens the rollout story.</p>
+<h2 id="product-outcome">Product outcome</h2>
+<p>An enterprise security or platform team must be able to:</p>
+<ol>
+<li>onboard a Claude Code project with a repeatable, scoped installer;</li>
+<li>assign it to a centrally managed group and policy;</li>
+<li>see whether the agent is enrolled, healthy, current and enforcing;</li>
+<li>roll out changes progressively with a visible desired-versus-applied state;</li>
+<li>stop an affected agent, group or deployment and prove what stopped;</li>
+<li>route and own the resulting incident;</li>
+<li>produce redacted, immutable evidence of the decision and response.</li>
+</ol>
+<p>The UI is successful when an operator can answer “what needs attention, what is
+the safe next action, and what evidence proves the result?” without understanding
+the SDK's internal adapter model.</p>
+<h2 id="feedback-disposition">Feedback disposition</h2>
+<table>
+<thead>
+<tr>
+<th>Feedback or concern</th>
+<th>Product decision</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Emergency stop may not revoke credentials or terminate the real process</td>
+<td>Treat stop as incomplete until the live deployment authority proves process termination, credential revocation and recovery verification</td>
+<td>P1 launch gate</td>
+</tr>
+<tr>
+<td>No acceptance evidence with actual Claude Code binaries and supported versions</td>
+<td>Add a host acceptance suite and supported-version matrix; synthetic MCP tests alone are insufficient</td>
+<td>P1 launch gate</td>
+</tr>
+<tr>
+<td>Alerts are not yet connected to enterprise SOC ownership</td>
+<td>Park PagerDuty/SIEM/SOC routing for a follow-on goal; retain local alerts, acknowledgement and audit evidence in this rollout</td>
+<td>Deferred</td>
+</tr>
+<tr>
+<td>Production SSO, federation and mandatory MFA are not proven</td>
+<td>Require enterprise IdP integration, MFA policy, RBAC and tenant-bound authorization before broad rollout</td>
+<td>P1 launch gate</td>
+</tr>
+<tr>
+<td>Provider/tool IAM proof is synthetic or reference-only</td>
+<td>Run least-privilege simulations for every production credential/tool role</td>
+<td>P1 launch gate</td>
+</tr>
+<tr>
+<td>Control-plane DR and fleet-scale performance are not proven</td>
+<td>Define target fleet size, RTO/RPO, load tests and failure exercises</td>
+<td>P1/P2</td>
+</tr>
+<tr>
+<td>Enrollment does not establish device/binary provenance</td>
+<td>Add approved host identity and binary/version attestation or document an accepted compensating control</td>
+<td>P2</td>
+</tr>
+<tr>
+<td>Investigation workflow is basic</td>
+<td>Add searchable, filterable evidence, ownership, incident linkage, export and bulk response</td>
+<td>P2</td>
+</tr>
+<tr>
+<td>UI is becoming complicated</td>
+<td>Simplify information architecture and use progressive disclosure; do not reduce policy editor capability</td>
+<td>P1 product usability</td>
+</tr>
+<tr>
+<td>Claude, Codex and Copilot are presented together</td>
+<td>Make Claude Code the primary rollout path; keep other hosts behind integrations until their acceptance criteria are met</td>
+<td>P1 scope control</td>
+</tr>
+</tbody>
+</table>
+<h2 id="recommended-information-architecture">Recommended information architecture</h2>
+<p>The current model has useful capabilities, but “Enterprise fleet” is carrying
+too much of the product and “Agents” overlaps with it. The recommended top-level
+navigation is:</p>
+<table>
+<thead>
+<tr>
+<th>Primary area</th>
+<th>What it owns</th>
+<th>Primary users</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Overview</strong></td>
+<td>Actionable fleet health and items needing attention</td>
+<td>Everyone</td>
+</tr>
+<tr>
+<td><strong>Fleet</strong></td>
+<td>Unified deployments, projects, groups and agents</td>
+<td>Platform, SecOps</td>
+</tr>
+<tr>
+<td><strong>Rollouts</strong></td>
+<td>Desired/applied versions, canaries, pauses and rollback</td>
+<td>Platform</td>
+</tr>
+<tr>
+<td><strong>Incidents</strong></td>
+<td>Alerts, ownership, emergency stops and recovery</td>
+<td>SecOps</td>
+</tr>
+<tr>
+<td><strong>Policy</strong></td>
+<td>Typed policy editor and effective-policy preview</td>
+<td>Security admin</td>
+</tr>
+<tr>
+<td><strong>Evidence</strong></td>
+<td>Audit, compliance evidence, exports and release proof</td>
+<td>SecOps, auditors</td>
+</tr>
+<tr>
+<td><strong>Admin</strong></td>
+<td>Identity, integrations, runtime dependencies and tenant settings</td>
+<td>Platform admin</td>
+</tr>
+</tbody>
+</table>
+<p>The policy page remains the detailed, typed editor. It should not be flattened
+or replaced with a simpler JSON screen.</p>
+<p>The existing <code>Agents</code>, <code>Integrations</code>, <code>Settings</code> and <code>Audit trail</code> destinations
+should become either Fleet subsections, Admin subsections or Evidence tabs. This
+removes navigation duplication without removing capability.</p>
+<h3 id="overview-requirements">Overview requirements</h3>
+<p>The landing page should contain only information that leads to an action:</p>
+<ul>
+<li>healthy, degraded, offline, blocked and stopped agent counts;</li>
+<li>policy drift and failed verification counts;</li>
+<li>pending or paused rollouts;</li>
+<li>open incidents and unowned high-severity alerts;</li>
+<li>control-plane dependency health;</li>
+<li>a “Needs attention” queue with a direct next action.</li>
+</ul>
+<p>Avoid placing configuration forms, provider choices or long technical status
+lists on Overview.</p>
+<h3 id="fleet-requirements">Fleet requirements</h3>
+<p>Fleet should use one hierarchy:</p>
+<pre><code class="language-text">organization → project → deployment → Claude Code agent
+</code></pre>
+<p>The list must support search, saved filters and bulk selection by team,
+environment, region, version, group, policy, drift, heartbeat and health. A
+detail page should show identity, last heartbeat, policy/version state, recent
+verification, active stop state and links to rollout and evidence. It should
+not duplicate policy authoring controls.</p>
+<h3 id="rollouts-requirements">Rollouts requirements</h3>
+<p>Every rollout should show, before confirmation:</p>
+<ul>
+<li>target groups/deployments and agent count;</li>
+<li>policy, SDK and host configuration versions;</li>
+<li>current versus desired state;</li>
+<li>canary percentage and health criteria;</li>
+<li>required approvals and change reason;</li>
+<li>pause and rollback conditions.</li>
+</ul>
+<p>The live view should make convergence explicit: <code>staged</code>, <code>canary</code>, <code>active</code>,
+<code>paused</code>, <code>rolling back</code>, <code>converged</code>, <code>drifted</code> or <code>failed</code>.</p>
+<h3 id="incidents-requirements">Incidents requirements</h3>
+<p>Incidents should be an operational queue, not another audit table. Each row
+needs severity, state, owner, first/last seen, affected scope, policy or
+deployment version, and a direct response. Operators need acknowledge, assign,
+link to an incident record, stop the smallest safe scope, view evidence and run
+post-stop verification. Clearing a stop must require explicit confirmation and
+show the recovery checks.</p>
+<h3 id="admin-requirements">Admin requirements</h3>
+<p>Move infrequent, high-risk or deployment-owned configuration here:</p>
+<ul>
+<li>SSO, MFA, roles and tenant settings;</li>
+<li>Claude Code host profiles and onboarding defaults;</li>
+<li>Codex and GitHub Copilot integrations;</li>
+<li>policy/approval/audit/credential/isolation providers;</li>
+<li>retention, telemetry and notification destinations.</li>
+</ul>
+<p>Admin pages should be role-gated and should clearly label settings that are
+only references until a deployment-owned adapter is connected.</p>
+<h2 id="user-journey-changes">User journey changes</h2>
+<h3 id="first-claude-code-deployment">First Claude Code deployment</h3>
+<p>The shortest supported path should be:</p>
+<ol>
+<li><strong>Onboard deployment</strong> from Fleet.</li>
+<li>Select Claude Code, project, environment and owner.</li>
+<li>Select an existing group and policy, or use a safe default.</li>
+<li>Review the exact files and commands that will change.</li>
+<li>Copy/run the scoped installer.</li>
+<li>Return to the wizard and run verification.</li>
+<li>See heartbeat, policy, synthetic allowed/approval/denied checks and host version.</li>
+<li>Finish with the deployment in <code>pending</code>, <code>healthy</code> or <code>blocked</code>, with one next action.</li>
+</ol>
+<p>Do not make a user visit Integrations, Agents, Enterprise and Settings to
+complete this journey.</p>
+<h3 id="policy-change">Policy change</h3>
+<p>The existing Policy journey is retained:</p>
+<ol>
+<li>create a typed policy;</li>
+<li>review effective behavior and affected groups;</li>
+<li>validate and version it;</li>
+<li>start a canary rollout from the affected-group action;</li>
+<li>monitor convergence in Rollouts.</li>
+</ol>
+<p>The policy editor should link into rollout review, but should not absorb fleet
+operations.</p>
+<h3 id="incident-response">Incident response</h3>
+<p>An operator should be able to go from Overview alert to action in three clicks
+or fewer: open incident, inspect affected scope/evidence, stop or assign.
+Recovery and export can follow from the incident detail page.</p>
+<h2 id="enterprise-launch-gates">Enterprise launch gates</h2>
+<p>Broad rollout should be blocked until all of the following are demonstrated in
+the target AWS deployment, using real Claude Code hosts where applicable:</p>
+<ol>
+<li><strong>Authentication and authorization:</strong> enterprise SSO/federation, mandatory
+   MFA, tenant isolation, role separation and audit of privileged operations.</li>
+<li><strong>Claude Code acceptance:</strong> supported-version matrix, real project-scoped
+   onboarding, upgrade, restart, offline and rollback tests.</li>
+<li><strong>Runtime authority:</strong> an emergency stop terminates or disables the actual
+   Claude Code execution path and revokes dependent credentials; clearing it
+   requires successful verification.</li>
+<li><strong>Policy convergence:</strong> desired/applied policy, SDK and host configuration
+   state is visible and reaches a defined SLA at the target fleet size.</li>
+<li><strong>Incident operations:</strong> local high-severity alerts, acknowledgement,
+   emergency response and retained ownership/evidence are proven. External
+   SOC/on-call routing is explicitly deferred to a follow-on goal.</li>
+<li><strong>Least privilege:</strong> every production tool and credential role has a
+   recorded allow/deny simulation and a negative cross-tenant/cross-agent test.</li>
+<li><strong>Resilience:</strong> control-plane backup/restore, RTO/RPO, dependency outage,
+   queue failure and fleet-scale load evidence are retained.</li>
+<li><strong>Evidence:</strong> an auditor can retrieve a redacted chain for onboarding,
+   policy change, rollout, stop, recovery and operator identity.</li>
+<li><strong>Release integrity:</strong> the hosted UI authentication fix and all rollout
+   components are committed, tagged, reproducibly built and deployed from the
+   release artifact.</li>
+</ol>
+<p>The launch review should record the target fleet size and heartbeat/convergence
+SLO rather than accepting “works at small scale” as evidence.</p>
+<h2 id="prioritised-roadmap">Prioritised roadmap</h2>
+<h3 id="now-remove-enterprise-rollout-blockers">Now: remove enterprise rollout blockers</h3>
+<ul>
+<li>Finish the real Claude Code host acceptance harness and version matrix.</li>
+<li>Bind emergency stop to the production process supervisor and credential broker.</li>
+<li>Complete SSO/MFA/RBAC and privileged-action review.</li>
+<li>Connect and test SOC/PagerDuty/SIEM routing and ownership.</li>
+<li>Define and test the initial fleet scale, convergence SLO and DR objectives.</li>
+<li>Commit, tag and redeploy the current hosted UI/authentication fix.</li>
+<li>Consolidate the UI navigation around Overview, Fleet, Rollouts, Incidents,
+  Policy, Evidence and Admin.</li>
+</ul>
+<h3 id="next-make-operations-efficient-at-scale">Next: make operations efficient at scale</h3>
+<ul>
+<li>Add saved filters, bulk remediation/quarantine and maintenance windows.</li>
+<li>Add searchable investigation cases, comments, incident links and exports.</li>
+<li>Add device/binary attestation and drift remediation workflows.</li>
+<li>Add rollout health trends and automatic pause/rollback criteria.</li>
+<li>Add role-specific dashboards and operator workload views.</li>
+</ul>
+<h3 id="later-broaden-the-platform">Later: broaden the platform</h3>
+<ul>
+<li>Promote Codex CLI and GitHub Copilot Agent only after host-specific acceptance.</li>
+<li>Add stronger isolation options such as microVM/WASM where required.</li>
+<li>Add advanced enterprise reporting and optional commercial operational features.</li>
+</ul>
+<h2 id="product-acceptance-criteria-for-the-simplified-ui">Product acceptance criteria for the simplified UI</h2>
+<ul>
+<li>A new operator can identify the highest-priority issue from Overview in under
+  30 seconds.</li>
+<li>A platform engineer can onboard one Claude Code deployment without visiting
+  more than one guided flow.</li>
+<li>A security administrator can create and validate a policy without leaving the
+  Policy page.</li>
+<li>A SecOps operator can stop the smallest affected scope from Incidents and
+  locate the retained evidence without knowing API endpoint names.</li>
+<li>A fleet operator can filter and bulk-select agents without confusing agent,
+  deployment, group and policy scope.</li>
+<li>Advanced configuration remains available to administrators but is hidden
+  from normal operator workflows.</li>
+<li>Every destructive or broad operation shows scope, impact, confirmation and
+  recovery state.</li>
+<li>Empty, loading, stale and permission-denied states explain what the user can
+  do next; no blank enterprise page is acceptable.</li>
+</ul>
+<h2 id="final-po-recommendation">Final PO recommendation</h2>
+<p>Prioritise <strong>enterprise Claude Code operations</strong> over breadth. Keep the strong
+typed Policy experience, reduce the rest of the UI to a small set of operational
+surfaces, and make every remaining capability reachable from the relevant
+object or incident. Approve a controlled design-partner rollout now only where
+the deployment-owned controls are explicitly bounded. Do not describe the
+product as ready for enterprise-wide consequential use until the nine launch
+gates have retained evidence.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

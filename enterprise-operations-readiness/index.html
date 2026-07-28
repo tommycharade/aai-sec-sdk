@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/deployment-evidence/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/enterprise-operations-readiness/">
       
       
-        <link rel="prev" href="../releasing/">
+        <link rel="prev" href="../enterprise-user-journeys/">
       
       
-        <link rel="next" href="../p1-p2-closure-evidence-2026-07-27/">
+        <link rel="next" href="../product-owner-enterprise-claude-rollout-review-2026-07-27/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Deployment evidence - Agentic AI Security SDK</title>
+        <title>Enterprise operations readiness - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#deployment-evidence" class="md-skip">
+        <a href="#enterprise-operations-readiness" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Deployment evidence
+              Enterprise operations readiness
             
           </span>
         </div>
@@ -691,10 +691,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../enterprise-operations-readiness/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise operations readiness
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -710,6 +737,48 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#aws-pilot-evidence-2026-07-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AWS pilot evidence — 2026-07-27
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#approval-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approval rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1015,37 +1084,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Deployment evidence
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
         
   
   
@@ -1061,37 +1103,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required evidence
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1231,10 +1242,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
+  <a href="#aws-pilot-evidence-2026-07-27" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Required evidence
+        AWS pilot evidence — 2026-07-27
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#approval-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approval rule
       
     </span>
   </a>
@@ -1261,33 +1283,167 @@
   
 
 
-<h1 id="deployment-evidence">Deployment evidence</h1>
-<p>The open-source SDK can prove its local contracts and release integrity. It
-cannot prove properties of infrastructure that the adopter has not supplied.
-Consequential production use therefore requires an adopter-owned evidence
-pack for every deployment.</p>
-<h2 id="required-evidence">Required evidence</h2>
+<h1 id="enterprise-operations-readiness">Enterprise operations readiness</h1>
+<p>This page is the acceptance matrix for the P1/P2 adopter findings. A source
+fix is not treated as deployment evidence: rows marked deployment-owned still
+require an enterprise adapter, infrastructure test, or published release
+verification before consequential workloads are approved.</p>
+<table>
+<thead>
+<tr>
+<th>Finding</th>
+<th>Source-level resolution</th>
+<th>Evidence</th>
+<th>Deployment acceptance still required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Production UI mock data or missing auth</td>
+<td>Mock mode is explicit; production HTTP client fails closed without bearer auth and supports explicit HttpOnly cookie sessions through a BFF.</td>
+<td>UI typecheck, 14 UI tests, production build.</td>
+<td>OIDC/SSO session through a BFF or equivalent, CSRF controls, RBAC and TLS.</td>
+</tr>
+<tr>
+<td>Stale long-running policy</td>
+<td>Runtime policy replacement is atomic; MCP heartbeat refreshes effective policy and stops on refresh failure or emergency stop.</td>
+<td>Runtime and MCP gateway tests; <code>make check</code>.</td>
+<td>Validate refresh latency and outage behavior in the target deployment.</td>
+</tr>
+<tr>
+<td>Fleet incident response</td>
+<td>Deployment, group, and agent emergency stops are audited and exposed in the UI.</td>
+<td>Enterprise API tests cover activation and clearing at each scope.</td>
+<td>Bind the authority adapter to the real process supervisor and credential revocation path.</td>
+</tr>
+<tr>
+<td>Unverified enrollment</td>
+<td>Agent verification reports registration, heartbeat, project root, policy assignment, and stop state.</td>
+<td>API and store verification tests.</td>
+<td>Validate host identity, binary provenance, and attestation in the enterprise environment.</td>
+</tr>
+<tr>
+<td>Weak investigation evidence</td>
+<td>Bounded redaction-safe audit evidence index is available to the UI and API.</td>
+<td>Audit API tests and redaction assertions.</td>
+<td>Export immutable/WORM records to the enterprise audit or SIEM system.</td>
+</tr>
+<tr>
+<td>Policy lifecycle ambiguity</td>
+<td>Policies are immutable; group reassignment is an explicit audited operation and live runtimes refresh.</td>
+<td>Group policy reassignment API/UI tests.</td>
+<td>Add four-eyes approval and change-management integration if required by policy.</td>
+</tr>
+<tr>
+<td>Fleet scale and drift</td>
+<td>Inventory reads are cursor-paginated, bounded, tenant-scoped, and UI collection has a safety cap.</td>
+<td>Pagination and fleet contract tests.</td>
+<td>Load-test the selected database, queue, cache, and browser workload at target fleet size.</td>
+</tr>
+<tr>
+<td>Alert response</td>
+<td>Alerts are derived from authoritative state, acknowledged without deleting evidence, and dispatched through an injected sink.</td>
+<td>Alert adapter and API tests.</td>
+<td>Connect PagerDuty/SIEM/SOC routing and test delivery retries and ownership.</td>
+</tr>
+<tr>
+<td>Release integrity</td>
+<td>Tag-only release workflow builds, checksums the exact bundle, verifies the downloaded release, and verifies tag-bound provenance.</td>
+<td><code>.github/workflows/release-artifacts.yml</code>, <code>scripts/verify_release_evidence.py</code>; public <code>v1.0.1</code> checksum and attestation verification passed on 2026-07-27.</td>
+<td>Repeat the same verification for every future release; historical <code>v1.0.0</code> assets remain superseded.</td>
+</tr>
+<tr>
+<td>Idempotency uncertainty</td>
+<td>Timeout, cancellation, and handler-failure paths surface failed terminal persistence as an uncertain unrecorded result.</td>
+<td>Runtime tests and 90%+ repository coverage gate.</td>
+<td>Test a shared durable store under process crash, failover, and concurrent retry conditions.</td>
+</tr>
+<tr>
+<td>Immutable authorization facts</td>
+<td>Validated JSON-like arguments are recursively frozen and thawed only at the handler boundary.</td>
+<td>Component adversarial tests and mutation gate.</td>
+<td>Validate behavior with application-specific validators and hostile handler tests.</td>
+</tr>
+<tr>
+<td>Host integration</td>
+<td>Claude Code, Codex CLI, and GitHub Copilot use the provider-neutral MCP gateway; all supported profiles share contract tests.</td>
+<td><code>tests/test_integrations.py</code> and onboarding documentation.</td>
+<td>Run acceptance tests with the actual host binaries, organization settings, and upgrade policy.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="aws-pilot-evidence-2026-07-27">AWS pilot evidence — 2026-07-27</h2>
+<p>The first AWS control-plane deployment provides retained evidence for part of
+the deployment-owned matrix:</p>
 <ul>
-<li>A multi-process idempotency adapter test demonstrating atomic claim,
-  conflict detection, terminal persistence, restart recovery, and reconciliation
-  after a timeout or store outage.</li>
-<li>Immutable or WORM audit retention, access controls, replication, and a test
-  showing that an operator or application process cannot rewrite accepted
-  events.</li>
-<li>Provider-side IAM evidence showing that issued credentials cannot exceed the
-  exact tool, principal, tenant, resource, and operation scope.</li>
-<li>A genuine container, microVM, or WASM isolation implementation, including
-  denial tests for network, filesystem, identity, and sandbox-escape attempts.</li>
-<li>Remote policy and approval adapter contract tests, including provider outage,
-  timeout, stale approval, and fail-closed behavior.</li>
-<li>Operational evidence for worker saturation, audit/export failure,
-  reconciliation backlog, emergency stop, and key rotation.</li>
+<li>Cognito Managed Login is used for operator authentication.</li>
+<li>API Gateway rejects unauthenticated requests with HTTP 401.</li>
+<li>Requests without a verified <code>custom:tenant_id</code> claim, or with a tenant that
+  has not been independently provisioned, fail closed with HTTP 403; the
+  Lambda never falls back to a default tenant.</li>
+<li>Mutations require the Cognito <code>platform-admin</code> or <code>security-operator</code> group.</li>
+<li>DynamoDB control and presence tables use on-demand capacity; the control
+  table has point-in-time recovery and the presence table uses TTL.</li>
+<li>The audit bucket is versioned, retained, SSL-only, private, and configured
+  with S3 Object Lock compliance retention.</li>
+<li>A retained DynamoDB idempotency table is deployed with TTL and point-in-time
+  recovery. <code>DynamoDbIdempotencyStore</code> was exercised against that live table
+  across independent processes and a new adapter instance for atomic claim,
+  replay detection, and terminal persistence.</li>
+<li>Agent enrollment now consumes a one-time hashed bootstrap secret and issues
+  a deployment/agent-bound short-lived session. The live API contract test
+  covered enrollment, replay refusal, heartbeat, effective-policy retrieval,
+  and URL identity mismatch refusal.</li>
+<li>Remote approvals are stored tenant-scoped and consumed with a conditional
+  exact-action update. The live API contract accepted one matching action and
+  rejected its replay.</li>
+<li>The live smoke activates an enrolled agent emergency stop, verifies that the
+  agent API refuses effective-policy retrieval with <code>409</code>, then clears the stop
+  and verifies recovery before executing any synthetic action.</li>
+<li>The live audit check verifies S3 Object Lock compliance retention and
+  versioning, and a delete attempt against a retained audit version is rejected
+  by AWS.</li>
+<li>A separate <code>eu-west-1</code> Object-Lock-protected audit replica is deployed and
+  configured through S3 cross-region replication. The live recovery test
+  received a synthetic object with <code>ReplicationStatus=REPLICA</code>, preserved
+  metadata, and <code>COMPLIANCE</code> retention on 2026-07-27.</li>
+<li>CloudWatch alarms are deployed for Lambda errors, Lambda throttles, and
+  idempotency-table <code>PutItem</code> throttles.</li>
+<li>The security-alert SNS topic has a durable encrypted SQS subscriber and
+  dead-letter queue. A live synthetic publish was received and acknowledged by
+  the queue on 2026-07-27, and an unacknowledged synthetic alert was verified
+  to reach the DLQ. PagerDuty/SIEM subscription and on-call ownership remain
+  enterprise deployment responsibilities.</li>
+<li>A dedicated scoped tool role is deployed. AWS IAM policy simulation returned
+  <code>allowed</code> for <code>s3:GetObject</code> under the synthetic
+  <code>tenant=tenant-demo/agent-claude-local/</code> prefix and <code>implicitDeny</code> for the
+  sibling <code>other-agent</code> prefix. This is a reference provider-scope proof, not
+  permission to reuse the role for unrelated production tools.</li>
+<li>CloudWatch error/throttle alarms publish to a retained SNS security-alert
+  topic. A production deployment must add and test its PagerDuty, SIEM, or SOC
+  subscription; the topic ARN is an output and no personal subscription is
+  created by this stack.</li>
+<li>Browser preflight requests are handled without the API JWT authorizer, and
+  the authenticated hosted UI has been exercised through Cognito, policy and
+  group management, effective-policy lookup, and agent emergency-stop flows.</li>
 </ul>
-<p>The repository's in-memory stores, callback isolation verifier, local audit
-sinks, and Python handlers are reference implementations for tests and pilots;
-they are not deployment evidence for high-impact actions. Keep the evidence
-with the deployed commit, adapter versions, configuration, and release
-verification record.</p>
+<p>This closes the AWS pilot's credential-exchange, remote-approval, durable
+idempotency reference path, and synthetic provider-IAM proof. It does not
+close the remaining high-impact deployment requirements: the actual
+production runtime must be connected to the table, each real provider/tool
+role must be simulated, hostile-code escape or microVM/WASM isolation evidence
+must be retained, and enterprise alert ownership and recovery artifacts must
+be demonstrated before consequential workloads are approved. The pilot now
+also includes a real Docker boundary probe; this does not certify the Docker
+daemon/host or substitute for a stronger isolation boundary.</p>
+<h2 id="approval-rule">Approval rule</h2>
+<p>The SDK is suitable for a low-risk pilot when the source-level evidence and
+authenticated policy/audit adapters pass. It is not approved for payments,
+deletion, messaging, credentialed state changes, hostile code, or regulated
+workloads until every deployment-owned row has a retained acceptance artifact.</p>
+<p>The management UI is an operator surface, never the authority boundary. The
+runtime, control plane, IAM, approval service, credential broker, isolation
+verifier, and durable audit service must each fail closed independently.</p>
 
 
 

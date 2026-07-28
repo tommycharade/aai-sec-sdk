@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/deployment-evidence/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/enterprise-integration-design/">
       
       
-        <link rel="prev" href="../releasing/">
+        <link rel="prev" href="../enterprise-ui/">
       
       
-        <link rel="next" href="../p1-p2-closure-evidence-2026-07-27/">
+        <link rel="next" href="../enterprise-user-journeys/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Deployment evidence - Agentic AI Security SDK</title>
+        <title>Enterprise integration design - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#deployment-evidence" class="md-skip">
+        <a href="#enterprise-integration-design" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Deployment evidence
+              Enterprise integration design
             
           </span>
         </div>
@@ -637,10 +637,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../enterprise-integration-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise integration design
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -656,6 +683,209 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#shared-integration-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared integration contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Claude Code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#enforcement-surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enforcement surfaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-onboarding-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI onboarding flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trust-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#codex-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Codex CLI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Codex CLI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#enforcement-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enforcement surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-onboarding-flow_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI onboarding flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trust-boundaries_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github-copilot-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub Copilot Agent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GitHub Copilot Agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#enforcement-surface_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enforcement surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-onboarding-flow_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI onboarding flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trust-boundaries_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#host-capability-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host capability matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollout-and-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollout and response
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1015,37 +1245,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Deployment evidence
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
         
   
   
@@ -1061,37 +1264,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required evidence
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1231,10 +1403,182 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
+  <a href="#shared-integration-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Required evidence
+        Shared integration contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Claude Code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#enforcement-surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enforcement surfaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-onboarding-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI onboarding flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trust-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#codex-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Codex CLI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Codex CLI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#enforcement-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enforcement surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-onboarding-flow_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI onboarding flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trust-boundaries_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github-copilot-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub Copilot Agent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GitHub Copilot Agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#enforcement-surface_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enforcement surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-onboarding-flow_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI onboarding flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trust-boundaries_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#host-capability-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host capability matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollout-and-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollout and response
       
     </span>
   </a>
@@ -1261,33 +1605,231 @@
   
 
 
-<h1 id="deployment-evidence">Deployment evidence</h1>
-<p>The open-source SDK can prove its local contracts and release integrity. It
-cannot prove properties of infrastructure that the adopter has not supplied.
-Consequential production use therefore requires an adopter-owned evidence
-pack for every deployment.</p>
-<h2 id="required-evidence">Required evidence</h2>
+<h1 id="enterprise-integration-design">Enterprise integration design</h1>
+<p>This document defines how a central security team onboards and governs agent
+hosts. It is an integration contract for the enterprise UI, onboarding
+workflow and control plane. It does not treat host configuration as proof of
+runtime authority: the SDK runtime and deployment infrastructure remain the
+enforcement boundary.</p>
+<h2 id="shared-integration-contract">Shared integration contract</h2>
+<p>Every supported host follows the same lifecycle:</p>
+<pre><code class="language-text">discover host -&gt; generate scoped installer -&gt; install SDK adapter
+              -&gt; register deployment/agent -&gt; assign group policy
+              -&gt; verify heartbeat and synthetic decision -&gt; monitor and respond
+</code></pre>
+<p>The installer must:</p>
 <ul>
-<li>A multi-process idempotency adapter test demonstrating atomic claim,
-  conflict detection, terminal persistence, restart recovery, and reconciliation
-  after a timeout or store outage.</li>
-<li>Immutable or WORM audit retention, access controls, replication, and a test
-  showing that an operator or application process cannot rewrite accepted
-  events.</li>
-<li>Provider-side IAM evidence showing that issued credentials cannot exceed the
-  exact tool, principal, tenant, resource, and operation scope.</li>
-<li>A genuine container, microVM, or WASM isolation implementation, including
-  denial tests for network, filesystem, identity, and sandbox-escape attempts.</li>
-<li>Remote policy and approval adapter contract tests, including provider outage,
-  timeout, stale approval, and fail-closed behavior.</li>
-<li>Operational evidence for worker saturation, audit/export failure,
-  reconciliation backlog, emergency stop, and key rotation.</li>
+<li>use a project or workspace scope unless an operator explicitly selects a
+  user/organization scope;</li>
+<li>preserve existing host configuration and create timestamped backups;</li>
+<li>install a pinned SDK version or reference an approved package source;</li>
+<li>write no bearer tokens or credentials into repository files;</li>
+<li>create a short-lived enrollment credential or require one from the operator;</li>
+<li>show exactly what files, commands and processes will change;</li>
+<li>return a verification command and an enrollment status link;</li>
+<li>be safe to rerun and fail closed when existing configuration is malformed.</li>
 </ul>
-<p>The repository's in-memory stores, callback isolation verifier, local audit
-sinks, and Python handlers are reference implementations for tests and pilots;
-they are not deployment evidence for high-impact actions. Keep the evidence
-with the deployed commit, adapter versions, configuration, and release
-verification record.</p>
+<p>The control plane stores host type, project/workspace, deployment, agent
+identity, SDK version, last heartbeat, group, policy version and health. The
+host never supplies its own authority, policy decision or principal in model
+output.</p>
+<p>After enrollment, a deployment may fetch its effective policy with the
+authenticated <code>GET /api/enterprise/agents/{deploymentId}/{agentId}/effective-policy</code>
+endpoint. The endpoint fails closed when the agent has no policy group or when
+multiple assigned groups resolve to different policies. The response contains
+configuration data only; the deployment must translate it into typed SDK
+objects and keep immutable SDK safeguards in force.</p>
+<h2 id="claude-code">Claude Code</h2>
+<h3 id="enforcement-surfaces">Enforcement surfaces</h3>
+<p>Claude Code needs two coordinated surfaces:</p>
+<ol>
+<li>A project-scoped <code>PreToolUse</code> hook for native tools such as Bash, Read,
+   Edit, Write, Glob and Grep.</li>
+<li>An authenticated MCP gateway for SDK-owned application tools that need
+   <code>GuardedRuntime</code>, approvals, credentials, idempotency and reconciliation.</li>
+</ol>
+<h3 id="ui-onboarding-flow">UI onboarding flow</h3>
+<p>The UI should ask for:</p>
+<ul>
+<li>project root;</li>
+<li>target deployment;</li>
+<li>agent display name;</li>
+<li>desired group;</li>
+<li>SDK version/channel;</li>
+<li>whether to generate or execute the installer locally.</li>
+</ul>
+<p>It should then generate a copyable command using
+<code>scripts/onboard_claude.py</code>, show the files that will be changed, and expose a
+verification checklist:</p>
+<ul>
+<li>hook configured in <code>.claude/settings.json</code>;</li>
+<li>project policy present in <code>.claude/aai-sec-config.json</code>;</li>
+<li>MCP server present in <code>.mcp.json</code>;</li>
+<li>Claude process started from the expected project root;</li>
+<li><code>/mcp</code> reports the gateway;</li>
+<li>heartbeat is visible in the enterprise UI;</li>
+<li>synthetic read, approval-required and denied checks pass.</li>
+</ul>
+<p>The enterprise hook command carries only non-secret routing metadata. The
+short-lived enrollment token is inherited from the host process and is never
+written to project files. The hook resolves the effective policy for each
+native-tool event, so a group policy change does not wait for a local policy
+file refresh.</p>
+<h3 id="trust-boundaries">Trust boundaries</h3>
+<p>The hook can govern native host tools but cannot prove sandbox isolation,
+credential scope, durable audit replication or runtime budgets. Those controls
+must be verified through the MCP/runtime and deployment checks.</p>
+<p>The reference MCP gateway registers first, retrieves this effective policy and
+starts only when it receives a valid tool allow-list. Losing the control-plane
+heartbeat stops the reference runtime; production adapters should apply the
+same fail-closed lifecycle with their deployment-specific shutdown mechanism.
+AWS agent sessions are deliberately short-lived. When an authenticated
+heartbeat is within five minutes of expiry, the control plane atomically issues
+a replacement bearer and invalidates the previous one. The gateway adopts the
+replacement in memory, so a healthy process can run indefinitely without
+writing a secret into the project or host configuration. A missed heartbeat,
+failed renewal, revoked session or emergency stop still fails closed.</p>
+<h2 id="codex-cli">Codex CLI</h2>
+<h3 id="enforcement-surface">Enforcement surface</h3>
+<p>Codex CLI should use its authenticated MCP server configuration. The current
+Codex supports project-scoped MCP configuration for trusted projects; the
+server routes SDK-owned tools through the same <code>GuardedRuntime</code>. Set
+<code>AAI_SEC_AGENT_HOST=codex-cli</code> so audit events and MCP initialization identify
+the client as Codex rather than relying on model-supplied metadata.</p>
+<p>The shared agent client carries that host value into the authenticated
+registration request; Codex presence is not recorded as Claude Code by
+default. <code>scripts/onboard_codex.py</code> writes a project-scoped MCP entry with
+<code>env_vars = ["AAI_SEC_AGENT_TOKEN"]</code>: only the variable name is stored, while
+the short-lived value is inherited from the launching shell.</p>
+<p>The first integration should not invent a Codex-specific policy language. It
+should translate Codex MCP tool calls into the existing typed
+<code>ActionProposal</code>, preserving the authenticated agent identity at the process
+boundary.</p>
+<h3 id="ui-onboarding-flow_1">UI onboarding flow</h3>
+<p>The UI generates:</p>
+<ul>
+<li>a project-scoped installer command for the selected scope;</li>
+<li>the gateway command and SDK checkout reference;</li>
+<li>the deployment and agent enrollment parameters;</li>
+<li>a verification command using <code>codex mcp get</code>;</li>
+<li>a synthetic MCP read and denied-action check.</li>
+</ul>
+<p>The UI must clearly distinguish Codex's user-local MCP configuration from
+enterprise enrollment. Central team management requires deployment enrollment
+and an authenticated agent identity; a user-local MCP entry is not sufficient
+evidence that the enterprise deployment is governed.</p>
+<p>The enrollment action consumes the one-time bootstrap secret before producing
+the short-lived session token used by the MCP process. Bootstrap and session
+credentials must never be committed to the repository or stored in the Codex
+configuration as long-lived secrets.
+The gateway renews the AWS session during its regular heartbeat loop and keeps
+the latest bearer only in process memory. Operators should treat a process
+that cannot heartbeat as unenrolled, even if its user-local MCP entry remains.</p>
+<h3 id="trust-boundaries_1">Trust boundaries</h3>
+<p>Codex MCP registration only starts the gateway. It does not itself authorize a
+tool or establish a principal. The gateway must require authenticated process
+context and fail closed when the control plane or runtime authority is absent.</p>
+<h2 id="github-copilot-agent">GitHub Copilot Agent</h2>
+<h3 id="enforcement-surface_1">Enforcement surface</h3>
+<p>GitHub Copilot Agent should use the supported MCP integration and, where the
+deployment supports it, host hooks for native command/tool interception. The
+enterprise UI must treat GitHub organization/repository identity and the SDK
+agent identity as separate facts and bind them during enrollment. The shared
+gateway uses <code>AAI_SEC_AGENT_HOST=github-copilot</code> for the host profile while the
+repository/organization MCP configuration remains the Copilot-owned setup
+surface.</p>
+<h3 id="ui-onboarding-flow_2">UI onboarding flow</h3>
+<p>The UI should ask for:</p>
+<ul>
+<li>GitHub organization;</li>
+<li>repository or workspace;</li>
+<li>Copilot agent environment;</li>
+<li>deployment region/environment;</li>
+<li>group and policy;</li>
+<li>GitHub App/OIDC or approved enrollment mechanism.</li>
+</ul>
+<p>It should generate a repository-safe configuration patch or GitHub-managed
+setup instruction, never a long-lived secret. Verification should show:</p>
+<ul>
+<li>MCP server registered in the target Copilot environment;</li>
+<li>repository identity bound to the enrolled deployment;</li>
+<li>a successful synthetic allowed call;</li>
+<li>a denied or approval-required call;</li>
+<li>audit evidence linked to the repository and agent.</li>
+</ul>
+<h3 id="trust-boundaries_2">Trust boundaries</h3>
+<p>GitHub repository permissions are not a substitute for SDK policy. A repository
+may be allowed to use the gateway while individual tools, resources and
+principals remain denied by the selected policy.</p>
+<h2 id="host-capability-matrix">Host capability matrix</h2>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Claude Code</th>
+<th>Codex CLI</th>
+<th>GitHub Copilot Agent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Native host hook</td>
+<td><code>PreToolUse</code></td>
+<td>Host/version dependent; do not assume</td>
+<td>Host/version dependent; verify deployment support</td>
+</tr>
+<tr>
+<td>MCP gateway</td>
+<td>Required for SDK-owned tools</td>
+<td>Required</td>
+<td>Required</td>
+</tr>
+<tr>
+<td>Project/repository scope</td>
+<td><code>.claude/</code> and project MCP config</td>
+<td>Project MCP scope</td>
+<td>Repository/organization-managed config</td>
+</tr>
+<tr>
+<td>Central enrollment</td>
+<td>MCP heartbeat plus deployment ID</td>
+<td>MCP heartbeat plus deployment ID</td>
+<td>MCP heartbeat plus repository/organization binding</td>
+</tr>
+<tr>
+<td>Policy enforcement</td>
+<td>Hook plus runtime</td>
+<td>Runtime gateway</td>
+<td>Runtime gateway plus supported host controls</td>
+</tr>
+<tr>
+<td>Verification</td>
+<td><code>/mcp</code> and synthetic hook checks</td>
+<td>MCP list/get and synthetic calls</td>
+<td>MCP/agent configuration and synthetic calls</td>
+</tr>
+<tr>
+<td>Main UI risk</td>
+<td>Hook config mistaken for full runtime security</td>
+<td>User-local MCP mistaken for enterprise enrollment</td>
+<td>GitHub permission mistaken for SDK authorization</td>
+</tr>
+</tbody>
+</table>
+<h2 id="rollout-and-response">Rollout and response</h2>
+<p>Integration rollout is staged per group:</p>
+<ol>
+<li>Generate configuration and show a diff.</li>
+<li>Apply to one canary deployment.</li>
+<li>Verify heartbeat, policy version and synthetic checks.</li>
+<li>Expand by percentage or deployment selection.</li>
+<li>Pause automatically on failed health or verification checks.</li>
+<li>Provide rollback to the previous known-good version.</li>
+</ol>
+<p>Emergency stop is a separate control from policy editing. It should stop a
+deployment or group immediately, show the affected agents and preserve audit
+evidence. Clearing the stop requires explicit operator confirmation and a
+post-stop verification check.</p>
 
 
 

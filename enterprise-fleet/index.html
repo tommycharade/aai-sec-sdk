@@ -1,0 +1,5966 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source execution security runtime for agentic AI systems">
+      
+      
+      
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/enterprise-fleet/">
+      
+      
+        <link rel="prev" href="../ui/">
+      
+      
+        <link rel="next" href="../policy-editor/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Enterprise fleet - Agentic AI Security SDK</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#enterprise-fleet-control-plane" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Agentic AI Security SDK" class="md-header__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agentic AI Security SDK
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Enterprise fleet
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Agentic AI Security SDK" class="md-nav__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agentic AI Security SDK
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operational runbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../production-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent integrations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Claude Code example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Management UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise fleet
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise fleet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scope-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inventory-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory API
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration governance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reference-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smoke-test-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Smoke-test evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        enterprise_control_plane
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetIdentity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetIdentity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetIdentity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetIdentity.__post_init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __post_init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetIdentityVerifier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetIdentityVerifier
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetIdentityVerifier">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetIdentityVerifier.verify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        verify
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetAuthenticator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CallbackFleetAuthenticator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CallbackFleetAuthenticator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetAuthenticator.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetAuthenticator.authenticate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authenticate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetAuthenticator.authorize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authorize
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetSecretReference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetSecretReference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetSecretReference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetSecretReference.__post_init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __post_init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetSecretResolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetSecretResolver
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetSecretResolver">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetSecretResolver.resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetSecretResolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CallbackFleetSecretResolver
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CallbackFleetSecretResolver">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetSecretResolver.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetSecretResolver.resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EnterpriseFleetStore
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="EnterpriseFleetStore">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.__del__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __del__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.acknowledge_alert" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        acknowledge_alert
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.add_agent_to_group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        add_agent_to_group
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        alerts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.assign_template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        assign_template
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.audit_evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        audit_evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.compliance_evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        compliance_evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_group
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_mcp_server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_mcp_server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_organization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_organization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_project
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_skill
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_template
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.disconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        disconnect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.dispatch_alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dispatch_alerts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.effective_agent_policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        effective_agent_policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        health
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.heartbeat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        heartbeat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_configuration_history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_configuration_history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_configurations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_configurations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_drift" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_drift
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_groups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_inventory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_inventory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_mcp_servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_mcp_servers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_policies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_policies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_templates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.persistence_capabilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        persistence_capabilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.reconcile_authorities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reconcile_authorities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.record_applied_configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        record_applied_configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.record_slo_sample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        record_slo_sample
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.register_agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        register_agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.remove_agent_from_group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        remove_agent_from_group
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.rollback_deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rollback_deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.rollout_deployments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rollout_deployments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_agent_emergency_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_agent_emergency_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_emergency_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_emergency_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_group_emergency_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_group_emergency_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_rollout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_rollout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.slo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.update_group_policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        update_group_policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.update_policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        update_policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.validate_template_configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_template_configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.verify_agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        verify_agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetApplication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EnterpriseFleetApplication
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="EnterpriseFleetApplication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetApplication.__call__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __call__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetApplication.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAuthenticator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetAuthenticator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetAuthenticator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAuthenticator.authenticate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authenticate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAuthenticator.authorize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authorize
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetDeploymentAuthority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetDeploymentAuthority
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetDeploymentAuthority">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetDeploymentAuthority.apply_configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        apply_configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetDeploymentAuthority.clear_emergency_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        clear_emergency_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetDeploymentAuthority.emergency_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        emergency_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAlertSink" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetAlertSink
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetAlertSink">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAlertSink.publish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        publish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.WebhookFleetAlertSink" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebhookFleetAlertSink
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="WebhookFleetAlertSink">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.WebhookFleetAlertSink.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.WebhookFleetAlertSink.publish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        publish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetPage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetPage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAuthorizationError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetAuthorizationError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetConfigurationError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetConfigurationError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetNotFoundError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetNotFoundError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.StaticFleetAuthenticator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StaticFleetAuthenticator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="StaticFleetAuthenticator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.StaticFleetAuthenticator.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.StaticFleetAuthenticator.authenticate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authenticate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.StaticFleetAuthenticator.authorize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authorize
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.validate_fleet_configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_fleet_configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-editor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-managed-resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed Claude resources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Wider enterprise UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-integration-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise integration design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-user-journeys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise user journeys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-operations-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise operations readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../product-owner-enterprise-claude-rollout-review-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product Owner rollout review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-claude-rollout-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise Claude Code rollout plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../real-claude-code-acceptance-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real Claude Code acceptance evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aws-deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-owned-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code-owned controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end-to-end-example/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End-to-end example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guardrails/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering guardrails
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licensing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../p1-p2-closure-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    P1/P2 closure evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release-evidence-v1.0.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release evidence v1.0.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-25)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-26/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-26)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scope-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inventory-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inventory API
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration governance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reference-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smoke-test-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Smoke-test evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        enterprise_control_plane
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetIdentity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetIdentity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetIdentity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetIdentity.__post_init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __post_init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetIdentityVerifier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetIdentityVerifier
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetIdentityVerifier">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetIdentityVerifier.verify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        verify
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetAuthenticator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CallbackFleetAuthenticator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CallbackFleetAuthenticator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetAuthenticator.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetAuthenticator.authenticate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authenticate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetAuthenticator.authorize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authorize
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetSecretReference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetSecretReference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetSecretReference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetSecretReference.__post_init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __post_init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetSecretResolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetSecretResolver
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetSecretResolver">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetSecretResolver.resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetSecretResolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CallbackFleetSecretResolver
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CallbackFleetSecretResolver">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetSecretResolver.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.CallbackFleetSecretResolver.resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EnterpriseFleetStore
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="EnterpriseFleetStore">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.__del__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __del__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.acknowledge_alert" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        acknowledge_alert
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.add_agent_to_group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        add_agent_to_group
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        alerts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.assign_template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        assign_template
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.audit_evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        audit_evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.close" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        close
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.compliance_evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        compliance_evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_group
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_mcp_server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_mcp_server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_organization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_organization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_project
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_skill
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        create_template
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.disconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        disconnect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.dispatch_alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dispatch_alerts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.effective_agent_policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        effective_agent_policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        health
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.heartbeat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        heartbeat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_configuration_history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_configuration_history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_configurations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_configurations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_drift" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_drift
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_groups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_inventory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_inventory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_mcp_servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_mcp_servers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_policies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_policies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_templates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.persistence_capabilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        persistence_capabilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.reconcile_authorities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reconcile_authorities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.record_applied_configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        record_applied_configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.record_slo_sample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        record_slo_sample
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.register_agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        register_agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.remove_agent_from_group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        remove_agent_from_group
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.rollback_deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rollback_deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.rollout_deployments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rollout_deployments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_agent_emergency_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_agent_emergency_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_emergency_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_emergency_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_group_emergency_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_group_emergency_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_rollout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        set_rollout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.slo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.update_group_policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        update_group_policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.update_policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        update_policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.validate_template_configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_template_configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.verify_agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        verify_agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetApplication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EnterpriseFleetApplication
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="EnterpriseFleetApplication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetApplication.__call__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __call__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetApplication.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAuthenticator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetAuthenticator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetAuthenticator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAuthenticator.authenticate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authenticate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAuthenticator.authorize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authorize
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetDeploymentAuthority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetDeploymentAuthority
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetDeploymentAuthority">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetDeploymentAuthority.apply_configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        apply_configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetDeploymentAuthority.clear_emergency_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        clear_emergency_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetDeploymentAuthority.emergency_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        emergency_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAlertSink" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetAlertSink
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FleetAlertSink">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAlertSink.publish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        publish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.WebhookFleetAlertSink" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WebhookFleetAlertSink
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="WebhookFleetAlertSink">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.WebhookFleetAlertSink.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.WebhookFleetAlertSink.publish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        publish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetPage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetPage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetAuthorizationError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetAuthorizationError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetConfigurationError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetConfigurationError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.FleetNotFoundError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FleetNotFoundError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.StaticFleetAuthenticator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StaticFleetAuthenticator
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="StaticFleetAuthenticator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.StaticFleetAuthenticator.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.StaticFleetAuthenticator.authenticate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authenticate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.StaticFleetAuthenticator.authorize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        authorize
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.validate_fleet_configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_fleet_configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="enterprise-fleet-control-plane">Enterprise fleet control plane</h1>
+<p>The enterprise fleet layer manages many independently deployed SDK control
+planes and many Claude Code projects without moving execution authority into
+the browser. It is a provider-neutral inventory and governance boundary:
+authentication, runtime authority, policy engines, approval services, IAM,
+and durable audit retention remain deployment-owned adapters.</p>
+<h2 id="scope-model">Scope model</h2>
+<p>Every resource belongs to one organization:</p>
+<pre><code class="language-text">organization
+└── project
+    └── deployment (team / environment / region)
+        └── Claude Code agents and sessions
+</code></pre>
+<p>An authenticated identity carries an organization and optional project scope.
+The API checks that scope on every read, registration, configuration, and
+rollout operation. The UI never receives bearer tokens, agent heartbeat
+sessions, credentials, or raw secrets.</p>
+<p>Deployments carry team, environment, and region dimensions so operators can
+filter and compare the same SDK policy across platform groups and geographic
+rollouts. The team field is inventory metadata, not an authorization grant;
+authorization remains organization/project/RBAC based.</p>
+<p>For enterprise IAM, provide a <code>CallbackFleetAuthenticator</code> backed by the
+organization's OIDC/JWT or service-mesh verifier. The callback must validate
+signature, issuer, audience, expiry, and claims before returning a normalized
+<code>FleetIdentity</code>; the SDK does not guess those rules or accept roles from the
+browser. Authorization is a separate callback and fails closed on exceptions.</p>
+<p>Credential governance uses <code>FleetSecretReference</code> and
+<code>CallbackFleetSecretResolver</code>. Templates may contain broker endpoint and
+opaque reference metadata, but never credential material. A deployment-owned
+secret manager resolves a reference only for a bounded purpose; resolution
+failures are errors rather than empty or synthetic credentials.</p>
+<h2 id="inventory-api">Inventory API</h2>
+<p>The reference WSGI application exposes these authenticated endpoints:</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/enterprise/organizations</code></td>
+<td>Tenant inventory</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/projects</code></td>
+<td>Project inventory</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/deployments</code></td>
+<td>SDK deployment inventory</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/agents</code></td>
+<td>Claude and other agent presence</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/agents/{deployment}/{agent}/effective-policy</code></td>
+<td>Authenticated policy resolved from the agent's group assignment</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/agents/{deployment}/{agent}/verify</code></td>
+<td>Redacted enrollment-readiness checks for operations</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/sessions</code></td>
+<td>Active/expired session inventory without session tokens</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/capabilities</code></td>
+<td>Persistence adapter and HA capability metadata</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/drift</code></td>
+<td>Desired/applied configuration drift</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/templates</code></td>
+<td>Tenant-scoped configuration templates</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/policies</code></td>
+<td>Tenant-scoped configuration policies</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/groups</code></td>
+<td>Agent groups with selected policy and enrolled agents</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/deployment-config</code></td>
+<td>Current desired/applied configuration state</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/deployment-config/history</code></td>
+<td>Bounded prior configuration versions</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/health</code></td>
+<td>Deployment health and rollout indicators</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/slo</code></td>
+<td>Sample-based availability and SLO status in the bounded window</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/compliance/evidence</code></td>
+<td>Redacted tenant-scoped evidence bundle for review/export</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/audit</code></td>
+<td>Bounded redaction-safe lifecycle evidence index for investigations</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/alerts</code></td>
+<td>Derived fleet alerts</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/agents/register</code></td>
+<td>Register an authenticated agent</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/agents/{deployment}/{agent}/heartbeat</code></td>
+<td>Refresh presence and optionally publish bounded aggregate SDK telemetry</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/agents/{deployment}/{agent}/disconnect</code></td>
+<td>Mark offline</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/templates</code></td>
+<td>Create a configuration template</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/policies</code></td>
+<td>Create a configuration policy</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/groups</code></td>
+<td>Create a group and bind it to a policy</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/groups/{group}/policy</code></td>
+<td>Change a group's immutable policy assignment and audit the change</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/groups/{group}/agents</code></td>
+<td>Enroll an existing agent in a group</td>
+</tr>
+<tr>
+<td><code>DELETE /api/enterprise/groups/{group}/agents/{deployment}/{agent}</code></td>
+<td>Remove an agent from a group</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/templates/validate</code></td>
+<td>Validate safe configuration without persisting it</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/deployment-config</code></td>
+<td>Assign desired configuration</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/deployment-config/rollout</code></td>
+<td>Stage, canary, pause, activate, or rollback</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/deployment-config/batch-rollout</code></td>
+<td>Apply one rollout command to up to 200 deployments</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/deployment-config/rollback</code></td>
+<td>Restore a known prior version as a new staged version</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/deployment-config/applied</code></td>
+<td>Record an applied configuration hash</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/emergency-stop</code></td>
+<td>Stop or clear one deployment through its authority</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/groups/{group}/emergency-stop</code></td>
+<td>Stop or clear all agents in one group</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/agents/{deployment}/{agent}/emergency-stop</code></td>
+<td>Stop or clear one enrolled agent</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/alerts/{alertId}/ack</code></td>
+<td>Acknowledge an alert without deleting evidence</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/alerts/dispatch</code></td>
+<td>Deliver unacknowledged alerts through an alert adapter</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/slo/sample</code></td>
+<td>Record one redaction-safe health sample for an authorized deployment</td>
+</tr>
+</tbody>
+</table>
+<p>Inventory and fleet collection endpoints accept <code>limit=1..200</code> and an opaque
+numeric continuation <code>cursor</code>; responses contain <code>nextCursor</code> until the
+collection is exhausted. The UI follows those cursors automatically, so a
+tenant with more than one page of deployments or Claude instances is not
+silently truncated. Cursors carry no identity or authority and are valid only
+as continuation tokens for the same authenticated read.</p>
+<p>Agent registration returns one opaque, expiring session. It is accepted only
+for the authenticated deployment/agent scope. Session inventory exposes only
+agent/deployment scope, timestamps, and active/expired status; the opaque
+session token is never returned. Expired heartbeats are marked offline and
+lifecycle events are written to the configured audit sink.</p>
+<p>An authenticated heartbeat may include a <code>telemetry</code> object containing only
+bounded numeric aggregates: action totals, admitted cost units, allowed,
+denied, approval-required, executed, failed, timed-out and cancelled counts,
+plus average and maximum guarded-action latency in milliseconds. Unknown,
+negative, non-finite, oversized, or secret-like fields are rejected. The
+control plane stores the latest snapshot with the agent metadata and exposes
+only that fixed projection to operators; it never stores tool arguments,
+resources, outputs, or credentials as telemetry.</p>
+<p>Policies are immutable, tenant-scoped configuration records in this reference
+implementation. A group selects one policy, and membership changes affect only
+group assignment; they do not create, rotate, or revoke the agent's session.
+Every policy, group, enrollment, and removal is authorized against the live
+operator identity and recorded as redacted fleet audit evidence. Runtime
+enforcement still occurs in each deployment's SDK authority.</p>
+<p>An enrolled runtime can resolve its policy before serving tools through the
+effective-policy endpoint. The lookup is scoped to the authenticated agent and
+fails closed when no group is assigned or when multiple groups select different
+policies. The response is configuration data, not an executable decision; the
+deployment adapter must map it to typed SDK policy objects and cannot weaken
+immutable SDK safeguards.</p>
+<h2 id="configuration-governance">Configuration governance</h2>
+<p>The UI template editor provides typed controls for deny-by-default policy,
+approvals, tool allow-lists, budgets, credentials, high-risk isolation, audit,
+and telemetry. It generates reviewable JSON while retaining an advanced editor
+for provider-specific fields; backend validation remains authoritative.</p>
+<p>Templates can inherit from one parent template. Inheritance is bounded and
+cycle-checked; child values override parent values. A deployment assignment
+creates a desired configuration hash and starts in <code>staged</code> state. Operators
+can move it through <code>canary</code>, <code>active</code>, <code>paused</code>, or <code>rollback</code> with an
+explicit percentage. A deployment is drifted when its applied hash is absent
+or differs from the desired hash.</p>
+<p>Templates may use typed governance sections: <code>policy</code>, <code>approvals</code>, <code>tools</code>,
+<code>budgets</code>, <code>credentials</code>, <code>isolation</code>, <code>audit</code>, <code>telemetry</code>, <code>runtime</code>, and
+<code>claudeCode</code>. Each recognized section is a closed schema, so misspelled fields
+fail validation before persistence. Provider endpoints and broker references
+are metadata only; credentials and bearer material are never accepted. Legacy
+extension sections remain supported for migration, but typed sections are the
+recommended enterprise contract.</p>
+<p>Persistence is an explicit adapter boundary. The bundled
+<code>SQLiteFleetPersistenceAdapter</code> enables WAL and bounded lock waits for local
+development, but advertises <code>highAvailability: false</code>. Deployments can require
+HA at startup with <code>require_high_availability=True</code>; the reference adapter is
+then rejected before serving traffic. A PostgreSQL or managed-database adapter
+must implement <code>FleetPersistenceAdapter</code>, migrations, transactions, locking,
+backup/restore, and tenant-safe concurrency before being used in production.
+The optional PostgreSQL implementation is available with
+<code>pip install 'agentic-security-sdk[postgres]'</code>; pass its deployment-managed DSN
+as the <code>path</code> argument. Connection failure aborts startup and the DSN is never
+returned by the API.</p>
+<p>The management UI provides tenant-scoped template creation, parent selection,
+deployment filtering, template assignment, canary rollout, rollback to the
+latest known history version, and emergency stop. Invalid JSON remains in the
+editor for correction; the control plane performs the authoritative secret and
+shape validation before persistence.</p>
+<p>Rollout and emergency operations are not database-only claims. A deployment
+can be bound to a <code>FleetDeploymentAuthority</code> adapter. Active/canary rollout,
+rollback, and stop/clear operations invoke the live authority first; an
+adapter failure leaves the operation unsuccessful and the database does not
+claim activation. On application startup, persisted active rollout and
+emergency-stop state is reconciled into every bound authority before the WSGI
+application serves requests; a reconciliation failure aborts startup.</p>
+<p>The fleet store rejects secret-like configuration keys and stores only JSON
+configuration and hashes. It does not provision OPA/Cedar, IAM, approvals,
+credentials, sandboxes, or telemetry backends; those remain explicit adapters.</p>
+<p>The compliance evidence endpoint is intentionally a summary, not a raw audit
+export. It includes deployment identity, configuration hashes and versions,
+rollout state, health/SLO posture, active-session counts, audit event types and
+counts, and explicit redaction assertions. It excludes configuration values,
+credential material, session tokens, and raw audit payloads. Use the deployment's
+immutable audit service for forensic event export.
+Health is intentionally split into current state and explicit SLO samples.
+Schedulers or telemetry adapters call the sample endpoint at a controlled
+frequency; the read-only SLO endpoint computes availability over the bounded
+configured window and reports <code>meeting</code>, <code>breach</code>, or <code>no_data</code>. Samples contain
+only status and counts, never credentials, sessions, or configuration values.</p>
+<p>Alerts are derived from current authoritative state. Incident commanders can
+acknowledge them, while a provider-neutral <code>FleetAlertSink</code> can deliver
+redacted alert records to an enterprise notification or incident system. The
+included <code>WebhookFleetAlertSink</code> is a bounded HTTPS implementation suitable
+for an enterprise webhook gateway; endpoint material must be injected from a
+secret manager and is never persisted by the fleet store.
+Delivery failures are reported as failures and do not clear, hide, or mutate
+the underlying alert condition.</p>
+<h2 id="reference-setup">Reference setup</h2>
+<p>The local UI example multiplexes the original runtime API with the enterprise
+API. Start it with a UI token and open <a href="../ui/">the management UI</a>:</p>
+<pre><code class="language-bash">AAI_SEC_UI_TOKEN=synthetic-enterprise-ui-token-1234 \
+AAI_SEC_AGENT_TOKEN=synthetic-enterprise-agent-token-1234 \
+AAI_SEC_UI_PORT=8001 \
+AAI_SEC_UI_ORIGIN=http://localhost:5174 \
+python3 examples/ui_control_plane.py
+</code></pre>
+<p>For production, replace static bearer authentication with an enterprise IdP
+through <code>CallbackFleetAuthenticator</code>, use a durable multi-process database
+adapter, put the API behind TLS, and
+connect each deployment to an authoritative runtime and immutable audit
+service. The SQLite/reference implementation is suitable for development and
+contract testing, not an enterprise production HA deployment.</p>
+<h2 id="smoke-test-evidence">Smoke-test evidence</h2>
+<p>With the reference server on port <code>8001</code> and the UI on port <code>5174</code>, set
+<code>VITE_USE_MOCKS=false</code>, <code>VITE_API_BASE_URL=http://localhost:8001/api</code>, and a
+synthetic <code>VITE_API_TOKEN</code>. Open the UI, select <strong>Enterprise fleet</strong>, verify
+the seeded <code>Safe default</code> template and <code>Local development</code> deployment, filter
+by <code>platform</code>, and exercise template assignment, canary, rollback, and stop
+with synthetic data. Confirm the resulting notice, health state, and alert;
+then clear the stop only through an authorized API call. Do not use production
+tokens in Vite variables or screenshots.</p>
+
+
+<div class="doc doc-object doc-module">
+
+
+
+<a id="agentic_security.enterprise_control_plane"></a>
+    <div class="doc doc-contents first">
+
+        <p>Tenant-aware fleet control-plane primitives.</p>
+<p>This module provides the durable, provider-neutral foundation used by an
+enterprise control plane.  It deliberately stores metadata and references to
+configuration rather than secrets or executable policy.  Authentication and
+runtime authority remain deployment-owned adapters, while this layer enforces
+organization, project, and deployment scope before returning data or changing
+state.</p>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetIdentity" class="doc doc-heading">
+            <code>FleetIdentity</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Authenticated enterprise identity and its organization/project scope.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.FleetIdentity.__post_init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">__post_init__</span><span class="p">()</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Reject empty identity data before it can influence authorization.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetIdentityVerifier" class="doc doc-heading">
+            <code>FleetIdentityVerifier</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Deployment-owned verifier for an OIDC/JWT/IAM authorization header.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.FleetIdentityVerifier.verify" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">verify</span><span class="p">(</span><span class="n">authorization</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Validate signature, issuer, audience, expiry, and claims externally.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.CallbackFleetAuthenticator" class="doc doc-heading">
+            <code>CallbackFleetAuthenticator</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Bridge a verified enterprise IAM adapter into the fleet API.</p>
+<p>The SDK deliberately does not implement key discovery, issuer policy, or
+JWT algorithm selection. The callback must perform those checks and return
+only a normalized :class:<code>FleetIdentity</code>; authorization remains a separate
+callback so tenant and role policy cannot be inferred from browser input.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.CallbackFleetAuthenticator.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">verifier</span><span class="p">,</span> <span class="n">authorizer</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create an authenticator around deployment-owned verification policy.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.CallbackFleetAuthenticator.authenticate" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">authenticate</span><span class="p">(</span><span class="n">authorization</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the verifier's identity or fail closed on verifier errors.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.CallbackFleetAuthenticator.authorize" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">authorize</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">action</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Delegate authorization to the deployment IAM policy boundary.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetSecretReference" class="doc doc-heading">
+            <code>FleetSecretReference</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Opaque reference to a deployment-owned secret, never the secret value.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.FleetSecretReference.__post_init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">__post_init__</span><span class="p">()</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Reject empty or oversized references before they reach a resolver.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetSecretResolver" class="doc doc-heading">
+            <code>FleetSecretResolver</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Deployment-owned secret manager boundary for ephemeral credential use.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.FleetSecretResolver.resolve" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">resolve</span><span class="p">(</span><span class="n">reference</span><span class="p">,</span> <span class="n">purpose</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Resolve one reference for one purpose without persisting or returning metadata.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.CallbackFleetSecretResolver" class="doc doc-heading">
+            <code>CallbackFleetSecretResolver</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Adapt a deployment secret manager callback with fail-closed validation.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.CallbackFleetSecretResolver.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">resolver</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a resolver around an application-owned secret manager client.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.CallbackFleetSecretResolver.resolve" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">resolve</span><span class="p">(</span><span class="n">reference</span><span class="p">,</span> <span class="n">purpose</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Resolve one bounded reference and reject empty or malformed results.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore" class="doc doc-heading">
+            <code>EnterpriseFleetStore</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>SQLite-backed tenant inventory and authenticated agent presence store.</p>
+<p>SQLite is a reference persistence adapter, not a claim that every
+enterprise should use SQLite. WAL mode and a bounded busy timeout improve
+local multi-process behavior; the schema and method contracts remain the
+portable boundary for a PostgreSQL or managed database adapter.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.__del__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__del__</span><span class="p">()</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Best-effort cleanup for short-lived reference applications and tests.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">audit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">now</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">heartbeat_ttl_seconds</span><span class="o">=</span><span class="mi">90</span><span class="p">,</span> <span class="n">sqlite_busy_timeout_ms</span><span class="o">=</span><span class="mi">5000</span><span class="p">,</span> <span class="n">persistence</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">require_high_availability</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">slo_window_seconds</span><span class="o">=</span><span class="mi">86400</span><span class="p">,</span> <span class="n">slo_target</span><span class="o">=</span><span class="mf">0.99</span><span class="p">,</span> <span class="n">authorities</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">alert_sink</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Open or create a migrated fleet database with bounded heartbeat TTL.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.acknowledge_alert" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">acknowledge_alert</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">alert_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Acknowledge one current alert without deleting or hiding its evidence.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.add_agent_to_group" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">add_agent_to_group</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Enroll an existing tenant agent in a group without changing its session.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.alerts" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">alerts</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return deterministic alerts derived from authoritative fleet state.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.assign_template" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">assign_template</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">template_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Set a deployment's desired configuration and stage it for rollout.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.audit_evidence" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">audit_evidence</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">event_type</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return bounded, redaction-safe lifecycle evidence for investigations.</p>
+<p>Raw audit payloads and credential material remain in the deployment's
+immutable audit sink. This endpoint exposes only the evidence index
+needed to scope an investigation and correlate an external record.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.close" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">close</span><span class="p">()</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Close the persistence connection after callers stop serving requests.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.compliance_evidence" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">compliance_evidence</span><span class="p">(</span><span class="n">identity</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Build a redacted tenant-scoped evidence summary for review/export.</p>
+<p>The bundle contains identifiers, hashes, states, counts, and audit
+metadata only. It intentionally excludes desired configuration values,
+credentials, opaque sessions, and raw audit payloads.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_deployment" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_deployment</span><span class="p">(</span><span class="n">organization_id</span><span class="p">,</span> <span class="n">project_id</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">environment</span><span class="p">,</span> <span class="n">region</span><span class="p">,</span> <span class="n">sdk_version</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">team</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Register one independently managed SDK control-plane deployment.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_group" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_group</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">policy_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a tenant-scoped agent group bound to one configuration policy.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_mcp_server" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_mcp_server</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">server_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">description</span><span class="p">,</span> <span class="n">version</span><span class="p">,</span> <span class="n">transport</span><span class="p">,</span> <span class="n">command</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">url</span><span class="p">,</span> <span class="n">environment_references</span><span class="p">,</span> <span class="n">enabled</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Register an MCP definition; secret values and credentials remain deployment-owned.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_organization" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_organization</span><span class="p">(</span><span class="n">organization_id</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create an organization root for tenant isolation.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_policy" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_policy</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">policy_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">configuration</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a tenant-scoped configuration policy for group assignment.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_project" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_project</span><span class="p">(</span><span class="n">organization_id</span><span class="p">,</span> <span class="n">project_id</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a project within an existing organization.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_skill" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_skill</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">skill_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">description</span><span class="p">,</span> <span class="n">version</span><span class="p">,</span> <span class="n">content</span><span class="p">,</span> <span class="n">enabled</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Register reviewed project-scoped Skill content without executable authority.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_template" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">create_template</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">template_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">configuration</span><span class="p">,</span> <span class="n">parent_template_id</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a tenant-scoped configuration template with optional inheritance.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.disconnect" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">disconnect</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">,</span> <span class="n">session_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Mark an agent offline after validating its current opaque session.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.dispatch_alerts" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">dispatch_alerts</span><span class="p">(</span><span class="n">identity</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Deliver current unacknowledged alerts through the injected alert adapter.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.effective_agent_policy" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">effective_agent_policy</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the one policy currently effective for an enrolled agent.</p>
+<p>The lookup is authenticated and tenant-scoped. An agent with no group
+assignment, or with memberships that resolve to different policies,
+fails closed instead of receiving an arbitrary policy. The returned
+policy is configuration data; the deployment-owned runtime remains
+responsible for translating it into its typed policy and adapters.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.health" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">health</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return deployment health and bounded operational SLO indicators.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.heartbeat" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">heartbeat</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">,</span> <span class="n">session_id</span><span class="p">,</span> <span class="n">telemetry</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Refresh a session and persist only validated aggregate telemetry.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_configuration_history" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">list_configuration_history</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return bounded, tenant-scoped prior configuration versions.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_configurations" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">list_configurations</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return desired/applied configuration state for scoped deployments.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_drift" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">list_drift</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return deployments whose applied configuration differs from desired state.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_groups" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">list_groups</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return groups with redacted agent membership for enterprise management.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_inventory" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">list_inventory</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">resource</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">organization_id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return tenant-scoped inventory without exposing agent session secrets.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_mcp_servers" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">list_mcp_servers</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return tenant-scoped MCP metadata without secret values.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_policies" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">list_policies</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return tenant-scoped configuration policies without secret material.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_skills" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">list_skills</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return tenant-scoped Skill metadata and content for deployment reconciliation.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.list_templates" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">list_templates</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return tenant-scoped templates without exposing secret material.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.persistence_capabilities" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">persistence_capabilities</span><span class="p">()</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return safe adapter metadata so deployment checks can prove HA selection.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.reconcile_authorities" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">reconcile_authorities</span><span class="p">()</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Reconcile persisted controls into live authorities before serving traffic.</p>
+<p>The database is not an execution authority. On restart, every bound
+deployment is brought to its persisted stop state and active rollout
+configuration first; any adapter failure aborts reconciliation and
+callers must keep the API out of service.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.record_applied_configuration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">record_applied_configuration</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">configuration_hash</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Record an agent-reported applied hash only when it matches desired state.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.record_slo_sample" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">record_slo_sample</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Persist a redaction-safe health sample for one authorized deployment.</p>
+<p>Samples are explicit rather than hidden inside <code>health</code> reads so a
+scheduler or telemetry adapter controls sampling frequency and the
+read path remains side-effect free.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.register_agent" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">register_agent</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="n">project_root</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Bind one authenticated agent process to a deployment and issue a session.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.remove_agent_from_group" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">remove_agent_from_group</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Remove an agent from a group while leaving its enrollment intact.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.rollback_deployment" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">rollback_deployment</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">version</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Restore a prior desired configuration as a new staged version.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.rollout_deployments" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">rollout_deployments</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_ids</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">percentage</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Apply one bounded rollout command to multiple scoped deployments.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_agent_emergency_stop" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">set_agent_emergency_stop</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">,</span> <span class="n">active</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Stop or release one agent without revoking its enrollment session.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_emergency_stop" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">set_emergency_stop</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">active</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Activate or clear one deployment's stop state through tenant scope.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_group_emergency_stop" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">set_group_emergency_stop</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">active</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Stop or release all agents assigned to one tenant-scoped group.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.set_rollout" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">set_rollout</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">percentage</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Advance or pause one deployment rollout with bounded percentage.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.slo" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">slo</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return bounded sample-based availability for each visible deployment.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.update_group_policy" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">update_group_policy</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">group_id</span><span class="p">,</span> <span class="n">policy_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Change a group's policy assignment as an audited control operation.</p>
+<p>Policies remain immutable records. Reassigning a group therefore
+preserves policy history while making the new effective policy
+explicit for every enrolled runtime on its next refresh.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.update_policy" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">update_policy</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">policy_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">configuration</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Apply a validated policy change as the next version of a policy.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.validate_template_configuration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">validate_template_configuration</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">configuration</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Validate a proposed template without persisting it or changing authority.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.verify_agent" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">verify_agent</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Verify enrollment, liveness, policy assignment, and stop state.</p>
+<p>This is an operational read, not a trust grant.  It reports each
+prerequisite independently so an operator can distinguish an offline
+process from a missing policy or an intentionally stopped agent.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.EnterpriseFleetApplication" class="doc doc-heading">
+            <code>EnterpriseFleetApplication</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Authenticated WSGI API for enterprise fleet inventory and agent presence.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetApplication.__call__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__call__</span><span class="p">(</span><span class="n">environ</span><span class="p">,</span> <span class="n">start_response</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Handle one bounded JSON request and return a JSON response.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetApplication.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">store</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">authenticator</span><span class="p">,</span> <span class="n">allowed_origin</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Bind a fleet store to an external authenticator and browser origin.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetAuthenticator" class="doc doc-heading">
+            <code>FleetAuthenticator</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Deployment-owned authentication boundary for enterprise API requests.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.FleetAuthenticator.authenticate" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">authenticate</span><span class="p">(</span><span class="n">authorization</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Authenticate a request and return no identity on failure.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.FleetAuthenticator.authorize" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">authorize</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">action</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return whether the identity may perform the coarse-grained action.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetDeploymentAuthority" class="doc doc-heading">
+            <code>FleetDeploymentAuthority</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Runtime adapter that applies controls to one independently deployed SDK.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.FleetDeploymentAuthority.apply_configuration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">apply_configuration</span><span class="p">(</span><span class="n">configuration</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Atomically apply validated configuration or raise without claiming success.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.FleetDeploymentAuthority.clear_emergency_stop" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">clear_emergency_stop</span><span class="p">()</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Clear the deployment stop after incident controls permit it.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.FleetDeploymentAuthority.emergency_stop" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">emergency_stop</span><span class="p">()</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Stop consequential actions for the deployment.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetAlertSink" class="doc doc-heading">
+            <code>FleetAlertSink</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>Provider-neutral delivery boundary for redacted fleet alerts.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.FleetAlertSink.publish" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">publish</span><span class="p">(</span><span class="n">alert</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Deliver one redacted alert or raise without changing fleet state.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.WebhookFleetAlertSink" class="doc doc-heading">
+            <code>WebhookFleetAlertSink</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Deliver redacted fleet alerts to an HTTPS webhook.</p>
+<p>The endpoint should be injected from a deployment secret manager and is
+never included in fleet configuration, audit payloads, or exceptions.
+Delivery is bounded and any transport or non-2xx response raises so the
+caller does not claim that an alert was delivered when it was not.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.WebhookFleetAlertSink.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">endpoint</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">timeout_seconds</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span> <span class="n">opener</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">allow_http</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a bounded webhook adapter with an explicit local HTTP escape hatch.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.WebhookFleetAlertSink.publish" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">publish</span><span class="p">(</span><span class="n">alert</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>POST one bounded redacted alert and fail on transport/non-2xx errors.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetPage" class="doc doc-heading">
+            <code>FleetPage</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Stable paginated result for fleet inventory APIs.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetAuthorizationError" class="doc doc-heading">
+            <code>FleetAuthorizationError</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="PermissionError">PermissionError</span></code></p>
+
+
+
+        <p>Raised when an identity lacks authority for a tenant-scoped action.</p>
+
+
+
+
+
+
+
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetConfigurationError" class="doc doc-heading">
+            <code>FleetConfigurationError</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="ValueError">ValueError</span></code></p>
+
+
+
+        <p>Raised when an enterprise fleet request is malformed or out of scope.</p>
+
+
+
+
+
+
+
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.FleetNotFoundError" class="doc doc-heading">
+            <code>FleetNotFoundError</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="LookupError">LookupError</span></code></p>
+
+
+
+        <p>Raised when a requested organization, project, deployment, or agent is absent.</p>
+
+
+
+
+
+
+
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.enterprise_control_plane.StaticFleetAuthenticator" class="doc doc-heading">
+            <code>StaticFleetAuthenticator</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Bounded bearer authenticator for local tests and reference deployments.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.StaticFleetAuthenticator.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">credentials</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a synthetic credential map; production uses an IdP adapter.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.StaticFleetAuthenticator.authenticate" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">authenticate</span><span class="p">(</span><span class="n">authorization</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Authenticate only a Bearer header using constant-time comparison.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.StaticFleetAuthenticator.authorize" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">authorize</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">action</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Apply the reference role matrix; deployments should use their IdP policy.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.enterprise_control_plane.validate_fleet_configuration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">validate_fleet_configuration</span><span class="p">(</span><span class="n">configuration</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Validate typed enterprise governance sections without accepting authority.</p>
+<p>Templates remain backward compatible with small legacy objects, but any
+recognized governance section is a closed schema. This makes policy,
+approvals, tools, budgets, credentials, isolation, audit, telemetry, and
+Claude Code controls discoverable and rejects configuration typos before a
+template can be rolled out. Endpoint values are references only; secrets
+are rejected by the common recursive validator below.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,3310 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source execution security runtime for agentic AI systems">
+      
+      
+      
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/integrations/">
+      
+      
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../claude-code/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Agent integrations - Agentic AI Security SDK</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#agent-integrations" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Agentic AI Security SDK" class="md-header__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agentic AI Security SDK
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Agent integrations
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Agentic AI Security SDK" class="md-nav__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agentic AI Security SDK
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operational runbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../production-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent integrations
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent integrations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#supported-host-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported host profiles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-one-gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create one gateway
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#host-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Host configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#project-scoped-codex-cli-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project-scoped Codex CLI setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#live-claude-presence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live Claude presence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#native-actions-and-complete-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native actions and complete coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extending-to-another-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extending to another host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-an-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing an integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        integrations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HOST_PROFILES" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HOST_PROFILES
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.AgentHost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AgentHost
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HostProfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HostProfile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpGateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        McpGateway
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="McpGateway">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpGateway.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpGateway.handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpGateway.serve_stdio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serve_stdio
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpHttpApplication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        McpHttpApplication
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="McpHttpApplication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpHttpApplication.__call__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __call__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpHttpApplication.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpHttpApplication.handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSession" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RuntimeSession
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RuntimeSessionStore
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RuntimeSessionStore">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore.reap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore.register" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        register
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore.resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore.revoke" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        revoke
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HostIntegration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HostIntegration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HostIntegration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HostIntegration.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HostIntegration.handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HostIntegration.serve_stdio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serve_stdio
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.IntegrationProtocolError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IntegrationProtocolError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.integration_for" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        integration_for
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.opencode_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        opencode_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.openhands_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        openhands_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.claude_code_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        claude_code_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.cline_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cline_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.gemini_cli_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gemini_cli_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.github_copilot_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        github_copilot_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.codex_cli_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        codex_cli_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Claude Code example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Management UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-fleet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise fleet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-editor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-managed-resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed Claude resources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Wider enterprise UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-integration-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise integration design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-user-journeys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise user journeys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-operations-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise operations readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../product-owner-enterprise-claude-rollout-review-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product Owner rollout review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-claude-rollout-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise Claude Code rollout plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../real-claude-code-acceptance-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real Claude Code acceptance evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aws-deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-owned-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code-owned controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end-to-end-example/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End-to-end example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guardrails/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering guardrails
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licensing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../p1-p2-closure-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    P1/P2 closure evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release-evidence-v1.0.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release evidence v1.0.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-25)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-26/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-26)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#supported-host-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported host profiles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-one-gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create one gateway
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#host-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Host configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#project-scoped-codex-cli-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project-scoped Codex CLI setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#live-claude-presence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live Claude presence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#native-actions-and-complete-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native actions and complete coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extending-to-another-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extending to another host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-an-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing an integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        integrations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HOST_PROFILES" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HOST_PROFILES
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.AgentHost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AgentHost
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HostProfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HostProfile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpGateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        McpGateway
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="McpGateway">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpGateway.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpGateway.handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpGateway.serve_stdio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serve_stdio
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpHttpApplication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        McpHttpApplication
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="McpHttpApplication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpHttpApplication.__call__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __call__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpHttpApplication.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.McpHttpApplication.handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSession" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RuntimeSession
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RuntimeSessionStore
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RuntimeSessionStore">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore.reap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore.register" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        register
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore.resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.RuntimeSessionStore.revoke" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        revoke
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HostIntegration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HostIntegration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HostIntegration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HostIntegration.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HostIntegration.handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.integrations.HostIntegration.serve_stdio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serve_stdio
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.IntegrationProtocolError" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IntegrationProtocolError
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.integration_for" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        integration_for
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.opencode_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        opencode_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.openhands_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        openhands_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.claude_code_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        claude_code_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.cline_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cline_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.gemini_cli_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gemini_cli_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.github_copilot_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        github_copilot_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.integrations.codex_cli_integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        codex_cli_integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="agent-integrations">Agent integrations</h1>
+<p>The SDK can be connected to agent hosts through the Model Context Protocol
+(MCP). The integration layer is deliberately separate from the security
+runtime: the host creates the authenticated <code>ExecutionContext</code>, registers the
+explicit tool allow-list, and supplies policy, approval, credential, audit,
+and isolation dependencies. The agent can request a tool, but it cannot
+choose those security inputs.</p>
+<h2 id="supported-host-profiles">Supported host profiles</h2>
+<p>The package includes profiles for:</p>
+<table>
+<thead>
+<tr>
+<th>Host</th>
+<th>Profile</th>
+<th>Primary connection</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OpenCode</td>
+<td><code>opencode</code></td>
+<td>MCP gateway</td>
+</tr>
+<tr>
+<td>OpenHands self-hosted</td>
+<td><code>openhands</code></td>
+<td>MCP gateway</td>
+</tr>
+<tr>
+<td>Claude Code</td>
+<td><code>claude-code</code></td>
+<td>MCP gateway and SDK <code>PreToolUse</code> adapter</td>
+</tr>
+<tr>
+<td>Cline</td>
+<td><code>cline</code></td>
+<td>MCP gateway</td>
+</tr>
+<tr>
+<td>Gemini CLI</td>
+<td><code>gemini-cli</code></td>
+<td>MCP gateway through an extension</td>
+</tr>
+<tr>
+<td>GitHub Copilot CLI/cloud agent</td>
+<td><code>github-copilot</code></td>
+<td>MCP gateway</td>
+</tr>
+<tr>
+<td>Codex CLI</td>
+<td><code>codex-cli</code></td>
+<td>MCP server configured with <code>codex mcp</code></td>
+</tr>
+</tbody>
+</table>
+<p>These profiles are integration labels, not identities or permissions. See
+<a class="autorefs autorefs-internal" href="#agentic_security.integrations.AgentHost"><code>AgentHost</code></a> and
+<a class="autorefs autorefs-internal" title="HOST_PROFILES = {AgentHost.OPENCODE: HostProfile(AgentHost.OPENCODE, 'OpenCode', configuration_file='opencode.json'), AgentHost.OPENHANDS: HostProfile(AgentHost.OPENHANDS, 'OpenHands self-hosted'), AgentHost.CLAUDE_CODE: HostProfile(AgentHost.CLAUDE_CODE, 'Claude Code', supports_pre_tool_hooks=True), AgentHost.CLINE: HostProfile(AgentHost.CLINE, 'Cline'), AgentHost.GEMINI_CLI: HostProfile(AgentHost.GEMINI_CLI, 'Gemini CLI'), AgentHost.GITHUB_COPILOT: HostProfile(AgentHost.GITHUB_COPILOT, 'GitHub Copilot'), AgentHost.CODEX_CLI: HostProfile(AgentHost.CODEX_CLI, 'Codex CLI', supports_pre_tool_hooks=False)}
+
+  
+      module-attribute
+  " href="#agentic_security.integrations.HOST_PROFILES"><code>HOST_PROFILES</code></a>.</p>
+<h2 id="create-one-gateway">Create one gateway</h2>
+<p>Install the SDK and create the runtime in the application that owns the
+identity and tools. The same gateway code works for every supported host:</p>
+<pre><code class="language-python">from agentic_security import AgentHost, GuardedRuntime, integration_for
+
+# Build this from your application's authenticated request context.
+runtime: GuardedRuntime = build_runtime_for_current_task()
+
+integration = integration_for(AgentHost.CLAUDE_CODE, runtime)
+integration.serve_stdio()
+</code></pre>
+<p>See the complete synthetic bootstrap in
+<a href="https://github.com/tommycharade/aai-sec-sdk/blob/main/examples/mcp_gateway.py"><code>examples/mcp_gateway.py</code></a>. It can be copied into
+an application and the host profile changed without changing the security
+runtime.</p>
+<p>The reference bootstrap selects its host profile from <code>AAI_SEC_AGENT_HOST</code>
+(for example <code>codex-cli</code> or <code>github-copilot</code>) and defaults to <code>claude-code</code>.
+This value is audit metadata only; authenticated identity and the effective
+policy still come from the control plane and runtime.</p>
+<p>Equivalent named factories are available when an application wants an
+explicit host dependency: <code>opencode_integration</code>, <code>openhands_integration</code>,
+<code>claude_code_integration</code>, <code>cline_integration</code>, <code>gemini_cli_integration</code>,
+<code>github_copilot_integration</code>, and <code>codex_cli_integration</code>.</p>
+<p>The gateway implements the MCP <code>initialize</code>, <code>ping</code>, <code>tools/list</code>, and
+<code>tools/call</code> methods. A call becomes an <code>ActionProposal</code> and is passed to
+<code>GuardedRuntime.execute</code>; a tool is never invoked directly by the integration.
+Unknown tools, malformed arguments, policy denials, missing approval, and
+runtime failures remain fail-closed.</p>
+<p>Add an optional JSON Schema to each <code>ToolDefinition</code> so the host can render a
+useful tool contract. The runtime validator remains authoritative; the schema
+is a discovery and user-experience contract, not a replacement for validation:</p>
+<pre><code class="language-python">ToolDefinition(
+    name=&quot;read_record&quot;,
+    handler=read_record,
+    validator=validate_read_record,
+    description=&quot;Read one synthetic record.&quot;,
+    input_schema={
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;properties&quot;: {&quot;id&quot;: {&quot;type&quot;: &quot;string&quot;}},
+        &quot;required&quot;: [&quot;id&quot;],
+        &quot;additionalProperties&quot;: False,
+    },
+)
+</code></pre>
+<p>For an HTTP MCP deployment, use the authenticated HTTP server framework of
+your choice and pass each decoded JSON-RPC object to
+<a class="autorefs autorefs-internal" title="handle(message)" href="#agentic_security.integrations.McpGateway.handle"><code>McpGateway.handle</code></a>. Do not
+put credentials or principals in the MCP request. Resolve them at the host
+boundary when constructing the runtime.</p>
+<p>The SDK also includes a framework-neutral WSGI application for a small
+deployment or as a reference boundary:</p>
+<pre><code class="language-python">from agentic_security import AgentHost, McpHttpApplication, RuntimeSessionStore
+
+sessions = RuntimeSessionStore()
+# `session_token` was issued by your authenticated application boundary.
+sessions.register(session_token, runtime, ttl_seconds=900)
+application = McpHttpApplication(sessions, AgentHost.CLAUDE_CODE)
+</code></pre>
+<p>Put this application behind TLS and a production WSGI server. The SDK checks
+POST, bearer authentication, session expiry/revocation, content length, JSON
+shape, and response size; it does not invent IAM identities or terminate TLS.</p>
+<h2 id="host-configuration">Host configuration</h2>
+<p>Each host should be configured to start the application entry point that
+creates the runtime. A typical local MCP configuration is conceptually:</p>
+<pre><code class="language-json">{
+  &quot;mcpServers&quot;: {
+    &quot;agentic-security&quot;: {
+      &quot;command&quot;: &quot;python3&quot;,
+      &quot;args&quot;: [&quot;-m&quot;, &quot;my_app.security_gateway&quot;]
+    }
+  }
+}
+</code></pre>
+<p>The exact filename and setting differ by host. Use the host's current MCP
+configuration documentation for the final location:</p>
+<ul>
+<li><a href="https://opencode.ai/docs/tools">OpenCode tools and MCP</a></li>
+<li><a href="https://docs.openhands.dev/sdk/index">OpenHands SDK and tools</a></li>
+<li><a href="https://code.claude.com/docs/en/hooks">Claude Code hooks</a></li>
+<li><a href="https://docs.cline.bot/customization/hooks">Cline hooks</a></li>
+<li><a href="https://google-gemini.github.io/gemini-cli/docs/extensions/">Gemini CLI extensions</a></li>
+<li><a href="https://docs.github.com/en/copilot/concepts/agents/hooks">GitHub Copilot hooks and MCP</a></li>
+<li><a href="https://learn.chatgpt.com/docs/extend/mcp.md">Codex Model Context Protocol</a></li>
+</ul>
+<h3 id="project-scoped-codex-cli-setup">Project-scoped Codex CLI setup</h3>
+<p>The guided UI uses <code>scripts/onboard_codex.py</code> rather than persisting a bearer
+through <code>codex mcp add --env</code>. Run the generated command from the project being
+secured. The script preserves unrelated TOML and owns only a marked
+<code>agentic-security</code> block:</p>
+<pre><code class="language-bash">python3 /path/to/aai-sec-sdk/scripts/onboard_codex.py \
+  --project-root &quot;$PWD&quot; \
+  --sdk-root /path/to/aai-sec-sdk \
+  --enterprise-control-plane-url https://control.example.test \
+  --deployment-id synthetic-deployment \
+  --agent-id synthetic-codex-agent
+</code></pre>
+<p>The generated <code>.codex/config.toml</code> uses
+<code>env_vars = ["AAI_SEC_AGENT_TOKEN"]</code>. It stores non-secret routing metadata,
+but reads the short-lived bearer from the environment of the Codex process.
+Export the session only in the launching shell, run
+<code>codex mcp get agentic-security --json</code>, and then start <code>codex</code> from that same
+shell. The installer rejects invalid TOML, unmanaged duplicate server entries,
+unsafe identifiers and symlinked configuration rather than overwriting them.</p>
+<p>For Copilot cloud agent, a deployment-specific credential broker must provide
+and renew agent sessions without serializing them into repository MCP
+configuration. Copilot's repository MCP configuration can run local MCP
+servers, but it does not provide an approval prompt before using their tools,
+so the SDK gateway remains deny-by-default and policy-authoritative. The UI
+labels this integration admin-managed until that broker is present.</p>
+<h2 id="live-claude-presence">Live Claude presence</h2>
+<p>The optional control-plane integration can show a Claude Code project as a
+live agent. The MCP entry must provide the control-plane URL and inherit an
+agent token from the launching environment:</p>
+<pre><code class="language-bash">export AAI_SEC_AGENT_TOKEN=&quot;short-lived-agent-token&quot;
+export AAI_SEC_CONTROL_PLANE_URL=&quot;https://control.example.test/api&quot;
+claude
+</code></pre>
+<p>The gateway registers its authenticated agent identity and project root,
+sends bounded heartbeats, and marks itself offline on orderly shutdown or
+heartbeat expiry. The control plane never accepts a principal from MCP JSON;
+the authenticated token identity must match the registration identity. The
+UI shows only live presence records and never displays the heartbeat bearer.</p>
+<h2 id="native-actions-and-complete-coverage">Native actions and complete coverage</h2>
+<p>An MCP gateway governs only tools exposed through the gateway. It does not
+automatically govern a host's built-in shell, filesystem, editor, Git, or
+browser actions. For complete coverage, combine the gateway with the host's
+pre-tool hook/plugin surface or run the entire agent in a sandbox whose
+network, filesystem, process, and credential access are restricted.</p>
+<p>This distinction is especially important for Cursor, Junie, and Aider-style
+workflows where MCP may be available but does not necessarily replace every
+built-in operation. Do not describe an MCP-only deployment as a complete
+security boundary unless all consequential actions are routed through it.</p>
+<h2 id="extending-to-another-host">Extending to another host</h2>
+<p>The host-neutral contract is intentionally small:</p>
+<ol>
+<li>Create the application-owned <code>ExecutionContext</code>.</li>
+<li>Register <code>ToolDefinition</code> objects in a <code>ToolRegistry</code>.</li>
+<li>Construct <code>GuardedRuntime</code> with explicit policy and operational controls.</li>
+<li>Translate the host's tool-call event into an <code>ActionProposal</code>.</li>
+<li>Call <code>runtime.execute(proposal)</code>.</li>
+<li>Translate the typed <code>ExecutionResult</code> back to the host's response format.</li>
+</ol>
+<p>Add a profile to <code>AgentHost</code> and <code>HOST_PROFILES</code> only when the host has a
+stable, tested integration surface. Host adapters must never accept identity,
+policy decisions, approvals, credentials, or isolation evidence from the
+agent payload.</p>
+<h2 id="testing-an-integration">Testing an integration</h2>
+<p>Every adapter should include:</p>
+<ul>
+<li>a <code>tools/list</code> contract test;</li>
+<li>an allowed call that proves the registered handler executes;</li>
+<li>an unknown-tool and malformed-argument test;</li>
+<li>a policy/approval denial test proving the handler has no side effect;</li>
+<li>an identity-injection test proving model fields cannot replace context;</li>
+<li>transport-size and malformed-JSON tests;</li>
+<li>a host smoke test using the host's own MCP or hook runner where available.</li>
+</ul>
+<p>Run the repository gate with <code>make check</code> before publishing an integration.</p>
+
+
+<div class="doc doc-object doc-module">
+
+
+
+<a id="agentic_security.integrations"></a>
+    <div class="doc doc-contents first">
+
+        <p>Host integration primitives for agentic-security SDK deployments.</p>
+<p>The security runtime is intentionally independent of any particular agent
+product.  This module provides the small amount of protocol glue needed to
+connect hosts to that runtime without moving authorization into model output.</p>
+<p>The :class:<code>McpGateway</code> is a dependency-free implementation of the MCP
+<code>tools/list</code> and <code>tools/call</code> surfaces.  It is suitable for stdio or HTTP
+wrappers supplied by an application.  The gateway owns proposal construction;
+the caller owns the :class:<code>~agentic_security.types.ExecutionContext</code> and the
+configured :class:<code>~agentic_security.runtime.GuardedRuntime</code>.</p>
+<p>MCP protects only calls routed through the gateway.  Hosts must use their
+pre-tool hooks, plugins, or a sandbox when their built-in shell or filesystem
+tools also need to be governed.</p>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h2 id="agentic_security.integrations.HOST_PROFILES" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">HOST_PROFILES</span> <span class="o">=</span> <span class="p">{</span><span class="n">AgentHost</span><span class="o">.</span><span class="n">OPENCODE</span><span class="p">:</span> <span class="n">HostProfile</span><span class="p">(</span><span class="n">AgentHost</span><span class="o">.</span><span class="n">OPENCODE</span><span class="p">,</span> <span class="s1">&#39;OpenCode&#39;</span><span class="p">,</span> <span class="n">configuration_file</span><span class="o">=</span><span class="s1">&#39;opencode.json&#39;</span><span class="p">),</span> <span class="n">AgentHost</span><span class="o">.</span><span class="n">OPENHANDS</span><span class="p">:</span> <span class="n">HostProfile</span><span class="p">(</span><span class="n">AgentHost</span><span class="o">.</span><span class="n">OPENHANDS</span><span class="p">,</span> <span class="s1">&#39;OpenHands self-hosted&#39;</span><span class="p">),</span> <span class="n">AgentHost</span><span class="o">.</span><span class="n">CLAUDE_CODE</span><span class="p">:</span> <span class="n">HostProfile</span><span class="p">(</span><span class="n">AgentHost</span><span class="o">.</span><span class="n">CLAUDE_CODE</span><span class="p">,</span> <span class="s1">&#39;Claude Code&#39;</span><span class="p">,</span> <span class="n">supports_pre_tool_hooks</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span> <span class="n">AgentHost</span><span class="o">.</span><span class="n">CLINE</span><span class="p">:</span> <span class="n">HostProfile</span><span class="p">(</span><span class="n">AgentHost</span><span class="o">.</span><span class="n">CLINE</span><span class="p">,</span> <span class="s1">&#39;Cline&#39;</span><span class="p">),</span> <span class="n">AgentHost</span><span class="o">.</span><span class="n">GEMINI_CLI</span><span class="p">:</span> <span class="n">HostProfile</span><span class="p">(</span><span class="n">AgentHost</span><span class="o">.</span><span class="n">GEMINI_CLI</span><span class="p">,</span> <span class="s1">&#39;Gemini CLI&#39;</span><span class="p">),</span> <span class="n">AgentHost</span><span class="o">.</span><span class="n">GITHUB_COPILOT</span><span class="p">:</span> <span class="n">HostProfile</span><span class="p">(</span><span class="n">AgentHost</span><span class="o">.</span><span class="n">GITHUB_COPILOT</span><span class="p">,</span> <span class="s1">&#39;GitHub Copilot&#39;</span><span class="p">),</span> <span class="n">AgentHost</span><span class="o">.</span><span class="n">CODEX_CLI</span><span class="p">:</span> <span class="n">HostProfile</span><span class="p">(</span><span class="n">AgentHost</span><span class="o">.</span><span class="n">CODEX_CLI</span><span class="p">,</span> <span class="s1">&#39;Codex CLI&#39;</span><span class="p">,</span> <span class="n">supports_pre_tool_hooks</span><span class="o">=</span><span class="kc">False</span><span class="p">)}</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-module-attribute"><code>module-attribute</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.integrations.AgentHost" class="doc doc-heading">
+            <code>AgentHost</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.StrEnum">StrEnum</span></code></p>
+
+
+
+        <p>Supported host profiles.</p>
+<p>Profiles are labels used for audit correlation and configuration.  They
+do not grant authority and are never accepted as the authenticated
+principal.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.integrations.HostProfile" class="doc doc-heading">
+            <code>HostProfile</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Integration metadata and configuration guidance for one host.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.integrations.McpGateway" class="doc doc-heading">
+            <code>McpGateway</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Expose a :class:<code>GuardedRuntime</code> as an MCP tool server.</p>
+<p>The implementation intentionally supports the small, stable MCP surface
+needed for tool mediation.  Unknown methods, malformed calls, unknown
+tools, and all runtime failures return structured errors; no host input
+can replace the runtime's identity, policy, approval, or credential
+dependencies.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.McpGateway.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">runtime</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">server_name</span><span class="o">=</span><span class="s1">&#39;agentic-security-gateway&#39;</span><span class="p">,</span> <span class="n">server_version</span><span class="o">=</span><span class="s1">&#39;1.1.0&#39;</span><span class="p">,</span> <span class="n">max_message_bytes</span><span class="o">=</span><span class="mi">1000000</span><span class="p">,</span> <span class="n">max_response_bytes</span><span class="o">=</span><span class="mi">2000000</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a gateway bound to one host-owned runtime and context.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.McpGateway.handle" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">handle</span><span class="p">(</span><span class="n">message</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Handle one JSON-RPC request and return its response.</p>
+<p>Notifications return <code>None</code> as required by JSON-RPC.  Requests are
+never executed until the runtime has constructed and authorized an
+:class:<code>ActionProposal</code> from the call.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.McpGateway.serve_stdio" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">serve_stdio</span><span class="p">(</span><span class="n">input_stream</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_stream</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Serve newline-delimited JSON-RPC over stdio until EOF.</p>
+<p>The stream boundary has a byte limit so an agent cannot make the
+integration process buffer an unbounded request.  Applications that
+need HTTP transport should pass the same parsed objects to
+:meth:<code>handle</code> from their authenticated web server.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.integrations.McpHttpApplication" class="doc doc-heading">
+            <code>McpHttpApplication</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Bounded WSGI application for authenticated MCP JSON-RPC requests.</p>
+<p>TLS termination, reverse-proxy limits, and deployment network policy are
+still responsibilities of the web server. This application enforces POST,
+bearer-session authentication, content-length limits, JSON object input,
+and bounded JSON responses before dispatching to :class:<code>McpGateway</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.McpHttpApplication.__call__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__call__</span><span class="p">(</span><span class="n">environ</span><span class="p">,</span> <span class="n">start_response</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Serve one WSGI request with no framework dependency.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.McpHttpApplication.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">sessions</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">max_body_bytes</span><span class="o">=</span><span class="mi">1000000</span><span class="p">,</span> <span class="n">max_response_bytes</span><span class="o">=</span><span class="mi">2000000</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create an HTTP boundary backed by an application-owned session store.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.McpHttpApplication.handle" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">handle</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">authorization</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Handle one authenticated request without requiring a web framework.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.integrations.RuntimeSession" class="doc doc-heading">
+            <code>RuntimeSession</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Application-authenticated runtime session with an absolute expiry.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.integrations.RuntimeSessionStore" class="doc doc-heading">
+            <code>RuntimeSessionStore</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Bounded in-memory session registry for a single gateway process.</p>
+<p>The application must create a session only after authenticating the
+principal through its own IAM boundary. Session identifiers are bearer
+secrets and must never be accepted from an MCP request body. Multi-process
+deployments should replace this store with a shared authenticated session
+service.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.RuntimeSessionStore.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">max_sessions</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">clock</span><span class="o">=</span><span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a bounded store with an injectable monotonic clock.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.RuntimeSessionStore.reap" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">reap</span><span class="p">()</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Remove expired sessions and stop their runtimes.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.RuntimeSessionStore.register" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">register</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">runtime</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">ttl_seconds</span><span class="o">=</span><span class="mi">3600</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Register an application-authenticated runtime until its expiry.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.RuntimeSessionStore.resolve" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">resolve</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return an unexpired runtime, or fail closed for an unknown session.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.RuntimeSessionStore.revoke" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">revoke</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Revoke a session and activate its runtime emergency stop.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.integrations.HostIntegration" class="doc doc-heading">
+            <code>HostIntegration</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Convenience factory for the supported host profiles.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.HostIntegration.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">runtime</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">server_name</span><span class="o">=</span><span class="s1">&#39;agentic-security-gateway&#39;</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Bind one explicit runtime to one host profile.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.HostIntegration.handle" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">handle</span><span class="p">(</span><span class="n">message</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Forward a protocol message to the host-independent gateway.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.integrations.HostIntegration.serve_stdio" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">serve_stdio</span><span class="p">(</span><span class="n">input_stream</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_stream</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Run this host integration over stdio.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.integrations.IntegrationProtocolError" class="doc doc-heading">
+            <code>IntegrationProtocolError</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="ValueError">ValueError</span></code></p>
+
+
+
+        <p>Raised when a host sends malformed protocol input.</p>
+
+
+
+
+
+
+
+
+
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.integrations.integration_for" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">integration_for</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">runtime</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a plug-and-play integration for a supported host name.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.integrations.opencode_integration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">opencode_integration</span><span class="p">(</span><span class="n">runtime</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create the OpenCode MCP integration.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.integrations.openhands_integration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">openhands_integration</span><span class="p">(</span><span class="n">runtime</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create the OpenHands self-hosted MCP integration.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.integrations.claude_code_integration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">claude_code_integration</span><span class="p">(</span><span class="n">runtime</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create the Claude Code MCP integration.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.integrations.cline_integration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">cline_integration</span><span class="p">(</span><span class="n">runtime</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create the Cline MCP integration.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.integrations.gemini_cli_integration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">gemini_cli_integration</span><span class="p">(</span><span class="n">runtime</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create the Gemini CLI MCP integration.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.integrations.github_copilot_integration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">github_copilot_integration</span><span class="p">(</span><span class="n">runtime</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create the GitHub Copilot CLI/cloud-agent MCP integration.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.integrations.codex_cli_integration" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">codex_cli_integration</span><span class="p">(</span><span class="n">runtime</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create the Codex CLI MCP integration.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1705 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source execution security runtime for agentic AI systems">
+      
+      
+      
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/ui/">
+      
+      
+        <link rel="prev" href="../claude-code/">
+      
+      
+        <link rel="next" href="../enterprise-fleet/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Management UI - Agentic AI Security SDK</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#aai-security-ui" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Agentic AI Security SDK" class="md-header__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agentic AI Security SDK
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Management UI
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Agentic AI Security SDK" class="md-nav__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agentic AI Security SDK
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operational runbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../production-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent integrations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Claude Code example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Management UI
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Management UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#managed-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managed controls
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Managed controls">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#audit-and-response-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit and response boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hosted-trial-onboarding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hosted trial onboarding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local development
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-fleet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise fleet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-editor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-managed-resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed Claude resources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Wider enterprise UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-integration-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise integration design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-user-journeys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise user journeys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-operations-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise operations readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../product-owner-enterprise-claude-rollout-review-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product Owner rollout review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-claude-rollout-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise Claude Code rollout plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../real-claude-code-acceptance-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real Claude Code acceptance evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aws-deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-owned-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code-owned controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end-to-end-example/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End-to-end example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guardrails/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering guardrails
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licensing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../p1-p2-closure-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    P1/P2 closure evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release-evidence-v1.0.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release evidence v1.0.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-25)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-26/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-26)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#managed-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managed controls
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Managed controls">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#audit-and-response-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit and response boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hosted-trial-onboarding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hosted trial onboarding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local development
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="aai-security-ui">AAI Security UI</h1>
+<p><code>aai-sec-ui/</code> is the separate React/TypeScript management console for the
+SDK. It is intended to help an operator connect Claude Code to the SDK and
+manage the SDK's restrictive runtime controls.</p>
+<h2 id="claude-code-integration">Claude Code integration</h2>
+<p>For a step-by-step onboarding procedure, see the <a href="../claude-code/">Claude Code onboarding
+guide</a>. The short version is: configure the hook in
+<code>.claude/settings.json</code>, register the MCP gateway with <code>claude mcp add</code>, start
+Claude from the project root, verify <code>/mcp</code>, and run the synthetic denial and
+approval checks.</p>
+<p>The UI configures both boundaries required for a complete Claude Code setup:</p>
+<ul>
+<li>a <code>PreToolUse</code> hook for Claude's built-in tools such as <code>Bash</code>, <code>Read</code>,
+  <code>Edit</code>, and <code>Write</code>; and</li>
+<li>an MCP gateway command for tools whose execution, credentials, idempotency,
+  approvals, or reconciliation must be owned by the SDK.</li>
+</ul>
+<p>The hook and MCP entries are complementary. An MCP server cannot govern
+Claude's native tools, and a hook does not provide the SDK's full execution
+runtime for application side effects.</p>
+<p>The global search control is also an entity-aware command palette: press
+<strong>⌘K</strong> on macOS or <strong>Ctrl+K</strong> on other platforms to open it, then search for an
+agent, group, policy, deployment, or destination such as Integrations. Results
+show the relevant host, policy, environment, or group context and are bounded
+to keep the palette fast for large fleets. This is intended as the fastest route
+for operators who manage several workspaces or return to a known task.</p>
+<p>The <strong>Integrations</strong> page provides guided activation for Claude Code and Codex
+CLI, plus an explicitly admin-managed GitHub Copilot Agent profile. Select a
+host to see its enrolled count, enforcement surfaces, deployment/group scope
+and verification contract. Claude Code and Codex use a short-lived enrollment
+session; the operator chooses the deployment, agent identity, project root and
+policy group, prepares enrollment, copies the session separately, and runs a
+secret-free generated command. That command prompts for the session without
+putting it in shell history. The result is backed by the
+control plane rather than inferred from a copied file: it checks registration,
+heartbeat, policy assignment and emergency-stop state. Host configuration is
+project/repository-scoped by default; a local config file is not treated as
+enterprise enrollment until the authenticated agent heartbeat and policy
+assignment are verified. The Claude command exports the exchanged short-lived
+session bearer only for the onboarding shell and its child Claude/MCP
+processes; it is not written to <code>.claude/settings.json</code> or <code>.mcp.json</code>. Codex
+uses <code>scripts/onboard_codex.py</code> to write a project-scoped <code>.codex/config.toml</code>
+whose <code>env_vars</code> entry forwards <code>AAI_SEC_AGENT_TOKEN</code> by name rather than
+serializing its value. Both installers preserve unrelated project
+configuration. After successful verification the UI offers <strong>View agent</strong>,
+taking the operator directly to the live agent inspector.</p>
+<p>The Copilot profile does not generate a misleading ready-to-paste bearer
+configuration. Guided activation remains unavailable until the deployment has
+a credential broker that can renew short-lived sessions across cloud-agent
+restarts; use the documented deployment adapter for controlled pilots.</p>
+<h2 id="managed-controls">Managed controls</h2>
+<p>The console keeps the operator's mental model explicit:</p>
+<ul>
+<li><strong>Enterprise fleet</strong> is the home for groups, policies, agent membership,
+  connected Claude agents, and health. Select a group to inspect its policy,
+  healthy/attention counts, monitored agents, and membership actions.</li>
+<li><strong>Deployments &amp; rollout</strong> is the home for organizations, projects, SDK
+  deployment registration, templates, canaries, rollback, drift, availability
+  SLOs, alerts, and redacted session inventory. Group controls are intentionally
+  not duplicated there. The page opens on a deployment-first command view that
+  derives readiness from enrolled-agent health, desired configuration, drift,
+  unacknowledged alerts, and emergency-stop state. Its attention queue points
+  to the first deployment requiring action, while each inventory row presents
+  coverage, desired configuration, rollout progress and health before exposing
+  destructive controls in a secondary menu. <strong>Rollouts &amp; health</strong> contains SLO,
+  drift, alerts and session evidence. It opens with a derived operational
+  posture, a prioritized intervention queue, and a deployment health matrix;
+  agent/session inventories and the redacted compliance projection remain
+  available under <strong>Evidence &amp; diagnostics</strong> without competing with live
+  blockers. <strong>Templates &amp; setup</strong> contains configuration templates and
+  deployment/project registration. These modes keep the frequent deployment
+  decision separate from infrequent setup and diagnostic work.</li>
+<li><strong>Skills &amp; MCP</strong> is the reviewed resource catalog. It shows each resource's
+  version, transport or content identity, enabled state, and current policy
+  reach including the number of affected agents. Search narrows the catalog
+  without hiding the registration controls; selecting a resource in a policy
+  remains the explicit deployment gate.</li>
+</ul>
+<p>Both surfaces are backed by the authenticated <code>/api/enterprise/*</code> contracts
+described in <a href="../enterprise-fleet/">Enterprise fleet</a>. Fleet collections are
+cursor-paginated by the API and the browser follows continuation pages
+automatically for larger tenants. Session tokens and credential material are
+never displayed.</p>
+<p>Mutating group controls and policy saves show an explicit pending state and
+disable competing actions until the control-plane request completes. Success
+and failure remain visible through the console status banners; a disabled
+control is not treated as evidence that an operation succeeded.</p>
+<p>On narrow screens, dense fleet tables preserve their complete column set inside
+a horizontally scrollable region and display an explicit swipe hint. This
+keeps policy, heartbeat, health, and action columns available without shrinking
+critical text below an operable size.</p>
+<p>The top bar reports control-plane freshness from successful reads: <strong>Syncing</strong>
+appears during initial load, <strong>Live</strong> after a successful dashboard or fleet
+read, and <strong>Stale</strong> when a later poll fails while the last known snapshot is
+retained. The overview's update label is derived from the snapshot timestamp;
+it does not claim that data is current when the API has not reported it. A
+healthy-looking snapshot must therefore be read together with its freshness
+state.</p>
+<p>The authenticated top bar keeps <strong>Connect agent</strong> available from every page.
+Overview also surfaces one contextual next action: give unassigned agents a
+policy, investigate stale health, or review held high-risk actions. This keeps
+the first useful action visible after onboarding instead of requiring the
+operator to infer which page to open next.</p>
+<h3 id="audit-and-response-boundary">Audit and response boundary</h3>
+<p>The Audit trail is an evidence view, not an approval engine. It presents decision
+counts and supports searching by agent, tool, resource, or reason plus filtering
+by allowed, approval-required, or denied decisions. The UI deliberately displays
+redacted metadata only; credentials, tool arguments, and sensitive content are
+not rendered. The approval count is a control-plane signal until an approval
+provider with an explicit, enforceable approve/deny API is configured. Operators
+must not treat the count as proof that an action can be approved from this page.</p>
+<p>Trial tenants also receive a server-derived status banner showing the remaining
+trial time and safe-default readiness. Before the first enrollment it links
+directly to onboarding; once an agent is enrolled it reports the enrolled-agent
+count and links to the agent directory instead. The browser never calculates
+entitlement or accepts trial metadata from user input; it renders the bounded summary returned by
+<code>GET /api/enterprise/tenant</code>.</p>
+<p>Template creation includes typed governance controls for deny-by-default policy,
+approval provider, tool allow-list, action budget, credential broker mode,
+high-risk isolation, audit provider, and telemetry. “Apply to template JSON”
+generates the corresponding configuration sections for review. The advanced JSON
+editor remains available for provider-specific fields, but submission is still
+validated by the backend and does not make the browser an authority boundary.</p>
+<p>The UI's Runtime settings page maps to the SDK's explicit configuration
+surfaces:</p>
+<ul>
+<li>local, OPA, or Cedar policy provider;</li>
+<li>in-memory or HTTP approvals;</li>
+<li>memory, JSONL, replicated, or OpenTelemetry audit adapter;</li>
+<li>action, concurrency, fan-out, cost, delegation, rate, and timeout budgets;</li>
+<li>idempotency and approval TTLs;</li>
+<li>credential and high-risk isolation requirements; and</li>
+<li>sensitive-data redaction and optional content capture.</li>
+</ul>
+<p>Primary console destinations are hash-addressable (for example, <code>#fleet</code> or
+<code>#policy</code>) so an operator can bookmark or share a working view without losing
+the current workspace context. Entity searches preserve the selected object in
+the hash too, such as <code>#agents/agent/&lt;deployment-id&gt;%3A&lt;agent-id&gt;</code>; reloading
+that link opens the same inspector or filtered deployment view. Browser
+back/forward navigation follows those destination changes. The trial and
+activation banner intentionally appears on Overview only; operational pages
+keep their vertical space for the task being performed.</p>
+<p>Executable tool handlers, argument validators, resource extractors, and
+credential implementations remain application-owned code. The UI manages
+allow-lists and runtime controls for registered tools; it deliberately does
+not create dynamic function lookups or accept executable policy from model
+output.</p>
+<p>The browser submits a complete typed configuration to an authenticated
+control-plane API. It must not connect directly to the Python runtime or be
+treated as an authority boundary. The API must authenticate the operator,
+authorize configuration changes, validate restrictive limits, redact data,
+audit writes, activate changes through a live runtime authority, and expose
+bounded rollback history. On startup the adapter must reconcile persisted
+configuration and emergency-stop state into the live authority before serving
+requests; a failed reconciliation must prevent the service from starting.</p>
+<p>The policy editor distinguishes an unsaved draft from an applied policy. New
+policies show their actual draft name and identifier, while edits show the
+current version and the next-version operation. Its rollout-impact panel
+reports only the groups and deduplicated agents currently assigned to that
+policy; workspace-wide decision counts are not presented as policy-specific
+metrics when the API cannot attribute them. Dashboard decision cards likewise
+show the source-backed decision total, denied total, and pending approvals
+instead of an inferred or hard-coded allow percentage.</p>
+<p>Claude presence is separate from configuration: the MCP process must be
+started with <code>AAI_SEC_CONTROL_PLANE_URL</code> and an agent token, then it registers
+and heartbeats through the authenticated agent endpoints. The dashboard shows
+only those live registrations; writing <code>.mcp.json</code> alone does not create a
+presence record.</p>
+<h2 id="hosted-trial-onboarding">Hosted trial onboarding</h2>
+<p>The hosted <strong>Start free trial</strong> flow opens Cognito's signup endpoint directly,
+so a new visitor does not have to find the signup link from the sign-in page.
+The visitor signs up and confirms their email; the Cognito post-confirmation trigger then
+creates a new isolated trial tenant, a restrictive starter policy and template,
+and a server-owned user-to-tenant mapping. The user is added to the operator
+group only for coarse RBAC. Every API request still resolves the tenant from
+the verified Cognito subject mapping, so a browser cannot choose or change its
+tenant by editing a request body. Trial defaults deny unknown tools, bound
+runtime actions, require approval for <code>git push</code>, redact sensitive data and do
+not capture tool content.</p>
+<p>The first authenticated fleet request tolerates the short gap between Cognito
+confirmation and post-confirmation tenant provisioning. The browser retries
+only the expected missing-entitlement response, then shows a provisioning
+message if the server still needs time; other authorization failures remain
+fail-closed and are surfaced as errors.</p>
+<p>The trial CTA is a real onboarding path only in the hosted deployment. Local
+development can use mock mode; it must not be treated as evidence of Cognito,
+tenant provisioning, or production authorization.</p>
+<h2 id="local-development">Local development</h2>
+<pre><code class="language-bash">cd aai-sec-ui
+cp .env.example .env
+npm install
+npm run dev
+</code></pre>
+<p>Mock mode is enabled by default. To exercise HTTP mode against the dependency-
+free reference adapter, run this from the SDK repository in another terminal:</p>
+<pre><code class="language-bash">AAI_SEC_UI_TOKEN=synthetic-enterprise-ui-token-1234 \
+AAI_SEC_AGENT_TOKEN=synthetic-enterprise-agent-token-1234 \
+AAI_SEC_UI_PORT=8001 \
+  python examples/ui_control_plane.py
+</code></pre>
+<p>Set <code>VITE_USE_MOCKS=false</code>, <code>VITE_API_BASE_URL=http://localhost:8001/api</code>, and
+the same <code>VITE_API_TOKEN</code> in the UI <code>.env</code>. Restart Vite after changing
+<code>VITE_*</code> values; they are read at startup.</p>
+<p>To run the local UI against the deployed AWS control plane, use the checked-in
+production configuration and the AWS development mode instead of plain
+<code>npm run dev</code>:</p>
+<pre><code class="language-bash">cd aai-sec-ui
+npm run dev:aws -- --port 5174
+</code></pre>
+<p>This loads <code>.env.production</code>, including the Cognito domain, client ID, and API
+URL. The UI automatically uses the current localhost origin as the Cognito
+callback during local development; the hosted deployment uses its CloudFront
+callback URL. If a Vite process is already using port 5174, stop it first
+and restart it with this command; changing environment variables does not
+update an already-running Vite process. The browser should then be opened at
+<code>http://localhost:5174/</code>, and the Cognito callback is registered for that URL.
+The adapter persists validated configuration and exposes the emergency stop,
+but it is localhost-only and does not by itself construct an application
+runtime. Production deployments must add authenticated operator identity,
+authorization, durable audit, and runtime reconciliation. Never bundle a
+durable administrator bearer token in a production <code>VITE_*</code> variable because
+Vite embeds those values in browser assets; use a short-lived authenticated
+operator session instead.</p>
+<p>For a production browser deployment, prefer the explicit BFF/session mode:</p>
+<pre><code class="language-dotenv">VITE_USE_MOCKS=false
+VITE_API_BASE_URL=/api
+VITE_API_AUTH_MODE=cookie
+</code></pre>
+<p>The hosting layer must establish a short-lived, HttpOnly, Secure, SameSite
+operator session and translate it to the authenticated control-plane request.
+The UI sends <code>credentials: include</code> and does not send or embed a bearer token
+in this mode. The BFF remains responsible for CSRF protection, OIDC claims,
+RBAC, TLS, rate limits, and session revocation.</p>
+<p>On <strong>Policy</strong>, create a tenant-scoped configuration policy using the UI-first
+typed editor. It is organized into identity and scope, tool permissions,
+Claude native-tool controls, command rules, approvals, resource limits,
+credentials, isolation, data capture/redaction, and review/versioning. The
+effective-policy preview shows allowed, denied and approval-required actions,
+limits, requirements and affected groups/agents before saving. Expert users can
+open advanced JSON, but it is schema-validated and cannot bypass immutable SDK
+safeguards. On <strong>Enterprise fleet</strong>, the posture strip first shows total groups,
+enrolled agents, healthy heartbeats, and unassigned agents. Create an agent
+group, select its policy,
+inspect enrolled Claude Code agents, and use <strong>Add agent</strong> or <strong>Remove agent</strong>
+to manage group membership. Group membership is control-plane metadata; the
+deployment runtime remains the authority that enforces the selected policy.
+The <strong>Agents</strong> page is the cross-enterprise operations directory: it provides
+health metrics, search across agent/deployment/project/group/policy identity,
+a healthy/attention filter, heartbeat freshness, and a focused inspector for
+verification and emergency-stop actions. It shows each enrolled host's central group/policy
+coverage, including an explicit fail-closed warning for conflicting group
+assignments or no assigned policy. The fleet opens on a clean groups index: the
+operator selects <strong>View group</strong> to enter a focused detail view with health
+metrics, policy assignment, membership changes and emergency-stop controls,
+then uses <strong>Back to groups</strong> to return to the index. Group creation is kept
+behind a single <strong>Create group</strong> action so the primary monitoring workflow is
+not competing with setup forms.</p>
+<p>Group detail includes the deployment availability SLO returned by the control
+plane when samples exist, plus aggregate SDK telemetry when enrolled runtimes
+report it: action totals, allow/deny/approval outcomes, cost units, and
+average/max guarded-action latency. The <strong>Agents</strong> inspector shows the same
+bounded metrics for one host and clearly labels heartbeat-only agents as not
+reporting performance data. CPU, token-use, raw tool content, and tool names
+are not part of this contract and are never represented as guessed values.</p>
+<p>If a live fleet request fails, the fleet-dependent screens show an explicit
+recovery state with the error context, access guidance, and a <strong>Retry
+connection</strong> action. The UI never replaces missing enterprise state with demo
+fixtures, so operators can distinguish an unavailable control plane from an
+empty fleet.</p>
+<p>Fleet loading uses a page-shaped skeleton rather than an empty screen while a
+retry or initial sync is in progress. Selecting a group also updates the URL
+to <code>#fleet/group/{group-id}</code>, so operators can bookmark, share, and refresh a
+focused group view without losing context.</p>
+<p>Every configurable field has a question-mark help control. Hover over or focus
+the icon to see the setting's purpose, security effect and any important
+operational constraint. The same help pattern is used across Policy, Runtime
+settings, Integrations, templates and fleet registration forms.</p>
+<p>Host onboarding never invents a deployment boundary. In a live workspace with
+no registered deployment, the enrollment action is disabled and the operator
+is directed to <strong>Deployments &amp; rollout</strong> first. The local deployment fallback
+is reserved for simulation mode.</p>
+<p>The first-run host flow ends at central enrollment and verification. Claude
+Code hook fields, generated <code>settings.json</code>, and native-tool rules are grouped
+under <strong>Advanced Claude Code settings</strong> so they remain available without
+competing with the primary connection path.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

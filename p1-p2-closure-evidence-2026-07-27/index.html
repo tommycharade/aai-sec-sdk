@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/deployment-evidence/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/p1-p2-closure-evidence-2026-07-27/">
       
       
-        <link rel="prev" href="../releasing/">
+        <link rel="prev" href="../deployment-evidence/">
       
       
-        <link rel="next" href="../p1-p2-closure-evidence-2026-07-27/">
+        <link rel="next" href="../release-evidence-v1.0.1/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Deployment evidence - Agentic AI Security SDK</title>
+        <title>P1/P2 closure evidence - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#deployment-evidence" class="md-skip">
+        <a href="#p1p2-closure-evidence-2026-07-27" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Deployment evidence
+              P1/P2 closure evidence
             
           </span>
         </div>
@@ -1015,6 +1015,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -1034,7 +1061,7 @@
   <span class="md-ellipsis">
     
   
-    Deployment evidence
+    P1/P2 closure evidence
   
 
     
@@ -1052,7 +1079,7 @@
   <span class="md-ellipsis">
     
   
-    Deployment evidence
+    P1/P2 closure evidence
   
 
     
@@ -1078,10 +1105,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
+  <a href="#findings-and-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Required evidence
+        Findings and evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adoption-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adoption decision
       
     </span>
   </a>
@@ -1092,33 +1141,6 @@
   
 </nav>
       
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../p1-p2-closure-evidence-2026-07-27/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    P1/P2 closure evidence
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -1231,10 +1253,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
+  <a href="#findings-and-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Required evidence
+        Findings and evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adoption-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adoption decision
       
     </span>
   </a>
@@ -1261,33 +1305,148 @@
   
 
 
-<h1 id="deployment-evidence">Deployment evidence</h1>
-<p>The open-source SDK can prove its local contracts and release integrity. It
-cannot prove properties of infrastructure that the adopter has not supplied.
-Consequential production use therefore requires an adopter-owned evidence
-pack for every deployment.</p>
-<h2 id="required-evidence">Required evidence</h2>
-<ul>
-<li>A multi-process idempotency adapter test demonstrating atomic claim,
-  conflict detection, terminal persistence, restart recovery, and reconciliation
-  after a timeout or store outage.</li>
-<li>Immutable or WORM audit retention, access controls, replication, and a test
-  showing that an operator or application process cannot rewrite accepted
-  events.</li>
-<li>Provider-side IAM evidence showing that issued credentials cannot exceed the
-  exact tool, principal, tenant, resource, and operation scope.</li>
-<li>A genuine container, microVM, or WASM isolation implementation, including
-  denial tests for network, filesystem, identity, and sandbox-escape attempts.</li>
-<li>Remote policy and approval adapter contract tests, including provider outage,
-  timeout, stale approval, and fail-closed behavior.</li>
-<li>Operational evidence for worker saturation, audit/export failure,
-  reconciliation backlog, emergency stop, and key rotation.</li>
-</ul>
-<p>The repository's in-memory stores, callback isolation verifier, local audit
-sinks, and Python handlers are reference implementations for tests and pilots;
-they are not deployment evidence for high-impact actions. Keep the evidence
-with the deployed commit, adapter versions, configuration, and release
-verification record.</p>
+<h1 id="p1p2-closure-evidence-2026-07-27">P1/P2 closure evidence — 2026-07-27</h1>
+<p>This record is the current evidence audit for the critical adopter findings.
+It distinguishes source and pilot evidence from controls that require facts
+from a particular production deployment.</p>
+<h2 id="findings-and-evidence">Findings and evidence</h2>
+<table>
+<thead>
+<tr>
+<th>Finding</th>
+<th>Current result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Published checksum bundle</td>
+<td>Resolved for public <code>v1.0.1</code></td>
+<td><code>docs/release-evidence-v1.0.1.md</code>; independent checksum/SBOM verification passed.</td>
+</tr>
+<tr>
+<td>Tag-bound provenance</td>
+<td>Resolved for public <code>v1.0.1</code></td>
+<td><code>docs/release-evidence-v1.0.1.md</code>; both GitHub attestations passed against <code>refs/tags/v1.0.1</code>.</td>
+</tr>
+<tr>
+<td>Uncertain idempotency persistence</td>
+<td>Resolved in source</td>
+<td>Runtime timeout, cancellation, and handler-failure tests; <code>DynamoDbIdempotencyStore</code> returns typed terminal state and live smoke exercises it.</td>
+</tr>
+<tr>
+<td>Stale mutation figures and timeout</td>
+<td>Resolved</td>
+<td>Release workflow and current review evidence use the exact release bundle and bounded 600-second run.</td>
+</tr>
+<tr>
+<td>Exact published bundle verification</td>
+<td>Resolved</td>
+<td>Tag-only release workflow downloads and verifies the published GitHub Release before the workflow succeeds.</td>
+</tr>
+<tr>
+<td>Mutable authorization facts</td>
+<td>Resolved</td>
+<td>Recursive argument freezing and defensive handler copies are covered by adversarial component tests.</td>
+</tr>
+<tr>
+<td>Durable idempotency deployment evidence</td>
+<td>Pilot evidence supplied</td>
+<td>Live AWS smoke runs two independent processes against DynamoDB, tests restart replay, terminal persistence, and runtime replay.</td>
+</tr>
+<tr>
+<td>Immutable audit deployment evidence</td>
+<td>Pilot evidence supplied</td>
+<td>S3 Object Lock compliance retention, versioning, and retained-version deletion refusal pass live. Audit records use unique keys and retained versions.</td>
+</tr>
+<tr>
+<td>Provider IAM enforcement</td>
+<td>Reference pilot evidence supplied</td>
+<td>Live IAM simulation proves the synthetic scoped role allows its tenant prefix and implicitly denies a sibling prefix. Real production tool roles still require their own simulations.</td>
+</tr>
+<tr>
+<td>Remote policy and approvals</td>
+<td>Pilot evidence supplied</td>
+<td>Live agent enrollment, policy assignment, exact approval consumption, replay refusal, and emergency-stop enforcement/recovery pass.</td>
+</tr>
+<tr>
+<td>Agent readiness verification</td>
+<td>Resolved and live-tested</td>
+<td>The deployed <code>/enterprise/agents/{deployment}/{agent}/verify</code> endpoint now requires registration, a fresh connected heartbeat, a valid group/policy assignment, and an inactive emergency stop. The live smoke test proves unassigned and stopped agents are rejected and assigned/recovered agents are accepted.</td>
+</tr>
+<tr>
+<td>Operational alert delivery and recovery</td>
+<td>Pilot evidence supplied</td>
+<td>CloudWatch alarms publish to SNS; synthetic alert delivery to encrypted SQS and redrive of an unacknowledged alert to its DLQ are live-tested. PagerDuty/SIEM ownership remains deployment-specific.</td>
+</tr>
+<tr>
+<td>Cross-region audit recovery</td>
+<td>Pilot evidence supplied</td>
+<td>A separately deployed <code>eu-west-1</code> Object-Lock replica receives S3 CRR objects with <code>ReplicationStatus=REPLICA</code>, preserved metadata, and compliance retention.</td>
+</tr>
+<tr>
+<td>Container isolation boundary</td>
+<td>Pilot evidence supplied</td>
+<td><code>DockerSandboxToolHandler</code> now rejects mutable image tags and <code>scripts/test_docker_sandbox.py</code> ran against a sha256-pinned local worker image, observing UID <code>65532</code>, blocked network access, a read-only root filesystem, dropped capabilities, <code>no_new_privs</code>, failed privilege escalation, blocked mount, and blocked process-memory probes. Docker daemon/host hardening, escape tests beyond these probes, and microVM/WASM evidence remain deployment-specific.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="verification-commands">Verification commands</h2>
+<p>Repository quality gates:</p>
+<pre><code class="language-bash">make check
+make package-check
+make security-check
+cd aai-sec-ui &amp;&amp; npm run check
+</code></pre>
+<p>AWS pilot smoke:</p>
+<pre><code class="language-bash">AWS_PROFILE=p1 AWS_REGION=eu-west-2 python3 scripts/test_aws_control_plane.py \
+  --api-url https://lwg33pxwk8.execute-api.eu-west-2.amazonaws.com \
+  --function-name AaiSecControlPlane-ControlPlaneHandler9D89D4EC-2Mr58QONVYaM \
+  --control-table AaiSecControlPlane-ControlPlaneTable34018A4D-1JYK4I7DQWA3D \
+  --idempotency-table AaiSecControlPlane-IdempotencyTable22A5A209-1LXF0SYF83EEH \
+  --audit-bucket aaiseccontrolplane-auditbucketb01e0ae8-wgrcz2izyuj2 \
+  --alerts-topic-arn arn:aws:sns:eu-west-2:396510133537:AaiSecControlPlane-SecurityAlertsF84E29CE-8113JplvkH7o \
+  --alerts-queue-arn arn:aws:sqs:eu-west-2:396510133537:AaiSecControlPlane-SecurityAlertsQueue4468E46B-ILuFo6zT2RVg \
+  --region eu-west-2 --profile p1
+</code></pre>
+<p>Observed result:</p>
+<pre><code class="language-text">AWS control-plane smoke passed: auth, enrollment, heartbeat, policy, agent verification, approval replay, emergency-stop enforcement/recovery, and multi-process/runtime-connected durable idempotency, and WORM audit retention, and SNS/SQS alert delivery
+</code></pre>
+<p>Provider-role scope check:</p>
+<pre><code class="language-bash">AWS_PROFILE=p1 AWS_REGION=eu-west-2 python3 scripts/test_aws_iam_scope.py \
+  --role-arn arn:aws:iam::396510133537:role/AaiSecControlPlane-ScopedToolRole3191AFF5-UUZQ44BWHrrj \
+  --action s3:GetObject \
+  --allowed-resource arn:aws:s3:::aaiseccontrolplane-auditbucketb01e0ae8-wgrcz2izyuj2/tenant=tenant-demo/agent-claude-local/object.json \
+  --denied-resource arn:aws:s3:::aaiseccontrolplane-auditbucketb01e0ae8-wgrcz2izyuj2/tenant=tenant-demo/other-agent/object.json \
+  --region eu-west-2 --profile p1
+</code></pre>
+<p>Observed result:</p>
+<pre><code class="language-text">AWS IAM scope passed: s3:GetObject allowed for the configured resource and denied for the sibling resource
+</code></pre>
+<p>Alert recovery check:</p>
+<pre><code class="language-bash">AWS_PROFILE=p1 AWS_REGION=eu-west-2 python3 scripts/test_aws_alert_recovery.py \
+  --queue-url https://sqs.eu-west-2.amazonaws.com/396510133537/AaiSecControlPlane-SecurityAlertsQueue4468E46B-ILuFo6zT2RVg \
+  --dlq-url https://sqs.eu-west-2.amazonaws.com/396510133537/AaiSecControlPlane-SecurityAlertsDlq67EAFD64-UYpb76yEQ4Bt \
+  --region eu-west-2 --profile p1
+</code></pre>
+<p>Observed result:</p>
+<pre><code class="language-text">AWS alert recovery passed: unacknowledged synthetic alert reached the SQS DLQ
+</code></pre>
+<p>Docker isolation probe:</p>
+<pre><code class="language-bash">docker build --tag aai-sec-isolation-probe:2026-07-27 tests/fixtures/docker-worker
+image_ref=&quot;$(docker image inspect aai-sec-isolation-probe:2026-07-27 --format '{{.Id}}')&quot;
+python3 scripts/test_docker_sandbox.py --image &quot;$image_ref&quot;
+</code></pre>
+<p>Observed result:</p>
+<pre><code class="language-text">Docker isolation passed: {'capabilities_dropped': True, 'filesystem_read_only': True, 'mount_blocked': True, 'network_blocked': True, 'no_new_privileges': True, 'process_memory_blocked': True, 'privilege_escalation_blocked': True, 'uid': 65532}
+</code></pre>
+<h2 id="adoption-decision">Adoption decision</h2>
+<p>The original source-level P1/P2 findings are resolved and the AWS pilot now
+has retained evidence for the durable reference paths above. The overall
+high-impact production gate remains conditional until the actual deployment
+retains: real provider/tool IAM simulations, hostile-code escape or microVM
+evidence, and alert ownership and recovery procedures. These cannot be
+truthfully inferred from a generic SDK or synthetic pilot role.</p>
 
 
 

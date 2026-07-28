@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/deployment-evidence/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/aws-deployment/">
       
       
-        <link rel="prev" href="../releasing/">
+        <link rel="prev" href="../real-claude-code-acceptance-evidence-2026-07-27/">
       
       
-        <link rel="next" href="../p1-p2-closure-evidence-2026-07-27/">
+        <link rel="next" href="../code-owned-controls/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Deployment evidence - Agentic AI Security SDK</title>
+        <title>AWS deployment - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#deployment-evidence" class="md-skip">
+        <a href="#aws-hosted-control-plane" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Deployment evidence
+              AWS deployment
             
           </span>
         </div>
@@ -799,10 +799,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../aws-deployment/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS deployment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -818,6 +845,98 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#deployed-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployed environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#first-sign-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First sign-in
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Verification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cross-region-audit-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-region audit recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#important-production-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Important production limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1015,37 +1134,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Deployment evidence
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
         
   
   
@@ -1061,37 +1153,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required evidence
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1231,10 +1292,71 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
+  <a href="#deployed-environment" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Required evidence
+        Deployed environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#first-sign-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First sign-in
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Verification">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cross-region-audit-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-region audit recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#important-production-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Important production limitations
       
     </span>
   </a>
@@ -1261,33 +1383,262 @@
   
 
 
-<h1 id="deployment-evidence">Deployment evidence</h1>
-<p>The open-source SDK can prove its local contracts and release integrity. It
-cannot prove properties of infrastructure that the adopter has not supplied.
-Consequential production use therefore requires an adopter-owned evidence
-pack for every deployment.</p>
-<h2 id="required-evidence">Required evidence</h2>
+<h1 id="aws-hosted-control-plane">AWS hosted control plane</h1>
+<p>This repository contains a deployable serverless proof of the enterprise
+control-plane path in <code>infra/aws-control-plane</code>. It is designed for the
+current hosted UI workflow: authenticate an operator with Cognito, inspect an
+enrolled agent, create policies and groups, assign an agent, resolve its
+effective policy, verify its enrollment, and activate an emergency stop.</p>
+<h2 id="deployed-environment">Deployed environment</h2>
+<p>The current development deployment uses AWS account <code>396510133537</code>, profile
+<code>p1</code>, and region <code>eu-west-2</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Resource</th>
+<th>Current value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hosted UI</td>
+<td><code>https://d2ir54klde64bd.cloudfront.net</code></td>
+</tr>
+<tr>
+<td>API</td>
+<td><code>https://lwg33pxwk8.execute-api.eu-west-2.amazonaws.com</code></td>
+</tr>
+<tr>
+<td>Cognito domain</td>
+<td><code>https://aai-sec-10133537.auth.eu-west-2.amazoncognito.com</code></td>
+</tr>
+<tr>
+<td>Stack</td>
+<td><code>AaiSecControlPlane</code></td>
+</tr>
+</tbody>
+</table>
+<p>Do not commit generated environment files or credentials. The current
+bootstrap operator is disposable and must be replaced before sharing this
+deployment.</p>
+<h2 id="deploy">Deploy</h2>
+<pre><code class="language-bash">cd infra/aws-control-plane
+npm install
+AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
+</code></pre>
+<p>The stack creates:</p>
 <ul>
-<li>A multi-process idempotency adapter test demonstrating atomic claim,
-  conflict detection, terminal persistence, restart recovery, and reconciliation
-  after a timeout or store outage.</li>
-<li>Immutable or WORM audit retention, access controls, replication, and a test
-  showing that an operator or application process cannot rewrite accepted
-  events.</li>
-<li>Provider-side IAM evidence showing that issued credentials cannot exceed the
-  exact tool, principal, tenant, resource, and operation scope.</li>
-<li>A genuine container, microVM, or WASM isolation implementation, including
-  denial tests for network, filesystem, identity, and sandbox-escape attempts.</li>
-<li>Remote policy and approval adapter contract tests, including provider outage,
-  timeout, stale approval, and fail-closed behavior.</li>
-<li>Operational evidence for worker saturation, audit/export failure,
-  reconciliation backlog, emergency stop, and key rotation.</li>
+<li>Cognito User Pool Managed Login with authorization-code OAuth;</li>
+<li>Cognito self-signup with email confirmation and a post-confirmation trigger
+  that provisions an isolated 14-day trial tenant with a safe default policy;</li>
+<li>Cognito <code>platform-admin</code> and <code>security-operator</code> groups for mutation RBAC;</li>
+<li>API Gateway HTTP API with Cognito JWT authorizer;</li>
+<li>Lambda control-plane handler;</li>
+<li>on-demand DynamoDB control and presence tables;</li>
+<li>a retained, point-in-time-recoverable DynamoDB idempotency table with TTL;</li>
+<li>an S3 Object Lock audit bucket;</li>
+<li>an SNS security-alert topic wired to Lambda and idempotency CloudWatch
+  alarms (subscribe the enterprise SOC endpoint before production);</li>
+<li>a private S3 UI bucket behind CloudFront.</li>
 </ul>
-<p>The repository's in-memory stores, callback isolation verifier, local audit
-sinks, and Python handlers are reference implementations for tests and pilots;
-they are not deployment evidence for high-impact actions. Keep the evidence
-with the deployed commit, adapter versions, configuration, and release
-verification record.</p>
+<p>The control plane also exposes a separate agent boundary. An operator creates a
+short-lived bootstrap secret for a registered agent; the agent exchanges it
+once at <code>POST /agent/enroll</code> and receives a 15-minute bearer session. The
+session is bound to the deployment and agent identifiers and can call only
+heartbeat, effective-policy, and exact approval-consumption routes. Bootstrap
+secrets are hashed at rest and consumed conditionally, so the control plane
+does not accept a tenant or agent identity from an enrollment request body.
+During authenticated heartbeats, the control plane rotates the bearer when it
+is within five minutes of expiry and invalidates the previous bearer. The
+reference gateway adopts the replacement in memory, allowing a healthy process
+to remain enrolled without writing credentials into Claude Code or Codex CLI
+configuration. Missed heartbeats, failed renewal, and emergency stops remain
+fail-closed.</p>
+<p>The stack also creates a synthetic least-privilege role for scope
+verification. In the current <code>p1</code> deployment, IAM simulation allowed
+<code>s3:GetObject</code> only below the <code>tenant-demo/agent-claude-local/</code> prefix and
+returned <code>implicitDeny</code> for the sibling agent prefix. Replace this role and
+repeat the simulation for every real provider integration; it is intentionally
+not a universal agent role.</p>
+<p>The runtime can use the exported idempotency table with
+<code>agentic_security.DynamoDbIdempotencyStore</code>. Its conditional claim and
+terminal-write contract is covered by local fake-table tests and a live AWS
+test across a new adapter instance. The table is not a substitute for
+provider-side IAM: applications must still scope any cloud credentials used by
+their tools to the exact operation and resource.</p>
+<p>For AWS-backed tools, <code>AwsStsCredentialBroker</code> adds a second enforcement
+layer. A trusted deployment policy builder returns an <code>AwsScopePolicy</code> bound
+to the live tool and resource IDs; the adapter refuses a mismatch and calls
+STS with a short-lived inline session policy. AWS intersects that policy with
+the role policy, so neither model output nor the SDK can expand the role's
+permissions. The role's identity policy and AWS IAM policy-simulation result
+remain deployment evidence and must be retained with the environment.</p>
+<p>Remote approvals are created by an authenticated operator at
+<code>POST /enterprise/approvals</code> and consumed once at the agent boundary. The
+consumption binding includes the tenant, enrolled agent, tool, proposal, task,
+principal, and action hash. A replay or any mismatch returns <code>approved: false</code>.</p>
+<p>The UI build is uploaded separately because its public configuration depends on
+the deployed API, Cognito client, and CloudFront URLs:</p>
+<pre><code class="language-bash">cd ../..
+npm --prefix aai-sec-ui run build
+aws --profile p1 s3 sync aai-sec-ui/dist/ s3://&lt;UiBucketName&gt;/ --delete
+</code></pre>
+<h2 id="first-sign-in">First sign-in</h2>
+<p>The hosted UI's <strong>Start free trial</strong> action sends a visitor to Cognito Managed
+Login. After email confirmation, the post-confirmation Lambda creates a
+server-generated <code>trial-*</code> tenant, a trial workspace, a deny-by-default policy,
+and a user-subject-to-tenant mapping. It also adds the user to
+<code>platform-admin</code>, which permits management actions only inside that mapped
+tenant. The API never trusts a tenant in request JSON. Existing administrator
+accounts may continue to use the immutable <code>custom:tenant_id</code> claim; new trial
+users resolve through the server-side subject mapping and fail closed if it is
+missing or unprovisioned.</p>
+<p>The stack selects Cognito Managed Login version 2 and declares the AAI Security
+branding style in CloudFormation, including the dark/teal form treatment and
+logo asset. This keeps the authentication handoff visually consistent with the
+public landing page and makes the signup presentation reproducible on a fresh
+deployment. The branding resource is presentation-only; Cognito remains the
+authentication authority and the API remains the authorization boundary.</p>
+<p>For a production launch, replace the shared development callback URL with the
+controlled deployment hostname, configure a verified email delivery path, set
+the trial lifecycle/retention policy, and add abuse controls such as signup
+rate limits and domain or invitation policy.</p>
+<p>Create an operator with a tenant claim using an administrator session:</p>
+<pre><code class="language-bash">aws --profile p1 cognito-idp admin-create-user \
+  --user-pool-id &lt;UserPoolId&gt; \
+  --username &lt;operator-email&gt; \
+  --temporary-password '&lt;temporary-password&gt;' \
+  --message-action SUPPRESS \
+  --user-attributes \
+    Name=email,Value=&lt;operator-email&gt; \
+    Name=email_verified,Value=true \
+    Name=custom:tenant_id,Value=&lt;tenant-id&gt;
+</code></pre>
+<p>The operator must complete the password change in Cognito. The browser keeps
+the claim-bearing Cognito identity token in memory and uses PKCE; long-lived
+bearer tokens must not be placed in Vite environment files or source control.</p>
+<h2 id="verification">Verification</h2>
+<p>The reproducible deployment smoke test requires AWS credentials with access
+to invoke the control-plane Lambda and the two DynamoDB tables. It creates and
+removes synthetic records and must be run against a non-production tenant:</p>
+<pre><code class="language-bash">AWS_PROFILE=p1 AWS_REGION=eu-west-2 python scripts/test_aws_control_plane.py \
+  --api-url https://&lt;api-id&gt;.execute-api.eu-west-2.amazonaws.com \
+  --function-name &lt;control-plane-lambda&gt; \
+  --control-table &lt;control-table&gt; \
+  --idempotency-table &lt;idempotency-table&gt; \
+  --audit-bucket &lt;audit-bucket&gt; \
+  --alerts-topic-arn &lt;security-alerts-topic-arn&gt; \
+  --alerts-queue-arn &lt;security-alerts-queue-arn&gt; \
+  --region eu-west-2 --profile p1
+</code></pre>
+<p>The test prints one passing result only after it has checked unauthenticated
+401 handling, synthetic agent registration and one-time enrollment, heartbeat,
+agent emergency-stop enforcement and recovery, exact approval consumption and
+replay refusal, a two-process DynamoDB claim race, restart replay, terminal
+write, and a <code>GuardedRuntime</code> execution that replays the typed
+<code>ExecutionResult</code> without invoking the synthetic side effect twice. It also
+checks the deployed audit bucket's compliance retention, versioning, and
+inability to delete a retained object version, and publishes a synthetic alert
+through SNS to verify delivery into the durable SQS operations queue.</p>
+<p>The first deployment is verified by:</p>
+<ol>
+<li>CloudFront returning the hosted UI with HTTP 200.</li>
+<li>API Gateway returning HTTP 401 without a JWT.</li>
+<li>Cognito redirecting an authorization-code request to Managed Login.</li>
+<li>Lambda inventory returning the seeded Claude Code agent.</li>
+<li>Lambda policy creation returning HTTP 201.</li>
+<li>Lambda group creation and agent assignment succeeding.</li>
+</ol>
+<p>The container adapter has a separate local evidence probe. Build a pinned
+worker image and run:</p>
+<pre><code class="language-bash">docker build --tag aai-sec-isolation-probe:2026-07-27 tests/fixtures/docker-worker
+image_ref=&quot;$(docker image inspect aai-sec-isolation-probe:2026-07-27 --format '{{.Id}}')&quot;
+python3 scripts/test_docker_sandbox.py --image &quot;$image_ref&quot;
+</code></pre>
+<p>The probe must report UID <code>65532</code>, blocked network access, a read-only root
+filesystem, dropped capabilities, <code>no_new_privs</code>, and failed privilege
+escalation, mount, and process-memory probes. Pin an immutable image digest and independently test the Docker
+daemon/host before using this boundary for hostile workloads; use a managed
+microVM where the host kernel is outside the trust boundary.</p>
+<p>For each real provider/tool role, run the IAM scope check with one permitted
+resource and one sibling resource. The check requires an AWS <code>allowed</code> result
+for the first and an <code>implicitDeny</code> or <code>explicitDeny</code> for the second:</p>
+<pre><code class="language-bash">AWS_PROFILE=p1 AWS_REGION=eu-west-2 python3 scripts/test_aws_iam_scope.py \
+  --role-arn &lt;provider-tool-role-arn&gt; \
+  --action &lt;provider-action&gt; \
+  --allowed-resource &lt;permitted-resource-arn&gt; \
+  --denied-resource &lt;sibling-resource-arn&gt; \
+  --region eu-west-2 --profile p1
+</code></pre>
+<p>The alert queue's retry and dead-letter behavior can be verified with a
+synthetic message. The script deletes only the matching synthetic DLQ message:</p>
+<pre><code class="language-bash">AWS_PROFILE=p1 AWS_REGION=eu-west-2 python3 scripts/test_aws_alert_recovery.py \
+  --queue-url &lt;security-alert-queue-url&gt; \
+  --dlq-url &lt;security-alert-dlq-url&gt; \
+  --region eu-west-2 --profile p1
+</code></pre>
+<ol>
+<li>Effective-policy resolution returning the assigned policy.</li>
+<li>Agent emergency-stop activation returning HTTP 200, effective-policy
+   retrieval failing closed with HTTP 409 while stopped, and recovery returning
+   HTTP 200.</li>
+<li>The deployed agent enrollment contract returning HTTP 201, refusing token
+   reuse and URL identity mismatches, and returning HTTP 200 for heartbeat and
+   effective-policy retrieval.</li>
+<li>The deployed approval contract accepting one exact action and rejecting its
+    replay.</li>
+<li>The deployed DynamoDB idempotency table accepting an atomic claim,
+    surviving a new adapter instance, and retaining the terminal result.</li>
+</ol>
+<h3 id="cross-region-audit-recovery">Cross-region audit recovery</h3>
+<p>Deploy the immutable replica stack in the recovery region first, then pass its
+bucket ARN when deploying the primary stack:</p>
+<pre><code class="language-bash">AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy:replica
+AWS_PROFILE=p1 AWS_REGION=eu-west-2 \
+  AUDIT_REPLICA_BUCKET_ARN=arn:aws:s3:::&lt;replica-bucket&gt; \
+  AUDIT_REPLICA_REGION=eu-west-1 npm run deploy
+</code></pre>
+<p>The replica bucket is versioned and uses S3 Object Lock compliance retention.
+The repeatable verification command is:</p>
+<pre><code class="language-bash">AWS_PROFILE=p1 python3 scripts/test_aws_audit_replication.py \
+  --source-bucket &lt;primary-audit-bucket&gt; --source-region eu-west-2 \
+  --replica-bucket &lt;replica-bucket&gt; --replica-region eu-west-1 \
+  --profile p1
+</code></pre>
+<p>The 2026-07-27 pilot test received a replica with <code>ReplicationStatus=REPLICA</code>,
+preserved synthetic metadata, and <code>COMPLIANCE</code> Object Lock retention.</p>
+<p>The Lambda also rejects a validly signed operator token when its tenant has no
+independent provisioning record. The development <code>tenant-demo</code> record is
+bootstrapped explicitly for the pilot; production tenants must be provisioned
+by an administrative workflow before operators can access them.</p>
+<p>The browser still requires an operator to complete the first-login password
+change before the authenticated UI can be exercised interactively.</p>
+<h2 id="important-production-limitations">Important production limitations</h2>
+<p>This is the first AWS deployment slice, not a production security
+certification. Before production use:</p>
+<ul>
+<li>add a server-side entitlement table instead of relying only on the Cognito
+  tenant claim;</li>
+<li>rotate enrollment/session signing material and integrate enterprise device
+  attestation for agent identity;</li>
+<li>connect every runtime deployment to the idempotency table and retain the
+  process-crash/retry evidence with the release;</li>
+<li>provision provider-specific IAM roles and prove tool/resource scope with
+  provider policy simulation and denied-action tests;</li>
+<li>retain the Docker probe and add hostile escape tests; use a genuine microVM
+  or WASM isolation boundary when the Docker daemon/host is not trusted;</li>
+<li>add API throttling and WAF rules;</li>
+<li>connect the alert queue to the enterprise PagerDuty/SIEM/SOC workflow and
+  retain delivery and recovery artifacts;</li>
+<li>replace seeded data with migration/bootstrap tooling;</li>
+<li>add full contract tests against DynamoDB and API Gateway;</li>
+<li>remove the temporary operator and configure enterprise SAML/OIDC federation;</li>
+<li>run <code>make check</code> and the AWS staging load/security test suite.</li>
+</ul>
+<p>The Lambda boundary preserves tenant scope from verified Cognito claims and
+stores audit evidence in the retained Object Lock bucket. Execution authority
+still remains in the enrolled SDK deployment; the hosted UI does not execute
+agent tools.</p>
 
 
 

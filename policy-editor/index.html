@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/deployment-evidence/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/policy-editor/">
       
       
-        <link rel="prev" href="../releasing/">
+        <link rel="prev" href="../enterprise-fleet/">
       
       
-        <link rel="next" href="../p1-p2-closure-evidence-2026-07-27/">
+        <link rel="next" href="../claude-managed-resources/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Deployment evidence - Agentic AI Security SDK</title>
+        <title>Policy editor - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#deployment-evidence" class="md-skip">
+        <a href="#policy-editor" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Deployment evidence
+              Policy editor
             
           </span>
         </div>
@@ -556,10 +556,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../policy-editor/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy editor
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -575,6 +602,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#design-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#policy-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy fields
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-references-versus-policy-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider references versus policy decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#policy-inventory-detail-and-activation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy inventory, detail and activation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#review-and-activation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review and activation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out of scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced JSON
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1015,37 +1139,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Deployment evidence
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
         
   
   
@@ -1061,37 +1158,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required evidence
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1231,10 +1297,76 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
+  <a href="#design-rules" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Required evidence
+        Design rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#policy-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy fields
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-references-versus-policy-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider references versus policy decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#policy-inventory-detail-and-activation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy inventory, detail and activation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#review-and-activation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review and activation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out of scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced JSON
       
     </span>
   </a>
@@ -1261,33 +1393,192 @@
   
 
 
-<h1 id="deployment-evidence">Deployment evidence</h1>
-<p>The open-source SDK can prove its local contracts and release integrity. It
-cannot prove properties of infrastructure that the adopter has not supplied.
-Consequential production use therefore requires an adopter-owned evidence
-pack for every deployment.</p>
-<h2 id="required-evidence">Required evidence</h2>
+<h1 id="policy-editor">Policy editor</h1>
+<p>The Policy editor is a UI-first editor for what an agent is allowed to do. A
+policy is a versioned, validated, tenant-scoped declaration that can be
+assigned to one or more enterprise groups. The runtime remains the authority: the model cannot
+change a policy, approval, identity, credential, or isolation decision.</p>
+<h2 id="design-rules">Design rules</h2>
 <ul>
-<li>A multi-process idempotency adapter test demonstrating atomic claim,
-  conflict detection, terminal persistence, restart recovery, and reconciliation
-  after a timeout or store outage.</li>
-<li>Immutable or WORM audit retention, access controls, replication, and a test
-  showing that an operator or application process cannot rewrite accepted
-  events.</li>
-<li>Provider-side IAM evidence showing that issued credentials cannot exceed the
-  exact tool, principal, tenant, resource, and operation scope.</li>
-<li>A genuine container, microVM, or WASM isolation implementation, including
-  denial tests for network, filesystem, identity, and sandbox-escape attempts.</li>
-<li>Remote policy and approval adapter contract tests, including provider outage,
-  timeout, stale approval, and fail-closed behavior.</li>
-<li>Operational evidence for worker saturation, audit/export failure,
-  reconciliation backlog, emergency stop, and key rotation.</li>
+<li>Use typed form sections and validated fields; arbitrary JSON is an expert
+  workflow, not the primary user experience.</li>
+<li>Deny by default and require explicit allow-lists.</li>
+<li>Evaluate policy with the live action, resource, principal, purpose and policy
+  version on every consequential action.</li>
+<li>Show a complete effective-policy preview before saving or activating.</li>
+<li>Version every change, retain an audit record, and support comparison and
+  rollback through the enterprise control plane.</li>
+<li>Policy values may narrow authority but must never disable SDK invariants such
+  as fail-closed authorization, approval replay protection or redaction.</li>
 </ul>
-<p>The repository's in-memory stores, callback isolation verifier, local audit
-sinks, and Python handlers are reference implementations for tests and pilots;
-they are not deployment evidence for high-impact actions. Keep the evidence
-with the deployed commit, adapter versions, configuration, and release
-verification record.</p>
+<h2 id="policy-fields">Policy fields</h2>
+<p>The editor presents these sections as typed form groups:</p>
+<ol>
+<li>Identity and scope</li>
+<li>Tool permissions</li>
+<li>Claude native-tool controls</li>
+<li>Command rules</li>
+<li>Approval rules</li>
+<li>Resource limits</li>
+<li>Credential requirements</li>
+<li>Isolation requirements</li>
+<li>Data capture and redaction</li>
+<li>Review, validation and versioning</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>What the editor should configure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Local allow-list policy</td>
+<td>Allowed tools, principals and resources.</td>
+</tr>
+<tr>
+<td>OPA policy adapter</td>
+<td>A policy-provider reference; endpoint and credentials belong in the wider UI.</td>
+</tr>
+<tr>
+<td>Cedar policy adapter</td>
+<td>A policy-provider reference; endpoint and credentials belong in the wider UI.</td>
+</tr>
+<tr>
+<td>Allowed tools</td>
+<td>Explicit registered-tool allow-list. Unknown tools remain denied.</td>
+</tr>
+<tr>
+<td>Allowed principals</td>
+<td>Identities that may perform actions under this policy.</td>
+</tr>
+<tr>
+<td>Approval requirements</td>
+<td>Which tools, resources, risk classes or command patterns require approval.</td>
+</tr>
+<tr>
+<td>Scoped approval grants</td>
+<td>Required binding to action, resource, principal, purpose and policy context.</td>
+</tr>
+<tr>
+<td>Approval expiry</td>
+<td>Maximum approval time-to-live.</td>
+</tr>
+<tr>
+<td>Claude command rules</td>
+<td>Command patterns that are allowed, denied or approval-required.</td>
+</tr>
+<tr>
+<td>Claude built-in tool allow-list</td>
+<td>Native Claude tools such as Read, Glob, Grep, Bash, Edit and Write.</td>
+</tr>
+<tr>
+<td>Action budget</td>
+<td>Maximum actions per task or session.</td>
+</tr>
+<tr>
+<td>Concurrency limit</td>
+<td>Maximum simultaneous actions.</td>
+</tr>
+<tr>
+<td>Fan-out limit</td>
+<td>Maximum delegated or parallel branches.</td>
+</tr>
+<tr>
+<td>Cost budget</td>
+<td>Maximum model or tool cost units.</td>
+</tr>
+<tr>
+<td>Delegation depth</td>
+<td>Maximum recursive delegation depth.</td>
+</tr>
+<tr>
+<td>Rate limit</td>
+<td>Maximum actions per second.</td>
+</tr>
+<tr>
+<td>Execution timeout</td>
+<td>Maximum operation duration.</td>
+</tr>
+<tr>
+<td>Timed-out worker limit</td>
+<td>Maximum timed-out workers before further work is denied.</td>
+</tr>
+<tr>
+<td>Credential scope enforcement</td>
+<td>Required action, resource, principal and purpose scope.</td>
+</tr>
+<tr>
+<td>Credential TTL</td>
+<td>Maximum permitted credential lifetime for actions under this policy.</td>
+</tr>
+<tr>
+<td>High-risk isolation requirement</td>
+<td>Whether high-risk actions require verified isolation evidence.</td>
+</tr>
+<tr>
+<td>Sensitive-data redaction</td>
+<td>Mandatory redaction profile and protected fields.</td>
+</tr>
+<tr>
+<td>Tool-content capture</td>
+<td>Disabled, metadata-only or bounded content capture. Default: restrictive.</td>
+</tr>
+<tr>
+<td>Safe default configuration</td>
+<td>A restrictive starting template for new policies.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="provider-references-versus-policy-decisions">Provider references versus policy decisions</h2>
+<p>The editor may select a provider or reference an external policy, but it must
+not contain provider secrets or pretend to own an external policy engine. The
+wider UI owns provider endpoints, authentication, health and deployment
+configuration. The runtime consumes the resulting policy decision and fails
+closed when the provider is unavailable or returns an invalid result.</p>
+<h2 id="policy-inventory-detail-and-activation">Policy inventory, detail and activation</h2>
+<p>The Policy page opens on the current-policy inventory. Each row shows the
+policy name and identifier, current version, author, date written, number of
+groups and number of enrolled agents receiving it. Select a row to open the
+policy detail view.</p>
+<p>The detail view shows the stored configuration as a human-readable summary
+grouped into policy sections, along with the groups assigned to it and the
+total affected-agent count. Choose <strong>View JSON</strong> when raw configuration
+inspection is needed, or <strong>Edit policy</strong> to open the typed form.
+When the review is complete, choose <strong>Apply changes</strong>. The control plane
+validates the configuration, records an audit event, increments the policy
+version and makes that version effective for the groups already assigned to
+the policy. A cancel action leaves the current version unchanged.</p>
+<h2 id="review-and-activation">Review and activation</h2>
+<p>The editor shows an effective-policy preview before saving. The preview must
+include allowed actions, denied actions, approval-required actions, maximum
+limits, credential and isolation requirements, redaction/capture behaviour, and
+the groups and agents affected by the policy.</p>
+<p>Before activation, display:</p>
+<ul>
+<li>tools and principals allowed;</li>
+<li>tools, commands and resources denied;</li>
+<li>approval-required actions;</li>
+<li>action, time, cost, concurrency, rate and delegation limits;</li>
+<li>credential and isolation requirements;</li>
+<li>redaction and content-capture behaviour;</li>
+<li>groups and agents affected by the policy.</li>
+</ul>
+<p>Saving a policy is not the same as activating it. Activation should be an
+explicit, audited operation with validation, version selection and a clear
+rollback path.</p>
+<h2 id="out-of-scope">Out of scope</h2>
+<p>The editor must not expose switches for security invariants such as dynamic
+tool lookup, bypassing the runtime, trusting model-supplied identity,
+disabling approval replay protection or disabling mandatory redaction.</p>
+<h2 id="advanced-json">Advanced JSON</h2>
+<p>Expert users may inspect and edit the generated JSON representation. Applying
+advanced JSON first parses the document, validates the closed policy schema and
+maps it back into the typed editor. Unknown sections, unknown fields, invalid
+budget values, <code>denyByDefault: false</code>, attempts to disable redaction and
+immutable safeguard fields are rejected before submission. The backend repeats
+its own validation; browser validation is only an early usability check.</p>
 
 
 

@@ -1,0 +1,2447 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source execution security runtime for agentic AI systems">
+      
+      
+      
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/claude-code/">
+      
+      
+        <link rel="prev" href="../integrations/">
+      
+      
+        <link rel="next" href="../ui/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Claude Code example - Agentic AI Security SDK</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#claude-code-complete-working-example" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Agentic AI Security SDK" class="md-header__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agentic AI Security SDK
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Claude Code example
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Agentic AI Security SDK" class="md-nav__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agentic AI Security SDK
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operational runbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../production-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent integrations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Claude Code example
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Claude Code example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code-onboarding-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code onboarding checklist
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Claude Code onboarding checklist">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-command-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-command setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-install-the-sdk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Install the SDK
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-start-claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Start Claude Code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2a-run-the-local-policy-coverage-harness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2a. Run the local policy coverage harness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-add-sdk-owned-application-tools-through-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Add SDK-owned application tools through MCP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-choosing-hook-versus-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Choosing hook versus MCP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-managed-skills-and-mcp-servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Managed Skills and MCP servers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-customize-the-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Customize the policy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        claude_code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeCodeHook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClaudeCodeHook
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ClaudeCodeHook">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeCodeHook.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeCodeHook.handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeCodeHook.serve_stdio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serve_stdio
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeHookDecision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClaudeHookDecision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeHookResult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClaudeHookResult
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ClaudeHookResult">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeHookResult.__post_init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __post_init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeToolEvent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClaudeToolEvent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.command_rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        command_rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.exact_tool_rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        exact_tool_rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.path_within_rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        path_within_rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Management UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-fleet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise fleet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-editor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-managed-resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed Claude resources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Wider enterprise UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-integration-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise integration design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-user-journeys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise user journeys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-operations-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise operations readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../product-owner-enterprise-claude-rollout-review-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product Owner rollout review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-claude-rollout-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise Claude Code rollout plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../real-claude-code-acceptance-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real Claude Code acceptance evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aws-deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-owned-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code-owned controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end-to-end-example/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End-to-end example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guardrails/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering guardrails
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licensing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../p1-p2-closure-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    P1/P2 closure evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release-evidence-v1.0.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release evidence v1.0.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-25)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-26/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-26)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code-onboarding-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code onboarding checklist
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Claude Code onboarding checklist">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-command-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One-command setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-install-the-sdk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Install the SDK
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-start-claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Start Claude Code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2a-run-the-local-policy-coverage-harness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2a. Run the local policy coverage harness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-add-sdk-owned-application-tools-through-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Add SDK-owned application tools through MCP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-choosing-hook-versus-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Choosing hook versus MCP
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-managed-skills-and-mcp-servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Managed Skills and MCP servers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-customize-the-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Customize the policy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        claude_code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeCodeHook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClaudeCodeHook
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ClaudeCodeHook">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeCodeHook.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeCodeHook.handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeCodeHook.serve_stdio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serve_stdio
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeHookDecision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClaudeHookDecision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeHookResult" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClaudeHookResult
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ClaudeHookResult">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeHookResult.__post_init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __post_init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.ClaudeToolEvent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClaudeToolEvent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.command_rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        command_rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.exact_tool_rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        exact_tool_rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentic_security.claude_code.path_within_rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        path_within_rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="claude-code-complete-working-example">Claude Code: complete working example</h1>
+<p>This example uses both Claude Code integration points:</p>
+<pre><code class="language-text">Claude native tools ── PreToolUse hook ──&gt; deterministic project policy/audit
+
+Application tools ─── MCP server ────────&gt; GuardedRuntime, approvals, credentials,
+                                           idempotency, and audit
+</code></pre>
+<p>The hook does not execute actions. It returns Claude Code's native <code>allow</code>,
+<code>ask</code>, or <code>deny</code> decision before Claude executes a built-in tool. Use MCP when
+the SDK must own the operation and provide credentials, idempotency, timeout,
+reconciliation, or result validation.</p>
+<h2 id="claude-code-onboarding-checklist">Claude Code onboarding checklist</h2>
+<p>Use this sequence when onboarding a new project:</p>
+<ol>
+<li>Install the SDK and confirm the project root you want Claude Code to work
+   in.</li>
+<li>Configure the project-scoped <code>PreToolUse</code> hook in
+   <code>.claude/settings.json</code>.</li>
+<li>Register the SDK-owned MCP gateway with <code>claude mcp add</code>.</li>
+<li>Start Claude Code from the same project root and confirm <code>/mcp</code> shows the
+   gateway.</li>
+<li>Run the synthetic verification commands below and inspect the audit file.</li>
+<li>Replace the synthetic identity, policy, approval, audit, credential, and
+   isolation adapters before enabling consequential work.</li>
+</ol>
+<h3 id="one-command-setup">One-command setup</h3>
+<p>From the project you want Claude Code to use, run:</p>
+<pre><code class="language-bash">SDK_ROOT=&quot;${AAI_SEC_SDK_ROOT:-$HOME/.aai-sec-sdk}&quot;
+if [ ! -f &quot;$SDK_ROOT/scripts/onboard_claude.py&quot; ]; then
+  git clone https://github.com/tommycharade/aai-sec-sdk.git &quot;$SDK_ROOT&quot;
+fi
+python3 &quot;$SDK_ROOT/scripts/onboard_claude.py&quot; \
+  --project-root &quot;$PWD&quot; --sdk-root &quot;$SDK_ROOT&quot; \
+  --control-plane-url http://localhost:8000/api
+</code></pre>
+<p>Review the repository and command before running it in a regulated
+environment. Set <code>AAI_SEC_SDK_ROOT</code> when the SDK is already checked out at a
+different path. The script writes only project-scoped files and creates
+timestamped backups before changing existing configuration.</p>
+<p>The script creates or updates <code>.claude/settings.json</code> and <code>.mcp.json</code>, keeps
+existing entries, and creates timestamped backups before modifying either
+file. It also installs <code>.claude/aai-sec-config.json</code>, the checked-in safe
+default policy used by the example hook. Preview the changes first with
+<code>--dry-run</code>. It does not invoke Claude or silently replace an existing
+configuration or policy.</p>
+<p>The default policy is intentionally narrow: <code>Read</code>, <code>Glob</code>, and <code>Grep</code> are the
+only explicitly allowed native tools; read-only/status/test commands are
+allowed; publishing, commits, pushes, and deployments require approval; and
+destructive shell commands are denied. Edit the project policy only after
+reviewing the security impact and adding tests.</p>
+<p>For the local reference control plane, export the synthetic agent token before
+starting Claude:</p>
+<pre><code class="language-bash">export AAI_SEC_AGENT_TOKEN=synthetic-agent-token-1234
+claude
+</code></pre>
+<p>The MCP process then registers the project as <code>claude-code-local</code>, sends
+heartbeats, and stops its guarded runtime if the control plane becomes
+unavailable. The gateway also reports content-free runtime aggregates on each
+heartbeat—action outcomes, cost units, and guarded-action latency—so the UI
+can show performance without receiving tool arguments or outputs. The UI shows
+the connected project under <strong>Agents</strong>; heartbeat expiry changes it to
+<code>offline</code> and records an audited lifecycle event.</p>
+<p>For an enterprise deployment, onboard the project with a deployment scope:</p>
+<p>First, have an authenticated platform operator create a one-time bootstrap
+token for the registered deployment. The AWS hosted control plane exposes this
+as <code>POST /enterprise/agents/bootstrap</code>; the response contains the token once
+and it must not be stored in the project. Then run onboarding with that token:</p>
+<pre><code class="language-bash">python3 /path/to/aai-sec-sdk/scripts/onboard_claude.py \
+  --project-root &quot;$PWD&quot; \
+  --enterprise-control-plane-url https://&lt;api-id&gt;.execute-api.eu-west-2.amazonaws.com \
+  --deployment-id deployment-prod-eu \
+  --agent-id claude-platform-prod \
+  --bootstrap-token &quot;&lt;one-time-token&gt;&quot;
+# The script prints this export after a successful exchange.
+export AAI_SEC_AGENT_TOKEN=&quot;&lt;short-lived-session-token&gt;&quot;
+claude
+</code></pre>
+<p>The script consumes the bootstrap token at <code>/agent/enroll</code>, writes only
+non-secret routing metadata to Claude's files, and prints the short-lived
+session token for the current shell. The token is deployment/agent-bound and
+expires; repeat enrollment with a newly issued bootstrap token when it expires.</p>
+<p>The real-device acceptance run for Claude Code 2.1.220 is recorded in
+<a href="../real-claude-code-acceptance-evidence-2026-07-27/">real Claude Code acceptance evidence</a>.</p>
+<p>The deployment ID determines which organization/project fleet receives the
+agent registration. The enterprise UI can then show the project alongside
+other deployments, report heartbeat health and drift, and apply staged
+configuration rollouts. Do not put the agent token in <code>.mcp.json</code>; inherit it
+from the process environment or a secret manager.</p>
+<p>Enterprise onboarding also embeds only the control-plane URL, deployment ID
+and agent ID in the hook command. When <code>AAI_SEC_AGENT_TOKEN</code> is inherited by
+Claude Code, the native-tool hook resolves the same authenticated effective
+group policy as the MCP gateway before each event. Missing credentials,
+unassigned or conflicting groups, malformed policy, or control-plane failure
+deny the native action. This keeps central policy enforcement consistent for
+Claude's built-in tools and SDK-owned MCP tools.</p>
+<p>The hook configuration and MCP configuration are separate Claude Code host
+boundaries. Put the <code>hooks</code> object in <code>.claude/settings.json</code>; put the
+<code>mcpServers</code> object in <code>.mcp.json</code> or register it with <code>claude mcp add</code>. Do not
+merge them into one file unless the Claude Code version you are using explicitly
+documents that format.</p>
+<p>If you are using the optional management UI, open <strong>Integrations → Claude Code</strong>
+to configure the project root, hook command, MCP command, tool allow-lists, and
+command approval rules. Save the configuration, download the generated host
+configuration, then apply the two objects to their respective Claude Code
+files. The UI control plane must be authenticated and connected to a live
+runtime authority; its localhost reference adapter is for development only.</p>
+<h2 id="1-install-the-sdk">1. Install the SDK</h2>
+<p>From the project you want Claude Code to work on:</p>
+<pre><code class="language-bash">python3 -m pip install agentic-security-sdk
+mkdir -p .claude
+cp /path/to/aai-sec-sdk/examples/.claude/settings.json .claude/settings.json
+</code></pre>
+<p>The copied settings file runs
+<code>examples/claude_code_hook.py</code> for <code>Bash</code>, <code>Read</code>, <code>Edit</code>, <code>Write</code>, <code>Glob</code>, and
+<code>Grep</code>. If the example is outside the project, change the command to an
+absolute path:</p>
+<pre><code class="language-json">{
+  &quot;type&quot;: &quot;command&quot;,
+  &quot;command&quot;: &quot;python3 /absolute/path/to/claude_code_hook.py&quot;,
+  &quot;timeout&quot;: 10
+}
+</code></pre>
+<p>Claude Code reads project hook configuration from <code>.claude/settings.json</code>.
+Review the current <a href="https://code.claude.com/docs/en/hooks">Claude Code hook documentation</a>
+when upgrading Claude Code because hook fields are host-owned configuration.</p>
+<h2 id="2-start-claude-code">2. Start Claude Code</h2>
+<p>Run Claude Code from the project root:</p>
+<pre><code class="language-bash">claude
+</code></pre>
+<p>Try these synthetic checks:</p>
+<pre><code class="language-text">Ask Claude to run: git status
+Ask Claude to run: git push origin main
+Ask Claude to run: rm -rf /tmp/example
+Ask Claude to read: /etc/hosts
+</code></pre>
+<p>Expected behavior:</p>
+<table>
+<thead>
+<tr>
+<th>Request</th>
+<th>Hook result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>git status</code></td>
+<td>Allowed</td>
+</tr>
+<tr>
+<td><code>git push</code></td>
+<td>Ask for interactive approval</td>
+</tr>
+<tr>
+<td><code>rm -rf</code></td>
+<td>Denied</td>
+</tr>
+<tr>
+<td>Read outside project</td>
+<td>Denied</td>
+</tr>
+</tbody>
+</table>
+<p>The hook writes a redaction-aware audit chain to
+<code>.claude/security-audit.jsonl</code>. This example uses synthetic local identity and
+rules. Replace them with the authenticated identity and policy boundary used
+by your organization before production use.</p>
+<h2 id="2a-run-the-local-policy-coverage-harness">2a. Run the local policy coverage harness</h2>
+<p>After onboarding a deployed project, run the SDK's non-destructive policy
+harness from the project root:</p>
+<pre><code class="language-bash">python3 /absolute/path/to/aai-sec-sdk/scripts/test_claude_policy.py \
+  --project-root &quot;$PWD&quot; \
+  --sdk-root /absolute/path/to/aai-sec-sdk \
+  --report .claude/policy-test-report.json \
+  --allow-untested
+</code></pre>
+<p>The harness temporarily applies a synthetic policy, sends synthetic
+<code>PreToolUse</code> events to the configured hook, checks allow/deny/approval/path,
+malformed-input and audit behaviour, then restores the previous project policy.
+It never invokes Claude or executes a proposed command. Omit
+<code>--allow-untested</code> when the run must prove complete coverage; the command then
+exits non-zero until runtime-only controls have a GuardedRuntime/MCP test.</p>
+<p>To create and verify the matching enterprise policy and group, provide the
+local control-plane URL and operator token. To verify live membership, also
+provide the deployment and agent identifiers:</p>
+<pre><code class="language-bash">AAI_SEC_UI_TOKEN=&quot;synthetic-enterprise-ui-token-1234&quot; \
+python3 /absolute/path/to/aai-sec-sdk/scripts/test_claude_policy.py \
+  --project-root &quot;$PWD&quot; \
+  --control-plane-url http://localhost:8001/api \
+  --deployment-id deployment-local \
+  --agent-id claude-code-local \
+  --report .claude/policy-test-report.json
+</code></pre>
+<p>The JSON report lists every check as <code>passed</code>, <code>failed</code> or <code>not_tested</code>. Native
+Claude hook coverage includes tool allow-lists, command rules, path boundaries,
+unknown tools, malformed input and audit output. Budgets, credentials,
+isolation, durable audit sinks, telemetry and idempotency are explicitly
+reported as runtime controls requiring MCP/GuardedRuntime or deployment tests;
+they are not falsely treated as enforced by a Claude hook.</p>
+<h2 id="3-add-sdk-owned-application-tools-through-mcp">3. Add SDK-owned application tools through MCP</h2>
+<p>The MCP example is a separate process that exposes an explicit registered
+<code>lookup_record</code> tool through <code>GuardedRuntime</code>:</p>
+<pre><code class="language-bash">claude mcp add --transport stdio --scope project \
+  agentic-security -- \
+  python3 /absolute/path/to/aai-sec-sdk/examples/mcp_gateway.py
+</code></pre>
+<p>Check the connection:</p>
+<pre><code class="language-bash">claude mcp list
+claude mcp get agentic-security
+</code></pre>
+<p>Inside Claude Code, <code>/mcp</code> should show the server and its tools. Ask Claude
+to call <code>lookup_record</code> with <code>record_001</code>. The proposal is validated and
+authorized by the SDK before the synthetic handler runs. An unknown tool or
+invalid record identifier is denied.</p>
+<p>Claude Code stores project-scoped MCP configuration in <code>.mcp.json</code>. The
+project file should be reviewed like source code because it controls which
+external processes Claude can start. <a href="https://code.claude.com/docs/en/mcp">Claude Code MCP configuration</a>
+describes project, user, and local scopes.</p>
+<h2 id="5-choosing-hook-versus-mcp">5. Choosing hook versus MCP</h2>
+<h2 id="4-managed-skills-and-mcp-servers">4. Managed Skills and MCP servers</h2>
+<p>The enterprise UI can register reviewed Skills and MCP servers. A policy may
+select their IDs under <code>claudeCode.allowedSkills</code> and
+<code>claudeCode.allowedMcpServers</code>. The authenticated effective-policy response
+resolves those IDs into <code>managedSkills</code> and <code>managedMcpServers</code> definitions.</p>
+<p>The deployment-owned reconciliation helper can then apply that manifest to a
+project:</p>
+<pre><code class="language-bash">python3 /path/to/aai-sec-sdk/scripts/reconcile_claude_resources.py \
+  --project-root &quot;$PWD&quot; \
+  --effective-policy .claude/effective-policy.json
+</code></pre>
+<p>It writes selected Skills to <code>.claude/skills/</code> and selected MCP entries to
+<code>.mcp.json</code>, preserving unrelated entries and removing only resources from its
+own managed manifest. It validates Skill digests and rejects insecure HTTP
+MCP URLs. Secret values are supplied by the deployment environment, never by
+the UI or policy JSON. This is configuration provisioning, not sandboxing;
+the SDK gateway and host isolation controls remain necessary.</p>
+<p>Use the hook for host-native operations where Claude Code remains the executor:</p>
+<ul>
+<li>Bash commands;</li>
+<li>file reads and writes;</li>
+<li>project search;</li>
+<li>Git commands;</li>
+<li>other Claude-native tools matched by <code>PreToolUse</code>.</li>
+</ul>
+<p>Use MCP and <code>GuardedRuntime</code> for operations where the SDK must remain the
+executor and authority boundary:</p>
+<ul>
+<li>external API calls;</li>
+<li>payments or destructive business actions;</li>
+<li>scoped credentials;</li>
+<li>durable idempotency;</li>
+<li>approval workflows;</li>
+<li>reconciliation after uncertain outcomes;</li>
+<li>domain-specific resource authorization.</li>
+</ul>
+<p>Do not treat the hook example as a sandbox. Claude Code or another process may
+still have access to the host outside the matched tools. For hostile or
+regulated workloads, combine the hook and MCP gateway with OS/container
+isolation, restricted credentials, and network egress controls.</p>
+<h2 id="6-customize-the-policy">6. Customize the policy</h2>
+<p>The hook API is extensible through ordered rules:</p>
+<pre><code class="language-python">from agentic_security import (
+    ClaudeCodeHook,
+    ClaudeHookDecision,
+    command_rule,
+    exact_tool_rule,
+)
+
+hook = ClaudeCodeHook(
+    rules=[
+        command_rule(
+            (r&quot;git\s+push&quot;,),
+            decision=ClaudeHookDecision.ASK,
+            reason=&quot;publishing requires approval&quot;,
+        ),
+        exact_tool_rule({&quot;Read&quot;, &quot;Glob&quot;, &quot;Grep&quot;}),
+    ]
+)
+</code></pre>
+<p>Rules are evaluated in order and the default decision is deny. A rule
+exception also denies. Add tests for every new command or path rule and run
+<code>make check</code> before distributing the hook configuration.</p>
+
+
+<div class="doc doc-object doc-module">
+
+
+
+<a id="agentic_security.claude_code"></a>
+    <div class="doc doc-contents first">
+
+        <p>Claude Code <code>PreToolUse</code> hook integration.</p>
+<p>Claude Code hooks are a native host enforcement point for built-in tools such
+as Bash, Edit, Write, Read, and MCP tools. This adapter makes that boundary
+usable without pretending that a hook executes the action itself: it returns a
+typed Claude decision, and Claude remains responsible for the eventual host
+operation. Consequential application operations should still use
+<code>GuardedRuntime</code> and an MCP tool handler when the SDK must own execution,
+credentials, idempotency, or reconciliation.</p>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.claude_code.ClaudeCodeHook" class="doc doc-heading">
+            <code>ClaudeCodeHook</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Run deterministic, fail-closed Claude Code pre-tool rules.</p>
+<p>Rules are evaluated in order. The first rule returning a result wins; if
+no rule matches, <code>default</code> is returned. The hook never trusts a
+principal, approval, credential, or policy version from Claude's JSON.
+<code>audit</code> receives the redaction-aware event through the SDK audit
+boundary, while stdout contains only Claude's hook response.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.claude_code.ClaudeCodeHook.__init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">rules</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">audit</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create an ordered hook policy with a deny-by-default fallback.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.claude_code.ClaudeCodeHook.handle" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">handle</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Translate one Claude hook JSON object into Claude's JSON response.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.claude_code.ClaudeCodeHook.serve_stdio" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">serve_stdio</span><span class="p">(</span><span class="n">input_stream</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_stream</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Read Claude hook events from stdin and write decisions to stdout.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.claude_code.ClaudeHookDecision" class="doc doc-heading">
+            <code>ClaudeHookDecision</code>
+
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.StrEnum">StrEnum</span></code></p>
+
+
+
+        <p>Decisions understood by Claude Code's <code>PreToolUse</code> hook.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.claude_code.ClaudeHookResult" class="doc doc-heading">
+            <code>ClaudeHookResult</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Safe decision and explanation returned by a hook policy.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.claude_code.ClaudeHookResult.__post_init__" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">__post_init__</span><span class="p">()</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Reject ambiguous hook outcomes and explanations.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="agentic_security.claude_code.ClaudeToolEvent" class="doc doc-heading">
+            <code>ClaudeToolEvent</code>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Validated, untrusted details of one Claude Code tool proposal.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.claude_code.command_rule" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">command_rule</span><span class="p">(</span><span class="n">patterns</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">decision</span><span class="p">,</span> <span class="n">reason</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a rule matching Bash <code>command</code> values with regex patterns.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.claude_code.exact_tool_rule" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">exact_tool_rule</span><span class="p">(</span><span class="n">tool_names</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">decision</span><span class="o">=</span><span class="n">ClaudeHookDecision</span><span class="o">.</span><span class="n">ALLOW</span><span class="p">,</span> <span class="n">reason</span><span class="o">=</span><span class="s1">&#39;tool is explicitly allowed&#39;</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Create a rule matching an explicit set of Claude tool names.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="agentic_security.claude_code.path_within_rule" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">path_within_rule</span><span class="p">(</span><span class="n">tool_names</span><span class="p">,</span> <span class="n">root</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">reason</span><span class="o">=</span><span class="s1">&#39;path is outside the approved project directory&#39;</span><span class="p">)</span></code>
+
+</h2>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Allow file tools only when their path is lexically under <code>root</code>.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

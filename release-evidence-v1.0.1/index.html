@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/deployment-evidence/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/release-evidence-v1.0.1/">
       
       
-        <link rel="prev" href="../releasing/">
+        <link rel="prev" href="../p1-p2-closure-evidence-2026-07-27/">
       
       
-        <link rel="next" href="../p1-p2-closure-evidence-2026-07-27/">
+        <link rel="next" href="../critical-adopter-review-2026-07-25/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Deployment evidence - Agentic AI Security SDK</title>
+        <title>Release evidence v1.0.1 - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#deployment-evidence" class="md-skip">
+        <a href="#release-evidence-v101" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Deployment evidence
+              Release evidence v1.0.1
             
           </span>
         </div>
@@ -1015,37 +1015,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Deployment evidence
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
         
   
   
@@ -1061,37 +1034,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required evidence
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1127,10 +1069,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../release-evidence-v1.0.1/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release evidence v1.0.1
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1146,6 +1115,48 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#source-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source identity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification-performed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification performed
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1231,10 +1242,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
+  <a href="#source-identity" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Required evidence
+        Source identity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification-performed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification performed
       
     </span>
   </a>
@@ -1261,33 +1283,38 @@
   
 
 
-<h1 id="deployment-evidence">Deployment evidence</h1>
-<p>The open-source SDK can prove its local contracts and release integrity. It
-cannot prove properties of infrastructure that the adopter has not supplied.
-Consequential production use therefore requires an adopter-owned evidence
-pack for every deployment.</p>
-<h2 id="required-evidence">Required evidence</h2>
+<h1 id="release-evidence-v101">Release evidence: v1.0.1</h1>
+<p>This record captures an independent verification of the public <code>v1.0.1</code>
+release, performed from a clean checkout on 2026-07-27.</p>
+<h2 id="source-identity">Source identity</h2>
 <ul>
-<li>A multi-process idempotency adapter test demonstrating atomic claim,
-  conflict detection, terminal persistence, restart recovery, and reconciliation
-  after a timeout or store outage.</li>
-<li>Immutable or WORM audit retention, access controls, replication, and a test
-  showing that an operator or application process cannot rewrite accepted
-  events.</li>
-<li>Provider-side IAM evidence showing that issued credentials cannot exceed the
-  exact tool, principal, tenant, resource, and operation scope.</li>
-<li>A genuine container, microVM, or WASM isolation implementation, including
-  denial tests for network, filesystem, identity, and sandbox-escape attempts.</li>
-<li>Remote policy and approval adapter contract tests, including provider outage,
-  timeout, stale approval, and fail-closed behavior.</li>
-<li>Operational evidence for worker saturation, audit/export failure,
-  reconciliation backlog, emergency stop, and key rotation.</li>
+<li>Tag: <code>v1.0.1</code></li>
+<li>Release commit: <code>baa1fb5ae409655e0c6a25d9cca9ef4f46c130c7</code></li>
+<li>Release workflow: <code>.github/workflows/release-artifacts.yml</code></li>
 </ul>
-<p>The repository's in-memory stores, callback isolation verifier, local audit
-sinks, and Python handlers are reference implementations for tests and pilots;
-they are not deployment evidence for high-impact actions. Keep the evidence
-with the deployed commit, adapter versions, configuration, and release
-verification record.</p>
+<h2 id="verification-performed">Verification performed</h2>
+<p>The published GitHub Release assets were downloaded into a directory outside
+the clean source checkout. The verifier was run with the checked-out tag:</p>
+<pre><code class="language-bash">python scripts/verify_release_evidence.py dist \
+  --commit baa1fb5ae409655e0c6a25d9cca9ef4f46c130c7 \
+  --tag v1.0.1
+</code></pre>
+<p>Result:</p>
+<pre><code class="language-text">Verified 2 artifact subjects, SBOM bindings, checksums, and tag v1.0.1.
+</code></pre>
+<p>GitHub attestations were then verified for both the wheel and source archive:</p>
+<pre><code class="language-bash">gh attestation verify dist/agentic_security_sdk-1.0.1-py3-none-any.whl \
+  --repo tommycharade/aai-sec-sdk \
+  --signer-workflow tommycharade/aai-sec-sdk/.github/workflows/release-artifacts.yml \
+  --source-ref refs/tags/v1.0.1
+gh attestation verify dist/agentic_security_sdk-1.0.1.tar.gz \
+  --repo tommycharade/aai-sec-sdk \
+  --signer-workflow tommycharade/aai-sec-sdk/.github/workflows/release-artifacts.yml \
+  --source-ref refs/tags/v1.0.1
+</code></pre>
+<p>Both commands exited successfully. This evidence supersedes the historical
+<code>v1.0.0</code> bundle finding; future releases must repeat the same independent
+post-publication verification.</p>
 
 
 

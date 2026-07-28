@@ -2,66 +2,134 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/api/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/architecture/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/aws-deployment/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/claude-code/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/claude-managed-resources/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/code-owned-controls/</loc>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/contributing/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/critical-adopter-review-2026-07-25/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/critical-adopter-review-2026-07-26/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/deployment-evidence/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/end-to-end-example/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/enterprise-claude-rollout-plan/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/enterprise-fleet/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/enterprise-integration-design/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/enterprise-operations-readiness/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/enterprise-ui/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/enterprise-user-journeys/</loc>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/getting-started/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/guardrails/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/integrations/</loc>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/license/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/p1-p2-closure-evidence-2026-07-27/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/policy-editor/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/product-owner-enterprise-claude-rollout-review-2026-07-27/</loc>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/production-readiness/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/real-claude-code-acceptance-evidence-2026-07-27/</loc>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/release-evidence-v1.0.1/</loc>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/releasing/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/runbooks/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/security-model/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
     </url>
     <url>
          <loc>https://tommycharade.github.io/aai-sec-sdk/testing/</loc>
-         <lastmod>2026-07-26</lastmod>
+         <lastmod>2026-07-28</lastmod>
+    </url>
+    <url>
+         <loc>https://tommycharade.github.io/aai-sec-sdk/ui/</loc>
+         <lastmod>2026-07-28</lastmod>
     </url>
 </urlset>
