@@ -611,6 +611,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Inventory API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#central-action-approvals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Central action approvals
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2351,6 +2368,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Inventory API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#central-action-approvals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Central action approvals
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3577,6 +3611,10 @@ failures are errors rather than empty or synthetic credentials.</p>
 <td>Bounded redaction-safe lifecycle evidence index for investigations</td>
 </tr>
 <tr>
+<td><code>GET /api/enterprise/approvals</code></td>
+<td>Tenant-scoped pending and historical exact-action approval requests</td>
+</tr>
+<tr>
 <td><code>GET /api/enterprise/alerts</code></td>
 <td>Derived fleet alerts</td>
 </tr>
@@ -3591,6 +3629,14 @@ failures are errors rather than empty or synthetic credentials.</p>
 <tr>
 <td><code>POST /api/enterprise/agents/{deployment}/{agent}/disconnect</code></td>
 <td>Mark offline</td>
+</tr>
+<tr>
+<td><code>POST /api/agent/{deployment}/{agent}/approvals/request</code></td>
+<td>Submit a bounded approval request using the authenticated agent session</td>
+</tr>
+<tr>
+<td><code>POST /api/agent/{deployment}/{agent}/approvals/consume</code></td>
+<td>Atomically consume one approved exact-action grant</td>
 </tr>
 <tr>
 <td><code>POST /api/enterprise/templates</code></td>
@@ -3668,6 +3714,14 @@ failures are errors rather than empty or synthetic credentials.</p>
 <td><code>POST /api/enterprise/slo/sample</code></td>
 <td>Record one redaction-safe health sample for an authorized deployment</td>
 </tr>
+<tr>
+<td><code>POST /api/enterprise/approvals</code></td>
+<td>Create a direct operator grant for compatibility and automation</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/approvals/{approvalId}/decision</code></td>
+<td>Approve or deny one live pending request with an operator rationale</td>
+</tr>
 </tbody>
 </table>
 <p>The tenant-wide emergency stop accepts <code>{"active": true}</code> or
@@ -3677,6 +3731,26 @@ requests fail closed with HTTP 409 while it is active, including requests from
 agents enrolled after activation. Clearing the fleet stop does not clear a
 narrower stop. Every transition records the operator identity, resulting state,
 and affected-agent count in the redacted audit trail.</p>
+<h3 id="central-action-approvals">Central action approvals</h3>
+<p>An enrolled agent submits a held action through its deployment/agent-bound
+session. The server derives <code>agentKey</code> from that session and accepts only the
+bounded tool, proposal, task, principal, action hash, risk class, and resource
+identifiers needed for review. It does not accept tool arguments, outputs,
+credentials, prompts, or a caller-selected agent identity. Descriptive request
+metadata remains untrusted evidence; an operator must verify it against the
+authenticated agent, policy, task, and intended resource.</p>
+<p>Only <code>security-operator</code> and <code>platform-admin</code> identities may decide a request.
+The decision requires a non-empty rationale and uses a conditional state
+transition, so two operators cannot both decide the same pending request. A
+denial is never consumable. An approval becomes a short-lived grant bound to
+the exact tenant, agent, tool, proposal, task, principal, and action hash. It
+can be consumed once by that same enrolled agent. Expiry, replay, mismatched
+bindings, missing state, or a concurrent decision returns no authority.</p>
+<p>The dashboard count is derived from live, unexpired <code>pending</code> records. The UI
+shows pending work and decision history on a dedicated <strong>Approvals</strong> page;
+the audit trail remains read-only evidence. <code>approval_requested</code> and
+<code>approval_decided</code> lifecycle events contain bounded identifiers and hashes,
+not action content.</p>
 <p>Inventory and fleet collection endpoints accept <code>limit=1..200</code> and an opaque
 numeric continuation <code>cursor</code>; responses contain <code>nextCursor</code> until the
 collection is exhausted. The UI follows those cursors automatically, so a
