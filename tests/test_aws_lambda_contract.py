@@ -580,6 +580,8 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
     assert stored["policy_id"] == "policy-a"
     assert stored["policy_version"] == 7
     assert stored["reported_by_agent"] is True
+    assert stored["timeline_pk"] == f"TENANT#{tenant}#DECISION"
+    assert stored["timeline_sk"].endswith(f"#dep-a:agent-a:{'a' * 64}")
     assert "command" not in stored and "path" not in stored and "prompt" not in stored
 
     duplicate = _invoke(
@@ -613,6 +615,24 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
         _event("/agent/dep-a/other-agent/decisions", "POST", body=body, token=token),
     )
     assert wrong_agent["statusCode"] == 403
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-conflict")
+        | {
+            "id": "group-conflict",
+            "policyId": "policy-a",
+            "agent_keys": ["dep-a:agent-a"],
+        }
+    )
+    conflicting_assignment = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/decisions",
+            "POST",
+            body={**body, "decisionId": "c" * 64},
+            token=token,
+        ),
+    )
+    assert conflicting_assignment["statusCode"] == 403
 
     claims = {
         "custom:tenant_id": tenant,
@@ -622,6 +642,7 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
     dashboard = _invoke(module, _event("/dashboard", "GET", claims=claims))
     snapshot = json.loads(dashboard["body"])
     assert snapshot["decisionsToday"] == 1
+    assert snapshot["decisionCountsTruncated"] is False
     assert snapshot["deniedToday"] == 0
     assert snapshot["recentAudit"][0] == {
         "id": "a" * 64,
@@ -707,10 +728,11 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
         | {"id": "group-a", "policyId": "policy-a", "agent_keys": ["dep-a:agent-a"]}
     )
     group = table.get_item(Key=module._item_key(tenant, "GROUP", "group-a"))["Item"]
+    groups = [group]
     monkeypatch.setattr(
         module,
         "_list",
-        lambda _tenant, kind: [group] if kind == "GROUP" else [],
+        lambda _tenant, kind, **_kwargs: list(groups) if kind == "GROUP" else [],
     )
     claims = {"custom:tenant_id": tenant, "cognito:groups": ["platform-admin"], "sub": "operator"}
 
@@ -739,6 +761,172 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
     offline_payload = json.loads(offline["body"])
     assert offline_payload["verified"] is False
     assert offline_payload["checks"]["heartbeat"]["passed"] is False
+    assert offline_payload["checks"]["heartbeat"]["detail"] == ("Agent is offline or disconnected.")
+
+    group["agent_keys"] = ["dep-a:agent-a"]
+    duplicate_group = dict(group)
+    duplicate_group["id"] = "group-duplicate"
+    groups.append(duplicate_group)
+    conflicting = json.loads(
+        _invoke(
+            module,
+            _event("/enterprise/agents/dep-a/agent-a/verify", "GET", claims=claims),
+        )["body"]
+    )
+    assert conflicting["checks"]["policyAssignment"] == {
+        "passed": False,
+        "detail": "Conflicting policy-group assignments must be resolved.",
+    }
+
+    missing = json.loads(
+        _invoke(
+            module,
+            _event("/enterprise/agents/dep-a/missing/verify", "GET", claims=claims),
+        )["body"]
+    )
+    assert missing["checks"]["registered"] == {
+        "passed": False,
+        "detail": "Agent is not registered to this deployment.",
+    }
+    assert missing["checks"]["heartbeat"] == {
+        "passed": False,
+        "detail": "Agent is not registered to this deployment.",
+    }
+
+
+def test_list_reads_every_dynamodb_page_before_policy_verification(monkeypatch: Any) -> None:
+    module, _table = _load_handler(monkeypatch)
+    calls: list[dict[str, Any]] = []
+
+    def paginated_query(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        if "ExclusiveStartKey" not in kwargs:
+            return {
+                "Items": [{"id": "group-a"}],
+                "LastEvaluatedKey": {"pk": "TENANT#tenant-a", "sk": "GROUP#group-a"},
+            }
+        return {"Items": [{"id": "group-b"}]}
+
+    monkeypatch.setattr(module.TABLE, "query", paginated_query)
+
+    assert module._list("tenant-a", "GROUP", consistent_read=True) == [
+        {"id": "group-a"},
+        {"id": "group-b"},
+    ]
+    assert calls[1]["ExclusiveStartKey"] == {
+        "pk": "TENANT#tenant-a",
+        "sk": "GROUP#group-a",
+    }
+    assert all(call["Limit"] == module._LIST_PAGE_ITEM_LIMIT for call in calls)
+    assert all(call["ConsistentRead"] is True for call in calls)
+
+
+def test_list_fails_closed_at_page_and_item_bounds(monkeypatch: Any) -> None:
+    module, _table = _load_handler(monkeypatch)
+    page_calls = 0
+
+    def endless_query(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal page_calls
+        page_calls += 1
+        return {
+            "Items": [{"id": f"group-{page_calls}"}],
+            "LastEvaluatedKey": {"pk": "tenant", "sk": f"group-{page_calls}"},
+        }
+
+    monkeypatch.setattr(module.TABLE, "query", endless_query)
+    monkeypatch.setattr(module, "_MAX_LIST_PAGES", 2)
+    with pytest.raises(RuntimeError, match="bounded page limit"):
+        module._list("tenant-a", "GROUP")
+    assert page_calls == 2
+
+    monkeypatch.setattr(
+        module.TABLE,
+        "query",
+        lambda **_kwargs: {"Items": [{"id": "group-a"}, {"id": "group-b"}]},
+    )
+    monkeypatch.setattr(module, "_MAX_LIST_ITEMS", 1)
+    with pytest.raises(RuntimeError, match="bounded item limit"):
+        module._list("tenant-a", "GROUP")
+
+
+def test_decision_window_is_recent_bounded_and_reports_truncation(monkeypatch: Any) -> None:
+    module, _table = _load_handler(monkeypatch)
+    calls: list[dict[str, Any]] = []
+
+    def decision_query(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        if kwargs.get("IndexName") == module._DECISION_TIMELINE_INDEX:
+            return {
+                "Items": [
+                    {"pk": "tenant", "sk": "DECISION#new", "observed_at": 3},
+                    {"pk": "tenant", "sk": "DECISION#duplicate", "observed_at": 2},
+                ],
+                "LastEvaluatedKey": {"timeline_pk": "tenant", "timeline_sk": "2"},
+            }
+        return {
+            "Items": [
+                {"pk": "tenant", "sk": "DECISION#duplicate", "observed_at": 2},
+                {"pk": "tenant", "sk": "DECISION#legacy", "observed_at": 1},
+            ]
+        }
+
+    monkeypatch.setattr(module.TABLE, "query", decision_query)
+
+    decisions, truncated = module._decision_window("tenant-a")
+
+    assert [item["sk"] for item in decisions] == [
+        "DECISION#new",
+        "DECISION#duplicate",
+        "DECISION#legacy",
+    ]
+    assert truncated is True
+    assert calls[0]["IndexName"] == "DecisionTimeline"
+    assert calls[0]["ScanIndexForward"] is False
+    assert all(call["Limit"] == module._DECISION_WINDOW_LIMIT for call in calls)
+
+
+def test_agent_verification_uses_one_clock_snapshot(monkeypatch: Any) -> None:
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-a"
+    checked_at = 2_000
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "status": "connected",
+            "expires_at": checked_at + 1,
+        }
+    )
+    table.put_item(Item=module._item_key(tenant, "POLICY", "policy-a") | {"id": "policy-a"})
+    group = {
+        "id": "group-a",
+        "policyId": "policy-a",
+        "agent_keys": ["dep-a:agent-a"],
+    }
+    monkeypatch.setattr(
+        module,
+        "_list",
+        lambda _tenant, kind, **_kwargs: [group] if kind == "GROUP" else [],
+    )
+    clock_reads = 0
+
+    def advancing_clock() -> int:
+        nonlocal clock_reads
+        value = checked_at + clock_reads
+        clock_reads += 1
+        return value
+
+    monkeypatch.setattr(module.time, "time", advancing_clock)
+
+    result = module._verify_agent(tenant, "dep-a", "agent-a")
+
+    assert result["checkedAt"] == checked_at
+    assert result["checks"]["heartbeat"] == {
+        "passed": True,
+        "detail": "Heartbeat is current and the session is connected.",
+    }
+    assert clock_reads == 1
 
 
 def test_fleet_emergency_stop_is_reversible_durable_and_enforced(monkeypatch: Any) -> None:
@@ -749,7 +937,7 @@ def test_fleet_emergency_stop_is_reversible_durable_and_enforced(monkeypatch: An
     monkeypatch.setattr(
         module,
         "_list",
-        lambda selected_tenant, kind: [
+        lambda selected_tenant, kind, **_kwargs: [
             dict(item)
             for (pk, sk), item in table.items.items()
             if pk == f"TENANT#{selected_tenant}" and sk.startswith(f"{kind}#")

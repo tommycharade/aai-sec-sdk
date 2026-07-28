@@ -23,6 +23,15 @@ PRESENCE = boto3.resource("dynamodb").Table(os.environ["PRESENCE_TABLE"])
 IDEMPOTENCY = boto3.resource("dynamodb").Table(os.environ["IDEMPOTENCY_TABLE"])
 S3 = boto3.client("s3")
 
+# Tenant list reads are deliberately finite. Callers that require complete
+# security state fail closed once either bound is reached; they never authorize
+# from a silently truncated result or let one request drain an unbounded table.
+_LIST_PAGE_ITEM_LIMIT = 250
+_MAX_LIST_PAGES = 8
+_MAX_LIST_ITEMS = 2_000
+_DECISION_WINDOW_LIMIT = 250
+_DECISION_TIMELINE_INDEX = "DecisionTimeline"
+
 _AGENT_TELEMETRY_FIELDS = frozenset(
     {
         "actionsTotal",
@@ -307,11 +316,68 @@ def _is_conditional_conflict(error):
     )
 
 
-def _list(tenant, kind):
-    result = TABLE.query(
-        KeyConditionExpression=Key("pk").eq(f"TENANT#{tenant}") & Key("sk").begins_with(f"{kind}#")
+def _list(tenant, kind, *, consistent_read=False):
+    """Return a complete bounded tenant list or fail instead of truncating it."""
+    condition = Key("pk").eq(f"TENANT#{tenant}") & Key("sk").begins_with(f"{kind}#")
+    items = []
+    exclusive_start_key = None
+    pages = 0
+    while True:
+        arguments = {
+            "KeyConditionExpression": condition,
+            "Limit": _LIST_PAGE_ITEM_LIMIT,
+        }
+        if consistent_read:
+            arguments["ConsistentRead"] = True
+        if exclusive_start_key is not None:
+            arguments["ExclusiveStartKey"] = exclusive_start_key
+        result = TABLE.query(**arguments)
+        page_items = result.get("Items", [])
+        if len(items) + len(page_items) > _MAX_LIST_ITEMS:
+            raise RuntimeError("Tenant list exceeds the bounded item limit")
+        items.extend(page_items)
+        pages += 1
+        exclusive_start_key = result.get("LastEvaluatedKey")
+        if not exclusive_start_key:
+            return items
+        if pages >= _MAX_LIST_PAGES:
+            raise RuntimeError("Tenant list exceeds the bounded page limit")
+
+
+def _decision_window(tenant):
+    """Return bounded recent decision evidence and whether older data exists.
+
+    New evidence is ordered by a dedicated timeline index. One bounded legacy
+    page preserves visibility during migration without restoring an unbounded
+    dashboard read. The truncation bit tells the UI that counts are lower
+    bounds rather than silently presenting an incomplete total as exact.
+    """
+    timeline = TABLE.query(
+        IndexName=_DECISION_TIMELINE_INDEX,
+        KeyConditionExpression=Key("timeline_pk").eq(f"TENANT#{tenant}#DECISION"),
+        ScanIndexForward=False,
+        Limit=_DECISION_WINDOW_LIMIT,
     )
-    return result.get("Items", [])
+    legacy = TABLE.query(
+        KeyConditionExpression=Key("pk").eq(f"TENANT#{tenant}")
+        & Key("sk").begins_with("DECISION#"),
+        Limit=_DECISION_WINDOW_LIMIT,
+    )
+    by_key = {
+        (item.get("pk", ""), item.get("sk", "")): item
+        for item in timeline.get("Items", []) + legacy.get("Items", [])
+    }
+    decisions = sorted(
+        by_key.values(),
+        key=lambda item: int(item.get("observed_at", 0)),
+        reverse=True,
+    )[:_DECISION_WINDOW_LIMIT]
+    truncated = bool(
+        timeline.get("LastEvaluatedKey")
+        or legacy.get("LastEvaluatedKey")
+        or len(by_key) > _DECISION_WINDOW_LIMIT
+    )
+    return decisions, truncated
 
 
 def _fleet_emergency_stop_active(tenant):
@@ -438,16 +504,14 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
     ).get("Item")
     if not agent:
         raise PermissionError("registered agent is required")
-    group = next(
-        (
-            item
-            for item in _list(tenant, "GROUP")
-            if agent_key in item.get("agent_keys", [])
-        ),
-        None,
-    )
-    if not group:
-        raise PermissionError("assigned policy group is required")
+    groups = [
+        item
+        for item in _list(tenant, "GROUP", consistent_read=True)
+        if agent_key in item.get("agent_keys", [])
+    ]
+    if len(groups) != 1:
+        raise PermissionError("exactly one assigned policy group is required")
+    group = groups[0]
     policy = TABLE.get_item(
         Key=_item_key(tenant, "POLICY", group.get("policyId", "")),
         ConsistentRead=True,
@@ -455,6 +519,7 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
     if not policy:
         raise PermissionError("assigned policy is unavailable")
     record_id = f"{deployment_id}:{agent_id}:{decision_id}"
+    observed_at = int(time.time())
     values = {
         "id": decision_id,
         "deployment_id": deployment_id,
@@ -468,8 +533,10 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
         "policy_id": policy["id"],
         "policy_version": int(policy.get("version", 0)),
         "reported_by_agent": True,
-        "observed_at": int(time.time()),
-        "ttl": int(time.time()) + (30 * 86400),
+        "observed_at": observed_at,
+        "timeline_pk": f"TENANT#{tenant}#DECISION",
+        "timeline_sk": f"{observed_at:010d}#{record_id}",
+        "ttl": observed_at + (30 * 86400),
     }
     try:
         item = _create_item(tenant, "DECISION", record_id, values)
@@ -820,17 +887,20 @@ def _verify_agent(tenant, deployment_id, agent_id):
     an agent is ready only when its identity exists, its heartbeat is current,
     a valid policy group is assigned, and no emergency stop is active.
     """
+    # One clock snapshot keeps the readiness boolean, explanation and evidence
+    # timestamp internally consistent at the session-expiry boundary.
+    checked_at = int(time.time())
     agent = TABLE.get_item(
         Key=_item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}"),
         ConsistentRead=True,
     ).get("Item")
     groups = [
         group
-        for group in _list(tenant, "GROUP")
+        for group in _list(tenant, "GROUP", consistent_read=True)
         if f"{deployment_id}:{agent_id}" in group.get("agent_keys", [])
     ]
     policy_assigned = False
-    if groups:
+    if len(groups) == 1:
         policy = TABLE.get_item(
             Key=_item_key(tenant, "POLICY", groups[0].get("policyId", "")),
             ConsistentRead=True,
@@ -838,24 +908,42 @@ def _verify_agent(tenant, deployment_id, agent_id):
         policy_assigned = bool(policy)
     fleet_stopped = _fleet_emergency_stop_active(tenant)
     agent_stopped = bool(agent and agent.get("emergencyStop", False))
+    registered = bool(agent)
+    heartbeat_current = bool(
+        agent
+        and agent.get("status") == "connected"
+        and int(agent.get("expires_at", 0)) > checked_at
+    )
+    if not agent:
+        heartbeat_detail = "Agent is not registered to this deployment."
+    elif agent.get("status") != "connected":
+        heartbeat_detail = "Agent is offline or disconnected."
+    elif int(agent.get("expires_at", 0)) <= checked_at:
+        heartbeat_detail = "The agent heartbeat session has expired."
+    else:
+        heartbeat_detail = "Heartbeat is current and the session is connected."
+    if len(groups) > 1:
+        policy_detail = "Conflicting policy-group assignments must be resolved."
+    elif policy_assigned:
+        policy_detail = "Exactly one valid policy group is assigned."
+    else:
+        policy_detail = "No valid policy group is assigned."
     checks = {
         "registered": {
-            "passed": bool(agent),
-            "detail": "Agent is registered to this deployment.",
+            "passed": registered,
+            "detail": (
+                "Agent is registered to this deployment."
+                if registered
+                else "Agent is not registered to this deployment."
+            ),
         },
         "heartbeat": {
-            "passed": bool(
-                agent
-                and agent.get("status") == "connected"
-                and int(agent.get("expires_at", 0)) > int(time.time())
-            ),
-            "detail": "Heartbeat is current and the session is connected.",
+            "passed": heartbeat_current,
+            "detail": heartbeat_detail,
         },
         "policyAssignment": {
             "passed": policy_assigned,
-            "detail": "A valid policy group is assigned."
-            if policy_assigned
-            else "No valid policy group is assigned.",
+            "detail": policy_detail,
         },
         "emergencyStop": {
             "passed": bool(agent and not fleet_stopped and not agent_stopped),
@@ -875,7 +963,7 @@ def _verify_agent(tenant, deployment_id, agent_id):
         "agentId": agent_id,
         "deploymentId": deployment_id,
         "verified": all(check["passed"] for check in checks.values()),
-        "checkedAt": int(time.time()),
+        "checkedAt": checked_at,
         "checks": checks,
         "host": agent.get("host", "") if agent else "",
         "status": agent.get("status", "offline") if agent else "offline",
@@ -911,11 +999,7 @@ def _managed_policy_configuration(tenant, configuration):
 def _configuration(tenant):
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     fleet_stopped = _fleet_emergency_stop_active(tenant)
-    decisions = sorted(
-        _list(tenant, "DECISION"),
-        key=lambda item: int(item.get("observed_at", 0)),
-        reverse=True,
-    )
+    decisions, decisions_truncated = _decision_window(tenant)
     utc = time.gmtime()
     today_start = int(time.time()) - (
         utc.tm_hour * 3600 + utc.tm_min * 60 + utc.tm_sec
@@ -929,6 +1013,7 @@ def _configuration(tenant):
             "posture": "critical" if fleet_stopped else "healthy",
             "activeSessions": len(_all_agents(tenant)),
             "decisionsToday": len(decisions_today),
+            "decisionCountsTruncated": decisions_truncated,
             "deniedToday": sum(
                 1 for item in decisions_today if item.get("decision") == "denied"
             ),

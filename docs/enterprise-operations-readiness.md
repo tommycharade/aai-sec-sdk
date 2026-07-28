@@ -31,8 +31,9 @@ the deployment-owned matrix:
   has not been independently provisioned, fail closed with HTTP 403; the
   Lambda never falls back to a default tenant.
 - Mutations require the Cognito `platform-admin` or `security-operator` group.
-- DynamoDB control and presence tables use on-demand capacity; the control
-  table has point-in-time recovery and the presence table uses TTL.
+- DynamoDB control and presence tables use on-demand capacity. The control
+  table has point-in-time recovery, TTL for short-lived operational records,
+  and a decision-timeline index; the presence table also uses TTL.
 - The audit bucket is versioned, retained, SSL-only, private, and configured
   with S3 Object Lock compliance retention.
 - A retained DynamoDB idempotency table is deployed with TTL and point-in-time

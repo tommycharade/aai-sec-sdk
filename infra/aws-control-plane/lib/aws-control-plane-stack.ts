@@ -28,9 +28,16 @@ export class AwsControlPlaneStack extends cdk.Stack {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "sk", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: "ttl",
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    table.addGlobalSecondaryIndex({
+      indexName: "DecisionTimeline",
+      partitionKey: { name: "timeline_pk", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "timeline_sk", type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
     });
 
     const presence = new dynamodb.Table(this, "PresenceTable", {
