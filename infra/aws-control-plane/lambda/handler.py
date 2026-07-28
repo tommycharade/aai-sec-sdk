@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import secrets
 import time
 import uuid
@@ -209,6 +210,39 @@ def _put(tenant, kind, identifier, item):
     record = {**_item_key(tenant, kind, identifier), **item, "tenant_id": tenant}
     TABLE.put_item(Item=record)
     return record
+
+
+def _bounded_text(value, field, maximum=128):
+    """Validate bounded operator metadata without accepting control characters."""
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be text")
+    normalized = value.strip()
+    if not normalized or len(normalized) > maximum or any(ord(char) < 32 for char in normalized):
+        raise ValueError(f"{field} must be bounded non-empty text")
+    return normalized
+
+
+def _bounded_identifier(value, field):
+    """Validate a stable tenant-scoped identifier safe for keys and routes."""
+    normalized = _bounded_text(value, field)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", normalized):
+        raise ValueError(f"{field} contains unsupported characters")
+    return normalized
+
+
+def _create_item(tenant, kind, identifier, item):
+    """Create one tenant-scoped record without allowing identity replacement."""
+    record = {**_item_key(tenant, kind, identifier), **item, "tenant_id": tenant}
+    TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+    return record
+
+
+def _is_conditional_conflict(error):
+    """Return whether DynamoDB rejected a create/update precondition."""
+    return (
+        getattr(error, "response", {}).get("Error", {}).get("Code")
+        == "ConditionalCheckFailedException"
+    )
 
 
 def _list(tenant, kind):
@@ -826,15 +860,10 @@ def _enroll_agent(event):
     )
     if not agent:
         raise PermissionError("registered agent no longer exists")
-    agent.update(
-        {
-            "status": "connected",
-            "last_heartbeat": now,
-            "expires_at": now + 300,
-            "project_root": body.get("projectRoot", agent.get("project_root", "")),
-            "host": body.get("host", agent.get("host", "agent")),
-        }
-    )
+    # Exchanging a bootstrap proves possession of enrollment material, not
+    # that the runtime process is alive. Only the authenticated agent
+    # heartbeat route may transition presence to connected.
+    agent.update({"status": "offline", "last_heartbeat": 0, "expires_at": 0})
     TABLE.put_item(Item=agent)
     _audit(
         tenant,
@@ -1183,6 +1212,81 @@ def handler(event, context):
                 )
             if method == "GET" and parts == ["compliance", "evidence"]:
                 return _response(200, _fleet(tenant)["complianceEvidence"])
+            if method == "POST" and parts == ["projects"]:
+                body = _body(event)
+                organization_id = _bounded_identifier(
+                    body.get("organizationId"), "organizationId"
+                )
+                project_id = _bounded_identifier(body.get("projectId"), "projectId")
+                organization = TABLE.get_item(
+                    Key=_item_key(tenant, "ORG", organization_id),
+                    ConsistentRead=True,
+                ).get("Item")
+                if not organization:
+                    return _response(400, {"error": "organization not found"})
+                try:
+                    item = _create_item(
+                        tenant,
+                        "PROJECT",
+                        project_id,
+                        {
+                            "id": project_id,
+                            "organization_id": organization_id,
+                            "name": _bounded_text(body.get("name"), "name"),
+                            "created_at": int(time.time()),
+                        },
+                    )
+                except Exception as error:
+                    if _is_conditional_conflict(error):
+                        return _response(409, {"error": "project already exists"})
+                    raise
+                _audit(tenant, "project_created", actor, {"project_id": project_id})
+                return _response(201, item)
+            if method == "POST" and parts == ["deployments"]:
+                body = _body(event)
+                organization_id = _bounded_identifier(
+                    body.get("organizationId"), "organizationId"
+                )
+                project_id = _bounded_identifier(body.get("projectId"), "projectId")
+                deployment_id = _bounded_identifier(
+                    body.get("deploymentId"), "deploymentId"
+                )
+                project = TABLE.get_item(
+                    Key=_item_key(tenant, "PROJECT", project_id),
+                    ConsistentRead=True,
+                ).get("Item")
+                if not project or project.get("organization_id") != organization_id:
+                    return _response(400, {"error": "project is not in the selected organization"})
+                item_values = {
+                    "id": deployment_id,
+                    "organization_id": organization_id,
+                    "project_id": project_id,
+                    "name": _bounded_text(body.get("name"), "name"),
+                    "environment": _bounded_text(
+                        body.get("environment"), "environment", 64
+                    ),
+                    "region": _bounded_text(body.get("region"), "region", 64),
+                    "team": _bounded_text(body.get("team", "Unassigned"), "team", 128),
+                    "sdk_version": _bounded_text(
+                        body.get("sdkVersion", "not-reported"), "sdkVersion", 64
+                    ),
+                    "created_at": int(time.time()),
+                }
+                try:
+                    item = _create_item(
+                        tenant, "DEPLOYMENT", deployment_id, item_values
+                    )
+                except Exception as error:
+                    if _is_conditional_conflict(error):
+                        return _response(409, {"error": "deployment already exists"})
+                    raise
+                _audit(
+                    tenant,
+                    "deployment_created",
+                    actor,
+                    {"deployment_id": deployment_id, "project_id": project_id},
+                )
+                return _response(201, item)
             if method == "GET" and parts in (
                 ["deployment-config"],
                 ["deployment-config", "history"],
@@ -1609,26 +1713,33 @@ def handler(event, context):
                 return _response(200, _approval_view(item, now))
             if method == "POST" and parts == ["groups"]:
                 body = _body(event)
+                group_id = _bounded_identifier(body.get("groupId"), "groupId")
+                policy_id = _bounded_identifier(body.get("policyId"), "policyId")
                 policy = next(
-                    (p for p in _list(tenant, "POLICY") if p["id"] == body["policyId"]), None
+                    (p for p in _list(tenant, "POLICY") if p["id"] == policy_id), None
                 )
                 if not policy:
                     return _response(400, {"error": "policy not found"})
-                item = _put(
-                    tenant,
-                    "GROUP",
-                    body["groupId"],
-                    {
-                        "id": body["groupId"],
-                        "organizationId": "org-demo",
-                        "name": body["name"],
-                        "policyId": policy["id"],
-                        "policyName": policy["name"],
-                        "createdAt": int(time.time()),
-                        "agent_keys": [],
-                    },
-                )
-                _audit(tenant, "group_created", actor, {"group_id": body["groupId"]})
+                try:
+                    item = _create_item(
+                        tenant,
+                        "GROUP",
+                        group_id,
+                        {
+                            "id": group_id,
+                            "organizationId": policy.get("organization_id", ""),
+                            "name": _bounded_text(body.get("name"), "name"),
+                            "policyId": policy["id"],
+                            "policyName": policy["name"],
+                            "createdAt": int(time.time()),
+                            "agent_keys": [],
+                        },
+                    )
+                except Exception as error:
+                    if _is_conditional_conflict(error):
+                        return _response(409, {"error": "group already exists"})
+                    raise
+                _audit(tenant, "group_created", actor, {"group_id": group_id})
                 return _response(201, {**item, "agents": []})
             if (
                 method == "POST"
@@ -1699,28 +1810,48 @@ def handler(event, context):
                 )
             if method == "POST" and parts == ["agents", "register"]:
                 body = _body(event)
-                agent_id = body["agentId"]
-                deployment_id = body["deploymentId"]
-                now = int(time.time())
-                item = _put(
-                    tenant,
-                    "AGENT",
-                    f"{deployment_id}:{agent_id}",
-                    {
-                        "id": agent_id,
-                        "organization_id": "org-demo",
-                        "project_id": "project-demo",
-                        "deployment_id": deployment_id,
-                        "host": body.get("host", "agent"),
-                        "project_root": body.get("projectRoot", ""),
-                        "environment": body.get("environment", "dev"),
-                        "region": body.get("region", os.environ.get("AWS_REGION", "eu-west-2")),
-                        "status": "connected",
-                        "last_heartbeat": now,
-                        "expires_at": now + 300,
-                        "emergencyStop": False,
-                    },
+                agent_id = _bounded_identifier(body.get("agentId"), "agentId")
+                deployment_id = _bounded_identifier(
+                    body.get("deploymentId"), "deploymentId"
                 )
+                deployment = TABLE.get_item(
+                    Key=_item_key(tenant, "DEPLOYMENT", deployment_id),
+                    ConsistentRead=True,
+                ).get("Item")
+                if not deployment:
+                    return _response(400, {"error": "deployment not found"})
+                now = int(time.time())
+                try:
+                    item = _create_item(
+                        tenant,
+                        "AGENT",
+                        f"{deployment_id}:{agent_id}",
+                        {
+                            "id": agent_id,
+                            # Ownership and environment come from the trusted
+                            # deployment record, never browser-supplied values.
+                            "organization_id": deployment["organization_id"],
+                            "project_id": deployment["project_id"],
+                            "deployment_id": deployment_id,
+                            "host": _bounded_text(body.get("host", "agent"), "host", 64),
+                            "project_root": (
+                                _bounded_text(body.get("projectRoot"), "projectRoot", 4096)
+                                if body.get("projectRoot")
+                                else ""
+                            ),
+                            "environment": deployment["environment"],
+                            "region": deployment["region"],
+                            "status": "offline",
+                            "last_heartbeat": 0,
+                            "expires_at": 0,
+                            "emergencyStop": False,
+                            "created_at": now,
+                        },
+                    )
+                except Exception as error:
+                    if _is_conditional_conflict(error):
+                        return _response(409, {"error": "agent already exists"})
+                    raise
                 _audit(
                     tenant,
                     "agent_registered",

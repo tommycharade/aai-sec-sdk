@@ -112,6 +112,16 @@ accounts may continue to use the immutable `custom:tenant_id` claim; new trial
 users resolve through the server-side subject mapping and fail closed if it is
 missing or unprovisioned.
 
+The first-run console then prepares a pilot foundation before offering any host
+installer. It creates a project under the provisioned organization, a bounded
+deployment under that project, and a policy group bound to the safe default.
+`POST /api/enterprise/projects` and `POST /api/enterprise/deployments` reject
+unknown or mismatched parents and duplicate identifiers. Agent registration
+requires an existing deployment and derives organization, project,
+environment, and region from that server-owned record; browser-supplied values
+cannot change ownership. Registration and bootstrap exchange leave presence
+offline. Only an authenticated runtime heartbeat marks the agent connected.
+
 The stack selects Cognito Managed Login version 2 and declares the AAI Security
 branding style in CloudFormation, including the dark/teal form treatment and
 logo asset. This keeps the authentication handoff visually consistent with the
