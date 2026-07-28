@@ -1382,8 +1382,9 @@ the deployment-owned matrix:</p>
   has not been independently provisioned, fail closed with HTTP 403; the
   Lambda never falls back to a default tenant.</li>
 <li>Mutations require the Cognito <code>platform-admin</code> or <code>security-operator</code> group.</li>
-<li>DynamoDB control and presence tables use on-demand capacity; the control
-  table has point-in-time recovery and the presence table uses TTL.</li>
+<li>DynamoDB control and presence tables use on-demand capacity. The control
+  table has point-in-time recovery, TTL for short-lived operational records,
+  and a decision-timeline index; the presence table also uses TTL.</li>
 <li>The audit bucket is versioned, retained, SSL-only, private, and configured
   with S3 Object Lock compliance retention.</li>
 <li>A retained DynamoDB idempotency table is deployed with TTL and point-in-time

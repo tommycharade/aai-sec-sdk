@@ -1451,6 +1451,16 @@ never displayed.</p>
 disable competing actions until the control-plane request completes. Success
 and failure remain visible through the console status banners; a disabled
 control is not treated as evidence that an operation succeeded.</p>
+<p>Agent verification messages are derived from the same boolean condition they
+describe. Missing registration, offline status, expired heartbeat, conflicting
+group assignment, missing policy and emergency-stop states each return a fixed,
+non-sensitive explanation; a failed check never carries healthy-state copy.
+Strongly consistent tenant list reads paginate to obtain complete
+policy-assignment state, but fixed page and item limits prevent unbounded
+Lambda work. Exceeding either limit fails the request closed instead of
+authorizing from a partial list. Operational decision history uses a separate
+reverse-chronological, bounded index; the API marks counts as truncated when
+the visible window is a lower bound.</p>
 <p>On narrow screens, dense fleet tables preserve their complete column set inside
 a horizontally scrollable region and display an explicit swipe hint. This
 keeps policy, heartbeat, health, and action columns available without shrinking

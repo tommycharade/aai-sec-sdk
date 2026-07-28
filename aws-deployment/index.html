@@ -1434,7 +1434,9 @@ AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 <li>Cognito <code>platform-admin</code> and <code>security-operator</code> groups for mutation RBAC;</li>
 <li>API Gateway HTTP API with Cognito JWT authorizer;</li>
 <li>Lambda control-plane handler;</li>
-<li>on-demand DynamoDB control and presence tables;</li>
+<li>on-demand DynamoDB control and presence tables; the control table expires
+  short-lived records by <code>ttl</code> and has a decision-timeline index for bounded
+  reverse-chronological dashboard reads;</li>
 <li>a retained, point-in-time-recoverable DynamoDB idempotency table with TTL;</li>
 <li>an S3 Object Lock audit bucket;</li>
 <li>an SNS security-alert topic wired to Lambda and idempotency CloudWatch
