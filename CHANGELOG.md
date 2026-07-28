@@ -1,5 +1,13 @@
 # Changelog
 
+- Made hosted agent verification details truth-preserving: missing, offline,
+  expired, healthy, and conflicting-policy states now return distinct fixed
+  messages, and multiple policy-group assignments fail the UI's exactly-one
+  policy check instead of being treated as valid. Tenant list pagination is
+  strongly consistent for policy assignment, complete within fixed page and
+  item limits, and fails closed at either bound. Operational decisions now use
+  a TTL-backed, bounded reverse-chronological index so high-volume history
+  cannot permanently take the dashboard offline or masquerade as exact totals.
 - Added an identity-scoped host session cache so Claude native hooks, Codex and
   the MCP gateway share heartbeat-rotated AWS agent bearers beyond the original
   15-minute session. The reference cache is outside project configuration,

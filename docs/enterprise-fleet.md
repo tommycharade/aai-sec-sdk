@@ -160,11 +160,15 @@ credentials, free-form reasons, and caller-selected policy metadata are
 rejected.
 
 The authenticated session binds the report to one deployment and agent. The
-server resolves the current group policy and derives tenant, deployment, agent,
-policy version, and observation time rather than trusting those values from the
-host. Identical reports are idempotent; reuse of a digest with different
-metadata is rejected. The dashboard keeps a bounded 30-day operational index,
-and the durable audit adapter receives the same content-free event.
+server uses a strongly consistent group read and requires exactly one current
+group before resolving policy. It derives tenant, deployment, agent, policy
+version, and observation time rather than trusting those values from the host.
+Identical reports are idempotent; reuse of a digest with different metadata is
+rejected. A reverse-chronological DynamoDB index supplies a bounded dashboard
+window, and the response marks totals as truncated when older rows exist.
+Decision records carry a 30-day TTL (physical deletion follows DynamoDB's
+asynchronous TTL process), while the durable audit adapter receives the same
+content-free event under its separate retention policy.
 
 This stream is evidence, not authority. An enrolled process can report what it
 observed, but its report cannot permit an action, change a policy, approve a

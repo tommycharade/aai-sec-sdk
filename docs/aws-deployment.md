@@ -38,7 +38,9 @@ The stack creates:
 - Cognito `platform-admin` and `security-operator` groups for mutation RBAC;
 - API Gateway HTTP API with Cognito JWT authorizer;
 - Lambda control-plane handler;
-- on-demand DynamoDB control and presence tables;
+- on-demand DynamoDB control and presence tables; the control table expires
+  short-lived records by `ttl` and has a decision-timeline index for bounded
+  reverse-chronological dashboard reads;
 - a retained, point-in-time-recoverable DynamoDB idempotency table with TTL;
 - an S3 Object Lock audit bucket;
 - an SNS security-alert topic wired to Lambda and idempotency CloudWatch
