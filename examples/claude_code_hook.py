@@ -21,8 +21,10 @@ from agentic_security import (
     ClaudeHookDecision,
     ClaudeHookResult,
     ControlPlaneAgentClient,
+    ControlPlaneDecisionExporter,
     ControlPlaneDependencyError,
     JsonlAuditSink,
+    ReplicatedAuditSink,
     command_rule,
     exact_tool_rule,
     path_within_rule,
@@ -74,7 +76,34 @@ def _string_list(value: object) -> list[str] | None:
     return value
 
 
-def _load_central_config(project_dir: Path) -> dict[str, Any] | None:
+def _control_plane_client(project_dir: Path) -> ControlPlaneAgentClient | None:
+    """Build the enrolled client without accepting identity from Claude input."""
+    control_plane_url = os.environ.get("AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL")
+    if not control_plane_url:
+        return None
+    token = os.environ.get("AAI_SEC_AGENT_TOKEN")
+    deployment_id = os.environ.get("AAI_SEC_DEPLOYMENT_ID")
+    agent_id = os.environ.get("AAI_SEC_AGENT_ID", "claude-code-local")
+    if not token or not deployment_id:
+        return None
+    try:
+        return ControlPlaneAgentClient(
+            control_plane_url,
+            token,
+            agent_id=agent_id,
+            project_root=str(project_dir),
+            deployment_id=deployment_id,
+            aws_agent_session=os.environ.get("AAI_SEC_AGENT_SESSION_MODE") == "aws",
+            timeout_seconds=3,
+        )
+    except ValueError:
+        return None
+
+
+def _load_central_config(
+    project_dir: Path,
+    client: ControlPlaneAgentClient | None = None,
+) -> dict[str, Any] | None:
     """Resolve the authenticated group policy for Claude native tools.
 
     The hook receives only routing metadata from onboarding; the bearer token
@@ -86,21 +115,11 @@ def _load_central_config(project_dir: Path) -> dict[str, Any] | None:
     control_plane_url = os.environ.get("AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL")
     if not control_plane_url:
         return _load_safe_config(project_dir)
-    token = os.environ.get("AAI_SEC_AGENT_TOKEN")
-    deployment_id = os.environ.get("AAI_SEC_DEPLOYMENT_ID")
-    agent_id = os.environ.get("AAI_SEC_AGENT_ID", "claude-code-local")
-    if not token or not deployment_id:
+    client = client or _control_plane_client(project_dir)
+    if client is None:
         return None
     try:
-        effective = ControlPlaneAgentClient(
-            control_plane_url,
-            token,
-            agent_id=agent_id,
-            project_root=str(project_dir),
-            deployment_id=deployment_id,
-            aws_agent_session=os.environ.get("AAI_SEC_AGENT_SESSION_MODE") == "aws",
-            timeout_seconds=3,
-        ).effective_policy()
+        effective = client.effective_policy()
     except (ControlPlaneDependencyError, ValueError):
         return None
     policy = effective.get("policy")
@@ -146,7 +165,8 @@ def _load_central_config(project_dir: Path) -> dict[str, Any] | None:
 def main() -> None:
     """Read one Claude event and emit one decision."""
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())).resolve()
-    config = _load_central_config(project_dir)
+    central_client = _control_plane_client(project_dir)
+    config = _load_central_config(project_dir, central_client)
     audit_path = project_dir / ".claude" / "security-audit.jsonl"
     if config is not None:
         configured_audit = Path(config["auditFile"])
@@ -154,13 +174,22 @@ def main() -> None:
             configured_audit if configured_audit.is_absolute() else project_dir / configured_audit
         )
     audit_path.parent.mkdir(parents=True, exist_ok=True)
+    local_audit = JsonlAuditSink(audit_path)
+    audit = (
+        ReplicatedAuditSink(
+            local_audit,
+            ControlPlaneDecisionExporter(central_client, source="claude_native"),
+        )
+        if central_client is not None and central_client.aws_agent_session
+        else local_audit
+    )
     if config is None:
         hook = ClaudeCodeHook(
             rules=[],
             default=ClaudeHookResult(
                 ClaudeHookDecision.DENY, "Claude security configuration is invalid"
             ),
-            audit=JsonlAuditSink(audit_path),
+            audit=audit,
         )
         hook.serve_stdio()
         return
@@ -193,7 +222,7 @@ def main() -> None:
                 reason="tool is explicitly allowed by the project policy",
             ),
         ],
-        audit=JsonlAuditSink(audit_path),
+        audit=audit,
     )
     hook.serve_stdio()
 

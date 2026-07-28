@@ -290,6 +290,46 @@ audit, or isolation services.
 
 ::: agentic_security.ControlPlaneAgentClient
 
+`ControlPlaneAgentClient.report_decision` is available only for an enrolled AWS
+agent session. It submits a SHA-256 event digest plus fixed, content-minimised
+decision metadata; it never submits tool arguments, prompts, commands, paths,
+outputs, credentials, principals, or caller-selected policy identity. The
+server derives ownership and current policy metadata from the authenticated
+session. A report is operational evidence and grants no authority.
+
+::: agentic_security.ControlPlaneDecisionExporter
+
+`ControlPlaneDecisionExporter` is an `AuditExporter` for host and SDK decision
+events. It maps structured local outcomes into the closed control-plane
+vocabulary, discards free-form action content, and ignores lifecycle events
+that are not decisions. Use it as the required replica in
+`ReplicatedAuditSink` when the management plane must acknowledge evidence
+before a consequential action proceeds:
+
+```python
+from agentic_security import (
+    ControlPlaneAgentClient,
+    ControlPlaneDecisionExporter,
+    JsonlAuditSink,
+    ReplicatedAuditSink,
+)
+
+client = ControlPlaneAgentClient(
+    "https://control-plane.example",
+    "synthetic-short-lived-agent-session",
+    agent_id="claude-example",
+    deployment_id="deployment-example",
+    aws_agent_session=True,
+)
+audit = ReplicatedAuditSink(
+    JsonlAuditSink(".claude/security-audit.jsonl"),
+    ControlPlaneDecisionExporter(client, source="claude_native"),
+)
+```
+
+The example token and identities are synthetic. Supply the real short-lived
+session through a deployment secret boundary rather than source code.
+
 ::: agentic_security.ControlPlaneConfigurationError
 
 ::: agentic_security.validate_configuration
