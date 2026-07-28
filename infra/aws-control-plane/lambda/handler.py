@@ -46,6 +46,44 @@ _AGENT_TELEMETRY_INTEGER_FIELDS = _AGENT_TELEMETRY_FIELDS - {
     "maxLatencyMs",
 }
 
+# Agent decision evidence is operationally useful but never authoritative.
+# The authenticated host may report only this fixed, content-free vocabulary;
+# tenant, agent, deployment, policy and timestamps are derived server-side.
+_DECISION_VALUES = frozenset({"allowed", "denied", "approval_required"})
+_DECISION_SOURCES = frozenset({"claude_native", "codex_native", "mcp", "sdk_runtime"})
+_DECISION_RESOURCE_KINDS = frozenset(
+    {"project_file", "shell_command", "mcp_tool", "sdk_tool", "unknown"}
+)
+_DECISION_REASON_CODES = frozenset(
+    {
+        "explicit_allow",
+        "deny_by_default",
+        "blocked_command",
+        "outside_project",
+        "approval_rule",
+        "invalid_configuration",
+        "audit_failure",
+        "policy_error",
+    }
+)
+_DECISION_REASON_LABELS = {
+    "explicit_allow": "Explicitly allowed by policy",
+    "deny_by_default": "Not explicitly allowed",
+    "blocked_command": "Blocked command rule matched",
+    "outside_project": "Outside the approved project",
+    "approval_rule": "Interactive approval required",
+    "invalid_configuration": "Security configuration is invalid",
+    "audit_failure": "Required audit persistence failed",
+    "policy_error": "Policy evaluation failed closed",
+}
+_DECISION_RESOURCE_LABELS = {
+    "project_file": "Project file",
+    "shell_command": "Shell command",
+    "mcp_tool": "MCP tool call",
+    "sdk_tool": "SDK tool call",
+    "unknown": "Content redacted",
+}
+
 
 def _json_default(value):
     """Convert DynamoDB decimals without changing integer API contracts to floats."""
@@ -307,6 +345,146 @@ def _audit(tenant, event_type, actor, payload):
         "occurred_at": redacted["occurred_at"],
         "payload_hash": digest,
     }
+
+
+def _decision_value(body, field, allowed):
+    """Return one value from a closed decision-evidence vocabulary."""
+    value = body.get(field)
+    if not isinstance(value, str) or value not in allowed:
+        raise ValueError(f"{field} is unsupported")
+    return value
+
+
+def _decision_view(item):
+    """Return content-minimised host evidence in the dashboard contract."""
+    observed_at = int(item.get("observed_at", 0))
+    return {
+        "id": item["id"],
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(observed_at)),
+        "agent": item.get("agent_id", "unknown-agent"),
+        "tool": item.get("tool_name", "unknown-tool"),
+        "decision": item["decision"],
+        "reason": _DECISION_REASON_LABELS.get(
+            item.get("reason_code"), "Policy decision recorded"
+        ),
+        "resource": _DECISION_RESOURCE_LABELS.get(
+            item.get("resource_kind"), "Content redacted"
+        ),
+        "source": item.get("source", "sdk_runtime"),
+        "deploymentId": item.get("deployment_id", ""),
+        "policyId": item.get("policy_id", ""),
+        "policyVersion": int(item.get("policy_version", 0)),
+        "reportedByAgent": True,
+    }
+
+
+def _record_agent_decision(tenant, deployment_id, agent_id, body):
+    """Persist one authenticated, redacted host decision as untrusted evidence.
+
+    The session establishes which enrolled process submitted the event. It
+    does not make the report an authorization decision: the server derives all
+    ownership and policy metadata and marks the record as agent-reported.
+    """
+    required_fields = {
+        "decisionId",
+        "source",
+        "toolName",
+        "decision",
+        "resourceKind",
+        "reasonCode",
+    }
+    if not isinstance(body, dict) or set(body) != required_fields:
+        raise ValueError("decision evidence contains unsupported fields")
+    decision_id = body.get("decisionId")
+    if (
+        not isinstance(decision_id, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", decision_id)
+    ):
+        raise ValueError("decisionId must be a SHA-256 event digest")
+    tool_name = _bounded_text(body.get("toolName"), "toolName", 128)
+    decision = _decision_value(body, "decision", _DECISION_VALUES)
+    source = _decision_value(body, "source", _DECISION_SOURCES)
+    resource_kind = _decision_value(
+        body, "resourceKind", _DECISION_RESOURCE_KINDS
+    )
+    reason_code = _decision_value(body, "reasonCode", _DECISION_REASON_CODES)
+    agent_key = f"{deployment_id}:{agent_id}"
+    agent = TABLE.get_item(
+        Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True
+    ).get("Item")
+    if not agent:
+        raise PermissionError("registered agent is required")
+    group = next(
+        (
+            item
+            for item in _list(tenant, "GROUP")
+            if agent_key in item.get("agent_keys", [])
+        ),
+        None,
+    )
+    if not group:
+        raise PermissionError("assigned policy group is required")
+    policy = TABLE.get_item(
+        Key=_item_key(tenant, "POLICY", group.get("policyId", "")),
+        ConsistentRead=True,
+    ).get("Item")
+    if not policy:
+        raise PermissionError("assigned policy is unavailable")
+    record_id = f"{deployment_id}:{agent_id}:{decision_id}"
+    values = {
+        "id": decision_id,
+        "deployment_id": deployment_id,
+        "agent_id": agent_id,
+        "host": agent.get("host", ""),
+        "source": source,
+        "tool_name": tool_name,
+        "decision": decision,
+        "resource_kind": resource_kind,
+        "reason_code": reason_code,
+        "policy_id": policy["id"],
+        "policy_version": int(policy.get("version", 0)),
+        "reported_by_agent": True,
+        "observed_at": int(time.time()),
+        "ttl": int(time.time()) + (30 * 86400),
+    }
+    try:
+        item = _create_item(tenant, "DECISION", record_id, values)
+    except Exception as error:
+        if not _is_conditional_conflict(error):
+            raise
+        existing = TABLE.get_item(
+            Key=_item_key(tenant, "DECISION", record_id), ConsistentRead=True
+        ).get("Item")
+        comparable = (
+            "deployment_id",
+            "agent_id",
+            "source",
+            "tool_name",
+            "decision",
+            "resource_kind",
+            "reason_code",
+        )
+        if existing and all(existing.get(key) == values[key] for key in comparable):
+            return {"accepted": True, "duplicate": True, "decisionId": decision_id}
+        return {"accepted": False, "conflict": True, "decisionId": decision_id}
+    _audit(
+        tenant,
+        "agent_decision_reported",
+        f"agent:{deployment_id}:{agent_id}",
+        {
+            "decision_id": decision_id,
+            "deployment_id": deployment_id,
+            "agent_id": agent_id,
+            "source": source,
+            "tool_name": tool_name,
+            "decision": decision,
+            "resource_kind": resource_kind,
+            "reason_code": reason_code,
+            "policy_id": policy["id"],
+            "policy_version": int(policy.get("version", 0)),
+        },
+    )
+    return {"accepted": True, "duplicate": False, "decisionId": item["id"]}
 
 
 def _approval_status(item, now=None):
@@ -709,13 +887,27 @@ def _managed_policy_configuration(tenant, configuration):
 def _configuration(tenant):
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     fleet_stopped = _fleet_emergency_stop_active(tenant)
+    decisions = sorted(
+        _list(tenant, "DECISION"),
+        key=lambda item: int(item.get("observed_at", 0)),
+        reverse=True,
+    )
+    utc = time.gmtime()
+    today_start = int(time.time()) - (
+        utc.tm_hour * 3600 + utc.tm_min * 60 + utc.tm_sec
+    )
+    decisions_today = [
+        item for item in decisions if int(item.get("observed_at", 0)) >= today_start
+    ]
     return {
         "dashboard": {
             "generatedAt": now,
             "posture": "critical" if fleet_stopped else "healthy",
             "activeSessions": len(_all_agents(tenant)),
-            "decisionsToday": 0,
-            "deniedToday": 0,
+            "decisionsToday": len(decisions_today),
+            "deniedToday": sum(
+                1 for item in decisions_today if item.get("decision") == "denied"
+            ),
             "approvalQueue": _pending_approval_count(tenant),
             "timedOutWorkers": 0,
             "emergencyStop": fleet_stopped,
@@ -731,7 +923,7 @@ def _configuration(tenant):
                 }
                 for a in _all_agents(tenant)
             ],
-            "recentAudit": [],
+            "recentAudit": [_decision_view(item) for item in decisions[:50]],
         },
         "runtime": {
             "policyProvider": "local_allow_list",
@@ -944,6 +1136,11 @@ def handler(event, context):
                 return _response(
                     200, {**item, **_renew_agent_session(tenant, session, _bearer(event))}
                 )
+            if method == "POST" and action == ["decisions"]:
+                recorded = _record_agent_decision(
+                    tenant, deployment_id, agent_id, _body(event)
+                )
+                return _response(409 if recorded.get("conflict") else 202, recorded)
             if method == "GET" and action == ["effective-policy"]:
                 agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key)).get("Item")
                 if not agent:

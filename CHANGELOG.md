@@ -1,5 +1,17 @@
 # Changelog
 
+- Added authenticated, content-minimised host decision evidence for enrolled
+  Claude hooks and SDK/MCP runtimes. The AWS control plane now derives policy
+  and identity metadata server-side, idempotently indexes allowed, denied, and
+  approval-required outcomes, and supplies source-backed dashboard totals while
+  rejecting prompts, commands, paths, arguments, outputs, credentials, and
+  caller-selected policy claims.
+- Added a guided first-governed-action proof to Claude Code onboarding. After
+  liveness and policy verification, operators can run one safe allowed read,
+  one approval-bound command, and one blocked destructive command and see the
+  three actual host outcomes appear for the enrolled agent. Codex native
+  shell/file evidence is explicitly identified as unavailable rather than
+  represented by fixture data.
 - Fixed fresh-trial activation by implementing tenant-safe project and
   deployment registration, deriving agent ownership from the selected
   deployment, rejecting identity replacement, and requiring a real runtime

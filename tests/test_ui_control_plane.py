@@ -5,17 +5,19 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from agentic_security import (
     AgentHost,
     AgentPresenceStore,
+    AuditEvent,
     CallbackControlPlaneAuthority,
     ControlPlaneAgentClient,
     ControlPlaneApplication,
     ControlPlaneConfigurationError,
+    ControlPlaneDecisionExporter,
     ControlPlaneDependencyError,
     ControlPlaneStore,
     InMemoryAuditSink,
@@ -406,6 +408,234 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
         "https://control.example.test/api/agent/deployment-prod/claude-code-local/effective-policy",
     ]
     assert aws_client.disconnect(TOKEN) == {"status": "disconnect_pending_expiry"}
+
+
+def test_agent_client_and_exporter_report_only_bounded_decision_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision evidence must omit prompts, arguments, commands, paths and policy claims."""
+    import agentic_security.ui_control_plane as control_plane
+
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps({"accepted": True, "duplicate": False}).encode()
+
+    def fake_urlopen(request: Any, *, timeout: float, **_kwargs: Any) -> Response:
+        del timeout
+        captured.append((request.full_url, json.loads(request.data)))
+        return Response()
+
+    monkeypatch.setattr(control_plane, "urlopen", fake_urlopen)
+    client = ControlPlaneAgentClient(
+        "https://control.example.test",
+        TOKEN,
+        agent_id="agent-a",
+        project_root="/workspace/secret-project",
+        deployment_id="dep-a",
+        aws_agent_session=True,
+    )
+    event = AuditEvent(
+        "claude_pre_tool_decision",
+        "tool-use-a",
+        {
+            "tool_name": "Bash",
+            "decision": "ask",
+            "reason": "consequential command requires interactive approval",
+            "tool_input": {"command": "git push https://token@example.test/private"},
+            "cwd": "/workspace/secret-project",
+        },
+        "2026-07-28T12:00:00Z",
+        "0" * 64,
+        "a" * 64,
+    )
+    ControlPlaneDecisionExporter(client, source="claude_native").export(event)
+    assert captured[0][0].endswith("/agent/dep-a/agent-a/decisions")
+    assert captured[0][1] == {
+        "decisionId": "a" * 64,
+        "source": "claude_native",
+        "toolName": "Bash",
+        "decision": "approval_required",
+        "resourceKind": "shell_command",
+        "reasonCode": "approval_rule",
+    }
+    assert "token" not in json.dumps(captured[0][1]).lower()
+    with pytest.raises(ControlPlaneConfigurationError):
+        client.report_decision(
+            decision_id="not-a-digest",
+            source="claude_native",
+            tool_name="Bash",
+            decision="allowed",
+            resource_kind="shell_command",
+            reason_code="explicit_allow",
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_type", "decision", "reason", "source", "tool_name", "expected"),
+    [
+        (
+            "action_executed",
+            None,
+            "",
+            "mcp",
+            "lookup_record",
+            ("allowed", "mcp_tool", "explicit_allow"),
+        ),
+        (
+            "action_denied",
+            None,
+            "outside approved project",
+            "sdk_runtime",
+            "Read",
+            ("denied", "sdk_tool", "outside_project"),
+        ),
+        (
+            "action_denied",
+            None,
+            "dangerous command",
+            "sdk_runtime",
+            "Bash",
+            ("denied", "sdk_tool", "blocked_command"),
+        ),
+        (
+            "action_denied",
+            None,
+            "configuration is invalid",
+            "sdk_runtime",
+            "Edit",
+            ("denied", "sdk_tool", "invalid_configuration"),
+        ),
+        (
+            "action_denied",
+            None,
+            "audit persistence failed",
+            "sdk_runtime",
+            "Write",
+            ("denied", "sdk_tool", "audit_failure"),
+        ),
+        (
+            "action_denied",
+            None,
+            "policy evaluation failed",
+            "codex_native",
+            "shell",
+            ("denied", "sdk_tool", "policy_error"),
+        ),
+        (
+            "action_denied",
+            None,
+            "unknown tool",
+            "sdk_runtime",
+            "Mystery",
+            ("denied", "sdk_tool", "deny_by_default"),
+        ),
+        (
+            "approval_required",
+            None,
+            "held",
+            "sdk_runtime",
+            "deploy",
+            ("approval_required", "sdk_tool", "approval_rule"),
+        ),
+        (
+            "claude_pre_tool_decision",
+            "deny",
+            "blocked",
+            "claude_native",
+            "Read",
+            ("denied", "project_file", "deny_by_default"),
+        ),
+    ],
+)
+def test_decision_exporter_normalizes_all_supported_host_outcomes(
+    event_type: str,
+    decision: str | None,
+    reason: str,
+    source: str,
+    tool_name: str,
+    expected: tuple[str, str, str],
+) -> None:
+    """Every source and reason branch emits only the closed evidence vocabulary."""
+
+    class RecordingClient:
+        def __init__(self) -> None:
+            self.reports: list[dict[str, str]] = []
+
+        def report_decision(self, **report: str) -> dict[str, object]:
+            self.reports.append(report)
+            return {"accepted": True}
+
+    recording = RecordingClient()
+    payload: dict[str, object] = {"tool_name": tool_name, "reason": reason}
+    if decision is not None:
+        payload["decision"] = decision
+    event = AuditEvent(
+        event_type,
+        "request-a",
+        payload,
+        "2026-07-28T12:00:00Z",
+        "0" * 64,
+        "b" * 64,
+    )
+
+    ControlPlaneDecisionExporter(cast(ControlPlaneAgentClient, recording), source=source).export(
+        event
+    )
+
+    assert recording.reports[0]["decision"] == expected[0]
+    assert recording.reports[0]["resource_kind"] == expected[1]
+    assert recording.reports[0]["reason_code"] == expected[2]
+
+
+def test_decision_exporter_rejects_invalid_sources_and_malformed_decisions() -> None:
+    """Unknown sources and content-free events without a tool fail safely."""
+
+    class RecordingClient:
+        def __init__(self) -> None:
+            self.reports: list[dict[str, str]] = []
+
+        def report_decision(self, **report: str) -> dict[str, object]:
+            self.reports.append(report)
+            return {"accepted": True}
+
+    recording = RecordingClient()
+    client = cast(ControlPlaneAgentClient, recording)
+    with pytest.raises(ControlPlaneConfigurationError):
+        ControlPlaneDecisionExporter(client, source="browser")
+
+    exporter = ControlPlaneDecisionExporter(client, source="claude_native")
+    exporter.export(AuditEvent("heartbeat", "request-a", {}, "now", "0" * 64, "c" * 64))
+    exporter.export(
+        AuditEvent(
+            "claude_pre_tool_decision",
+            "request-b",
+            {"decision": 7, "tool_name": "Bash"},
+            "now",
+            "0" * 64,
+            "d" * 64,
+        )
+    )
+    assert recording.reports == []
+
+    with pytest.raises(ControlPlaneConfigurationError):
+        exporter.export(
+            AuditEvent(
+                "claude_pre_tool_decision",
+                "request-c",
+                {"decision": "allow"},
+                "now",
+                "0" * 64,
+                "e" * 64,
+            )
+        )
 
 
 def test_agent_client_submits_content_minimised_exact_approval_request(

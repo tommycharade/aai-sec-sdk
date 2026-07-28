@@ -70,6 +70,7 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/agents/register` | Register an authenticated agent |
 | `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence and optionally publish bounded aggregate SDK telemetry |
 | `POST /api/enterprise/agents/{deployment}/{agent}/disconnect` | Mark offline |
+| `POST /api/agent/{deployment}/{agent}/decisions` | Record one authenticated, content-minimised host decision as operational evidence |
 | `POST /api/agent/{deployment}/{agent}/approvals/request` | Submit a bounded approval request using the authenticated agent session |
 | `POST /api/agent/{deployment}/{agent}/approvals/consume` | Atomically consume one approved exact-action grant |
 | `POST /api/enterprise/templates` | Create a configuration template |
@@ -147,6 +148,29 @@ negative, non-finite, oversized, or secret-like fields are rejected. The
 control plane stores the latest snapshot with the agent metadata and exposes
 only that fixed projection to operators; it never stores tool arguments,
 resources, outputs, or credentials as telemetry.
+
+### Host decision evidence
+
+An enrolled Claude hook or SDK runtime may report an observed decision through
+`POST /api/agent/{deployment}/{agent}/decisions`. The request accepts exactly
+six fields: a SHA-256 event digest, a fixed source, a bounded tool name, one of
+`allowed`, `denied`, or `approval_required`, a fixed resource kind, and a fixed
+reason code. Prompts, commands, paths, arguments, outputs, principals,
+credentials, free-form reasons, and caller-selected policy metadata are
+rejected.
+
+The authenticated session binds the report to one deployment and agent. The
+server resolves the current group policy and derives tenant, deployment, agent,
+policy version, and observation time rather than trusting those values from the
+host. Identical reports are idempotent; reuse of a digest with different
+metadata is rejected. The dashboard keeps a bounded 30-day operational index,
+and the durable audit adapter receives the same content-free event.
+
+This stream is evidence, not authority. An enrolled process can report what it
+observed, but its report cannot permit an action, change a policy, approve a
+request, or prove that an unobserved side effect did not occur. Operators use
+it to verify activation and investigate outcomes; authorization remains at the
+host execution boundary.
 
 Policies are immutable, tenant-scoped configuration records in this reference
 implementation. A group selects one policy, and membership changes affect only

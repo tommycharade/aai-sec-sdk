@@ -486,6 +486,128 @@ def test_agent_enrollment_is_one_time_and_identity_bound(monkeypatch: Any) -> No
     assert wrong_identity["statusCode"] == 403
 
 
+def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visible(
+    monkeypatch: Any,
+) -> None:
+    """A host can prove outcomes without supplying tenant, policy or raw content."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-decision-proof"
+    token = "synthetic-agent-session-token-1234"  # noqa: S105 - synthetic test credential
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant, "status": "active"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "status": "connected",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-a")
+        | {"id": "policy-a", "name": "Safe", "version": 7}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-a")
+        | {
+            "id": "group-a",
+            "policyId": "policy-a",
+            "agent_keys": ["dep-a:agent-a"],
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", token),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "expires_at": int(time.time()) + 600,
+        }
+    )
+    body = {
+        "decisionId": "a" * 64,
+        "source": "claude_native",
+        "toolName": "Bash",
+        "decision": "approval_required",
+        "resourceKind": "shell_command",
+        "reasonCode": "approval_rule",
+    }
+    recorded = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/decisions", "POST", body=body, token=token),
+    )
+    assert recorded["statusCode"] == 202
+    assert json.loads(recorded["body"]) == {
+        "accepted": True,
+        "duplicate": False,
+        "decisionId": "a" * 64,
+    }
+    stored = table.items[(f"TENANT#{tenant}", f"DECISION#dep-a:agent-a:{'a' * 64}")]
+    assert stored["policy_id"] == "policy-a"
+    assert stored["policy_version"] == 7
+    assert stored["reported_by_agent"] is True
+    assert "command" not in stored and "path" not in stored and "prompt" not in stored
+
+    duplicate = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/decisions", "POST", body=body, token=token),
+    )
+    assert duplicate["statusCode"] == 202
+    assert json.loads(duplicate["body"])["duplicate"] is True
+    conflict = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/decisions",
+            "POST",
+            body={**body, "decision": "denied"},
+            token=token,
+        ),
+    )
+    assert conflict["statusCode"] == 409
+    raw_content = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/decisions",
+            "POST",
+            body={**body, "decisionId": "b" * 64, "command": "secret command"},
+            token=token,
+        ),
+    )
+    assert raw_content["statusCode"] == 400
+    wrong_agent = _invoke(
+        module,
+        _event("/agent/dep-a/other-agent/decisions", "POST", body=body, token=token),
+    )
+    assert wrong_agent["statusCode"] == 403
+
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "operator",
+    }
+    dashboard = _invoke(module, _event("/dashboard", "GET", claims=claims))
+    snapshot = json.loads(dashboard["body"])
+    assert snapshot["decisionsToday"] == 1
+    assert snapshot["deniedToday"] == 0
+    assert snapshot["recentAudit"][0] == {
+        "id": "a" * 64,
+        "timestamp": snapshot["recentAudit"][0]["timestamp"],
+        "agent": "agent-a",
+        "tool": "Bash",
+        "decision": "approval_required",
+        "reason": "Interactive approval required",
+        "resource": "Shell command",
+        "source": "claude_native",
+        "deploymentId": "dep-a",
+        "policyId": "policy-a",
+        "policyVersion": 7,
+        "reportedByAgent": True,
+    }
+
+
 def test_agent_heartbeat_rotates_session_near_expiry(monkeypatch: Any) -> None:
     """A live agent receives a replacement bearer before session expiry."""
     module, table = _load_handler(monkeypatch)

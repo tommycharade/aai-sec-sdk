@@ -39,7 +39,7 @@ from urllib.request import Request, urlopen
 
 import certifi
 
-from .audit import AuditSink
+from .audit import AuditEvent, AuditSink
 from .integrations import AgentHost
 
 try:  # pragma: no cover - platform branch; control-plane reference targets Unix hosts.
@@ -519,6 +519,72 @@ class ControlPlaneAgentClient:
             self.token = refreshed
         return response
 
+    def report_decision(
+        self,
+        *,
+        decision_id: str,
+        source: str,
+        tool_name: str,
+        decision: str,
+        resource_kind: str,
+        reason_code: str,
+    ) -> JsonObject:
+        """Report one content-minimised decision from this enrolled process.
+
+        This is authenticated operational evidence, not authorization input.
+        The API deliberately excludes prompts, tool arguments, command text,
+        paths, outputs, principals and policy claims; the server binds the
+        report to the live session and derives tenant/policy metadata itself.
+        """
+        if not self.aws_agent_session or not self.deployment_id:
+            raise ControlPlaneDependencyError(
+                "decision reporting requires an enrolled AWS agent session"
+            )
+        if not re.fullmatch(r"[0-9a-f]{64}", decision_id):
+            raise ControlPlaneConfigurationError("decision ID must be a SHA-256 event digest")
+        vocabularies = {
+            "source": ({"claude_native", "codex_native", "mcp", "sdk_runtime"}, source),
+            "decision": ({"allowed", "denied", "approval_required"}, decision),
+            "resource kind": (
+                {"project_file", "shell_command", "mcp_tool", "sdk_tool", "unknown"},
+                resource_kind,
+            ),
+            "reason code": (
+                {
+                    "explicit_allow",
+                    "deny_by_default",
+                    "blocked_command",
+                    "outside_project",
+                    "approval_rule",
+                    "invalid_configuration",
+                    "audit_failure",
+                    "policy_error",
+                },
+                reason_code,
+            ),
+        }
+        for name, (allowed, value) in vocabularies.items():
+            if value not in allowed:
+                raise ControlPlaneConfigurationError(f"decision {name} is unsupported")
+        if not isinstance(tool_name, str) or not tool_name.strip() or len(tool_name) > 128:
+            raise ControlPlaneConfigurationError(
+                "decision tool name must be non-empty text up to 128 characters"
+            )
+        response = self._request(
+            self._agent_path("decisions"),
+            {
+                "decisionId": decision_id,
+                "source": source,
+                "toolName": tool_name.strip(),
+                "decision": decision,
+                "resourceKind": resource_kind,
+                "reasonCode": reason_code,
+            },
+        )
+        if response.get("accepted") is not True:
+            raise ControlPlaneDependencyError("control plane did not acknowledge decision evidence")
+        return response
+
     def disconnect(self, session_id: str) -> JsonObject:
         """Mark the agent offline during an orderly MCP process shutdown."""
         if self.aws_agent_session:
@@ -707,6 +773,78 @@ class ControlPlaneAgentClient:
         except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
             raise ControlPlaneDependencyError("control-plane agent request failed") from exc
         return dict(_mapping(value, "control-plane agent response"))
+
+
+class ControlPlaneDecisionExporter:
+    """Export redacted decision metadata through an enrolled agent session.
+
+    Tool arguments, command text, paths, prompts, outputs and free-form reasons
+    are deliberately discarded. The control plane receives only a closed
+    vocabulary suitable for operational proof and derives identity/policy
+    metadata from the authenticated session.
+    """
+
+    def __init__(self, client: ControlPlaneAgentClient, *, source: str) -> None:
+        """Bind one exporter to its authenticated host evidence source."""
+        if source not in {"claude_native", "codex_native", "mcp", "sdk_runtime"}:
+            raise ControlPlaneConfigurationError("decision source is unsupported")
+        self.client = client
+        self.source = source
+
+    @staticmethod
+    def _decision(event: AuditEvent) -> str | None:
+        """Normalize host and runtime outcomes into the dashboard vocabulary."""
+        if event.event_type == "claude_pre_tool_decision":
+            value = event.payload.get("decision")
+            return {"allow": "allowed", "deny": "denied", "ask": "approval_required"}.get(
+                value if isinstance(value, str) else ""
+            )
+        return {
+            "action_executed": "allowed",
+            "action_denied": "denied",
+            "approval_required": "approval_required",
+        }.get(event.event_type)
+
+    @staticmethod
+    def _reason(event: AuditEvent, decision: str) -> str:
+        """Map free-form local explanations to non-sensitive reason codes."""
+        reason = str(event.payload.get("reason", "")).lower()
+        if decision == "approval_required":
+            return "approval_rule"
+        if "outside" in reason and "project" in reason:
+            return "outside_project"
+        if "dangerous" in reason or "command" in reason and "blocked" in reason:
+            return "blocked_command"
+        if "configuration" in reason and "invalid" in reason:
+            return "invalid_configuration"
+        if "audit" in reason and ("failed" in reason or "persistence" in reason):
+            return "audit_failure"
+        if "evaluation" in reason or "policy" in reason and "failed" in reason:
+            return "policy_error"
+        return "explicit_allow" if decision == "allowed" else "deny_by_default"
+
+    def export(self, event: AuditEvent) -> None:
+        """Report one recognized decision and ignore non-decision lifecycle events."""
+        decision = self._decision(event)
+        if decision is None:
+            return
+        tool_name = event.payload.get("tool_name")
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise ControlPlaneConfigurationError("decision event has no valid tool name")
+        if self.source == "claude_native":
+            resource_kind = "shell_command" if tool_name == "Bash" else "project_file"
+        elif self.source == "mcp":
+            resource_kind = "mcp_tool"
+        else:
+            resource_kind = "sdk_tool"
+        self.client.report_decision(
+            decision_id=event.event_hash,
+            source=self.source,
+            tool_name=tool_name,
+            decision=decision,
+            resource_kind=resource_kind,
+            reason_code=self._reason(event, decision),
+        )
 
 
 def _now() -> str:

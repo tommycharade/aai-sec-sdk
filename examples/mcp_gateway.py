@@ -15,11 +15,14 @@ from typing import Any
 
 from agentic_security import (
     AgentHost,
+    AuditSink,
     ControlPlaneAgentClient,
+    ControlPlaneDecisionExporter,
     ExecutionContext,
     GuardedRuntime,
     InMemoryAuditSink,
     Principal,
+    ReplicatedAuditSink,
     ToolDefinition,
     ToolRegistry,
     integration_for,
@@ -40,7 +43,10 @@ def lookup_record(context: ExecutionContext, arguments: Any) -> dict[str, str]:
     return {"record_id": arguments["record_id"], "principal": context.principal.id}
 
 
-def build_runtime(allowed_tools: set[str] | None = None) -> GuardedRuntime:
+def build_runtime(
+    allowed_tools: set[str] | None = None,
+    audit: AuditSink | None = None,
+) -> GuardedRuntime:
     """Build the runtime using the centrally assigned allow-list when present."""
     context = ExecutionContext(
         "example-agent",
@@ -69,7 +75,7 @@ def build_runtime(allowed_tools: set[str] | None = None) -> GuardedRuntime:
         context,
         registry,
         AllowListPolicy(policy_tools),
-        InMemoryAuditSink(),
+        audit or InMemoryAuditSink(),
     )
 
 
@@ -131,7 +137,17 @@ if __name__ == "__main__":
             client = agent_client
             session_id = session_state["token"]
             allowed, _policy_version = effective_allowed_tools(agent_client)
-            runtime = build_runtime(allowed)
+            runtime = build_runtime(
+                allowed,
+                (
+                    ReplicatedAuditSink(
+                        InMemoryAuditSink(),
+                        ControlPlaneDecisionExporter(agent_client, source="mcp"),
+                    )
+                    if agent_client.aws_agent_session
+                    else InMemoryAuditSink()
+                ),
+            )
             if runtime is None:
                 raise SystemExit("security runtime was not initialized")
             managed_runtime = runtime
