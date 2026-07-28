@@ -625,6 +625,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#host-decision-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host decision evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2382,6 +2393,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#host-decision-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Host decision evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3639,6 +3661,10 @@ failures are errors rather than empty or synthetic credentials.</p>
 <td>Mark offline</td>
 </tr>
 <tr>
+<td><code>POST /api/agent/{deployment}/{agent}/decisions</code></td>
+<td>Record one authenticated, content-minimised host decision as operational evidence</td>
+</tr>
+<tr>
 <td><code>POST /api/agent/{deployment}/{agent}/approvals/request</code></td>
 <td>Submit a bounded approval request using the authenticated agent session</td>
 </tr>
@@ -3778,6 +3804,25 @@ negative, non-finite, oversized, or secret-like fields are rejected. The
 control plane stores the latest snapshot with the agent metadata and exposes
 only that fixed projection to operators; it never stores tool arguments,
 resources, outputs, or credentials as telemetry.</p>
+<h3 id="host-decision-evidence">Host decision evidence</h3>
+<p>An enrolled Claude hook or SDK runtime may report an observed decision through
+<code>POST /api/agent/{deployment}/{agent}/decisions</code>. The request accepts exactly
+six fields: a SHA-256 event digest, a fixed source, a bounded tool name, one of
+<code>allowed</code>, <code>denied</code>, or <code>approval_required</code>, a fixed resource kind, and a fixed
+reason code. Prompts, commands, paths, arguments, outputs, principals,
+credentials, free-form reasons, and caller-selected policy metadata are
+rejected.</p>
+<p>The authenticated session binds the report to one deployment and agent. The
+server resolves the current group policy and derives tenant, deployment, agent,
+policy version, and observation time rather than trusting those values from the
+host. Identical reports are idempotent; reuse of a digest with different
+metadata is rejected. The dashboard keeps a bounded 30-day operational index,
+and the durable audit adapter receives the same content-free event.</p>
+<p>This stream is evidence, not authority. An enrolled process can report what it
+observed, but its report cannot permit an action, change a policy, approve a
+request, or prove that an unobserved side effect did not occur. Operators use
+it to verify activation and investigate outcomes; authorization remains at the
+host execution boundary.</p>
 <p>Policies are immutable, tenant-scoped configuration records in this reference
 implementation. A group selects one policy, and membership changes affect only
 group assignment; they do not create, rotate, or revoke the agent's session.

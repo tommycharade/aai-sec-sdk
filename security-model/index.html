@@ -1559,6 +1559,17 @@ audit durability, and isolation remain independent requirements. The client
 uses HTTPS outside explicitly permitted localhost development URLs and bounds
 responses; deployments must still provide TLS termination, token rotation,
 network policy, and monitoring.</p>
+<p>Host decision reports are a separate evidence boundary. A valid agent session
+authenticates which enrolled process sent a report, but does not make the report
+authoritative. The control plane accepts only a fixed decision vocabulary and a
+SHA-256 event digest; it rejects prompts, commands, paths, arguments, results,
+credentials, principals, free-form reasons, and caller-supplied policy claims.
+Tenant, deployment, agent, policy version, and observation time are derived
+server-side. Reports can populate operator views and durable evidence, but can
+never authorize execution, satisfy an approval, change policy, or override an
+emergency stop. A compromised enrolled process can still submit false evidence,
+so forensic assurance must correlate this stream with deployment-owned WORM
+audit, identity, and infrastructure logs.</p>
 <p>Handlers may return arbitrary application values, but the runtime applies the
 optional tool output normalizer, performs key and common-token content
 redaction, and

@@ -1832,6 +1832,23 @@ group policy as the MCP gateway before each event. Missing credentials,
 unassigned or conflicting groups, malformed policy, or control-plane failure
 deny the native action. This keeps central policy enforcement consistent for
 Claude's built-in tools and SDK-owned MCP tools.</p>
+<p>For AWS-enrolled sessions, the hook also replicates each native decision to the
+control plane as content-minimised evidence. Only the event digest, source,
+tool name, normalized outcome, resource kind, and fixed reason code leave the
+host; prompts, command text, file paths, arguments, outputs, and free-form
+reasons do not. Remote acceptance is required alongside the local JSONL write,
+so an evidence-export failure denies the action rather than creating an
+unrecorded authorization outcome. The report is operational evidence only and
+cannot grant authority.</p>
+<p>After the UI verifies a live heartbeat and policy assignment, <strong>Connect
+agents</strong> presents a three-step activation proof. Run the supplied safe read,
+approval-bound <code>git push</code>, and blocked destructive-command prompts in Claude
+Code. Decline the approval prompt. The UI completes the proof only after it
+observes matching <code>claude_native</code> evidence for that enrolled agent. The denied
+test targets a deliberately nonexistent project path and must be blocked before
+execution. Codex CLI does not yet expose equivalent native shell/file evidence
+through this integration, so the UI states that limitation instead of showing
+synthetic success.</p>
 <p>The hook configuration and MCP configuration are separate Claude Code host
 boundaries. Put the <code>hooks</code> object in <code>.claude/settings.json</code>; put the
 <code>mcpServers</code> object in <code>.mcp.json</code> or register it with <code>claude mcp add</code>. Do not
