@@ -9,6 +9,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 
 class ConditionalFailure(Exception):
     """Minimal boto-compatible conditional failure."""
@@ -184,6 +186,35 @@ def _event(
 def _invoke(module: Any, event: dict[str, Any]) -> dict[str, Any]:
     """Invoke the Lambda with the context value unused by this handler."""
     return cast(dict[str, Any], module.handler(event, None))
+
+
+@pytest.mark.parametrize(
+    ("claim", "expected"),
+    [
+        (["platform-admin"], True),
+        ("platform-admin", True),
+        ('["platform-admin","developers"]', True),
+        ("[developers, security-operator]", True),
+        ("developers,platform-admin", True),
+        ("not-platform-admin", False),
+        ('{"group":"platform-admin"}', False),
+        (123, False),
+        ("x" * 2049, False),
+    ],
+)
+def test_cognito_operator_groups_normalize_gateway_strings_and_fail_closed(
+    monkeypatch: Any,
+    claim: object,
+    expected: bool,
+) -> None:
+    """Only exact mutation roles survive API Gateway's string projection."""
+    module, _table = _load_handler(monkeypatch)
+    event = _event(
+        "/enterprise/agents/bootstrap",
+        "POST",
+        claims={"cognito:groups": claim},
+    )
+    assert module._mutation_authorized(event) is expected
 
 
 def test_json_boundary_preserves_integral_policy_versions(monkeypatch: Any) -> None:

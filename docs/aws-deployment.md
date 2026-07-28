@@ -45,6 +45,13 @@ The stack creates:
   alarms (subscribe the enterprise SOC endpoint before production);
 - a private S3 UI bucket behind CloudFront.
 
+API Gateway exposes JWT claim values to Lambda as strings even when Cognito's
+source claim is an array. The handler therefore applies bounded parsing to
+`cognito:groups` and compares only exact role names. Verify both an authorized
+group member and a lookalike unauthorized group through API Gateway after each
+authorizer or Cognito configuration change; direct Lambda test events alone do
+not prove the deployed claim projection.
+
 The control plane also exposes a separate agent boundary. An operator creates a
 short-lived bootstrap secret for a registered agent; the agent exchanges it
 once at `POST /agent/enroll` and receives a 15-minute bearer session. The

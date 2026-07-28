@@ -194,12 +194,36 @@ def _tenant(event):
 
 
 def _mutation_authorized(event):
-    groups = _claims(event).get("cognito:groups", [])
-    if isinstance(groups, str):
-        groups = [groups]
-    return isinstance(groups, list) and bool(
-        {"platform-admin", "security-operator"}.intersection(groups)
-    )
+    """Authorize operator mutations from API Gateway's string-shaped claims.
+
+    Cognito represents ``cognito:groups`` as an array in the JWT, while HTTP
+    API authorizers expose claim values as strings. Depending on the gateway
+    projection, that string may be one group, JSON array text, or bounded
+    bracket/comma text. Normalize only exact group names; malformed values and
+    lookalike substrings grant no authority.
+    """
+    raw_groups = _claims(event).get("cognito:groups", [])
+    groups = []
+    if isinstance(raw_groups, list):
+        groups = raw_groups
+    elif isinstance(raw_groups, str) and len(raw_groups) <= 2048:
+        value = raw_groups.strip()
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, list):
+            groups = decoded
+        elif isinstance(decoded, str):
+            groups = [decoded]
+        else:
+            if value.startswith("[") and value.endswith("]"):
+                value = value[1:-1]
+            groups = [item.strip().strip("\"'") for item in value.split(",")]
+    normalized = {
+        group for group in groups if isinstance(group, str) and group and len(group) <= 128
+    }
+    return bool({"platform-admin", "security-operator"}.intersection(normalized))
 
 
 def _body(event):
