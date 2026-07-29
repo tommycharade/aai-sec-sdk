@@ -1,3 +1,6 @@
+import json
+import re
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,3 +74,29 @@ def test_release_workflow_is_tag_bound_and_publishes_the_verified_bundle() -> No
     assert "gh release create" in workflow
     assert "gh release download" in workflow
     assert '--source-ref "$GITHUB_REF"' in workflow
+
+
+def test_cdk_exception_is_exact_pinned_monitored_and_unexpired() -> None:
+    """A temporary toolchain exception cannot drift or silently become permanent."""
+    package = json.loads(
+        (ROOT / "infra/aws-control-plane/package.json").read_text(encoding="utf-8")
+    )
+    development = package["devDependencies"]
+    for dependency in ("aws-cdk", "aws-cdk-lib", "constructs"):
+        assert re.fullmatch(r"\d+\.\d+\.\d+", development[dependency])
+    assert "aws-cdk-lib" not in package.get("dependencies", {})
+    assert "constructs" not in package.get("dependencies", {})
+
+    workflow = (ROOT / ".github/workflows/cdk-upstream-watch.yml").read_text(encoding="utf-8")
+    assert 'cron: "23 7 * * *"' in workflow
+    assert "npm view aws-cdk-lib version" in workflow
+    assert "brace-expansion/package.json" in workflow
+    assert "5.0.8" in workflow
+
+    acceptance = (ROOT / "docs/risk-acceptance-cdk-brace-expansion-2026-07-29.md").read_text(
+        encoding="utf-8"
+    )
+    expiry_match = re.search(r"\| Expires \| (\d{4}-\d{2}-\d{2}) \|", acceptance)
+    assert expiry_match is not None
+    assert date.today() <= date.fromisoformat(expiry_match.group(1))
+    assert "aws/aws-cdk#38410" in acceptance

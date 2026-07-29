@@ -37,6 +37,7 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Security model: security-model.md
+  - Temporary CDK risk acceptance: risk-acceptance-cdk-brace-expansion-2026-07-29.md
   - Operational runbooks: runbooks.md
   - Testing and assurance: testing.md
   - Production readiness: production-readiness.md

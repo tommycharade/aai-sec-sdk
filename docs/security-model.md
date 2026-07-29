@@ -536,6 +536,17 @@ adapters never invoke a shell and pass only a JSON context/argument payload.
 The Docker adapter adds a real container boundary but deployments handling
 hostile code must still retain image provenance, daemon/host hardening, and
 filesystem, network, identity, resource, and escape-denial evidence.
+
+Infrastructure synthesis is a build-time trust boundary, not a hosted product
+API. AWS CDK runs only against reviewed repository configuration and is not
+packaged into SDK, UI or Lambda runtime artifacts. Temporary dependency risk in
+that toolchain still requires an owner, fixed expiry, preserved scanner
+visibility and an automated upstream-remediation signal; it cannot be used to
+waive runtime findings or permit untrusted synthesis input. The active
+exception, controls and closure criteria are recorded in [Temporary risk
+acceptance: AWS CDK bundled
+brace-expansion](risk-acceptance-cdk-brace-expansion-2026-07-29.md).
+
 ## Enterprise fleet trust boundaries
 
 The enterprise fleet layer adds organization, project, and deployment scope

@@ -1,5 +1,10 @@
 # Changelog
 
+- Exact-pinned AWS CDK infrastructure tooling as development-only dependencies
+  and documented a 30-day exception for the upstream bundled
+  `brace-expansion@5.0.7` denial-of-service advisory. A daily workflow inspects
+  the latest published CDK bundle and fails when the upstream fix is available,
+  while a repository guardrail prevents silent expiry or dependency drift.
 - Added trusted dynamic policy groups. Operators author bounded typed rules over
   server-owned host, project, deployment, team, environment, region and reviewed
   criticality fields, then preview exact additions, removals and overlaps before
