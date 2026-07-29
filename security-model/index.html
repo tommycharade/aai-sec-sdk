@@ -398,6 +398,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#operator-identity-and-authorization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator identity and authorization
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#guarantees-and-non-guarantees" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -897,6 +908,33 @@
     
   
     Enterprise rollout P0 and P1 requirements
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../p0-p1-implementation-status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise P0 and P1 implementation status
   
 
     
@@ -1417,6 +1455,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#operator-identity-and-authorization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator identity and authorization
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#guarantees-and-non-guarantees" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1569,6 +1618,25 @@ own handler directly outside the SDK.</p>
 <li>current policy and manifest versions;</li>
 <li>approval, budget, idempotency, and kill-switch state.</li>
 </ul>
+<h2 id="operator-identity-and-authorization">Operator identity and authorization</h2>
+<p>The hosted control plane treats operator authentication, tenant entitlement
+and role authority as separate facts. Cognito verifies the token. A native
+trial user resolves tenant through an immutable claim or server-owned subject
+mapping. A Microsoft Entra ID user receives provider provenance from a Cognito
+pre-token trigger only after that trigger identifies the configured federated
+profile. The API then compares the Entra tenant to deployment configuration
+and selects a provisioned AAI tenant; request JSON and browser state never
+select tenant authority.</p>
+<p>Entra authentication does not directly grant an AAI role. Canonical roles are
+currently controlled through Cognito-managed groups and are translated into
+explicit capabilities for runtime administration, policy authoring, policy
+approval, fleet operation, action approval and incident response. Exact role
+names are parsed from bounded JWT claims; malformed values and lookalike names
+grant no authority. Read-only auditors receive no mutation capability.</p>
+<p>The current Entra adapter does not yet provide SCIM lifecycle or automatic app
+role/group reconciliation. Those gaps remain visible in the UI and in the
+<a href="../p0-p1-implementation-status/">P0/P1 implementation status</a>. A configured
+identity provider is not evidence that joiner, mover and leaver controls work.</p>
 <h2 id="guarantees-and-non-guarantees">Guarantees and non-guarantees</h2>
 <p>The SDK aims to guarantee that unknown or unauthorized actions do not execute
 when all handlers are routed through the runtime and the application supplies
