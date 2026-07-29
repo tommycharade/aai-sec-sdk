@@ -984,6 +984,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="P1 ledger">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#p1-flt-01-acceptance-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1-FLT-01 acceptance evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1651,6 +1668,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="P1 ledger">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#p1-flt-01-acceptance-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1-FLT-01 acceptance evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1856,8 +1890,8 @@ installation or live host-load acceptance.</p>
 <tr>
 <td>Fleet lifecycle</td>
 <td>Partial</td>
-<td>Enrollment, groups, assignment, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, required accountable ownership and 90-day stale-review reporting</td>
-<td>Bulk operations, dynamic groups, managed upgrades, exception expiry and automatic orphan/leaver detection</td>
+<td>Enrollment, groups, revision-bound bulk assignment with preview/partial outcomes/idempotency/audit, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, required accountable ownership and 90-day stale-review reporting</td>
+<td>Bulk enrollment import, dynamic groups, managed upgrades, exception expiry and automatic orphan/leaver detection</td>
 </tr>
 <tr>
 <td>Policy governance</td>
@@ -1879,6 +1913,20 @@ installation or live host-load acceptance.</p>
 </tr>
 </tbody>
 </table>
+<h3 id="p1-flt-01-acceptance-evidence">P1-FLT-01 acceptance evidence</h3>
+<p><strong>Bulk enrollment and assignment is complete for the requirement's “select
+many” path.</strong> The hosted group detail UI selects up to 100 active unassigned
+agents, requires an operator rationale, shows progress, previews live typed
+outcomes, applies eligible assignments, and retains partial failures per agent.
+The AWS route <code>POST /api/enterprise/groups/{group}/agents/bulk</code> repeats live
+validation, compares the exact membership revision, rejects multi-group
+authority, and atomically stores the membership change, idempotency result and
+immutable audit summary. Contract tests prove preview has no side effect,
+partial HTTP 207 behavior, replay, request-ID collision denial, stale revision
+denial, transaction rollback, duplicate/oversized rejection, sole-group
+enforcement, and revisioned removal. UI tests prove preview precedes apply and
+that the same request ID is reused. CSV/file import is a future convenience,
+not required because P1-FLT-01 explicitly accepts either import <strong>or</strong> selection.</p>
 <h2 id="current-delivery-slice-entra-identity-and-trust">Current delivery slice — Entra identity and trust</h2>
 <p>The active implementation establishes the provider-neutral identity boundary
 with Microsoft Entra ID as the first adapter:</p>

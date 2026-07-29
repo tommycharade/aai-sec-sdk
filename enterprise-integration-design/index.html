@@ -2252,6 +2252,10 @@ principals remain denied by the selected policy.</p>
 <h2 id="rollout-and-response">Rollout and response</h2>
 <p>Integration rollout is staged per group:</p>
 <ol>
+<li>Select up to 100 currently unassigned agents and record the rollout reason.</li>
+<li>Preview live eligibility against the exact group membership revision.</li>
+<li>Resolve rejected or conflicting agents without weakening sole-group authority.</li>
+<li>Apply the eligible assignment batch and retain its immutable audit receipt.</li>
 <li>Generate configuration and show a diff.</li>
 <li>Apply to one canary deployment.</li>
 <li>Verify heartbeat, policy version and synthetic checks.</li>

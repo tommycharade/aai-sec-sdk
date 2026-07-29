@@ -1831,7 +1831,7 @@ the central team's operating workflows.</p>
 </tr>
 <tr>
 <td>Agent groups</td>
-<td>Create groups, select a policy, view members and add/remove agents.</td>
+<td>Create groups, select a policy, preview/apply up to 100 assignments, inspect partial outcomes and remove agents.</td>
 </tr>
 <tr>
 <td>Claude onboarding script</td>
@@ -1852,6 +1852,14 @@ effective relationship clearly:</p>
 <p>Changing group membership must not silently mutate an active session. The
 runtime must re-evaluate live actions using the currently active authority,
 and policy changes should expose rollout state and affected agents.</p>
+<p>The group detail journey uses a typed bulk assignment dialog rather than a
+single-agent selector. Operators search or select active unassigned agents,
+enter an auditable rationale, and request a server-authoritative preview. The
+preview shows ready, unchanged and rejected outcomes before <strong>Apply</strong> is
+enabled. Apply is bound to the displayed membership revision and request ID;
+stale revisions require a new preview. Partial success remains visible per
+agent and never appears as an all-success toast. The completion view shows the
+new revision and the exact applied/unchanged/rejected counts.</p>
 <h2 id="operational-safeguards">Operational safeguards</h2>
 <p>Enterprise actions should require role-based authorization, use explicit
 confirmation for emergency operations, produce audit events, and expose
