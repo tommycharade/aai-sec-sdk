@@ -1,5 +1,12 @@
 # Changelog
 
+- Added tenant-bound Microsoft Entra SCIM 2.0 lifecycle provisioning for users,
+  groups and memberships. Platform administrators can map exact directory
+  groups to canonical roles in the Identity & Trust UI; Cognito token issuance
+  reconciles live provisioned state and fails closed for inactive,
+  unprovisioned or roleless operators. Five-minute tokens bound lifecycle
+  convergence, and a dedicated runbook and adversarial contracts cover the
+  joiner, mover and leaver boundary.
 - Added the first Microsoft Entra ID enterprise federation boundary for the
   AWS control plane. Deployment uses tenant-specific OIDC, resolves the client
   secret from Secrets Manager, annotates Cognito tokens with non-authoritative

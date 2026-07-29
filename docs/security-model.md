@@ -49,17 +49,25 @@ profile. The API then compares the Entra tenant to deployment configuration
 and selects a provisioned AAI tenant; request JSON and browser state never
 select tenant authority.
 
-Entra authentication does not directly grant an AAI role. Canonical roles are
-currently controlled through Cognito-managed groups and are translated into
-explicit capabilities for runtime administration, policy authoring, policy
-approval, fleet operation, action approval and incident response. Exact role
-names are parsed from bounded JWT claims; malformed values and lookalike names
-grant no authority. Read-only auditors receive no mutation capability.
+Entra authentication does not directly grant an AAI role. With SCIM enabled,
+a separate tenant-bound endpoint provisions users, groups and memberships by
+immutable Entra object UUID. A platform administrator maps exact active groups
+to canonical roles. The Cognito pre-token trigger resolves the live user,
+memberships and mappings and replaces the token's groups; unprovisioned,
+inactive, unmapped, malformed and oversized lifecycle state fails closed.
+Canonical roles translate into explicit capabilities for runtime
+administration, policy authoring, policy approval, fleet operation, identity
+administration, action approval and incident response. Read-only auditors
+receive no mutation capability, and only platform administrators can change
+directory-to-role mappings.
 
-The current Entra adapter does not yet provide SCIM lifecycle or automatic app
-role/group reconciliation. Those gaps remain visible in the UI and in the
+Access and ID tokens expire after five minutes, bounding mover and leaver
+convergence when refresh reruns lifecycle checks. This is not immediate global
+revocation. Live Entra acceptance, break-glass access, access certification
+and delegated administration remain open in the
 [P0/P1 implementation status](p0-p1-implementation-status.md). A configured
-identity provider is not evidence that joiner, mover and leaver controls work.
+identity provider or synthetic contract test is not production joiner, mover
+and leaver evidence.
 
 ## Guarantees and non-guarantees
 

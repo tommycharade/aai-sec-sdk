@@ -165,6 +165,8 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("ENTRA_PROVIDER_ENABLED", "false")
     monkeypatch.setenv("ENTRA_TENANT_ID", "")
     monkeypatch.setenv("ENTRA_AAI_TENANT_ID", "")
+    monkeypatch.setenv("SCIM_ENABLED", "false")
+    monkeypatch.setenv("SCIM_TABLE", "")
     monkeypatch.setenv("SPLUNK_STUB_ENABLED", "true")
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/handler.py"
     spec = importlib.util.spec_from_file_location("aai_lambda_handler", path)
@@ -350,6 +352,130 @@ def test_entra_pre_token_trigger_uses_only_cognito_federation_identity(
         "response": {},
     }
     assert module.handler(hostile, None)["response"] == {}
+
+
+def test_entra_pre_token_enforces_scim_lifecycle_and_mapped_roles(monkeypatch: Any) -> None:
+    """Unprovisioned, deactivated and unmapped Entra operators fail before token issue."""
+    _handler, table = _load_handler(monkeypatch)
+    monkeypatch.setenv("ENTRA_PROVIDER_NAME", "MicrosoftEntraID")
+    monkeypatch.setenv("ENTRA_TENANT_ID", "11111111-2222-4333-8444-555555555555")
+    monkeypatch.setenv("SCIM_ENABLED", "true")
+    monkeypatch.setenv("SCIM_TABLE", "scim")
+    monkeypatch.setenv("SCIM_AAI_TENANT_ID", "tenant-enterprise")
+    user_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    group_id = "99999999-8888-4777-8666-555555555555"
+    identity = json.dumps(
+        [{"providerName": "MicrosoftEntraID", "providerType": "OIDC", "userId": "pairwise"}]
+    )
+    event = {
+        "request": {
+            "userAttributes": {
+                "identities": identity,
+                "custom:entra_object_id": user_id,
+            }
+        },
+        "response": {},
+    }
+    path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/pre_token.py"
+    spec = importlib.util.spec_from_file_location("aai_scim_pre_token", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    with pytest.raises(PermissionError, match="not actively provisioned"):
+        module.handler(event, None)
+    table.put_item(
+        Item={
+            "pk": "TENANT#tenant-enterprise",
+            "sk": f"USER#{user_id}",
+            "active": True,
+            "version": 1,
+        }
+    )
+    with pytest.raises(PermissionError, match="no mapped product role"):
+        module.handler(event, None)
+    table.put_item(
+        Item={
+            "pk": f"TENANT#tenant-enterprise#USER#{user_id}",
+            "sk": f"GROUP#{group_id}",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": "TENANT#tenant-enterprise",
+            "sk": f"GROUP#{group_id}",
+            "active": True,
+            "mapped_role": "policy-approver",
+            "version": 2,
+        }
+    )
+    result = module.handler(event, None)
+    overrides = result["response"]["claimsAndScopeOverrideDetails"]
+    assert overrides["groupOverrideDetails"] == {"groupsToOverride": ["policy-approver"]}
+    assert (
+        overrides["accessTokenGeneration"]["claimsToAddOrOverride"]["aai:scim_enforced"] == "true"
+    )
+    assert (
+        len(overrides["accessTokenGeneration"]["claimsToAddOrOverride"]["aai:scim_revision"]) == 64
+    )
+    table.items[("TENANT#tenant-enterprise", f"USER#{user_id}")]["active"] = False
+    with pytest.raises(PermissionError, match="not actively provisioned"):
+        module.handler({**event, "response": {}}, None)
+
+
+def test_scim_group_role_mapping_is_platform_admin_only_and_audited(monkeypatch: Any) -> None:
+    """Only tenant administrators can map provisioned groups into product authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-enterprise"
+    group_id = "99999999-8888-4777-8666-555555555555"
+    monkeypatch.setenv("SCIM_ENABLED", "true")
+    monkeypatch.setenv("ENTRA_AAI_TENANT_ID", tenant)
+    module.SCIM = table
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item={
+            "pk": f"TENANT#{tenant}",
+            "sk": f"GROUP#{group_id}",
+            "id": group_id,
+            "display_name": "AAI Policy Approvers",
+            "active": True,
+            "mapped_role": "",
+            "version": 1,
+            "updated_at": 1,
+        }
+    )
+    path = f"/enterprise/identity/scim/groups/{group_id}/role"
+    denied = _invoke(
+        module,
+        _event(
+            path,
+            "PUT",
+            body={"role": "policy-approver"},
+            claims={"custom:tenant_id": tenant, "cognito:groups": ["fleet-operator"]},
+        ),
+    )
+    assert denied["statusCode"] == 403
+    assert json.loads(denied["body"])["requiredCapability"] == "identity_admin"
+    applied = _invoke(
+        module,
+        _event(
+            path,
+            "PUT",
+            body={"role": "policy-approver"},
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["platform-admin"],
+                "sub": "admin-a",
+            },
+        ),
+    )
+    assert applied["statusCode"] == 200
+    payload = json.loads(applied["body"])
+    assert payload["scimStatus"] == "configured"
+    assert payload["scim"]["groups"] == {"total": 1, "mapped": 1, "unmapped": 0}
+    assert table.items[(f"TENANT#{tenant}", f"GROUP#{group_id}")]["mapped_role"] == (
+        "policy-approver"
+    )
 
 
 def test_json_boundary_preserves_integral_policy_versions(monkeypatch: Any) -> None:

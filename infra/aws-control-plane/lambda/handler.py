@@ -21,6 +21,8 @@ from boto3.dynamodb.conditions import Key
 TABLE = boto3.resource("dynamodb").Table(os.environ["CONTROL_TABLE"])
 PRESENCE = boto3.resource("dynamodb").Table(os.environ["PRESENCE_TABLE"])
 IDEMPOTENCY = boto3.resource("dynamodb").Table(os.environ["IDEMPOTENCY_TABLE"])
+SCIM_TABLE_NAME = os.environ.get("SCIM_TABLE", "")
+SCIM = boto3.resource("dynamodb").Table(SCIM_TABLE_NAME) if SCIM_TABLE_NAME else None
 S3 = boto3.client("s3")
 
 # Tenant list reads are deliberately finite. Callers that require complete
@@ -307,6 +309,8 @@ def _required_mutation_capability(path):
         return "incident_response"
     if normalized.startswith("/enterprise/approvals/"):
         return "approval_decision"
+    if normalized.startswith("/enterprise/identity/scim"):
+        return "identity_admin"
     if normalized.startswith("/enterprise/policies"):
         return "policy_write"
     if normalized.startswith("/enterprise/skills") or normalized.startswith(
@@ -338,6 +342,98 @@ def _mutation_authorized(event):
     return bool(_operator_roles(event))
 
 
+def _scim_lifecycle(tenant):
+    """Return a bounded, secret-free view of Entra provisioning lifecycle."""
+    configured = (
+        os.environ.get("SCIM_ENABLED") == "true"
+        and SCIM is not None
+        and os.environ.get("ENTRA_AAI_TENANT_ID") == tenant
+    )
+    empty = {
+        "status": "not_configured",
+        "lifecycleEnforced": False,
+        "users": {"total": 0, "active": 0, "disabled": 0},
+        "groups": {"total": 0, "mapped": 0, "unmapped": 0},
+        "groupMappings": [],
+        "lastProvisionedAt": None,
+    }
+    if not configured:
+        return empty
+    result = SCIM.query(
+        KeyConditionExpression=Key("pk").eq(f"TENANT#{tenant}"),
+        Limit=501,
+        ConsistentRead=True,
+    )
+    items = result.get("Items", [])
+    if result.get("LastEvaluatedKey") or len(items) > 500:
+        # The status endpoint is not an authorization decision. Still surface
+        # an explicit degraded state rather than silently reporting a subset.
+        return {**empty, "status": "degraded", "error": "inventory_bound_exceeded"}
+    users = [item for item in items if str(item.get("sk", "")).startswith("USER#")]
+    groups = [item for item in items if str(item.get("sk", "")).startswith("GROUP#")]
+    mappings = [
+        {
+            "groupId": group.get("id", ""),
+            "displayName": group.get("display_name", ""),
+            "role": group.get("mapped_role") or None,
+            "active": group.get("active") is True,
+            "updatedAt": group.get("updated_at"),
+        }
+        for group in sorted(groups, key=lambda item: str(item.get("display_name", "")).lower())
+    ]
+    timestamps = [
+        int(item.get("updated_at", 0))
+        for item in users + groups
+        if int(item.get("updated_at", 0)) > 0
+    ]
+    mapped = sum(1 for group in groups if group.get("mapped_role") in _CANONICAL_OPERATOR_ROLES)
+    active = sum(1 for user in users if user.get("active") is True)
+    return {
+        "status": "configured",
+        "lifecycleEnforced": True,
+        "users": {"total": len(users), "active": active, "disabled": len(users) - active},
+        "groups": {"total": len(groups), "mapped": mapped, "unmapped": len(groups) - mapped},
+        "groupMappings": mappings,
+        "lastProvisionedAt": max(timestamps) if timestamps else None,
+    }
+
+
+def _map_scim_group_role(tenant, group_id, role, actor):
+    """Map one provisioned Entra group to one exact canonical product role."""
+    if SCIM is None or os.environ.get("SCIM_ENABLED") != "true":
+        raise ValueError("SCIM lifecycle is not configured")
+    if not isinstance(group_id, str) or len(group_id) > 64:
+        raise ValueError("SCIM group ID is invalid")
+    try:
+        group_id = str(uuid.UUID(group_id))
+    except ValueError as error:
+        raise ValueError("SCIM group ID is invalid") from error
+    if role is not None and role not in _CANONICAL_OPERATOR_ROLES:
+        raise ValueError("SCIM group role is not canonical")
+    key = {"pk": f"TENANT#{tenant}", "sk": f"GROUP#{group_id}"}
+    group = SCIM.get_item(Key=key, ConsistentRead=True).get("Item")
+    if not group:
+        return None
+    now = int(time.time())
+    group.update(
+        {
+            "mapped_role": role or "",
+            "mapped_by": actor,
+            "mapped_at": now,
+            "updated_at": now,
+            "version": int(group.get("version", 0)) + 1,
+        }
+    )
+    SCIM.put_item(Item=group)
+    _audit(
+        tenant,
+        "scim_group_role_mapped",
+        actor,
+        {"group_id": group_id, "role": role or "unmapped"},
+    )
+    return group
+
+
 def _identity_access(tenant, event):
     """Return redaction-safe identity provenance and the enforced role matrix."""
     entra_tenant = os.environ.get("ENTRA_TENANT_ID", "")
@@ -346,6 +442,7 @@ def _identity_access(tenant, event):
         and bool(entra_tenant)
         and os.environ.get("ENTRA_AAI_TENANT_ID") == tenant
     )
+    scim = _scim_lifecycle(tenant)
     return {
         "provider": "microsoft_entra_id",
         "providerLabel": "Microsoft Entra ID",
@@ -354,7 +451,8 @@ def _identity_access(tenant, event):
         "tenantHint": f"{entra_tenant[:8]}…" if configured else None,
         "tenantBinding": "server_owned",
         "roleSource": "cognito_managed_groups",
-        "scimStatus": "not_configured",
+        "scimStatus": scim["status"],
+        "scim": scim,
         "activeRoles": sorted(_operator_roles(event)),
         "roleMatrix": [
             {"role": role, "capabilities": sorted(capabilities)}
@@ -1701,6 +1799,20 @@ def handler(event, context):
             if method == "GET" and parts == ["capabilities"]:
                 return _response(200, _fleet(tenant)["capabilities"])
             if method == "GET" and parts == ["identity"]:
+                return _response(200, _identity_access(tenant, event))
+            if (
+                method == "PUT"
+                and len(parts) == 5
+                and parts[:3] == ["identity", "scim", "groups"]
+                and parts[4] == "role"
+            ):
+                body = _body(event)
+                role = body.get("role")
+                if role == "":
+                    role = None
+                group = _map_scim_group_role(tenant, parts[3], role, actor)
+                if group is None:
+                    return _response(404, {"error": "SCIM group not found"})
                 return _response(200, _identity_access(tenant, event))
             if method == "GET" and parts == ["integrations"]:
                 return _response(200, _enterprise_integrations())

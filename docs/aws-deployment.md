@@ -38,6 +38,8 @@ The stack creates:
 - seven canonical Cognito groups for capability-based operator RBAC;
 - optional Microsoft Entra ID tenant-specific OIDC federation, with its client
   secret resolved from AWS Secrets Manager at deployment time;
+- optional tenant-bound Microsoft Entra SCIM provisioning, with a separate
+  bearer resolved only by the SCIM Lambda from AWS Secrets Manager;
 - API Gateway HTTP API with Cognito JWT authorizer;
 - Lambda control-plane handler;
 - on-demand DynamoDB control and presence tables; the control table expires
@@ -58,7 +60,8 @@ not prove the deployed claim projection.
 
 Mutating routes are classified into `runtime_admin`, `policy_write`,
 `policy_approval`, `fleet_write`, `approval_decision`, or
-`incident_response`. A role must grant the exact capability. Entra proves the
+`incident_response`; identity lifecycle changes additionally require
+`identity_admin`. A role must grant the exact capability. Entra proves the
 operator identity but does not select the AAI tenant or grant a product role:
 the deployment maps the configured Entra tenant to one provisioned AAI tenant,
 and Cognito-managed groups remain the authorization source. This separation
@@ -69,13 +72,16 @@ authority.
 
 Create a single-tenant Microsoft Entra application registration. Configure its
 web redirect URI as the Cognito domain followed by `/oauth2/idpresponse`. Store
-the client secret in AWS Secrets Manager, then deploy with all four variables:
+the client secret in AWS Secrets Manager. To enable lifecycle provisioning,
+create a different 32-character-or-longer SCIM bearer secret and deploy with
+all five variables:
 
 ```bash
 ENTRA_TENANT_ID=<entra-directory-uuid> \
 ENTRA_CLIENT_ID=<entra-application-client-id> \
 ENTRA_CLIENT_SECRET_NAME=<secrets-manager-secret-name> \
 ENTRA_AAI_TENANT_ID=<provisioned-aai-tenant-id> \
+ENTRA_SCIM_TOKEN_SECRET_NAME=<scim-bearer-secret-name> \
 AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 ```
 
@@ -89,11 +95,14 @@ adds provider provenance to ID and access tokens. The API compares the Entra
 tenant claim to the deployment configuration before resolving the mapped AAI
 tenant. These provenance claims are not role authority.
 
-The first integration uses controlled Cognito group assignment for the seven
-canonical roles. Automatic Entra group/app-role lifecycle requires the SCIM
-provisioning work tracked in
-[enterprise rollout P0/P1 status](p0-p1-implementation-status.md); until that
-is complete, the UI correctly shows SCIM as **Not configured**.
+When SCIM is enabled, Entra provisions users, groups and memberships into a
+tenant-bound retained DynamoDB lifecycle table. A platform administrator maps
+each exact Entra group UUID to one canonical role in **Identity & trust**.
+The pre-token trigger then replaces Cognito groups from that live mapping;
+unprovisioned, inactive and roleless identities fail closed. Five-minute
+access and ID tokens bound leaver and mover convergence. Without the SCIM
+secret, the UI truthfully reports lifecycle provisioning as not configured.
+Follow the [Entra SCIM lifecycle runbook](entra-scim-runbook.md).
 
 | Canonical role | Capability |
 | --- | --- |

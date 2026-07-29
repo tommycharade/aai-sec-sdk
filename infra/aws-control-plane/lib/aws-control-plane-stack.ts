@@ -9,6 +9,7 @@ import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
@@ -28,6 +29,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     const entraClientId = process.env.ENTRA_CLIENT_ID?.trim();
     const entraClientSecretName = process.env.ENTRA_CLIENT_SECRET_NAME?.trim();
     const entraAaiTenantId = process.env.ENTRA_AAI_TENANT_ID?.trim();
+    const entraScimTokenSecretName = process.env.ENTRA_SCIM_TOKEN_SECRET_NAME?.trim();
     const entraInputs = [entraTenantId, entraClientId, entraClientSecretName, entraAaiTenantId];
     if (entraInputs.some(Boolean) && !entraInputs.every(Boolean)) {
       throw new Error(
@@ -39,6 +41,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
       && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entraTenantId)
     ) {
       throw new Error("ENTRA_TENANT_ID must be a tenant-specific UUID");
+    }
+    if (entraScimTokenSecretName && !entraInputs.every(Boolean)) {
+      throw new Error("ENTRA_SCIM_TOKEN_SECRET_NAME requires the complete Entra OIDC configuration");
     }
 
     const table = new dynamodb.Table(this, "ControlPlaneTable", {
@@ -70,6 +75,18 @@ export class AwsControlPlaneStack extends cdk.Stack {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       timeToLiveAttribute: "ttl",
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // SCIM lifecycle state is isolated from runtime policy and session state.
+    // Its tenant is deployment-owned, while alternate partitions support
+    // bounded membership lookup in both the user and group directions.
+    const scim = new dynamodb.Table(this, "ScimLifecycleTable", {
+      partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "sk", type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -173,6 +190,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       customAttributes: {
         tenant_id: new cognito.StringAttribute({ mutable: false }),
+        // This OIDC-signed object ID is only a lookup key. The SCIM lifecycle
+        // table independently decides whether the identity is active and what
+        // canonical roles its provisioned groups receive.
+        entra_object_id: new cognito.StringAttribute({ mutable: true, minLen: 36, maxLen: 36 }),
       },
       passwordPolicy: { minLength: 14, requireLowercase: true, requireUppercase: true, requireDigits: true, requireSymbols: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -233,6 +254,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
           email: cognito.ProviderAttribute.other("email"),
           givenName: cognito.ProviderAttribute.other("given_name"),
           familyName: cognito.ProviderAttribute.other("family_name"),
+          custom: {
+            entra_object_id: cognito.ProviderAttribute.other("oid"),
+          },
         },
       });
       const entraClaims = new lambda.Function(this, "MicrosoftEntraClaims", {
@@ -245,8 +269,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
         environment: {
           ENTRA_PROVIDER_NAME: entraProvider.providerName,
           ENTRA_TENANT_ID: entraTenantId,
+          SCIM_ENABLED: entraScimTokenSecretName ? "true" : "false",
+          SCIM_TABLE: scim.tableName,
+          SCIM_AAI_TENANT_ID: entraAaiTenantId,
         },
       });
+      scim.grantReadData(entraClaims);
       // V2 can add independently verified provider provenance to both ID and
       // access tokens. The API still resolves application tenant and roles
       // from server-owned configuration; these claims are not authorization.
@@ -259,6 +287,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
     const client = userPool.addClient("WebClient", {
       generateSecret: false,
       authFlows: { userSrp: true },
+      // SCIM deactivation is enforced at every refresh and any already-issued
+      // operator token expires within the five-minute lifecycle SLO.
+      accessTokenValidity: cdk.Duration.minutes(5),
+      idTokenValidity: cdk.Duration.minutes(5),
+      refreshTokenValidity: cdk.Duration.days(1),
       supportedIdentityProviders: [
         cognito.UserPoolClientIdentityProvider.COGNITO,
         ...(entraProvider
@@ -267,7 +300,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       ],
       readAttributes: new cognito.ClientAttributes()
         .withStandardAttributes({ email: true, givenName: true, familyName: true })
-        .withCustomAttributes("tenant_id"),
+        .withCustomAttributes("tenant_id", "entra_object_id"),
       oAuth: {
         flows: { authorizationCodeGrant: true },
         scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
@@ -307,6 +340,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
         ENTRA_PROVIDER_ENABLED: entraProvider ? "true" : "false",
         ENTRA_TENANT_ID: entraTenantId ?? "",
         ENTRA_AAI_TENANT_ID: entraAaiTenantId ?? "",
+        SCIM_ENABLED: entraScimTokenSecretName ? "true" : "false",
+        SCIM_TABLE: scim.tableName,
         SPLUNK_STUB_ENABLED: "true",
       },
       tracing: lambda.Tracing.PASS_THROUGH,
@@ -314,6 +349,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     table.grantReadWriteData(handler);
     presence.grantReadWriteData(handler);
     idempotency.grantReadWriteData(handler);
+    scim.grantReadWriteData(handler);
     audit.grantPut(handler);
     handler.addToRolePolicy(new iam.PolicyStatement({ actions: ["sts:AssumeRole"], resources: [scopedToolRole.roleArn] }));
 
@@ -323,6 +359,35 @@ export class AwsControlPlaneStack extends cdk.Stack {
     });
     const issuer = `https://cognito-idp.${this.region}.amazonaws.com/${userPool.userPoolId}`;
     const jwt = new authorizers.HttpJwtAuthorizer("CognitoAuthorizer", issuer, { jwtAudience: [client.userPoolClientId] });
+    let scimEndpointStatus = "not-configured";
+    if (entraScimTokenSecretName && entraAaiTenantId) {
+      const scimToken = secretsmanager.Secret.fromSecretNameV2(
+        this,
+        "MicrosoftEntraScimToken",
+        entraScimTokenSecretName,
+      );
+      const scimHandler = new lambda.Function(this, "MicrosoftEntraScim", {
+        runtime: lambda.Runtime.PYTHON_3_13,
+        architecture: lambda.Architecture.ARM_64,
+        handler: "scim.handler",
+        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+        timeout: cdk.Duration.seconds(15),
+        memorySize: 256,
+        environment: {
+          SCIM_TABLE: scim.tableName,
+          SCIM_AAI_TENANT_ID: entraAaiTenantId,
+          SCIM_TOKEN_SECRET_NAME: entraScimTokenSecretName,
+        },
+      });
+      scim.grantReadWriteData(scimHandler);
+      scimToken.grantRead(scimHandler);
+      api.addRoutes({
+        path: "/scim/v2/{proxy+}",
+        methods: [apigwv2.HttpMethod.ANY],
+        integration: new integrations.HttpLambdaIntegration("MicrosoftEntraScimIntegration", scimHandler),
+      });
+      scimEndpointStatus = "configured";
+    }
     // Agent enrollment and short-lived session calls are authenticated by the
     // handler with one-time/expiring credentials, not by an operator JWT.
     api.addRoutes({ path: "/agent/{proxy+}", methods: [apigwv2.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration("AgentIntegration", handler) });
@@ -366,6 +431,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "UiBucketName", { value: uiBucket.bucketName });
     new cdk.CfnOutput(this, "ControlTableName", { value: table.tableName });
     new cdk.CfnOutput(this, "IdempotencyTableName", { value: idempotency.tableName });
+    new cdk.CfnOutput(this, "ScimLifecycleTableName", { value: scim.tableName });
     new cdk.CfnOutput(this, "ScopedToolRoleArn", { value: scopedToolRole.roleArn });
     new cdk.CfnOutput(this, "SecurityAlertsTopicArn", { value: securityAlerts.topicArn });
     new cdk.CfnOutput(this, "SecurityAlertsQueueArn", { value: securityAlertsQueue.queueArn });
@@ -373,6 +439,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "MicrosoftEntraIdStatus", {
       value: entraProvider ? "configured" : "not-configured",
     });
+    new cdk.CfnOutput(this, "MicrosoftEntraScimStatus", { value: scimEndpointStatus });
+    if (scimEndpointStatus === "configured") {
+      new cdk.CfnOutput(this, "MicrosoftEntraScimEndpoint", {
+        value: `${api.apiEndpoint}/scim/v2`,
+      });
+    }
     if (auditReplicaArn) {
       new cdk.CfnOutput(this, "AuditReplicaBucketArn", { value: auditReplicaArn });
       new cdk.CfnOutput(this, "AuditReplicaRegion", { value: process.env.AUDIT_REPLICA_REGION ?? "eu-west-1" });

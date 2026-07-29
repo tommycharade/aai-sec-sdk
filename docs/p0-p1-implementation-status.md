@@ -24,7 +24,7 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.
 | P0-03 | Native-control reconciliation | Partial | Shared typed policy and host decision evidence | Combined Claude/Codex effective-authority engine and conflict UI |
 | P0-04 | Complete agent discovery | Partial | Enrolled inventory and health | Device/user/repository discovery and unmanaged-instance denominator |
 | P0-05 | Runtime attestation | Partial | Signed releases, checksums and configuration hashes | Runtime binary/process/config attestation bound to heartbeat and revocation |
-| P0-06 | Entra SSO, SCIM and granular RBAC | Partial | Tenant-specific Entra OIDC CDK adapter, server-owned tenant binding, seven capability roles, adversarial tests and Identity & Trust UI | SCIM, automatic Entra app-role/group mapping, access certification and live federated acceptance |
+| P0-06 | Entra SSO, SCIM and granular RBAC | Partial | Tenant-specific Entra OIDC, tenant-bound SCIM users/groups/memberships, admin-controlled canonical-role mapping, five-minute token reconciliation, adversarial contracts and Identity & Trust UI | Live Entra joiner/mover/leaver acceptance, break glass, access certification and delegated scopes |
 | P0-07 | SIEM/SOAR | Stub | Splunk status contract and honest UI state with `deliveryVerified: false` | HEC delivery, authentication, schema, retry, dead letter, monitoring and replay |
 | P0-08 | Durable evidence | Partial | S3 Object Lock, retention and cross-region pilot evidence | Tenant retention, legal hold, complete export and evidence-loss recovery SLO |
 | P0-09 | Production credential broker | Partial | Typed broker contracts and AWS scoped STS reference | Real AWS/Azure/GCP production role inventory and revocation evidence |
@@ -56,8 +56,16 @@ with Microsoft Entra ID as the first adapter:
 4. The API independently binds that directory to one provisioned AAI tenant.
 5. Mutating routes require an explicit capability from one of seven canonical
    roles; malformed and lookalike roles fail closed.
-6. The UI reports active roles, tenant provenance, SCIM status and Splunk
-   delivery status without treating setup as proof.
+6. A separate bearer-protected SCIM endpoint provisions tenant-bound users,
+   groups and memberships using immutable Entra object UUIDs.
+7. Only a platform administrator maps exact active groups to canonical roles;
+   token issuance reconciles live lifecycle state and fails closed.
+8. Access and ID tokens expire after five minutes, bounding mover/leaver
+   convergence when refresh repeats the lifecycle lookup.
+9. The UI reports lifecycle counts, sync posture and role mappings while
+   preserving honest degraded and not-configured states. Splunk remains a
+   non-delivering stub.
 
-This closes a foundation, not P0-06 itself. SCIM and automatic Entra group/app
-role reconciliation remain the next identity deliverable.
+This advances but does not close P0-06. The next identity acceptance slice is
+a live Entra joiner/mover/leaver exercise, followed by break glass, quarterly
+access certification and delegated administrative scopes.
