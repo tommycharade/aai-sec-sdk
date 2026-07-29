@@ -116,6 +116,19 @@ access and ID tokens bound leaver and mover convergence. Without the SCIM
 secret, the UI truthfully reports lifecycle provisioning as not configured.
 Follow the [Entra SCIM lifecycle runbook](entra-scim-runbook.md).
 
+After provisioning, a tenant identity administrator can assign an expiring
+non-admin role to one active Entra object for an existing organization,
+project or deployment in **Identity & trust → Delegated operator access**. The
+pre-token trigger verifies that the SCIM identity has either a tenant-wide
+mapped role or a live delegated grant, but it never copies the delegated role
+into Cognito groups. The control-plane Lambda resolves the exact resource
+lineage and grant state on every mutation, so expiry and revocation are
+immediate. The pre-token trigger therefore also needs read-only access to the
+control table; CDK declares that permission and the `CONTROL_TABLE`
+environment value. Follow the
+[delegated administration design](delegated-administration.md) and prove one
+in-scope allow plus one sibling-resource deny before pilot use.
+
 | Canonical role | Capability |
 | --- | --- |
 | `platform-admin` | All administrative capabilities; reserve for tenant administration and break glass |

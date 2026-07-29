@@ -611,8 +611,33 @@ def test_entra_pre_token_enforces_scim_lifecycle_and_mapped_roles(monkeypatch: A
             "version": 1,
         }
     )
-    with pytest.raises(PermissionError, match="no mapped product role"):
+    with pytest.raises(PermissionError, match="no mapped or delegated product authority"):
         module.handler(event, None)
+    delegated_key = ("TENANT#tenant-enterprise", "DELEGATED_GRANT#grant-a")
+    table.put_item(
+        Item={
+            "pk": delegated_key[0],
+            "sk": delegated_key[1],
+            "id": "grant-a",
+            "principal_id": user_id,
+            "role": "fleet-operator",
+            "status": "active",
+            "expires_at": int(time.time()) + 300,
+            "revision": 1,
+        }
+    )
+    delegated = module.handler({**event, "response": {}}, None)
+    delegated_overrides = delegated["response"]["claimsAndScopeOverrideDetails"]
+    assert delegated_overrides["groupOverrideDetails"] == {"groupsToOverride": []}
+    assert (
+        delegated_overrides["accessTokenGeneration"]["claimsToAddOrOverride"]["aai:operator_id"]
+        == user_id
+    )
+    assert (
+        delegated_overrides["accessTokenGeneration"]["claimsToAddOrOverride"]["aai:delegated"]
+        == "true"
+    )
+    del table.items[delegated_key]
     table.put_item(
         Item={
             "pk": f"TENANT#tenant-enterprise#USER#{user_id}",
@@ -637,6 +662,8 @@ def test_entra_pre_token_enforces_scim_lifecycle_and_mapped_roles(monkeypatch: A
     assert (
         len(overrides["accessTokenGeneration"]["claimsToAddOrOverride"]["aai:scim_revision"]) == 64
     )
+    assert overrides["accessTokenGeneration"]["claimsToAddOrOverride"]["aai:operator_id"] == user_id
+    assert overrides["accessTokenGeneration"]["claimsToAddOrOverride"]["aai:delegated"] == "false"
     table.items[("TENANT#tenant-enterprise", f"USER#{user_id}")]["active"] = False
     with pytest.raises(PermissionError, match="not actively provisioned"):
         module.handler({**event, "response": {}}, None)
@@ -694,6 +721,222 @@ def test_scim_group_role_mapping_is_platform_admin_only_and_audited(monkeypatch:
     assert payload["scim"]["groups"] == {"total": 1, "mapped": 1, "unmapped": 0}
     assert table.items[(f"TENANT#{tenant}", f"GROUP#{group_id}")]["mapped_role"] == (
         "policy-approver"
+    )
+
+
+def test_delegated_admin_scope_is_live_narrow_and_revocable(monkeypatch: Any) -> None:
+    """A delegated role authorizes only descendant resources and never identity control."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-delegated"
+    for item in (
+        module._item_key(tenant, "TENANT", "root") | {"id": tenant},
+        module._item_key(tenant, "ORG", "org-a") | {"id": "org-a", "name": "A"},
+        module._item_key(tenant, "ORG", "org-b") | {"id": "org-b", "name": "B"},
+        module._item_key(tenant, "PROJECT", "project-a")
+        | {"id": "project-a", "organization_id": "org-a", "name": "A project"},
+        module._item_key(tenant, "PROJECT", "project-b")
+        | {"id": "project-b", "organization_id": "org-b", "name": "B project"},
+        module._item_key(tenant, "DEPLOYMENT", "existing-b")
+        | {
+            "id": "existing-b",
+            "organization_id": "org-b",
+            "project_id": "project-b",
+            "name": "Existing B",
+        },
+    ):
+        table.put_item(Item=item)
+    admin_claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    created = _invoke(
+        module,
+        _event(
+            "/enterprise/identity/delegated-grants",
+            "POST",
+            body={
+                "principalId": "operator-a",
+                "role": "fleet-operator",
+                "scopeType": "organization",
+                "scopeId": "org-a",
+                "durationDays": 30,
+                "reason": "Operate the synthetic A organization fleet",
+            },
+            claims=admin_claims,
+        ),
+    )
+    assert created["statusCode"] == 201
+    grant = json.loads(created["body"])
+    assert grant["effectiveStatus"] == "active"
+    assert grant["scopeId"] == "org-a"
+    assert len([key for key in table.items if key[1].startswith("BREAK_GLASS_AUDIT#")]) == 1
+
+    delegated_claims = {
+        "custom:tenant_id": tenant,
+        "sub": "operator-a",
+        # This claim is informational only; the API resolves grant authority live.
+        "aai:delegated": "true",
+    }
+    allowed = _invoke(
+        module,
+        _event(
+            "/enterprise/deployments",
+            "POST",
+            body={
+                "organizationId": "org-a",
+                "projectId": "project-a",
+                "deploymentId": "deployment-a",
+                "name": "A deployment",
+                "environment": "synthetic",
+                "region": "test-1",
+            },
+            claims=delegated_claims,
+        ),
+    )
+    assert allowed["statusCode"] == 201
+    denied_sibling = _invoke(
+        module,
+        _event(
+            "/enterprise/deployments",
+            "POST",
+            body={
+                "organizationId": "org-b",
+                "projectId": "project-b",
+                "deploymentId": "deployment-b",
+                "name": "B deployment",
+                "environment": "synthetic",
+                "region": "test-1",
+            },
+            claims=delegated_claims,
+        ),
+    )
+    assert denied_sibling["statusCode"] == 403
+    visible = _invoke(
+        module,
+        _event("/enterprise/deployments", "GET", claims=delegated_claims),
+    )
+    assert visible["statusCode"] == 200
+    assert [item["id"] for item in json.loads(visible["body"])["items"]] == ["deployment-a"]
+    denied_identity = _invoke(
+        module,
+        _event(
+            "/enterprise/identity/delegated-grants",
+            "POST",
+            body={
+                "principalId": "attacker",
+                "role": "fleet-operator",
+                "scopeType": "organization",
+                "scopeId": "org-a",
+                "durationDays": 30,
+                "reason": "Attempt to widen delegated authority illegally",
+            },
+            claims=delegated_claims,
+        ),
+    )
+    assert denied_identity["statusCode"] == 403
+    forged = _invoke(
+        module,
+        _event(
+            "/enterprise/projects",
+            "POST",
+            body={"organizationId": "org-a", "projectId": "forged", "name": "Forged"},
+            claims={
+                "custom:tenant_id": tenant,
+                "sub": "attacker",
+                "aai:delegated": "true",
+            },
+        ),
+    )
+    assert forged["statusCode"] == 403
+
+    revoked = _invoke(
+        module,
+        _event(
+            f"/enterprise/identity/delegated-grants/{grant['id']}/revoke",
+            "POST",
+            claims=admin_claims,
+        ),
+    )
+    assert revoked["statusCode"] == 200
+    assert json.loads(revoked["body"])["effectiveStatus"] == "revoked"
+    denied_after_revoke = _invoke(
+        module,
+        _event(
+            "/enterprise/projects",
+            "POST",
+            body={"organizationId": "org-a", "projectId": "after-revoke", "name": "Denied"},
+            claims=delegated_claims,
+        ),
+    )
+    assert denied_after_revoke["statusCode"] == 403
+    assert len([key for key in table.items if key[1].startswith("BREAK_GLASS_AUDIT#")]) == 2
+
+
+def test_delegated_admin_rejects_self_wildcard_expired_and_cross_tenant_grants(
+    monkeypatch: Any,
+) -> None:
+    """Delegation cannot create wildcard, self, stale or cross-tenant authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-delegated-bounds"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(tenant, "ORG", "org-a") | {"id": "org-a"})
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    for body in (
+        {
+            "principalId": "admin-a",
+            "role": "fleet-operator",
+            "scopeType": "organization",
+            "scopeId": "org-a",
+            "durationDays": 30,
+            "reason": "Self delegation must always be rejected",
+        },
+        {
+            "principalId": "operator-a",
+            "role": "platform-admin",
+            "scopeType": "organization",
+            "scopeId": "org-a",
+            "durationDays": 30,
+            "reason": "Wildcard delegation must always be rejected",
+        },
+    ):
+        response = _invoke(
+            module,
+            _event("/enterprise/identity/delegated-grants", "POST", body=body, claims=claims),
+        )
+        assert response["statusCode"] in {400, 403}
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "DELEGATED_GRANT", "expired"),
+            "id": "expired",
+            "principal_id": "operator-a",
+            "role": "fleet-operator",
+            "scope_type": "organization",
+            "scope_id": "org-a",
+            "status": "active",
+            "expires_at": int(time.time()) - 1,
+            "revision": 1,
+        }
+    )
+    assert not module._operator_authorized(
+        _event("/", "GET", claims={"custom:tenant_id": tenant, "sub": "operator-a"}),
+        "fleet_write",
+        tenant,
+        resource_scope={"organization": "org-a"},
+    )
+    assert not module._operator_authorized(
+        _event(
+            "/",
+            "GET",
+            claims={"custom:tenant_id": "tenant-other", "sub": "operator-a"},
+        ),
+        "fleet_write",
+        "tenant-other",
+        resource_scope={"organization": "org-a"},
     )
 
 
@@ -1138,7 +1381,9 @@ def test_access_certification_is_complete_bounded_and_auditor_only(monkeypatch: 
     )
     assert exported["statusCode"] == 200
     payload = json.loads(exported["body"])
+    assert payload["schemaVersion"] == 2
     assert payload["complete"] is True
+    assert payload["delegatedGrants"] == []
     assert payload["operators"] == [
         {
             "subjectId": user_id,
@@ -1503,6 +1748,8 @@ def test_aws_strong_authentication_assertion_is_server_owned() -> None:
         Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
     ).read_text(encoding="utf-8")
     assert "ENTRA_STRONG_AUTH_ENFORCED" in stack
+    assert "CONTROL_TABLE: table.tableName" in stack
+    assert "table.grantReadData(entraClaims)" in stack
     assert "entra_auth_methods" not in stack
 
 

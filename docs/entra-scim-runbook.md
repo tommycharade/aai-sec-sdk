@@ -121,6 +121,20 @@ content-minimised lifecycle audit records are intentionally retained.
 4. Verify any already-issued operator token stops working within five minutes.
 5. Retain the lifecycle audit record and the denied authentication evidence.
 
+### Delegated operator
+
+1. Provision an active pilot operator without a tenant-wide mapped role.
+2. As a different platform administrator, create a 7-day `fleet-operator`
+   grant for one synthetic project in **Delegated operator access**.
+3. Sign in as the pilot and confirm token issuance reports delegated access
+   without adding `fleet-operator` to `cognito:groups`.
+4. Create one synthetic deployment inside the project and confirm success.
+5. Attempt the same operation in a sibling project and confirm HTTP 403.
+6. Revoke the grant and confirm the formerly permitted operation receives HTTP
+   403 immediately, without waiting for token expiry.
+7. Generate access certification and confirm the grant and revocation appear
+   in schema version 2 evidence.
+
 ## Operations and incident response
 
 - **Provisioning failure:** do not create a local Cognito group workaround.
@@ -147,7 +161,8 @@ This implementation advances P0-06 but does not complete it. The automated
 command proves the deployed SCIM protocol once configured; real Entra OIDC
 sign-in and joiner/mover/leaver acceptance, configurable provisioning SLO
 alarms, immediate global token
-revocation and delegated administrative scopes remain outstanding. The
+revocation and live multi-business-unit delegated-scope acceptance remain
+outstanding. The
 break-glass and access-certification contracts are implemented but still need
 the deployed two-person Entra MFA acceptance exercise. Splunk remains a
 non-delivering stub.

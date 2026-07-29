@@ -149,6 +149,9 @@ _ROLE_CAPABILITIES = {
     "incident-responder": frozenset({"incident_response"}),
     "auditor": frozenset({"access_certification_read"}),
 }
+_DELEGATABLE_OPERATOR_ROLES = frozenset(_CANONICAL_OPERATOR_ROLES - {"platform-admin"})
+_DELEGATED_SCOPE_TYPES = frozenset({"organization", "project", "deployment"})
+_DELEGATED_GRANT_MAX_SECONDS = 366 * 24 * 60 * 60
 _BREAK_GLASS_CAPABILITIES = frozenset(
     {
         "approval_decision",
@@ -743,6 +746,8 @@ def _required_mutation_capability(path):
         return "approval_decision"
     if normalized.startswith("/enterprise/identity/scim"):
         return "identity_admin"
+    if normalized.startswith("/enterprise/identity/delegated-grants"):
+        return "identity_admin"
     if re.fullmatch(
         r"/enterprise/policies/[^/]+/versions/[1-9][0-9]*/(decision|stage|activate)",
         normalized,
@@ -765,7 +770,15 @@ def _required_mutation_capability(path):
     return "fleet_write"
 
 
-def _operator_authorized(event, capability, tenant=None, *, include_break_glass=True):
+def _operator_authorized(
+    event,
+    capability,
+    tenant=None,
+    *,
+    include_break_glass=True,
+    resource_scope=None,
+    include_delegated=True,
+):
     """Authorize one live capability from normal roles or an active emergency grant.
 
     Break-glass authority is resolved from server-owned state for each request;
@@ -778,6 +791,14 @@ def _operator_authorized(event, capability, tenant=None, *, include_break_glass=
     )
     if normally_authorized:
         return True
+    if include_delegated and tenant is not None and resource_scope is not None:
+        try:
+            if _delegated_operator_authorized(tenant, event, capability, resource_scope):
+                return True
+        except Exception:
+            # Delegated authority is live server-owned state. A malformed,
+            # oversized or unavailable lookup must never widen authority.
+            return False
     if not include_break_glass or tenant is None or capability not in _BREAK_GLASS_CAPABILITIES:
         return False
     try:
@@ -798,7 +819,210 @@ def _mutation_authorized(event):
     return bool(_operator_roles(event))
 
 
-def _scim_lifecycle(tenant):
+def _item_resource_scope(tenant, kind, identifier):
+    """Resolve one tenant item into its organization/project/deployment lineage."""
+    item = TABLE.get_item(
+        Key=_item_key(tenant, kind, _bounded_identifier(identifier, "resourceId")),
+        ConsistentRead=True,
+    ).get("Item")
+    if not item:
+        return None
+    organization_id = item.get("organization_id") or item.get("organizationId")
+    project_id = item.get("project_id") or item.get("projectId")
+    deployment_id = item.get("deployment_id") or item.get("deploymentId")
+    scope = {}
+    if isinstance(organization_id, str) and organization_id:
+        scope["organization"] = organization_id
+    if isinstance(project_id, str) and project_id:
+        scope["project"] = project_id
+    if kind == "DEPLOYMENT":
+        scope["deployment"] = item.get("id", identifier)
+    elif isinstance(deployment_id, str) and deployment_id:
+        scope["deployment"] = deployment_id
+    return scope or None
+
+
+def _mutation_resource_scope(tenant, event, path):
+    """Derive server-validated scope for delegated mutation authorization.
+
+    Returning ``None`` is a deliberate denial for delegated operators. Tenant-
+    wide controls, identity governance and unrecognized routes require normal
+    directory-derived authority or break glass.
+    """
+    normalized = path.removeprefix("/api")
+    if not normalized.startswith("/enterprise/"):
+        return None
+    parts = [part for part in normalized.removeprefix("/enterprise/").split("/") if part]
+    body = _body(event)
+    if parts == ["projects"]:
+        organization_id = body.get("organizationId")
+        try:
+            return _delegated_scope_lineage(tenant, "organization", organization_id)
+        except (ValueError, LookupError):
+            return None
+    if parts == ["deployments"]:
+        project_id = body.get("projectId")
+        try:
+            return _delegated_scope_lineage(tenant, "project", project_id)
+        except (ValueError, LookupError):
+            return None
+    if parts and parts[0] == "deployments" and len(parts) >= 2:
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", parts[1])
+        except (ValueError, LookupError):
+            return None
+    if parts in (["agents", "register"], ["agents", "bootstrap"]):
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", body.get("deploymentId"))
+        except (ValueError, LookupError):
+            return None
+    if parts and parts[0] == "agents" and len(parts) >= 3:
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", parts[1])
+        except (ValueError, LookupError):
+            return None
+    if parts == ["deployment-config"] or parts == ["deployment-config", "rollback"]:
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", body.get("deploymentId"))
+        except (ValueError, LookupError):
+            return None
+    if parts == ["deployment-config", "batch-rollout"]:
+        deployment_ids = body.get("deploymentIds")
+        if not isinstance(deployment_ids, list) or not 1 <= len(deployment_ids) <= 200:
+            return None
+        try:
+            return [
+                _delegated_scope_lineage(tenant, "deployment", deployment_id)
+                for deployment_id in deployment_ids
+            ]
+        except (ValueError, LookupError):
+            return None
+    if parts == ["emergency-stop"] and body.get("deploymentId"):
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", body.get("deploymentId"))
+        except (ValueError, LookupError):
+            return None
+    if parts and parts[0] == "policies":
+        if len(parts) >= 2:
+            return _item_resource_scope(tenant, "POLICY", parts[1])
+        try:
+            organization_id = _policy_organization(tenant, body)
+            return _delegated_scope_lineage(tenant, "organization", organization_id)
+        except (ValueError, LookupError):
+            return None
+    if parts and parts[0] == "groups":
+        if len(parts) >= 2:
+            return _item_resource_scope(tenant, "GROUP", parts[1])
+        policy_id = body.get("policyId")
+        return _item_resource_scope(tenant, "POLICY", policy_id) if policy_id else None
+    if parts in (["skills"], ["mcp-servers"]):
+        organization_id = body.get("organizationId")
+        if organization_id is None:
+            organizations = _list(tenant, "ORG", consistent_read=True)
+            organization_id = organizations[0].get("id") if len(organizations) == 1 else None
+        try:
+            return _delegated_scope_lineage(tenant, "organization", organization_id)
+        except (ValueError, LookupError):
+            return None
+    if parts and parts[0] == "approvals":
+        agent_key = body.get("agentKey")
+        if len(parts) >= 2 and parts[1] not in {"consume"}:
+            approval = TABLE.get_item(
+                Key=_item_key(tenant, "APPROVAL", parts[1]), ConsistentRead=True
+            ).get("Item")
+            agent_key = approval.get("agent_key") if approval else None
+        if isinstance(agent_key, str) and ":" in agent_key:
+            try:
+                return _delegated_scope_lineage(tenant, "deployment", agent_key.split(":", 1)[0])
+            except (ValueError, LookupError):
+                return None
+    return None
+
+
+_DELEGATED_READ_ROLES = {
+    "ORG": _DELEGATABLE_OPERATOR_ROLES,
+    "PROJECT": _DELEGATABLE_OPERATOR_ROLES,
+    "DEPLOYMENT": frozenset(
+        {"fleet-operator", "incident-responder", "security-operator", "auditor"}
+    ),
+    "AGENT": frozenset({"fleet-operator", "incident-responder", "security-operator", "auditor"}),
+    "GROUP": frozenset(
+        {"fleet-operator", "incident-responder", "policy-author", "policy-approver", "auditor"}
+    ),
+    "POLICY": frozenset({"fleet-operator", "policy-author", "policy-approver", "auditor"}),
+    "SKILL": frozenset({"policy-author", "policy-approver", "auditor"}),
+    "MCP": frozenset({"policy-author", "policy-approver", "auditor"}),
+    "CONFIGURATION": frozenset({"fleet-operator", "incident-responder", "auditor"}),
+    "DRIFT": frozenset({"fleet-operator", "incident-responder", "security-operator", "auditor"}),
+    "HEALTH": frozenset({"fleet-operator", "incident-responder", "security-operator", "auditor"}),
+    "SLO": frozenset({"fleet-operator", "incident-responder", "security-operator", "auditor"}),
+    "APPROVAL": frozenset({"policy-approver", "security-operator", "auditor"}),
+    "ALERT": frozenset({"incident-responder", "security-operator", "auditor"}),
+    "AUDIT": frozenset({"security-operator", "auditor"}),
+}
+
+
+def _delegated_item_scope(tenant, kind, item):
+    """Resolve one list item into a scope without trusting presentation fields."""
+    if kind == "ORG":
+        identifier = item.get("id")
+        return {"organization": identifier} if isinstance(identifier, str) and identifier else None
+    if kind == "PROJECT":
+        identifier = item.get("id")
+        try:
+            return _delegated_scope_lineage(tenant, "project", identifier)
+        except (ValueError, LookupError):
+            return None
+    if kind == "DEPLOYMENT":
+        identifier = item.get("id")
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", identifier)
+        except (ValueError, LookupError):
+            return None
+    deployment_id = item.get("deployment_id") or item.get("deploymentId")
+    if kind == "APPROVAL":
+        agent_key = item.get("agent_key") or item.get("agentKey")
+        deployment_id = (
+            agent_key.split(":", 1)[0]
+            if isinstance(agent_key, str) and ":" in agent_key
+            else deployment_id
+        )
+    if isinstance(deployment_id, str) and deployment_id:
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", deployment_id)
+        except (ValueError, LookupError):
+            return None
+    organization_id = item.get("organization_id") or item.get("organizationId")
+    if isinstance(organization_id, str) and organization_id:
+        try:
+            return _delegated_scope_lineage(tenant, "organization", organization_id)
+        except (ValueError, LookupError):
+            return None
+    return None
+
+
+def _delegated_operator_can_read(tenant, event, kind, scope):
+    """Authorize scoped read visibility from live role and resource grants."""
+    allowed_roles = _DELEGATED_READ_ROLES.get(kind, frozenset())
+    return any(
+        grant.get("role") in allowed_roles and _delegated_grant_covers(grant, scope)
+        for grant in _active_delegated_grants(tenant, event)
+    )
+
+
+def _filter_enterprise_items(tenant, event, kind, items):
+    """Filter tenant inventory for a delegated-only operator or fail closed."""
+    if _operator_roles(event):
+        return items
+    result = []
+    for item in items:
+        scope = _delegated_item_scope(tenant, kind, item)
+        if scope is not None and _delegated_operator_can_read(tenant, event, kind, scope):
+            result.append(item)
+    return result
+
+
+def _scim_lifecycle(tenant, *, include_operators=False):
     """Return a bounded, secret-free view of Entra provisioning lifecycle."""
     configured = (
         os.environ.get("SCIM_ENABLED") == "true"
@@ -811,6 +1035,7 @@ def _scim_lifecycle(tenant):
         "users": {"total": 0, "active": 0, "disabled": 0},
         "groups": {"total": 0, "mapped": 0, "unmapped": 0},
         "groupMappings": [],
+        "operators": [],
         "lastProvisionedAt": None,
     }
     if not configured:
@@ -844,12 +1069,26 @@ def _scim_lifecycle(tenant):
     ]
     mapped = sum(1 for group in groups if group.get("mapped_role") in _CANONICAL_OPERATOR_ROLES)
     active = sum(1 for user in users if user.get("active") is True)
+    operators = (
+        [
+            {
+                "principalId": str(user.get("id", "")),
+                "userName": str(user.get("user_name", "")),
+                "displayName": str(user.get("display_name", "")),
+                "active": user.get("active") is True,
+            }
+            for user in sorted(users, key=lambda item: str(item.get("display_name", "")).lower())
+        ]
+        if include_operators
+        else []
+    )
     return {
         "status": "configured",
         "lifecycleEnforced": True,
         "users": {"total": len(users), "active": active, "disabled": len(users) - active},
         "groups": {"total": len(groups), "mapped": mapped, "unmapped": len(groups) - mapped},
         "groupMappings": mappings,
+        "operators": operators,
         "lastProvisionedAt": max(timestamps) if timestamps else None,
     }
 
@@ -898,7 +1137,48 @@ def _identity_access(tenant, event):
         and bool(entra_tenant)
         and os.environ.get("ENTRA_AAI_TENANT_ID") == tenant
     )
-    scim = _scim_lifecycle(tenant)
+    can_manage_delegation = _operator_authorized(
+        event,
+        "identity_admin",
+        tenant,
+        include_break_glass=False,
+        include_delegated=False,
+    )
+    scim = _scim_lifecycle(tenant, include_operators=can_manage_delegation)
+    all_grants = _delegated_grants(tenant)
+    principal = _operator_principal(event)
+    visible_grants = (
+        all_grants
+        if can_manage_delegation
+        else [grant for grant in all_grants if grant["principalId"] == principal]
+    )
+    scope_catalog = (
+        {
+            "organizations": [
+                {"id": item.get("id", ""), "name": item.get("name", item.get("id", ""))}
+                for item in _list(tenant, "ORG", consistent_read=True)
+            ],
+            "projects": [
+                {
+                    "id": item.get("id", ""),
+                    "name": item.get("name", item.get("id", "")),
+                    "organizationId": item.get("organization_id", ""),
+                }
+                for item in _list(tenant, "PROJECT", consistent_read=True)
+            ],
+            "deployments": [
+                {
+                    "id": item.get("id", ""),
+                    "name": item.get("name", item.get("id", "")),
+                    "organizationId": item.get("organization_id", ""),
+                    "projectId": item.get("project_id", ""),
+                }
+                for item in _list(tenant, "DEPLOYMENT", consistent_read=True)
+            ],
+        }
+        if can_manage_delegation
+        else {"organizations": [], "projects": [], "deployments": []}
+    )
     return {
         "provider": "microsoft_entra_id",
         "providerLabel": "Microsoft Entra ID",
@@ -919,8 +1199,17 @@ def _identity_access(tenant, event):
         "scimStatus": scim["status"],
         "scim": scim,
         "activeRoles": sorted(_operator_roles(event)),
+        "delegatedAdministration": {
+            "canManage": can_manage_delegation,
+            "grants": visible_grants,
+            "scopeCatalog": scope_catalog,
+        },
         "roleMatrix": [
-            {"role": role, "capabilities": sorted(capabilities)}
+            {
+                "role": role,
+                "capabilities": sorted(capabilities),
+                "delegatable": role in _DELEGATABLE_OPERATOR_ROLES,
+            }
             for role, capabilities in _ROLE_CAPABILITIES.items()
         ],
     }
@@ -1046,6 +1335,254 @@ def _export_identity_governance_audit(tenant, event_type, actor, payload):
                 {"warning": "identity governance audit replication failed", "event": event_type}
             )
         )
+
+
+def _operator_principal(event):
+    """Return the server-bound principal used for delegated administration.
+
+    Entra sessions use the immutable directory object identifier emitted by
+    the pre-token trigger. Native Cognito sessions fall back to their signed
+    ``sub``. Request JSON and browser state are never accepted as principals.
+    """
+    claims = _claims(event)
+    value = claims.get("aai:operator_id") or claims.get("sub")
+    if not isinstance(value, str) or not value or len(value) > 256:
+        raise PermissionError("authenticated operator principal is required")
+    return value
+
+
+def _delegated_grant_view(item, *, now=None):
+    """Return one secret-free delegated authority record with live status."""
+    current = int(time.time()) if now is None else now
+    status = str(item.get("status", "unknown"))
+    effective_status = (
+        "expired" if status == "active" and int(item.get("expires_at", 0)) <= current else status
+    )
+    return {
+        "id": item.get("id", ""),
+        "principalId": item.get("principal_id", ""),
+        "role": item.get("role", ""),
+        "scopeType": item.get("scope_type", ""),
+        "scopeId": item.get("scope_id", ""),
+        "reason": item.get("reason", ""),
+        "createdAt": int(item.get("created_at", 0)),
+        "createdBy": item.get("created_by", ""),
+        "expiresAt": int(item.get("expires_at", 0)),
+        "revokedAt": int(item["revoked_at"]) if item.get("revoked_at") else None,
+        "revokedBy": item.get("revoked_by") or None,
+        "status": status,
+        "effectiveStatus": effective_status,
+    }
+
+
+def _delegated_scope_lineage(tenant, scope_type, scope_id):
+    """Resolve one tenant-owned scope and its immutable parent lineage."""
+    if scope_type not in _DELEGATED_SCOPE_TYPES:
+        raise ValueError("delegated scope type is unsupported")
+    identifier = _bounded_identifier(scope_id, "scopeId")
+    if scope_type == "organization":
+        item = TABLE.get_item(Key=_item_key(tenant, "ORG", identifier), ConsistentRead=True).get(
+            "Item"
+        )
+        if not item:
+            raise LookupError("delegated organization scope was not found")
+        return {"organization": identifier}
+    if scope_type == "project":
+        item = TABLE.get_item(
+            Key=_item_key(tenant, "PROJECT", identifier), ConsistentRead=True
+        ).get("Item")
+        if not item:
+            raise LookupError("delegated project scope was not found")
+        organization_id = _bounded_identifier(item.get("organization_id"), "organizationId")
+        return {"organization": organization_id, "project": identifier}
+    item = TABLE.get_item(Key=_item_key(tenant, "DEPLOYMENT", identifier), ConsistentRead=True).get(
+        "Item"
+    )
+    if not item:
+        raise LookupError("delegated deployment scope was not found")
+    organization_id = _bounded_identifier(item.get("organization_id"), "organizationId")
+    project_id = _bounded_identifier(item.get("project_id"), "projectId")
+    return {
+        "organization": organization_id,
+        "project": project_id,
+        "deployment": identifier,
+    }
+
+
+def _delegated_grant_covers(grant, action_scope):
+    """Return whether one exact grant contains one resolved action scope."""
+    scope_type = grant.get("scope_type")
+    scope_id = grant.get("scope_id")
+    return scope_type in _DELEGATED_SCOPE_TYPES and action_scope.get(scope_type) == scope_id
+
+
+def _active_delegated_grants(tenant, event):
+    """Resolve live delegated grants for the exact signed operator principal."""
+    principal = _operator_principal(event)
+    now = int(time.time())
+    grants = []
+    for item in _list(tenant, "DELEGATED_GRANT", consistent_read=True):
+        if (
+            item.get("principal_id") == principal
+            and item.get("status") == "active"
+            and int(item.get("expires_at", 0)) > now
+            and item.get("role") in _DELEGATABLE_OPERATOR_ROLES
+            and item.get("scope_type") in _DELEGATED_SCOPE_TYPES
+        ):
+            grants.append(item)
+    return grants
+
+
+def _delegated_operator_authorized(tenant, event, capability, resource_scope):
+    """Authorize a capability only when every target is inside a live grant."""
+    scopes = resource_scope if isinstance(resource_scope, list) else [resource_scope]
+    if not scopes or len(scopes) > 200 or any(not isinstance(scope, dict) for scope in scopes):
+        return False
+    grants = [
+        grant
+        for grant in _active_delegated_grants(tenant, event)
+        if capability in _ROLE_CAPABILITIES.get(grant.get("role"), frozenset())
+    ]
+    return bool(grants) and all(
+        any(_delegated_grant_covers(grant, scope) for grant in grants) for scope in scopes
+    )
+
+
+def _delegated_grants(tenant):
+    """Return the bounded delegated authority ledger ordered newest first."""
+    now = int(time.time())
+    return sorted(
+        (
+            _delegated_grant_view(item, now=now)
+            for item in _list(tenant, "DELEGATED_GRANT", consistent_read=True)
+        ),
+        key=lambda item: item["createdAt"],
+        reverse=True,
+    )
+
+
+def _create_delegated_grant(tenant, event, body):
+    """Create one expiring, server-owned and resource-scoped operator grant."""
+    actor = _operator_subject(event)
+    actor_principal = _operator_principal(event)
+    principal_id = _bounded_text(body.get("principalId"), "principalId", 256)
+    if principal_id == actor_principal or principal_id == actor:
+        raise PermissionError("an identity administrator cannot delegate authority to themselves")
+    if (
+        os.environ.get("SCIM_ENABLED") == "true"
+        and SCIM is not None
+        and os.environ.get("ENTRA_AAI_TENANT_ID") == tenant
+    ):
+        try:
+            principal_id = str(uuid.UUID(principal_id))
+        except ValueError as error:
+            raise ValueError("delegated Entra principal is malformed") from error
+        principal = SCIM.get_item(
+            Key={"pk": f"TENANT#{tenant}", "sk": f"USER#{principal_id}"},
+            ConsistentRead=True,
+        ).get("Item")
+        if not principal or principal.get("active") is not True:
+            raise ValueError("delegated Entra principal is not actively provisioned")
+    role = body.get("role")
+    if role not in _DELEGATABLE_OPERATOR_ROLES:
+        raise ValueError("delegated role is unsupported")
+    scope_type = body.get("scopeType")
+    scope_id = _bounded_identifier(body.get("scopeId"), "scopeId")
+    _delegated_scope_lineage(tenant, scope_type, scope_id)
+    reason = _bounded_text(body.get("reason"), "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("reason must contain at least 20 characters")
+    duration_days = body.get("durationDays")
+    if isinstance(duration_days, bool) or not isinstance(duration_days, int):
+        raise ValueError("durationDays must be an integer")
+    duration_seconds = duration_days * 24 * 60 * 60
+    if not 24 * 60 * 60 <= duration_seconds <= _DELEGATED_GRANT_MAX_SECONDS:
+        raise ValueError("durationDays must be between 1 and 366")
+    now = int(time.time())
+    grant_id = str(uuid.uuid4())
+    item = {
+        **_item_key(tenant, "DELEGATED_GRANT", grant_id),
+        "tenant_id": tenant,
+        "id": grant_id,
+        "principal_id": principal_id,
+        "role": role,
+        "scope_type": scope_type,
+        "scope_id": scope_id,
+        "reason": reason,
+        "status": "active",
+        "created_at": now,
+        "created_by": actor,
+        "expires_at": now + duration_seconds,
+        "revision": 1,
+        # Retain a reviewable record after authority expires.
+        "ttl": now + _DELEGATED_GRANT_MAX_SECONDS + (366 * 24 * 60 * 60),
+    }
+    audit_payload = {
+        "grant_id": grant_id,
+        "principal_id": principal_id,
+        "role": role,
+        "scope_type": scope_type,
+        "scope_id": scope_id,
+        "expires_at": item["expires_at"],
+    }
+    audit_record = _identity_governance_audit_record(
+        tenant, "delegated_grant_created", actor, audit_payload, now=now
+    )
+    _transact_identity_governance(
+        [
+            _transaction_put(item, condition="attribute_not_exists(pk)"),
+            _transaction_put(audit_record, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_identity_governance_audit(tenant, "delegated_grant_created", actor, audit_payload)
+    return _delegated_grant_view(item, now=now)
+
+
+def _revoke_delegated_grant(tenant, event, grant_id):
+    """Conditionally revoke one live delegated grant and audit atomically."""
+    actor = _operator_subject(event)
+    now = int(time.time())
+    key = _item_key(tenant, "DELEGATED_GRANT", _bounded_identifier(grant_id, "grantId"))
+    current = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if not current:
+        return None
+    revision = int(current.get("revision", 0))
+    if (
+        revision < 1
+        or current.get("status") != "active"
+        or int(current.get("expires_at", 0)) <= now
+    ):
+        raise PolicyConflict("delegated grant is not active")
+    updated = {
+        **current,
+        "status": "revoked",
+        "revoked_at": now,
+        "revoked_by": actor,
+        "revision": revision + 1,
+    }
+    audit_payload = {
+        "grant_id": current.get("id", ""),
+        "principal_id": current.get("principal_id", ""),
+        "role": current.get("role", ""),
+        "scope_type": current.get("scope_type", ""),
+        "scope_id": current.get("scope_id", ""),
+    }
+    audit_record = _identity_governance_audit_record(
+        tenant, "delegated_grant_revoked", actor, audit_payload, now=now
+    )
+    _transact_identity_governance(
+        [
+            _transaction_put(
+                updated,
+                condition="#status = :active AND #revision = :revision AND expires_at > :now",
+                names={"#status": "status", "#revision": "revision"},
+                values={":active": "active", ":revision": revision, ":now": now},
+            ),
+            _transaction_put(audit_record, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_identity_governance_audit(tenant, "delegated_grant_revoked", actor, audit_payload)
+    return _delegated_grant_view(updated, now=now)
 
 
 def _active_break_glass_capabilities(tenant, event):
@@ -1283,7 +1820,7 @@ def _access_certification(tenant, event):
                 }
             )
     artifact = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "tenantId": tenant,
         "identityProvider": "microsoft_entra_id",
         "lifecycleStatus": scim["status"],
@@ -1291,6 +1828,7 @@ def _access_certification(tenant, event):
         "operators": operators,
         "groupMappings": scim["groupMappings"],
         "breakGlass": _break_glass_requests(tenant),
+        "delegatedGrants": _delegated_grants(tenant),
         "roleMatrix": [
             {"role": role, "capabilities": sorted(capabilities)}
             for role, capabilities in _ROLE_CAPABILITIES.items()
@@ -1300,7 +1838,11 @@ def _access_certification(tenant, event):
         json.dumps(_json(artifact), sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     actor = _operator_subject(event)
-    audit_payload = {"content_hash": digest, "operator_count": len(operators)}
+    audit_payload = {
+        "content_hash": digest,
+        "operator_count": len(operators),
+        "delegated_grant_count": len(artifact["delegatedGrants"]),
+    }
     audit_record = _identity_governance_audit_record(
         tenant, "access_certification_exported", actor, audit_payload, now=generated_at
     )
@@ -3650,11 +4192,20 @@ def handler(event, context):
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
             capability = _required_mutation_capability(path)
             is_break_glass_governance = "/enterprise/identity/break-glass/requests" in path
+            is_identity_governance = is_break_glass_governance or any(
+                marker in path
+                for marker in (
+                    "/enterprise/identity/scim",
+                    "/enterprise/identity/delegated-grants",
+                )
+            )
             if not _operator_authorized(
                 event,
                 capability,
                 tenant,
                 include_break_glass=not is_break_glass_governance,
+                resource_scope=_mutation_resource_scope(tenant, event, path),
+                include_delegated=not is_identity_governance,
             ):
                 return _response(
                     403,
@@ -3729,6 +4280,7 @@ def handler(event, context):
                     in {"groups", "agents", "health", "policies", "drift", "skills", "mcp-servers"}
                     else _list(tenant, key)
                 )
+                items = _filter_enterprise_items(tenant, event, key, items)
                 if parts[0] == "approvals":
                     items = sorted(
                         (_approval_view(item) for item in items),
@@ -3775,6 +4327,34 @@ def handler(event, context):
                         },
                     )
                 return _response(200, _access_certification(tenant, event))
+            if method == "GET" and parts == ["identity", "delegated-grants"]:
+                if not _operator_authorized(
+                    event,
+                    "identity_admin",
+                    tenant,
+                    include_break_glass=False,
+                    include_delegated=False,
+                ):
+                    return _response(
+                        403,
+                        {
+                            "error": "operator role does not permit this action",
+                            "requiredCapability": "identity_admin",
+                        },
+                    )
+                return _response(200, {"items": _delegated_grants(tenant), "nextCursor": None})
+            if method == "POST" and parts == ["identity", "delegated-grants"]:
+                return _response(201, _create_delegated_grant(tenant, event, _body(event)))
+            if (
+                method == "POST"
+                and len(parts) == 4
+                and parts[:2] == ["identity", "delegated-grants"]
+                and parts[3] == "revoke"
+            ):
+                grant = _revoke_delegated_grant(tenant, event, parts[2])
+                if grant is None:
+                    return _response(404, {"error": "delegated grant not found"})
+                return _response(200, grant)
             if (
                 method == "PUT"
                 and len(parts) == 5
@@ -3818,8 +4398,16 @@ def handler(event, context):
                 ).get("Item")
                 if not deployment:
                     return _response(404, {"error": "deployment not found"})
+                scope = _delegated_item_scope(tenant, "DEPLOYMENT", deployment)
+                if not _operator_roles(event) and (
+                    scope is None
+                    or not _delegated_operator_can_read(tenant, event, "DEPLOYMENT", scope)
+                ):
+                    return _response(403, {"error": "operator scope does not permit this read"})
                 return _response(200, _managed_package_metadata(tenant, deployment_id))
             if method == "GET" and parts == ["compliance", "evidence"]:
+                if not _operator_roles(event):
+                    return _response(403, {"error": "tenant-wide evidence requires a tenant role"})
                 return _response(200, _fleet(tenant)["complianceEvidence"])
             if method == "POST" and parts == ["projects"]:
                 body = _body(event)
@@ -3901,7 +4489,10 @@ def handler(event, context):
                 ["deployment-config"],
                 ["deployment-config", "history"],
             ):
-                return _response(200, {"items": _list(tenant, "CONFIGURATION"), "nextCursor": None})
+                items = _filter_enterprise_items(
+                    tenant, event, "CONFIGURATION", _list(tenant, "CONFIGURATION")
+                )
+                return _response(200, {"items": items, "nextCursor": None})
             if method == "POST" and parts == ["templates"]:
                 body = _body(event)
                 template_id = body.get("templateId")
@@ -4091,6 +4682,12 @@ def handler(event, context):
                 ).get("Item")
                 if not policy:
                     return _response(404, {"error": "policy not found"})
+                scope = _delegated_item_scope(tenant, "POLICY", policy)
+                if not _operator_roles(event) and (
+                    scope is None
+                    or not _delegated_operator_can_read(tenant, event, "POLICY", scope)
+                ):
+                    return _response(403, {"error": "operator scope does not permit this read"})
                 _ensure_policy_governance(tenant, policy)
                 versions = _policy_versions(tenant, policy_id, consistent_read=True)
                 return _response(
@@ -4110,6 +4707,15 @@ def handler(event, context):
             ):
                 policy_id = _bounded_identifier(parts[1], "policyId")
                 version = _positive_policy_version(int(parts[3]))
+                policy = TABLE.get_item(
+                    Key=_item_key(tenant, "POLICY", policy_id), ConsistentRead=True
+                ).get("Item")
+                scope = _delegated_item_scope(tenant, "POLICY", policy or {})
+                if not _operator_roles(event) and (
+                    scope is None
+                    or not _delegated_operator_can_read(tenant, event, "POLICY", scope)
+                ):
+                    return _response(403, {"error": "operator scope does not permit this read"})
                 return _response(
                     200,
                     _policy_version_view(
@@ -4150,6 +4756,7 @@ def handler(event, context):
                 )
             if method == "POST" and parts == ["skills"]:
                 body = _body(event)
+                organization_id = _policy_organization(tenant, body)
                 content = body.get("content", "")
                 if not isinstance(content, str) or not content or len(content) > 100000:
                     return _response(400, {"error": "valid bounded Skill content is required"})
@@ -4161,7 +4768,7 @@ def handler(event, context):
                     skill_id,
                     {
                         "id": skill_id,
-                        "organizationId": "org-demo",
+                        "organizationId": organization_id,
                         "name": body.get("name", skill_id),
                         "description": body.get("description", ""),
                         "version": body.get("version", "1.0.0"),
@@ -4176,6 +4783,7 @@ def handler(event, context):
                 return _response(201, item)
             if method == "POST" and parts == ["mcp-servers"]:
                 body = _body(event)
+                organization_id = _policy_organization(tenant, body)
                 server_id = body.get("serverId")
                 transport = body.get("transport")
                 if (
@@ -4196,7 +4804,7 @@ def handler(event, context):
                     server_id,
                     {
                         "id": server_id,
-                        "organizationId": "org-demo",
+                        "organizationId": organization_id,
                         "name": body.get("name", server_id),
                         "description": body.get("description", ""),
                         "version": body.get("version", "1.0.0"),
@@ -4565,6 +5173,11 @@ def handler(event, context):
                 agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key)).get("Item")
                 if not agent:
                     return _response(404, {"error": "agent not found"})
+                scope = _delegated_item_scope(tenant, "AGENT", agent)
+                if not _operator_roles(event) and (
+                    scope is None or not _delegated_operator_can_read(tenant, event, "AGENT", scope)
+                ):
+                    return _response(403, {"error": "operator scope does not permit this read"})
                 if _fleet_emergency_stop_active(tenant):
                     return _response(
                         409,
@@ -4642,6 +5255,17 @@ def handler(event, context):
                 and parts[0] == "agents"
                 and parts[3] == "verify"
             ):
+                agent = TABLE.get_item(
+                    Key=_item_key(tenant, "AGENT", f"{parts[1]}:{parts[2]}"),
+                    ConsistentRead=True,
+                ).get("Item")
+                if not agent and not _operator_roles(event):
+                    return _response(404, {"error": "agent not found"})
+                scope = _delegated_item_scope(tenant, "AGENT", agent or {})
+                if not _operator_roles(event) and (
+                    scope is None or not _delegated_operator_can_read(tenant, event, "AGENT", scope)
+                ):
+                    return _response(403, {"error": "operator scope does not permit this read"})
                 return _response(200, _verify_agent(tenant, parts[1], parts[2]))
         return _response(404, {"error": "not found"})
     except ValueError as exc:

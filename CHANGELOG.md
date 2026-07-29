@@ -1,5 +1,14 @@
 # Changelog
 
+- Added expiring delegated administration for tenant-owned organizations,
+  projects and deployments. Active SCIM operators can receive one non-admin
+  canonical role without a tenant-wide Cognito group; every scoped mutation
+  resolves live grant state and server-owned resource lineage. Self,
+  platform-admin, identity-governance, expired, revoked, forged-claim,
+  cross-tenant and sibling-resource paths fail closed. The Identity & Trust UI
+  provides typed creation and immediate revocation, delegated-only inventory
+  reads are scope-filtered, and access-certification schema version 2 includes
+  the complete delegation ledger.
 - Added tenant-scoped managed-package publication and enrolled-agent retrieval
   for Claude Code and Codex. Publication is platform-admin-only in the AWS
   adapter, revision-safe, bounded, canonical and exactly bound to current

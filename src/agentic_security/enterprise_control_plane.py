@@ -4456,11 +4456,25 @@ class EnterpriseFleetApplication:
                 "users": {"total": 0, "active": 0, "disabled": 0},
                 "groups": {"total": 0, "mapped": 0, "unmapped": 0},
                 "groupMappings": [],
+                "operators": [],
                 "lastProvisionedAt": None,
             },
             "activeRoles": active_roles,
+            "delegatedAdministration": {
+                "canManage": False,
+                "grants": [],
+                "scopeCatalog": {
+                    "organizations": [],
+                    "projects": [],
+                    "deployments": [],
+                },
+            },
             "roleMatrix": [
-                {"role": role, "capabilities": role_capabilities}
+                {
+                    "role": role,
+                    "capabilities": role_capabilities,
+                    "delegatable": role != "platform-admin",
+                }
                 for role, role_capabilities in capabilities.items()
             ],
         }

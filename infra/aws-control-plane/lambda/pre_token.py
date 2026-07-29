@@ -2,13 +2,14 @@
 
 The trigger identifies federation from Cognito's server-owned ``identities``
 attribute. When SCIM is enabled, an Entra login fails closed unless the exact
-OIDC object ID is active in the deployment-owned lifecycle table and belongs
-to at least one group mapped to a canonical operator role.
+OIDC object ID is active in the deployment-owned lifecycle table and has
+either a mapped canonical role or a live server-owned delegated grant.
 """
 
 import hashlib
 import json
 import os
+import time
 import uuid
 
 _CANONICAL_ROLES = frozenset(
@@ -99,10 +100,41 @@ def _scim_roles(attributes):
         if group and group.get("active") is True and role in _CANONICAL_ROLES:
             roles.add(role)
             revisions.append(f"{group_id}:{group.get('version', 0)}:{role}")
-    if not roles:
-        raise PermissionError("Entra operator has no mapped product role")
     revision = hashlib.sha256("|".join(sorted(revisions)).encode()).hexdigest()
-    return sorted(roles), revision
+    return sorted(roles), revision, user_id
+
+
+def _active_delegated_access(principal_id):
+    """Return a revision only when the exact Entra principal has a live grant."""
+    table_name = os.environ.get("CONTROL_TABLE", "")
+    tenant = os.environ.get("SCIM_AAI_TENANT_ID", "")
+    if not table_name or not tenant:
+        raise PermissionError("delegated authority is unavailable")
+    try:
+        import boto3
+        from boto3.dynamodb.conditions import Key
+    except ModuleNotFoundError as error:
+        raise PermissionError("delegated authority is unavailable") from error
+    table = boto3.resource("dynamodb").Table(table_name)
+    result = table.query(
+        KeyConditionExpression=Key("pk").eq(f"TENANT#{tenant}")
+        & Key("sk").begins_with("DELEGATED_GRANT#"),
+        Limit=501,
+        ConsistentRead=True,
+    )
+    items = result.get("Items", [])
+    if result.get("LastEvaluatedKey") or len(items) > 500:
+        raise PermissionError("delegated authority exceeds the safe bound")
+    now = int(time.time())
+    revisions = [
+        f"{item.get('id', '')}:{item.get('revision', 0)}:{item.get('expires_at', 0)}"
+        for item in items
+        if item.get("principal_id") == principal_id
+        and item.get("status") == "active"
+        and int(item.get("expires_at", 0)) > now
+        and item.get("role") in (_CANONICAL_ROLES - {"platform-admin"})
+    ]
+    return hashlib.sha256("|".join(sorted(revisions)).encode()).hexdigest() if revisions else None
 
 
 def handler(event, _context):
@@ -127,11 +159,19 @@ def handler(event, _context):
         provenance["aai:strong_auth_enforced"] = "true"
     roles = None
     if os.environ.get("SCIM_ENABLED") == "true":
-        roles, revision = _scim_roles(attributes)
+        roles, scim_revision, operator_id = _scim_roles(attributes)
+        delegated_revision = _active_delegated_access(operator_id)
+        if not roles and delegated_revision is None:
+            raise PermissionError("Entra operator has no mapped or delegated product authority")
+        revision = hashlib.sha256(
+            f"{scim_revision}|{delegated_revision or 'none'}".encode()
+        ).hexdigest()
         provenance.update(
             {
                 "aai:scim_enforced": "true",
                 "aai:scim_revision": revision,
+                "aai:operator_id": operator_id,
+                "aai:delegated": "true" if delegated_revision else "false",
             }
         )
     for token_name in ("idTokenGeneration", "accessTokenGeneration"):
