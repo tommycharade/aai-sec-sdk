@@ -1,5 +1,9 @@
 # Changelog
 
+- Fixed group authority edges so a group can reference only an existing agent
+  and active policy owned by the same server-resolved organization. Missing
+  ownership, missing agents and cross-organization membership or policy
+  assignment now fail closed before state or audit mutation.
 - Added expiring delegated administration for tenant-owned organizations,
   projects and deployments. Active SCIM operators can receive one non-admin
   canonical role without a tenant-wide Cognito group; every scoped mutation

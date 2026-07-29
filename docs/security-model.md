@@ -111,6 +111,14 @@ API remains the live resource-authorization boundary. Tenant-wide directory
 roles still take precedence, so removing an operator's broader Entra group is
 a separate prerequisite when converting that operator to scoped access.
 
+Group membership and policy assignment are authority edges, not presentation
+metadata. The API consistently reloads the group, agent and policy records and
+requires exact non-empty server-owned organization equality before changing
+either edge. A caller with legitimate control of one organization therefore
+cannot attach an enrolled agent or policy from a sibling organization by
+guessing its identifier. Missing legacy ownership and nonexistent agents fail
+closed rather than creating a dangling or cross-boundary reference.
+
 ## Guarantees and non-guarantees
 
 The SDK aims to guarantee that unknown or unauthorized actions do not execute

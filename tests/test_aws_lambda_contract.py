@@ -928,6 +928,161 @@ def test_delegated_admin_rejects_self_wildcard_expired_and_cross_tenant_grants(
         tenant,
         resource_scope={"organization": "org-a"},
     )
+
+
+def test_group_authority_edges_reject_cross_organization_policy_and_agent(
+    monkeypatch: Any,
+) -> None:
+    """Group policy and membership changes must not bridge organization boundaries."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-group-organization-boundary"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    for item in (
+        module._item_key(tenant, "TENANT", "root") | {"id": tenant},
+        module._item_key(tenant, "ORG", "org-a") | {"id": "org-a", "name": "A"},
+        module._item_key(tenant, "ORG", "org-b") | {"id": "org-b", "name": "B"},
+        module._item_key(tenant, "POLICY", "policy-a")
+        | {
+            "id": "policy-a",
+            "organization_id": "org-a",
+            "name": "Policy A",
+            "configuration": {"tools": {"allowed": ["read_repository"]}},
+            "version": 1,
+            "governance_schema_version": 1,
+        },
+        module._item_key(tenant, "POLICY", "policy-b")
+        | {
+            "id": "policy-b",
+            "organization_id": "org-b",
+            "name": "Policy B",
+            "configuration": {"tools": {"allowed": ["read_repository"]}},
+            "version": 1,
+            "governance_schema_version": 1,
+        },
+        module._item_key(tenant, "POLICY", "policy-missing-owner")
+        | {
+            "id": "policy-missing-owner",
+            "name": "Missing owner",
+            "configuration": {"tools": {"allowed": ["read_repository"]}},
+            "version": 1,
+            "governance_schema_version": 1,
+        },
+        module._item_key(tenant, "GROUP", "group-a")
+        | {
+            "id": "group-a",
+            "organizationId": "org-a",
+            "name": "Group A",
+            "policyId": "policy-a",
+            "policyName": "Policy A",
+            "agent_keys": [],
+        },
+        module._item_key(tenant, "AGENT", "deployment-a:agent-a")
+        | {
+            "id": "agent-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "deployment-a",
+            "host": "claude-code",
+            "status": "offline",
+            "expires_at": 0,
+        },
+        module._item_key(tenant, "AGENT", "deployment-b:agent-b")
+        | {
+            "id": "agent-b",
+            "organization_id": "org-b",
+            "project_id": "project-b",
+            "deployment_id": "deployment-b",
+            "host": "claude-code",
+            "status": "offline",
+            "expires_at": 0,
+        },
+        module._item_key(tenant, "AGENT", "deployment-a:missing-owner")
+        | {
+            "id": "missing-owner",
+            "deployment_id": "deployment-a",
+            "host": "claude-code",
+            "status": "offline",
+            "expires_at": 0,
+        },
+    ):
+        table.put_item(Item=item)
+
+    cross_policy = _invoke(
+        module,
+        _event(
+            "/enterprise/groups/group-a/policy",
+            "POST",
+            body={"policyId": "policy-b"},
+            claims=claims,
+        ),
+    )
+    assert cross_policy["statusCode"] == 409
+    assert "same organization" in json.loads(cross_policy["body"])["error"]
+    assert table.items[(f"TENANT#{tenant}", "GROUP#group-a")]["policyId"] == "policy-a"
+
+    missing_policy_owner = _invoke(
+        module,
+        _event(
+            "/enterprise/groups/group-a/policy",
+            "POST",
+            body={"policyId": "policy-missing-owner"},
+            claims=claims,
+        ),
+    )
+    assert missing_policy_owner["statusCode"] == 409
+
+    missing_agent = _invoke(
+        module,
+        _event(
+            "/enterprise/groups/group-a/agents",
+            "POST",
+            body={"deploymentId": "deployment-a", "agentId": "missing"},
+            claims=claims,
+        ),
+    )
+    assert missing_agent["statusCode"] == 404
+
+    missing_agent_owner = _invoke(
+        module,
+        _event(
+            "/enterprise/groups/group-a/agents",
+            "POST",
+            body={"deploymentId": "deployment-a", "agentId": "missing-owner"},
+            claims=claims,
+        ),
+    )
+    assert missing_agent_owner["statusCode"] == 409
+
+    cross_agent = _invoke(
+        module,
+        _event(
+            "/enterprise/groups/group-a/agents",
+            "POST",
+            body={"deploymentId": "deployment-b", "agentId": "agent-b"},
+            claims=claims,
+        ),
+    )
+    assert cross_agent["statusCode"] == 409
+    assert "same organization" in json.loads(cross_agent["body"])["error"]
+    assert table.items[(f"TENANT#{tenant}", "GROUP#group-a")]["agent_keys"] == []
+
+    same_organization = _invoke(
+        module,
+        _event(
+            "/enterprise/groups/group-a/agents",
+            "POST",
+            body={"deploymentId": "deployment-a", "agentId": "agent-a"},
+            claims=claims,
+        ),
+    )
+    assert same_organization["statusCode"] == 200
+    assert table.items[(f"TENANT#{tenant}", "GROUP#group-a")]["agent_keys"] == [
+        "deployment-a:agent-a"
+    ]
     assert not module._operator_authorized(
         _event(
             "/",

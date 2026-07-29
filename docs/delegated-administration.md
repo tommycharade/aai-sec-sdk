@@ -107,6 +107,8 @@ Contract and adversarial tests prove:
 - delegated authority cannot manage delegated or break-glass authority;
 - self-delegation and `platform-admin` delegation are rejected;
 - delegated-only inventory reads omit out-of-scope records;
+- group membership and policy assignment reject missing records, missing
+  ownership and every cross-organization authority edge;
 - Entra token issuance accepts an active SCIM operator with a live delegated
   grant without copying that role into tenant-wide Cognito groups.
 
