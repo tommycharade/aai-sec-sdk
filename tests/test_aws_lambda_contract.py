@@ -162,6 +162,10 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("PRESENCE_TABLE", "presence")
     monkeypatch.setenv("IDEMPOTENCY_TABLE", "idempotency")
     monkeypatch.setenv("AUDIT_BUCKET", "audit")
+    monkeypatch.setenv("ENTRA_PROVIDER_ENABLED", "false")
+    monkeypatch.setenv("ENTRA_TENANT_ID", "")
+    monkeypatch.setenv("ENTRA_AAI_TENANT_ID", "")
+    monkeypatch.setenv("SPLUNK_STUB_ENABLED", "true")
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/handler.py"
     spec = importlib.util.spec_from_file_location("aai_lambda_handler", path)
     assert spec and spec.loader
@@ -225,6 +229,127 @@ def test_cognito_operator_groups_normalize_gateway_strings_and_fail_closed(
         claims={"cognito:groups": claim},
     )
     assert module._mutation_authorized(event) is expected
+
+
+@pytest.mark.parametrize(
+    ("role", "allowed", "denied"),
+    [
+        ("platform-admin", "runtime_admin", None),
+        ("security-operator", "approval_decision", "policy_write"),
+        ("policy-author", "policy_write", "approval_decision"),
+        ("policy-approver", "policy_approval", "fleet_write"),
+        ("fleet-operator", "fleet_write", "incident_response"),
+        ("incident-responder", "incident_response", "policy_write"),
+        ("auditor", None, "runtime_admin"),
+    ],
+)
+def test_operator_roles_enforce_capabilities_without_authority_overlap(
+    monkeypatch: Any,
+    role: str,
+    allowed: str | None,
+    denied: str | None,
+) -> None:
+    """Canonical roles grant only their explicit server-owned capabilities."""
+    module, _table = _load_handler(monkeypatch)
+    event = _event("/enterprise/identity", "GET", claims={"cognito:groups": [role]})
+    if allowed:
+        assert module._operator_authorized(event, allowed)
+    if denied:
+        assert not module._operator_authorized(event, denied)
+
+
+def test_entra_tenant_binding_requires_cognito_provenance_and_deployment_mapping(
+    monkeypatch: Any,
+) -> None:
+    """A browser tenant value cannot replace the configured Entra-to-AAI binding."""
+    module, table = _load_handler(monkeypatch)
+    entra_tenant = "11111111-2222-4333-8444-555555555555"
+    aai_tenant = "tenant-enterprise"
+    monkeypatch.setenv("ENTRA_PROVIDER_ENABLED", "true")
+    monkeypatch.setenv("ENTRA_TENANT_ID", entra_tenant)
+    monkeypatch.setenv("ENTRA_AAI_TENANT_ID", aai_tenant)
+    table.put_item(
+        Item=module._item_key(aai_tenant, "TENANT", "root") | {"id": aai_tenant, "status": "active"}
+    )
+    claims = {
+        "aai:identity_provider": "microsoft_entra_id",
+        "aai:entra_tenant_id": entra_tenant,
+        "sub": "entra-operator",
+    }
+    assert module._tenant(_event("/enterprise/tenant", "GET", claims=claims)) == aai_tenant
+    with pytest.raises(PermissionError, match="tenant entitlement"):
+        module._tenant(
+            _event(
+                "/enterprise/tenant",
+                "GET",
+                claims={**claims, "aai:entra_tenant_id": "attacker-tenant"},
+            )
+        )
+
+
+def test_identity_and_splunk_stub_report_truthful_enterprise_posture(monkeypatch: Any) -> None:
+    """The UI receives role provenance while a stub never claims SIEM delivery."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-enterprise"
+    entra_tenant = "11111111-2222-4333-8444-555555555555"
+    monkeypatch.setenv("ENTRA_PROVIDER_ENABLED", "true")
+    monkeypatch.setenv("ENTRA_TENANT_ID", entra_tenant)
+    monkeypatch.setenv("ENTRA_AAI_TENANT_ID", tenant)
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant, "status": "active"}
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["auditor", "incident-responder"],
+        "sub": "operator-a",
+    }
+    identity = _invoke(module, _event("/enterprise/identity", "GET", claims=claims))
+    payload = json.loads(identity["body"])
+    assert payload["status"] == "configured"
+    assert payload["tenantHint"] == "11111111…"
+    assert payload["tenantBinding"] == "server_owned"
+    assert payload["activeRoles"] == ["auditor", "incident-responder"]
+    assert "ENTRA_CLIENT_SECRET" not in json.dumps(payload)
+
+    integrations = _invoke(module, _event("/enterprise/integrations", "GET", claims=claims))
+    splunk = json.loads(integrations["body"])["splunk"]
+    assert splunk["status"] == "stub"
+    assert splunk["deliveryVerified"] is False
+
+
+def test_entra_pre_token_trigger_uses_only_cognito_federation_identity(
+    monkeypatch: Any,
+) -> None:
+    """Only the exact configured OIDC identity receives Entra provenance."""
+    monkeypatch.setenv("ENTRA_PROVIDER_NAME", "MicrosoftEntraID")
+    monkeypatch.setenv("ENTRA_TENANT_ID", "11111111-2222-4333-8444-555555555555")
+    path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/pre_token.py"
+    spec = importlib.util.spec_from_file_location("aai_pre_token", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    identity = json.dumps(
+        [{"providerName": "MicrosoftEntraID", "providerType": "OIDC", "userId": "synthetic"}]
+    )
+    event = {"request": {"userAttributes": {"identities": identity}}, "response": {}}
+    response = module.handler(event, None)
+    overrides = response["response"]["claimsAndScopeOverrideDetails"]
+    for token_name in ("idTokenGeneration", "accessTokenGeneration"):
+        assert overrides[token_name]["claimsToAddOrOverride"] == {
+            "aai:identity_provider": "microsoft_entra_id",
+            "aai:entra_tenant_id": "11111111-2222-4333-8444-555555555555",
+        }
+    hostile = {
+        "request": {
+            "userAttributes": {
+                "identities": json.dumps(
+                    [{"providerName": "MicrosoftEntraID-lookalike", "providerType": "OIDC"}]
+                )
+            }
+        },
+        "response": {},
+    }
+    assert module.handler(hostile, None)["response"] == {}
 
 
 def test_json_boundary_preserves_integral_policy_versions(monkeypatch: Any) -> None:

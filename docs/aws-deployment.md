@@ -35,7 +35,9 @@ The stack creates:
 - Cognito User Pool Managed Login with authorization-code OAuth;
 - Cognito self-signup with email confirmation and a post-confirmation trigger
   that provisions an isolated 14-day trial tenant with a safe default policy;
-- Cognito `platform-admin` and `security-operator` groups for mutation RBAC;
+- seven canonical Cognito groups for capability-based operator RBAC;
+- optional Microsoft Entra ID tenant-specific OIDC federation, with its client
+  secret resolved from AWS Secrets Manager at deployment time;
 - API Gateway HTTP API with Cognito JWT authorizer;
 - Lambda control-plane handler;
 - on-demand DynamoDB control and presence tables; the control table expires
@@ -53,6 +55,66 @@ source claim is an array. The handler therefore applies bounded parsing to
 group member and a lookalike unauthorized group through API Gateway after each
 authorizer or Cognito configuration change; direct Lambda test events alone do
 not prove the deployed claim projection.
+
+Mutating routes are classified into `runtime_admin`, `policy_write`,
+`policy_approval`, `fleet_write`, `approval_decision`, or
+`incident_response`. A role must grant the exact capability. Entra proves the
+operator identity but does not select the AAI tenant or grant a product role:
+the deployment maps the configured Entra tenant to one provisioned AAI tenant,
+and Cognito-managed groups remain the authorization source. This separation
+prevents a browser-supplied tenant, group, or upstream claim from widening
+authority.
+
+## Microsoft Entra ID federation
+
+Create a single-tenant Microsoft Entra application registration. Configure its
+web redirect URI as the Cognito domain followed by `/oauth2/idpresponse`. Store
+the client secret in AWS Secrets Manager, then deploy with all four variables:
+
+```bash
+ENTRA_TENANT_ID=<entra-directory-uuid> \
+ENTRA_CLIENT_ID=<entra-application-client-id> \
+ENTRA_CLIENT_SECRET_NAME=<secrets-manager-secret-name> \
+ENTRA_AAI_TENANT_ID=<provisioned-aai-tenant-id> \
+AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
+```
+
+The deployment fails if only some values are present or if the Entra tenant is
+not a tenant-specific UUID. The generated OIDC provider requests only
+`openid`, `email`, and `profile`; its secret is a CloudFormation dynamic
+reference and is not copied to Lambda or output values.
+
+A Cognito pre-token trigger inspects the server-owned federated identity and
+adds provider provenance to ID and access tokens. The API compares the Entra
+tenant claim to the deployment configuration before resolving the mapped AAI
+tenant. These provenance claims are not role authority.
+
+The first integration uses controlled Cognito group assignment for the seven
+canonical roles. Automatic Entra group/app-role lifecycle requires the SCIM
+provisioning work tracked in
+[enterprise rollout P0/P1 status](p0-p1-implementation-status.md); until that
+is complete, the UI correctly shows SCIM as **Not configured**.
+
+| Canonical role | Capability |
+| --- | --- |
+| `platform-admin` | All administrative capabilities; reserve for tenant administration and break glass |
+| `security-operator` | Exact-action approval and incident response |
+| `policy-author` | Policy, Skill and MCP resource changes |
+| `policy-approver` | Exact-action approval and future four-eyes policy approval |
+| `fleet-operator` | Deployments, groups and agent lifecycle |
+| `incident-responder` | Emergency stop, containment and alert response |
+| `auditor` | Read-only evidence |
+
+After deployment, retain evidence for one successful Entra login, tenant
+resolution, every permitted role action, every denied cross-role action, an
+unknown role, and a mismatched Entra tenant. Federation configuration alone is
+not enterprise SSO acceptance evidence.
+
+The authenticated `GET /enterprise/identity` route returns redaction-safe
+provider status, tenant hint, active roles and the enforced role matrix. It
+never returns the OIDC client ID or secret. `GET /enterprise/integrations`
+currently reports Splunk as a stub with `deliveryVerified: false`; no Splunk
+event delivery is implemented or claimed.
 
 The control plane also exposes a separate agent boundary. An operator creates a
 short-lived bootstrap secret for a registered agent; the agent exchanges it
