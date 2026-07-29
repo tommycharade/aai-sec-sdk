@@ -1908,6 +1908,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../managed-host-configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed host configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -3789,7 +3816,7 @@ failures are errors rather than empty or synthetic credentials.</p>
 </tr>
 <tr>
 <td><code>POST /api/enterprise/agents/{deployment}/{agent}/heartbeat</code></td>
-<td>Refresh presence and optionally publish bounded aggregate SDK telemetry</td>
+<td>Refresh presence and optionally publish bounded aggregate SDK telemetry plus managed-host evidence</td>
 </tr>
 <tr>
 <td><code>POST /api/enterprise/agents/{deployment}/{agent}/disconnect</code></td>
@@ -3943,6 +3970,18 @@ negative, non-finite, oversized, or secret-like fields are rejected. The
 control plane stores the latest snapshot with the agent metadata and exposes
 only that fixed projection to operators; it never stores tool arguments,
 resources, outputs, or credentials as telemetry.</p>
+<p>The same heartbeat may include <code>managedConfiguration</code>. Its closed schema binds
+<code>host</code>, <code>hostVersion</code>, <code>platform</code>, <code>bundleHash</code>, <code>policyId</code>, <code>policyVersion</code>,
+<code>source</code>, <code>verifiedAt</code> and <code>expiresAt</code>. The server compares those fields with
+the deployment template's <code>managedHost</code> desired state and derives posture; the
+agent cannot report <code>status</code>. A missing desired bundle is <code>not_configured</code>, a
+missing report is <code>missing</code>, expired or future-dated evidence is <code>stale</code>, and
+any identity or digest difference is <code>conflict</code>. Only an exact fresh match is
+<code>enforced</code>.</p>
+<p>Agent verification requires <code>enforced</code> managed posture. This evidence remains
+content-minimised and credential-free. It proves what the approved runtime
+reported, not hardware-backed device identity; endpoint ownership, file
+permissions and approved launch controls remain deployment responsibilities.</p>
 <h3 id="host-decision-evidence">Host decision evidence</h3>
 <p>An enrolled Claude hook or SDK runtime may report an observed decision through
 <code>POST /api/agent/{deployment}/{agent}/decisions</code>. The request accepts exactly
@@ -4990,14 +5029,14 @@ responsible for translating it into its typed policy and adapters.</p>
 
 
 <h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.heartbeat" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">heartbeat</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">,</span> <span class="n">session_id</span><span class="p">,</span> <span class="n">telemetry</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">heartbeat</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">,</span> <span class="n">session_id</span><span class="p">,</span> <span class="n">telemetry</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">managed_configuration</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Refresh a session and persist only validated aggregate telemetry.</p>
+        <p>Refresh a session and persist bounded telemetry and managed evidence.</p>
 
 
     </div>

@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/guardrails/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/managed-host-configuration/">
       
       
-        <link rel="prev" href="../api/">
+        <link rel="prev" href="../runtime-attestation-design/">
       
       
-        <link rel="next" href="../license/">
+        <link rel="next" href="../enterprise-user-journeys/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Engineering guardrails - Agentic AI Security SDK</title>
+        <title>Managed host configuration - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#sdk-engineering-guardrails" class="md-skip">
+        <a href="#managed-host-configuration" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Engineering guardrails
+              Managed host configuration
             
           </span>
         </div>
@@ -718,10 +718,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../managed-host-configuration/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed host configuration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -737,6 +764,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#security-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code output
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#codex-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Codex output
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1069,37 +1171,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Engineering guardrails
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../guardrails/" class="md-nav__link">
         
   
   
@@ -1115,159 +1190,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#1-product-and-architecture-guardrails" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Product and architecture guardrails
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#2-security-guardrails" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Security guardrails
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="2. Security guardrails">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#authority" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authority
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#defaults" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Defaults
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#data-handling" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Data handling
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3-api-and-sdk-clarity-guardrails" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. API and SDK clarity guardrails
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-coding-standards" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Coding standards
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#5-testing-guardrails" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. Testing guardrails
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#6-documentation-guardrails" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        6. Documentation guardrails
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#7-review-and-release-guardrails" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        7. Review and release guardrails
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="7. Review and release guardrails">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#definition-of-done" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Definition of done
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1515,10 +1437,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-product-and-architecture-guardrails" class="md-nav__link">
+  <a href="#security-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Product and architecture guardrails
+        Security contract
       
     </span>
   </a>
@@ -1526,60 +1448,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-security-guardrails" class="md-nav__link">
+  <a href="#claude-code-output" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Security guardrails
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="2. Security guardrails">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#authority" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authority
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#defaults" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Defaults
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#data-handling" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Data handling
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3-api-and-sdk-clarity-guardrails" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. API and SDK clarity guardrails
+        Claude Code output
       
     </span>
   </a>
@@ -1587,10 +1459,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-coding-standards" class="md-nav__link">
+  <a href="#codex-output" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Coding standards
+        Codex output
       
     </span>
   </a>
@@ -1598,10 +1470,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-testing-guardrails" class="md-nav__link">
+  <a href="#example" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Testing guardrails
+        Example
       
     </span>
   </a>
@@ -1609,41 +1481,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-documentation-guardrails" class="md-nav__link">
+  <a href="#deployment-verification" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. Documentation guardrails
+        Deployment verification
       
     </span>
   </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#7-review-and-release-guardrails" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        7. Review and release guardrails
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="7. Review and release guardrails">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#definition-of-done" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Definition of done
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1667,134 +1511,159 @@
   
 
 
-<h1 id="sdk-engineering-guardrails">SDK engineering guardrails</h1>
-<p>This document is the project’s working contract. It applies before the first runtime implementation and remains the review standard as the SDK grows.</p>
-<h2 id="1-product-and-architecture-guardrails">1. Product and architecture guardrails</h2>
-<p>The SDK is an agent execution-security runtime. Its job is to constrain and evidence actions. It is not an LLM safety oracle, IAM replacement, sandbox implementation, compliance certification, or business authorization system.</p>
-<p>The core must remain:</p>
+<h1 id="managed-host-configuration">Managed host configuration</h1>
+<p>Project files are useful for evaluation, but they are not an enterprise
+enforcement boundary. A user or process with repository access can remove
+them, and an alternate launch can avoid them. The managed-configuration API
+compiles one typed policy intent into administrator-owned Claude Code or Codex
+configuration and keeps desired state separate from observed state.</p>
+<h2 id="security-contract">Security contract</h2>
+<p><code>ManagedConfigurationCompiler.compile</code> is a pure operation. It returns:</p>
 <ul>
-<li>deterministic at the execution boundary;</li>
-<li>fail-closed for unknown or unsafe conditions;</li>
-<li>framework- and model-provider-neutral;</li>
-<li>small enough to audit;</li>
-<li>usable as middleware or as a low-level execution primitive;</li>
-<li>explicit about which controls are local and which are delegated to infrastructure.</li>
+<li>deterministic files and SHA-256 digests;</li>
+<li>the target host, version, operating system, policy ID, and policy version;</li>
+<li>allowed, denied, and approval-required action summaries;</li>
+<li>capability-level coverage identifying native versus SDK enforcement; and</li>
+<li>a bundle digest binding the complete intent and every artifact.</li>
 </ul>
-<p>The canonical flow is:</p>
-<pre><code class="language-text">proposal -&gt; normalize -&gt; schema/business validation -&gt; policy -&gt; approval
-         -&gt; budget/idempotency -&gt; scoped execution -&gt; result handling -&gt; audit
+<p>It does <strong>not</strong> install privileged files or prove that a host loaded them.
+Endpoint management, MDM, or a separately authenticated host service must
+deploy the artifacts atomically and protect them from modification.</p>
+<p><code>reconcile_effective_authority</code> accepts endpoint-owned evidence only. Missing,
+expired, future-dated, wrong-host, or mismatched evidence produces no effective
+allows. Duplicate action expressions resolve in this order:</p>
+<pre><code class="language-text">deny &gt; approval required &gt; allow
 </code></pre>
-<p>No side effect or privileged credential mint may happen before all applicable checks complete.</p>
-<h2 id="2-security-guardrails">2. Security guardrails</h2>
-<h3 id="authority">Authority</h3>
+<p>Conflicts remain visible for operator resolution even though execution fails
+closed.</p>
+<h2 id="claude-code-output">Claude Code output</h2>
+<p>For Claude Code 2.1.191 or later, the compiler emits:</p>
 <ul>
-<li>Model output is untrusted input.</li>
-<li>Tool names and arguments are untrusted input.</li>
-<li>Tool results, retrieved documents, memory, and inter-agent messages are untrusted observations.</li>
-<li>The caller principal is obtained from authenticated application context, never from the model.</li>
-<li>Authorization is evaluated per action with live arguments and resource identity.</li>
-<li>Delegation can only narrow authority.</li>
+<li>endpoint-managed <code>managed-settings.json</code> with managed-only permission rules,
+  bypass mode disabled, fail-closed remote refresh, and a managed <code>PreToolUse</code>
+  hook; and</li>
+<li>exclusive <code>managed-mcp.json</code> containing only reviewed, credential-free MCP
+  definitions.</li>
 </ul>
-<h3 id="defaults">Defaults</h3>
+<p>Documented paths are:</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Managed settings directory</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS</td>
+<td><code>/Library/Application Support/ClaudeCode/</code></td>
+</tr>
+<tr>
+<td>Linux/WSL</td>
+<td><code>/etc/claude-code/</code></td>
+</tr>
+<tr>
+<td>Windows</td>
+<td><code>C:\Program Files\ClaudeCode\</code></td>
+</tr>
+</tbody>
+</table>
+<p>Claude server-managed settings currently apply uniformly to the organization,
+not per AAI group, and cannot distribute <code>managed-mcp.json</code>. Use endpoint
+management when per-device/group assignment or exclusive MCP deployment is
+required. The control plane must display the effective source because
+server-managed and endpoint-managed sources occupy the same highest tier but
+do not merge. See the <a href="https://code.claude.com/docs/en/server-managed-settings">Claude managed-settings precedence and fail-closed
+behavior</a> and
+<a href="https://code.claude.com/docs/en/managed-mcp">managed MCP deployment</a>.</p>
+<h2 id="codex-output">Codex output</h2>
+<p>For Codex 0.138.0 or later, the compiler emits system <code>requirements.toml</code> with:</p>
 <ul>
-<li>Deny unknown tools.</li>
-<li>Deny missing or invalid identity, policy, scope, approval, or provenance.</li>
-<li>Require explicit opt-in for write, destructive, external-egress, code-execution, and secret-reading actions.</li>
-<li>Bound steps, wall time, concurrency, fan-out, rate, and cost.</li>
-<li>Make every consequential action idempotent or explicitly document why it cannot be.</li>
-<li>Make all security decisions observable.</li>
+<li>allowed approval and permission profiles;</li>
+<li>a conservative managed default profile;</li>
+<li>hooks pinned on and unmanaged hooks excluded;</li>
+<li>a managed <code>PreToolUse</code> hook at an absolute deployment-owned path;</li>
+<li>restrictive command rules;</li>
+<li>MCP server name-and-identity allowlists;</li>
+<li>filesystem deny-read requirements;</li>
+<li>browser, computer-use, and plugin controls; and</li>
+<li>an experimental managed network-domain allowlist when domains are supplied.</li>
 </ul>
-<h3 id="data-handling">Data handling</h3>
-<ul>
-<li>Never use real credentials, customer data, secrets, or production destinations in tests or examples.</li>
-<li>Redact/tokenize before events leave the process; content capture is opt-in.</li>
-<li>Keep sensitive re-identification data separate from normal audit records.</li>
-<li>Treat logs, traces, approval systems, and policy stores as security-sensitive systems.</li>
-</ul>
-<h2 id="3-api-and-sdk-clarity-guardrails">3. API and SDK clarity guardrails</h2>
-<ul>
-<li>Public types use descriptive names and typed fields.</li>
-<li>Security-sensitive values use dedicated types where confusion is plausible (<code>Principal</code>, <code>Resource</code>, <code>PolicyVersion</code>, <code>ApprovalId</code>).</li>
-<li>Prefer structured decisions such as <code>ALLOW</code>, <code>DENY</code>, <code>APPROVAL_REQUIRED</code>, and <code>RETRYABLE_ERROR</code> over <code>True</code>/<code>False</code>.</li>
-<li>Exceptions are reserved for programmer/configuration failures; expected policy outcomes are data.</li>
-<li>No hidden network calls, credential acquisition, retries, or approval prompts in constructors.</li>
-<li>Async and sync APIs must have equivalent semantics and documented cancellation behavior when they are introduced; the current core is synchronous only.</li>
-<li>Every public method documents inputs, outputs, side effects, failure modes, security assumptions, and an example.</li>
-<li>Configuration must be inspectable and serializable without exposing secrets.</li>
-<li>Breaking changes require a migration note and a versioning decision.</li>
-</ul>
-<h2 id="4-coding-standards">4. Coding standards</h2>
-<ul>
-<li>Python 3.11+; type annotations on public and security-sensitive code.</li>
-<li>Small modules with one clear responsibility.</li>
-<li>No mutable module-level security state.</li>
-<li>No <code>eval</code>, <code>exec</code>, dynamic imports, shell calls, or unrestricted HTTP clients in the core.</li>
-<li>Explicit timeouts and bounded retries for every integration.</li>
-<li>Deterministic clocks, IDs, randomness, and external clients must be injectable in tests.</li>
-<li>Avoid logging raw prompts, tool arguments, tokens, credentials, or tool results.</li>
-<li>Comments explain security invariants and trust boundaries, not syntax.</li>
-<li>Every public module, class, function, method, exception, and configuration field has a docstring explaining purpose, inputs, outputs, side effects, failure modes, and security assumptions.</li>
-<li>Non-obvious security decisions have nearby comments that explain the invariant and the consequence of weakening it.</li>
-<li>Public examples are complete enough to copy, run, and adapt; abbreviated examples are labelled as such.</li>
-<li>Dependencies are pinned/locked in application examples and reviewed for security relevance.</li>
-</ul>
-<h2 id="5-testing-guardrails">5. Testing guardrails</h2>
-<p>Every security control needs a positive test and a negative/bypass test. At minimum:</p>
-<ul>
-<li>unit tests for normalization, validation, policy composition, budgets, approvals, idempotency, redaction, and event generation;</li>
-<li>property or fuzz tests for untrusted tool arguments and policy boundary values;</li>
-<li>contract tests for each provider/infrastructure adapter;</li>
-<li>integration tests proving no side effect occurs on denial, timeout, expiry, or cancellation;</li>
-<li>replay tests proving an approval cannot be reused outside its scope or TTL;</li>
-<li>concurrency tests for idempotency, rate limits, and kill switches;</li>
-<li>adversarial tests for unknown tools, forged principals, parameter injection, prompt-injected destinations, delegation widening, and result poisoning;</li>
-<li>documentation examples executed as tests where practical.</li>
-</ul>
-<p>Test quality is measured by behavior and coverage of security branches, not only line coverage. The project target is at least 90% line coverage for the core and 100% coverage of deny/approval/expiry paths.</p>
-<h2 id="6-documentation-guardrails">6. Documentation guardrails</h2>
-<p>This is an open-source project. Documentation is part of the product, not an afterthought.</p>
-<ul>
-<li>The root README is generated from <code>docs/README.md</code>; edit the source, then run <code>make docs</code>.</li>
-<li>Full documentation lives under <code>docs/</code> and is published as a MkDocs site.</li>
-<li>Every public API has narrative documentation, a reference entry, and at least one usage example.</li>
-<li>Security behavior is explained in terms of trust boundaries, guarantees, non-guarantees, and failure modes.</li>
-<li>Code examples must include comments at security-sensitive boundaries and must not hide important behavior behind unexplained helpers.</li>
-<li>Documentation examples use synthetic identities, data, secrets, and destinations.</li>
-<li>Examples are executed in CI or have an explicit test that keeps them runnable.</li>
-<li>Source code is Apache-2.0; documentation is CC BY 4.0 unless explicitly marked otherwise.</li>
-<li>Licence, NOTICE, trademark, and contribution terms are checked before the first public release.</li>
-<li>A release must pass package-build validation and include LICENSE/NOTICE in published artifacts.</li>
-<li>The documentation site must build with warnings treated as errors.</li>
-<li>Links, navigation, README generation, and API reference generation are checked in CI.</li>
-</ul>
-<p>Every feature should answer:</p>
+<p>The requirements file belongs at <code>/etc/codex/requirements.toml</code> on Unix or
+<code>%ProgramData%\OpenAI\Codex\requirements.toml</code> on Windows. Codex enforces the
+requirements but does not distribute hook executables. Endpoint management
+must install the referenced hook and verify its digest. See the <a href="https://learn.chatgpt.com/docs/enterprise/managed-configuration">Codex managed
+configuration reference</a>.</p>
+<p>The Codex network requirement is explicitly experimental. Roll it out to a
+version- and OS-pinned canary before broad use. On native Windows, managed
+deny-read does not cover shell subprocess reads; use OS isolation and an
+approved launch profile as additional boundaries.</p>
+<h2 id="example">Example</h2>
+<pre><code class="language-python">from agentic_security import (
+    AgentHost,
+    ManagedConfigurationCompiler,
+    ManagedConfigurationSource,
+    ManagedMcpServer,
+    ManagedPlatform,
+    ManagedPolicyIntent,
+    NativeActionDecision,
+    NativeActionRule,
+    ObservedManagedConfiguration,
+    reconcile_effective_authority,
+)
+
+intent = ManagedPolicyIntent(
+    policy_id=&quot;engineering-safe&quot;,
+    policy_version=4,
+    action_rules=(
+        NativeActionRule(&quot;Read&quot;, NativeActionDecision.ALLOW, &quot;repository reads&quot;),
+        NativeActionRule(&quot;Bash(rm *)&quot;, NativeActionDecision.DENY, &quot;destructive command&quot;),
+    ),
+    mcp_servers=(
+        ManagedMcpServer(&quot;github&quot;, url=&quot;https://api.githubcopilot.com/mcp/&quot;),
+    ),
+)
+bundle = ManagedConfigurationCompiler().compile(
+    intent,
+    host=AgentHost.CLAUDE_CODE,
+    host_version=&quot;2.1.211&quot;,
+    platform=ManagedPlatform.MACOS,
+    hook_command=&quot;/opt/aai-security/hooks/claude-policy&quot;,
+)
+
+# Deployment writes the files with administrator ownership, then the endpoint
+# reports what the running host actually loaded. Desired state is not enough.
+observed = ObservedManagedConfiguration(
+    host=AgentHost.CLAUDE_CODE,
+    bundle_hash=bundle.bundle_hash,
+    source=ManagedConfigurationSource.ENDPOINT_MANAGED_FILE,
+    verified_at=100.0,
+    expires_at=400.0,
+)
+authority = reconcile_effective_authority(bundle, observed, now=120.0)
+assert authority.allowed_actions == (&quot;Read&quot;,)
+</code></pre>
+<p>Never put credentials in an MCP definition. Use per-user OAuth, environment
+expansion, a credential helper, or the SDK credential broker. The generated
+MCP identity does not inspect arbitrary environment variables, so deployment
+policy must constrain those separately.</p>
+<h2 id="deployment-verification">Deployment verification</h2>
+<p>For each managed endpoint:</p>
 <ol>
-<li>What threat or failure does it address?</li>
-<li>Which trust boundary does it enforce?</li>
-<li>What does it guarantee and what does it not guarantee?</li>
-<li>What are the secure defaults?</li>
-<li>How does an engineer use it safely?</li>
-<li>How is it tested and observed?</li>
-<li>What infrastructure must still be configured?</li>
+<li>install every generated artifact and hook using an administrator-owned
+   channel;</li>
+<li>protect file ownership and permissions;</li>
+<li>restart the host and inspect its effective managed source;</li>
+<li>calculate the bundle hash from the exact installed bytes;</li>
+<li>send short-lived, authenticated evidence to the control plane;</li>
+<li>test an allowed action, a denied action, an approval-required action, and an
+   unapproved MCP server; and</li>
+<li>delete or weaken a local project file and prove effective authority does not
+   change.</li>
 </ol>
-<p>Examples must be runnable or clearly labelled conceptual. Examples must show failure handling and must not normalize insecure shortcuts.</p>
-<h2 id="7-review-and-release-guardrails">7. Review and release guardrails</h2>
-<p>Reviewers must reject changes that:</p>
-<ul>
-<li>bypass the central execution boundary;</li>
-<li>weaken a default without an explicit configuration and threat-model rationale;</li>
-<li>add a public API without docs and tests;</li>
-<li>add public code without docstrings and explanatory security comments;</li>
-<li>edit the generated README directly instead of updating its source;</li>
-<li>introduce documentation links or navigation that fail the documentation build;</li>
-<li>add an integration without timeout, error, and contract tests;</li>
-<li>capture sensitive content by default;</li>
-<li>claim standards or regulatory compliance without authoritative verification;</li>
-<li>change policy semantics without migration and regression evidence.</li>
-</ul>
-<p>Before release, run <code>make check</code>, review the dependency diff, update the changelog, and verify the package contains no credentials or generated sensitive artifacts.</p>
-<h3 id="definition-of-done">Definition of done</h3>
-<p>A change is done only when its behavior is documented, its security assumptions are explicit, its failure modes and bypass attempts are tested, its telemetry is defined, and the full quality gate passes.</p>
+<p>The current SDK API supplies compilation and reconciliation. Live privileged
+deployment and host heartbeat ingestion remain deployment integrations; the UI
+must label them <code>deployment_required</code> until exact endpoint evidence arrives.</p>
 
 
 
