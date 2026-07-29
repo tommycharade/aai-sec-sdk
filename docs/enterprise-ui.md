@@ -67,7 +67,7 @@ The recommended navigation is:
 | Configuration validation | Show validation results before activation. |
 | UI authentication | Operators, roles, bearer tokens and enterprise SSO integration. |
 | CORS/origin restriction | Allowed browser origins and deployment environment. |
-| Agent groups | Create groups, select a policy, preview/apply up to 100 assignments, inspect partial outcomes and remove agents. |
+| Agent groups | Create groups, select a policy, use manual batch assignment or trusted dynamic rules, inspect outcomes and manage agents. |
 | Claude onboarding script | Display or generate the exact onboarding command for a project. |
 | Configuration backups | Show backup status and provide controlled restore operations. |
 
@@ -93,6 +93,14 @@ enabled. Apply is bound to the displayed membership revision and request ID;
 stale revisions require a new preview. Partial success remains visible per
 agent and never appears as an all-success toast. The completion view shows the
 new revision and the exact applied/unchanged/rejected counts.
+
+Operators can instead select **Automate membership**. A typed rule builder
+offers only trusted inventory fields and exact include/exclude values. It
+explains every field with contextual help, requires a business reason, and
+shows matched, added, removed, unchanged and overlapping agents before apply.
+Overlap blocks apply. Once enabled, the group is labelled **Dynamic**, manual
+assignment/removal controls disappear, and **Review rule** opens the current
+human-readable rule for deterministic reevaluation.
 
 ## Operational safeguards
 

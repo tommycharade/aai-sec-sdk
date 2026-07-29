@@ -77,7 +77,7 @@ installation or live host-load acceptance.
 
 | Workstream | Status | Implemented foundation | Major remaining work |
 | --- | --- | --- | --- |
-| Fleet lifecycle | Partial | Enrollment, groups, revision-bound bulk assignment with preview/partial outcomes/idempotency/audit, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, required accountable ownership and 90-day stale-review reporting | Bulk enrollment import, dynamic groups, managed upgrades, exception expiry and automatic orphan/leaver detection |
+| Fleet lifecycle | Partial | Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and deterministic reevaluation, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, required accountable ownership and 90-day stale-review reporting | Bulk enrollment import, scheduled dynamic reevaluation, managed upgrades, exception expiry and automatic orphan/leaver detection |
 | Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, self-approval denial, staging, atomic activation, assignment impact and rollback | Historical simulation, richer semantic diff, signed bundles, scheduling, inheritance, expiring exceptions and measured endpoint convergence |
 | Security operations | Partial | Alerts, approvals, audit timeline and emergency stops | Cases, quarantine, automatic containment, credential revocation, detections, anomaly controls and workflow integrations |
 | Reporting and administration | Partial | Fleet posture, health, SLO and compliance evidence summaries | Coverage denominator, executive/auditor reports, delegated scopes, service identities, Terraform, CMK/residency and private access |
@@ -97,6 +97,18 @@ denial, transaction rollback, duplicate/oversized rejection, sole-group
 enforcement, and revisioned removal. UI tests prove preview precedes apply and
 that the same request ID is reused. CSV/file import is a future convenience,
 not required because P1-FLT-01 explicitly accepts either import **or** selection.
+
+### P1-FLT-02 acceptance evidence
+
+The bounded dynamic-group slice evaluates only strongly read server inventory,
+previews without writes, blocks policy-group overlap, and atomically stores
+materialized membership, canonical rule, optimistic revision, idempotency
+result and primary audit evidence. Contract tests cover trusted-attribute
+changes, deterministic removal, unsupported fields, stale revisions, overlap,
+manual-route bypass and transaction races. UI tests prove typed authoring,
+preview-before-apply and exact request-ID reuse. Scheduled service-driven
+reevaluation and endpoint posture attributes remain outstanding and are not
+claimed.
 
 ## Current delivery slice — Entra identity and trust
 

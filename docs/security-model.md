@@ -626,3 +626,22 @@ hook is labelled SDK-enforced; Codex experimental network controls require a
 pinned canary; native Windows Codex deny-read does not constrain reads made by
 shell subprocesses. A policy expression requested with multiple outcomes
 resolves deny-first and remains a conflict requiring audited operator repair.
+
+## Dynamic group authority boundary
+
+Dynamic membership changes which policy can authorize an agent, so neither the
+browser nor an enrolled runtime supplies match attributes or a computed member
+list. The control plane supports a closed conjunction over stable inventory
+fields, strongly reloads agents, deployments and all groups, and derives the
+desired set itself. Unknown fields, duplicate conditions, missing lineage,
+inactive or cross-organization agents, oversized rules and candidate sets fail
+closed.
+
+Preview is non-mutating. Apply repeats evaluation, rejects overlap with another
+policy group and compares the exact group membership revision in the same
+transaction that stores the canonical rule, materialized membership,
+idempotency result and primary audit evidence. A concurrent writer therefore
+cannot substitute a different authority set. Dynamic groups reject manual add,
+remove and batch routes, preventing those older paths from bypassing the rule.
+Audit evidence contains only rule hashes and change counts; full membership,
+prompts, tool arguments and credentials are excluded.

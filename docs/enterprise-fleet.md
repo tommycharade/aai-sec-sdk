@@ -90,6 +90,7 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/groups/{group}/policy` | Change a group's immutable policy assignment and audit the change |
 | `POST /api/enterprise/groups/{group}/agents` | Enroll an existing agent in a group |
 | `POST /api/enterprise/groups/{group}/agents/bulk` | Preview or apply one revision-bound batch of up to 100 assignments |
+| `POST /api/enterprise/groups/{group}/dynamic-membership` | Preview or apply a deterministic rule over trusted inventory |
 | `DELETE /api/enterprise/groups/{group}/agents/{deployment}/{agent}` | Remove an agent from a group |
 | `POST /api/enterprise/templates/validate` | Validate safe configuration without persisting it |
 | `POST /api/enterprise/deployment-config` | Assign desired configuration |
@@ -148,6 +149,20 @@ rejected agents remain unchanged and retain explicit outcomes. Replaying the
 same request ID and exact semantic request returns the stored result without a
 second authority or audit change; reuse with different content is rejected.
 S3 receives a best-effort secondary copy after the primary transaction.
+
+### Dynamic group membership
+
+Dynamic groups materialize a bounded rule over strongly read, server-owned
+agent and deployment attributes. The operator uses a typed editor, supplies an
+auditable reason and previews additions, removals, unchanged agents and policy
+group overlaps before apply. Overlap, stale revision, malformed lineage,
+unsupported fields and transaction races fail closed without a partial update.
+
+After apply, the group stores its canonical rule, rule hash, evaluation actor
+and time. Manual single-agent and bulk membership routes reject changes to a
+dynamic group; future changes use another preview and rule reevaluation. See
+[Dynamic policy groups](dynamic-groups-design.md) for the complete contract and
+security invariants.
 
 The UI follows a three-step **Select → Preview → Apply** journey. It lists only
 currently active, unassigned agents from the browser snapshot, requires a

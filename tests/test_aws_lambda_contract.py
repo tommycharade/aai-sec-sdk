@@ -1494,6 +1494,333 @@ def test_single_group_assignment_rejects_existing_policy_group_and_revisions_rem
     assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["agent_keys"] == []
 
 
+def test_dynamic_group_previews_conflicts_and_applies_deterministic_membership(
+    monkeypatch: Any,
+) -> None:
+    """Dynamic rules use trusted inventory, fail on overlap and co-commit evidence."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-dynamic-groups"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-operator-a",
+    }
+    now = int(time.time())
+    for record in (
+        module._item_key(tenant, "TENANT", "root") | {"id": tenant},
+        module._item_key(tenant, "DEPLOYMENT", "dep-platform")
+        | {
+            "id": "dep-platform",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "team": "Platform",
+            "environment": "prod",
+            "region": "eu-west-2",
+        },
+        module._item_key(tenant, "DEPLOYMENT", "dep-data")
+        | {
+            "id": "dep-data",
+            "organization_id": "org-a",
+            "project_id": "project-b",
+            "team": "Data",
+            "environment": "prod",
+            "region": "eu-west-2",
+        },
+        module._item_key(tenant, "GROUP", "target")
+        | {
+            "id": "target",
+            "organizationId": "org-a",
+            "name": "Platform production",
+            "policyId": "policy-a",
+            "policyName": "Policy A",
+            "agent_keys": ["dep-data:remove", "dep-platform:unchanged"],
+            "membership_revision": 2,
+            "membership_mode": "manual",
+        },
+        module._item_key(tenant, "GROUP", "other")
+        | {
+            "id": "other",
+            "organizationId": "org-a",
+            "name": "Other",
+            "policyId": "policy-a",
+            "policyName": "Policy A",
+            "agent_keys": ["dep-platform:conflict"],
+            "membership_revision": 1,
+        },
+    ):
+        table.put_item(Item=record)
+    for deployment_id, agent_id in (
+        ("dep-platform", "add"),
+        ("dep-platform", "unchanged"),
+        ("dep-platform", "conflict"),
+        ("dep-data", "remove"),
+    ):
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}")
+            | {
+                "id": agent_id,
+                "organization_id": "org-a",
+                "project_id": "project-a" if deployment_id == "dep-platform" else "project-b",
+                "deployment_id": deployment_id,
+                "host": "claude-code",
+                "status": "offline",
+                "expires_at": 0,
+                "lifecycle_state": "active",
+                "lifecycle_revision": 1,
+                "owner_id": "owner-a",
+                "owner_name": "Owner A",
+                "business_contact": "owner@example.invalid",
+                "ownership_criticality": "high",
+                "ownership_reviewed_at": now,
+                "ownership_review_due_at": now + 3600,
+                "ownership_reviewed_by": "reviewer-a",
+                "ownership_revision": 1,
+            }
+        )
+    path = "/enterprise/groups/target/dynamic-membership"
+    request = {
+        "mode": "preview",
+        "requestId": "dynamic-request-001",
+        "expectedMembershipRevision": 2,
+        "reason": "Keep production platform agents on the approved policy.",
+        "rule": {
+            "match": "all",
+            "conditions": [
+                {"field": "environment", "operator": "equals_any", "values": ["prod"]},
+                {"field": "team", "operator": "equals_any", "values": ["Platform"]},
+            ],
+        },
+    }
+
+    preview = _invoke(module, _event(path, "POST", body=request, claims=claims))
+    assert preview["statusCode"] == 200
+    preview_body = json.loads(preview["body"])
+    assert preview_body["counts"] == {
+        "matched": 3,
+        "additions": 1,
+        "removals": 1,
+        "unchanged": 1,
+        "conflicts": 1,
+    }
+    assert preview_body["canApply"] is False
+    assert preview_body["additions"] == [{"deploymentId": "dep-platform", "agentId": "add"}]
+    assert preview_body["removals"] == [{"deploymentId": "dep-data", "agentId": "remove"}]
+    assert preview_body["conflicts"][0]["groupIds"] == ["other"]
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["membership_mode"] == "manual"
+    assert not [key for key in table.items if key[1].startswith("DYNAMIC_GROUP_OPERATION#")]
+
+    blocked = _invoke(
+        module,
+        _event(path, "POST", body={**request, "mode": "apply"}, claims=claims),
+    )
+    assert blocked["statusCode"] == 409
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["membership_revision"] == 2
+
+    table.items[(f"TENANT#{tenant}", "GROUP#other")]["agent_keys"] = []
+    clear_request = {**request, "requestId": "dynamic-request-002"}
+    clear_preview = _invoke(module, _event(path, "POST", body=clear_request, claims=claims))
+    assert json.loads(clear_preview["body"])["canApply"] is True
+    applied = _invoke(
+        module,
+        _event(path, "POST", body={**clear_request, "mode": "apply"}, claims=claims),
+    )
+    assert applied["statusCode"] == 200, applied
+    applied_body = json.loads(applied["body"])
+    assert applied_body["resultingMembershipRevision"] == 3
+    stored = table.items[(f"TENANT#{tenant}", "GROUP#target")]
+    assert stored["membership_mode"] == "dynamic"
+    assert stored["agent_keys"] == [
+        "dep-platform:add",
+        "dep-platform:conflict",
+        "dep-platform:unchanged",
+    ]
+    assert stored["dynamic_rule"]["conditions"][0]["field"] == "environment"
+    assert len([key for key in table.items if key[1].startswith("DYNAMIC_GROUP_OPERATION#")]) == 1
+    audits = [key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_AUDIT#")]
+    assert len(audits) == 1
+    audit = table.items[audits[0]]
+    assert audit["event_type"] == "dynamic_group_membership_applied"
+    assert audit["payload"]["addition_count"] == 2
+    assert "agent_keys" not in audit["payload"]
+
+    replay = _invoke(
+        module,
+        _event(path, "POST", body={**clear_request, "mode": "apply"}, claims=claims),
+    )
+    assert json.loads(replay["body"])["replayed"] is True
+    collision = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                **clear_request,
+                "mode": "apply",
+                "reason": "A different valid dynamic rule reason for collision.",
+            },
+            claims=claims,
+        ),
+    )
+    assert collision["statusCode"] == 409
+
+    manual_add = _invoke(
+        module,
+        _event(
+            "/enterprise/groups/target/agents",
+            "POST",
+            body={"deploymentId": "dep-data", "agentId": "remove"},
+            claims=claims,
+        ),
+    )
+    assert manual_add["statusCode"] == 409
+    manual_remove = _invoke(
+        module,
+        _event(
+            "/enterprise/groups/target/agents/dep-platform/add",
+            "DELETE",
+            claims=claims,
+        ),
+    )
+    assert manual_remove["statusCode"] == 409
+
+    # A trusted deployment attribute change deterministically removes authority
+    # on the next reviewed reevaluation; the agent cannot supply this field.
+    table.items[(f"TENANT#{tenant}", "DEPLOYMENT#dep-platform")]["team"] = "Data"
+    reevaluate = {
+        **clear_request,
+        "requestId": "dynamic-request-003",
+        "expectedMembershipRevision": 3,
+        "reason": "Reevaluate membership after the trusted team inventory changed.",
+    }
+    reevaluation_preview = _invoke(module, _event(path, "POST", body=reevaluate, claims=claims))
+    reevaluation_body = json.loads(reevaluation_preview["body"])
+    assert reevaluation_body["counts"]["matched"] == 0
+    assert reevaluation_body["counts"]["removals"] == 3
+    assert reevaluation_body["canApply"] is True
+    reevaluated = _invoke(
+        module,
+        _event(path, "POST", body={**reevaluate, "mode": "apply"}, claims=claims),
+    )
+    assert reevaluated["statusCode"] == 200
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["agent_keys"] == []
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["membership_revision"] == 4
+
+
+def test_dynamic_group_rejects_untrusted_rules_stale_revisions_and_transaction_races(
+    monkeypatch: Any,
+) -> None:
+    """Malformed selectors and concurrent inventory authority fail without writes."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-dynamic-groups-race"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    for record in (
+        module._item_key(tenant, "TENANT", "root") | {"id": tenant},
+        module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {
+            "id": "dep-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "team": "Platform",
+            "environment": "prod",
+            "region": "eu-west-2",
+        },
+        module._item_key(tenant, "GROUP", "target")
+        | {
+            "id": "target",
+            "organizationId": "org-a",
+            "name": "Target",
+            "policyId": "policy-a",
+            "policyName": "Policy A",
+            "agent_keys": [],
+            "membership_revision": 4,
+        },
+        module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "dep-a",
+            "host": "codex-cli",
+            "status": "offline",
+            "expires_at": 0,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        },
+    ):
+        table.put_item(Item=record)
+    path = "/enterprise/groups/target/dynamic-membership"
+    base = {
+        "mode": "preview",
+        "requestId": "dynamic-race-001",
+        "expectedMembershipRevision": 4,
+        "reason": "Select the approved Codex production deployment cohort.",
+        "rule": {
+            "match": "all",
+            "conditions": [{"field": "host", "operator": "equals_any", "values": ["codex-cli"]}],
+        },
+    }
+    stale = _invoke(
+        module,
+        _event(path, "POST", body={**base, "expectedMembershipRevision": 3}, claims=claims),
+    )
+    assert stale["statusCode"] == 409
+    unknown = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                **base,
+                "rule": {
+                    "match": "all",
+                    "conditions": [
+                        {"field": "browserRisk", "operator": "equals_any", "values": ["low"]}
+                    ],
+                },
+            },
+            claims=claims,
+        ),
+    )
+    assert unknown["statusCode"] == 400
+    duplicate_field = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                **base,
+                "rule": {
+                    "match": "all",
+                    "conditions": [
+                        {"field": "host", "operator": "equals_any", "values": ["codex-cli"]},
+                        {"field": "host", "operator": "not_equals_any", "values": ["claude-code"]},
+                    ],
+                },
+            },
+            claims=claims,
+        ),
+    )
+    assert duplicate_field["statusCode"] == 400
+
+    def change_group() -> None:
+        current = table.items[(f"TENANT#{tenant}", "GROUP#target")]
+        current["membership_revision"] = 5
+        current["agent_keys"] = ["dep-a:concurrent"]
+
+    module.DYNAMODB.before_transaction = change_group
+    raced = _invoke(
+        module,
+        _event(path, "POST", body={**base, "mode": "apply"}, claims=claims),
+    )
+    assert raced["statusCode"] == 409
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["agent_keys"] == ["dep-a:concurrent"]
+    assert not [key for key in table.items if key[1].startswith("DYNAMIC_GROUP_OPERATION#")]
+
+
 def test_break_glass_requires_mfa_four_eyes_scope_and_immediate_revocation(
     monkeypatch: Any,
 ) -> None:
