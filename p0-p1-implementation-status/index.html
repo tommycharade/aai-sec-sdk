@@ -16,7 +16,7 @@
         <link rel="prev" href="../enterprise-rollout-p0-p1-requirements/">
       
       
-        <link rel="next" href="../entra-scim-runbook/">
+        <link rel="next" href="../aws-pilot-acceptance-2026-07-29/">
       
       
         
@@ -997,10 +997,48 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#current-aws-acceptance-2026-07-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current AWS acceptance — 2026-07-29
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aws-pilot-acceptance-2026-07-29/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS pilot acceptance evidence — 2026-07-29
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1572,6 +1610,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#current-aws-acceptance-2026-07-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current AWS acceptance — 2026-07-29
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1759,8 +1808,8 @@ installation or live host-load acceptance.</p>
 <tr>
 <td>Policy governance</td>
 <td>Partial</td>
-<td>Typed editor, immutable version number, readable effective policy, assignment impact and rollback</td>
-<td>Draft/review/approve lifecycle, four-eyes, simulation, semantic diff, signed bundles, inheritance and expiring exceptions</td>
+<td>Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, self-approval denial, staging, atomic activation, assignment impact and rollback</td>
+<td>Historical simulation, richer semantic diff, signed bundles, scheduling, inheritance, expiring exceptions and measured endpoint convergence</td>
 </tr>
 <tr>
 <td>Security operations</td>
@@ -1806,6 +1855,17 @@ fail-closed evidence, not an acceptance pass. P0-06 still requires a configured
 pilot tenant and real Entra OIDC sign-in, role transition and token-revocation
 exercise, followed by break glass, quarterly access certification and
 delegated administrative scopes.</p>
+<h2 id="current-aws-acceptance-2026-07-29">Current AWS acceptance — 2026-07-29</h2>
+<p>The governed policy lifecycle and hosted UI are merged and deployed. The live
+safe-default policy migrated to an immutable active version-2 ledger entry
+without changing active authority. Public unauthenticated policy and identity
+requests fail with HTTP 401.</p>
+<p>The managed Claude Code and Codex registrations on Kratos are not currently
+verified: both heartbeats are expired, runtime manifests are not configured,
+and exact managed configuration is not freshly proven. Entra OIDC and SCIM are
+also not configured. These are explicit rollout blockers, not dashboard-only
+warnings. See <a href="../aws-pilot-acceptance-2026-07-29/">AWS pilot acceptance evidence</a>
+for the exact pass/fail record and release sequence.</p>
 
 
 

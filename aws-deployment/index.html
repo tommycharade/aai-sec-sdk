@@ -910,6 +910,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../aws-pilot-acceptance-2026-07-29/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS pilot acceptance evidence — 2026-07-29
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../entra-scim-runbook/" class="md-nav__link">
         
   
@@ -1812,7 +1839,7 @@ Follow the <a href="../entra-scim-runbook/">Entra SCIM lifecycle runbook</a>.</p
 </tr>
 <tr>
 <td><code>policy-approver</code></td>
-<td>Exact-action approval and future four-eyes policy approval</td>
+<td>Independently review, stage and activate governed policy versions</td>
 </tr>
 <tr>
 <td><code>fleet-operator</code></td>
@@ -1832,6 +1859,10 @@ Follow the <a href="../entra-scim-runbook/">Entra SCIM lifecycle runbook</a>.</p
 resolution, every permitted role action, every denied cross-role action, an
 unknown role, and a mismatched Entra tenant. Federation configuration alone is
 not enterprise SSO acceptance evidence.</p>
+<p>The current pilot's post-deployment result is recorded in
+<a href="../aws-pilot-acceptance-2026-07-29/">AWS pilot acceptance evidence</a>. Entra OIDC
+and SCIM are not configured in that environment, so the source contracts must
+not be presented as live federation acceptance.</p>
 <p>The authenticated <code>GET /enterprise/identity</code> route returns redaction-safe
 provider status, tenant hint, active roles and the enforced role matrix. It
 never returns the OIDC client ID or secret. <code>GET /enterprise/integrations</code>
