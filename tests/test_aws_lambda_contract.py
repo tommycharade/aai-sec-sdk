@@ -1149,6 +1149,351 @@ def test_group_authority_edges_reject_cross_organization_policy_and_agent(
     )
 
 
+def test_bulk_group_assignment_previews_applies_partial_results_and_replays(
+    monkeypatch: Any,
+) -> None:
+    """Bulk assignment is bounded, partial, revisioned, durable and idempotent."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-bulk-membership"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-operator-a",
+    }
+    now = int(time.time())
+    records = [
+        module._item_key(tenant, "TENANT", "root") | {"id": tenant},
+        module._item_key(tenant, "GROUP", "target")
+        | {
+            "id": "target",
+            "organizationId": "org-a",
+            "name": "Target",
+            "policyId": "policy-a",
+            "policyName": "Policy A",
+            "agent_keys": ["deployment-a:existing"],
+            "membership_revision": 3,
+        },
+        module._item_key(tenant, "GROUP", "other")
+        | {
+            "id": "other",
+            "organizationId": "org-a",
+            "name": "Other",
+            "policyId": "policy-a",
+            "policyName": "Policy A",
+            "agent_keys": ["deployment-a:assigned"],
+            "membership_revision": 1,
+        },
+    ]
+    for agent_id, organization_id, lifecycle_state in (
+        ("eligible", "org-a", "active"),
+        ("existing", "org-a", "active"),
+        ("assigned", "org-a", "active"),
+        ("inactive", "org-a", "revoked"),
+        ("cross-org", "org-b", "active"),
+    ):
+        records.append(
+            module._item_key(tenant, "AGENT", f"deployment-a:{agent_id}")
+            | {
+                "id": agent_id,
+                "organization_id": organization_id,
+                "project_id": "project-a",
+                "deployment_id": "deployment-a",
+                "host": "claude-code",
+                "status": "offline",
+                "expires_at": 0,
+                "lifecycle_state": lifecycle_state,
+                "lifecycle_revision": 1,
+                "created_at": now,
+            }
+        )
+    for record in records:
+        table.put_item(Item=record)
+    request = {
+        "mode": "preview",
+        "requestId": "batch-001",
+        "expectedMembershipRevision": 3,
+        "reason": "Assign the approved engineering pilot cohort.",
+        "agents": [
+            {"deploymentId": "deployment-a", "agentId": "eligible"},
+            {"deploymentId": "deployment-a", "agentId": "existing"},
+            {"deploymentId": "deployment-a", "agentId": "assigned"},
+            {"deploymentId": "deployment-a", "agentId": "inactive"},
+            {"deploymentId": "deployment-a", "agentId": "cross-org"},
+            {"deploymentId": "deployment-a", "agentId": "missing"},
+        ],
+    }
+    path = "/enterprise/groups/target/agents/bulk"
+
+    preview = _invoke(module, _event(path, "POST", body=request, claims=claims))
+    assert preview["statusCode"] == 200
+    preview_body = json.loads(preview["body"])
+    assert preview_body["counts"] == {
+        "requested": 6,
+        "ready": 1,
+        "applied": 0,
+        "unchanged": 1,
+        "rejected": 4,
+    }
+    assert preview_body["canApply"] is True
+    assert preview_body["partialFailure"] is True
+    assert preview_body["membershipRevision"] == 3
+    assert not [key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_AUDIT#")]
+    assert not [key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_OPERATION#")]
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["agent_keys"] == [
+        "deployment-a:existing"
+    ]
+
+    applied = _invoke(
+        module,
+        _event(path, "POST", body={**request, "mode": "apply"}, claims=claims),
+    )
+    assert applied["statusCode"] == 207
+    applied_body = json.loads(applied["body"])
+    assert applied_body["counts"] == {
+        "requested": 6,
+        "ready": 0,
+        "applied": 1,
+        "unchanged": 1,
+        "rejected": 4,
+    }
+    assert applied_body["resultingMembershipRevision"] == 4
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["agent_keys"] == [
+        "deployment-a:eligible",
+        "deployment-a:existing",
+    ]
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["membership_revision"] == 4
+    audit_keys = [key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_AUDIT#")]
+    operation_keys = [
+        key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_OPERATION#")
+    ]
+    assert len(audit_keys) == 1
+    assert len(operation_keys) == 1
+    audit = table.items[audit_keys[0]]
+    assert audit["actor"] == "fleet-operator-a"
+    assert audit["payload"]["applied_count"] == 1
+    assert "agents" not in audit["payload"]
+
+    replay = _invoke(
+        module,
+        _event(path, "POST", body={**request, "mode": "apply"}, claims=claims),
+    )
+    assert replay["statusCode"] == 207
+    assert json.loads(replay["body"])["replayed"] is True
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["membership_revision"] == 4
+    assert len([key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_AUDIT#")]) == 1
+
+    collision = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                **request,
+                "mode": "apply",
+                "reason": "A different valid operator reason for collision.",
+            },
+            claims=claims,
+        ),
+    )
+    assert collision["statusCode"] == 409
+
+
+def test_bulk_group_assignment_rejects_stale_malformed_and_concurrent_requests(
+    monkeypatch: Any,
+) -> None:
+    """Stale previews, duplicate targets and transaction races change no authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-bulk-membership-race"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "target")
+        | {
+            "id": "target",
+            "organizationId": "org-a",
+            "name": "Target",
+            "policyId": "policy-a",
+            "policyName": "Policy A",
+            "agent_keys": [],
+            "membership_revision": 2,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "deployment-a:eligible")
+        | {
+            "id": "eligible",
+            "organization_id": "org-a",
+            "deployment_id": "deployment-a",
+            "project_id": "project-a",
+            "host": "codex-cli",
+            "status": "offline",
+            "expires_at": 0,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+    path = "/enterprise/groups/target/agents/bulk"
+    base = {
+        "mode": "preview",
+        "requestId": "batch-race",
+        "expectedMembershipRevision": 1,
+        "reason": "Assign a bounded cohort after operator review.",
+        "agents": [{"deploymentId": "deployment-a", "agentId": "eligible"}],
+    }
+    stale = _invoke(module, _event(path, "POST", body=base, claims=claims))
+    assert stale["statusCode"] == 409
+
+    duplicate = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                **base,
+                "expectedMembershipRevision": 2,
+                "agents": [
+                    {"deploymentId": "deployment-a", "agentId": "eligible"},
+                    {"deploymentId": "deployment-a", "agentId": "eligible"},
+                ],
+            },
+            claims=claims,
+        ),
+    )
+    assert duplicate["statusCode"] == 400
+
+    request = {**base, "mode": "apply", "expectedMembershipRevision": 2}
+
+    def change_group() -> None:
+        current = table.items[(f"TENANT#{tenant}", "GROUP#target")]
+        current["membership_revision"] = 3
+        current["agent_keys"] = ["deployment-a:concurrent"]
+
+    module.DYNAMODB.before_transaction = change_group
+    raced = _invoke(module, _event(path, "POST", body=request, claims=claims))
+    assert raced["statusCode"] == 409
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["agent_keys"] == [
+        "deployment-a:concurrent"
+    ]
+    assert not [key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_AUDIT#")]
+    assert not [key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_OPERATION#")]
+
+    oversized = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                **base,
+                "expectedMembershipRevision": 3,
+                "agents": [
+                    {"deploymentId": "deployment-a", "agentId": f"agent-{index}"}
+                    for index in range(101)
+                ],
+            },
+            claims=claims,
+        ),
+    )
+    assert oversized["statusCode"] == 400
+
+
+def test_single_group_assignment_rejects_existing_policy_group_and_revisions_removal(
+    monkeypatch: Any,
+) -> None:
+    """Legacy single routes preserve sole-group authority and revision membership writes."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-single-membership"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-operator-a",
+    }
+    for record in (
+        module._item_key(tenant, "TENANT", "root") | {"id": tenant},
+        module._item_key(tenant, "GROUP", "target")
+        | {
+            "id": "target",
+            "organizationId": "org-a",
+            "name": "Target",
+            "policyId": "policy-a",
+            "policyName": "Policy A",
+            "agent_keys": [],
+            "membership_revision": 1,
+        },
+        module._item_key(tenant, "GROUP", "other")
+        | {
+            "id": "other",
+            "organizationId": "org-a",
+            "name": "Other",
+            "policyId": "policy-a",
+            "policyName": "Policy A",
+            "agent_keys": ["deployment-a:assigned"],
+            "membership_revision": 1,
+        },
+        module._item_key(tenant, "AGENT", "deployment-a:assigned")
+        | {
+            "id": "assigned",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "deployment-a",
+            "host": "claude-code",
+            "status": "offline",
+            "expires_at": 0,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        },
+        module._item_key(tenant, "AGENT", "deployment-a:eligible")
+        | {
+            "id": "eligible",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "deployment-a",
+            "host": "codex-cli",
+            "status": "offline",
+            "expires_at": 0,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        },
+    ):
+        table.put_item(Item=record)
+    add_path = "/enterprise/groups/target/agents"
+    rejected = _invoke(
+        module,
+        _event(
+            add_path,
+            "POST",
+            body={"deploymentId": "deployment-a", "agentId": "assigned"},
+            claims=claims,
+        ),
+    )
+    assert rejected["statusCode"] == 409
+    added = _invoke(
+        module,
+        _event(
+            add_path,
+            "POST",
+            body={"deploymentId": "deployment-a", "agentId": "eligible"},
+            claims=claims,
+        ),
+    )
+    assert added["statusCode"] == 200
+    assert json.loads(added["body"])["membershipRevision"] == 2
+    removed = _invoke(
+        module,
+        _event(
+            "/enterprise/groups/target/agents/deployment-a/eligible",
+            "DELETE",
+            claims=claims,
+        ),
+    )
+    assert removed["statusCode"] == 200
+    assert json.loads(removed["body"])["membershipRevision"] == 3
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["agent_keys"] == []
+
+
 def test_break_glass_requires_mfa_four_eyes_scope_and_immediate_revocation(
     monkeypatch: Any,
 ) -> None:
@@ -3507,6 +3852,7 @@ def test_agent_replacement_is_atomic_inherits_groups_and_requires_new_enrollment
         "dep-a:agent-new",
         "dep-a:agent-old",
     ]
+    assert table.items[(f"TENANT#{tenant}", "GROUP#group-a")]["membership_revision"] == 2
     assert (
         _invoke(
             module,

@@ -307,9 +307,12 @@ limits, requirements and affected groups/agents before saving. Expert users can
 open advanced JSON, but it is schema-validated and cannot bypass immutable SDK
 safeguards. On **Enterprise fleet**, the posture strip first shows total groups,
 enrolled agents, healthy heartbeats, and unassigned agents. Create an agent
-group, select its policy,
-inspect enrolled Claude Code agents, and use **Add agent** or **Remove agent**
-to manage group membership. Group membership is control-plane metadata; the
+group, select its policy, inspect enrolled Claude Code or Codex agents, and use
+**Assign agents** to open the controlled bulk workflow. Select up to 100
+unassigned agents, provide a rationale, review live ready/unchanged/rejected
+outcomes, and apply only from that preview. The completion receipt shows the
+new membership revision and partial-failure counts. Use **Remove from group**
+for an individual removal. Group membership is control-plane metadata; the
 deployment runtime remains the authority that enforces the selected policy.
 The **Agents** page is the cross-enterprise operations directory: it provides
 health metrics, search across agent/deployment/project/group/policy identity,

@@ -97,6 +97,10 @@ _AGENT_TELEMETRY_INTEGER_FIELDS = _AGENT_TELEMETRY_FIELDS - {
 _AGENT_LIFECYCLE_STATES = frozenset({"active", "revoked", "deleted"})
 _AGENT_REPLACEMENT_GROUP_LIMIT = 97
 
+# Group membership selects runtime policy authority. Bulk changes are bounded
+# so one browser request cannot create unbounded DynamoDB work or audit data.
+_GROUP_MEMBERSHIP_BATCH_LIMIT = 100
+
 # Ownership is operational authority metadata, not a browser label. New
 # identities must carry a reviewed accountable owner and all reviews expire on
 # a fixed bounded cadence so abandoned agents cannot remain silently trusted.
@@ -3290,6 +3294,402 @@ def _audit(tenant, event_type, actor, payload):
     }
 
 
+def _positive_membership_revision(value):
+    """Require an explicit positive group-membership revision."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("expectedMembershipRevision must be a positive integer")
+    return value
+
+
+def _group_membership_revision(group):
+    """Return one valid stored revision, treating untouched legacy groups as v1."""
+    if "membership_revision" not in group:
+        return 1
+    value = group.get("membership_revision")
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        raise PolicyConflict("group membership revision is malformed")
+    if isinstance(value, Decimal) and value != value.to_integral_value():
+        raise PolicyConflict("group membership revision is malformed")
+    revision = int(value)
+    if revision <= 0:
+        raise PolicyConflict("group membership revision is malformed")
+    return revision
+
+
+def _group_agent_keys(group):
+    """Return a bounded, unambiguous membership set or fail closed."""
+    values = group.get("agent_keys")
+    if not isinstance(values, list) or len(values) > _MAX_LIST_ITEMS:
+        raise PolicyConflict("group membership record is malformed")
+    keys = []
+    for value in values:
+        try:
+            key = _bounded_identifier(value, "stored agent membership")
+        except ValueError as error:
+            raise PolicyConflict("group membership record is malformed") from error
+        if ":" not in key:
+            raise PolicyConflict("group membership record is malformed")
+        keys.append(key)
+    if len(keys) != len(set(keys)):
+        raise PolicyConflict("group membership record is malformed")
+    return sorted(keys)
+
+
+def _membership_request(body):
+    """Validate and normalize one closed-schema bulk assignment request."""
+    if not isinstance(body, dict) or set(body) != {
+        "mode",
+        "requestId",
+        "expectedMembershipRevision",
+        "agents",
+        "reason",
+    }:
+        raise ValueError("bulk group assignment request schema is invalid")
+    mode = body.get("mode")
+    if mode not in {"preview", "apply"}:
+        raise ValueError("mode must be preview or apply")
+    request_id = _bounded_identifier(body.get("requestId"), "requestId")
+    expected = _positive_membership_revision(body.get("expectedMembershipRevision"))
+    reason = _bounded_text(body.get("reason"), "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("reason must contain at least 20 characters")
+    raw_agents = body.get("agents")
+    if (
+        not isinstance(raw_agents, list)
+        or not 1 <= len(raw_agents) <= _GROUP_MEMBERSHIP_BATCH_LIMIT
+    ):
+        raise ValueError(f"agents must contain 1 to {_GROUP_MEMBERSHIP_BATCH_LIMIT} entries")
+    agents = []
+    seen = set()
+    for raw_agent in raw_agents:
+        if not isinstance(raw_agent, dict) or set(raw_agent) != {"deploymentId", "agentId"}:
+            raise ValueError("each bulk assignment agent must contain deploymentId and agentId")
+        deployment_id = _bounded_identifier(raw_agent.get("deploymentId"), "deploymentId")
+        agent_id = _bounded_identifier(raw_agent.get("agentId"), "agentId")
+        key = f"{deployment_id}:{agent_id}"
+        if key in seen:
+            raise ValueError("bulk assignment agents must be unique")
+        seen.add(key)
+        agents.append({"deploymentId": deployment_id, "agentId": agent_id, "agentKey": key})
+    return mode, request_id, expected, reason, sorted(agents, key=lambda item: item["agentKey"])
+
+
+def _membership_outcome(deployment_id, agent_id, status, reason_code, message):
+    """Build one content-minimised, typed assignment result."""
+    return {
+        "deploymentId": deployment_id,
+        "agentId": agent_id,
+        "status": status,
+        "reasonCode": reason_code,
+        "message": message,
+    }
+
+
+def _preview_group_membership(tenant, group, agents):
+    """Evaluate assignment eligibility from strongly read server-owned state."""
+    group_id = group.get("id")
+    group_organization = group.get("organizationId") or group.get("organization_id")
+    if not group_id or not group_organization:
+        raise PolicyConflict("group organization ownership is missing")
+    current_keys = set(_group_agent_keys(group))
+    groups = _list(tenant, "GROUP", consistent_read=True)
+    memberships = {}
+    for candidate_group in groups:
+        candidate_id = candidate_group.get("id")
+        if not candidate_id:
+            raise PolicyConflict("group membership record is malformed")
+        for key in _group_agent_keys(candidate_group):
+            memberships.setdefault(key, set()).add(candidate_id)
+    outcomes = []
+    ready_keys = []
+    for target in agents:
+        deployment_id = target["deploymentId"]
+        agent_id = target["agentId"]
+        key = target["agentKey"]
+        if key in current_keys:
+            outcomes.append(
+                _membership_outcome(
+                    deployment_id,
+                    agent_id,
+                    "unchanged",
+                    "already_member",
+                    "Agent is already assigned to this group.",
+                )
+            )
+            continue
+        agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", key), ConsistentRead=True).get("Item")
+        if not agent:
+            outcomes.append(
+                _membership_outcome(
+                    deployment_id,
+                    agent_id,
+                    "rejected",
+                    "agent_not_found",
+                    "Agent is not enrolled in this tenant.",
+                )
+            )
+            continue
+        if _agent_lifecycle_state(agent) != "active":
+            outcomes.append(
+                _membership_outcome(
+                    deployment_id,
+                    agent_id,
+                    "rejected",
+                    "agent_not_active",
+                    "Only an active agent can receive group authority.",
+                )
+            )
+            continue
+        agent_organization = agent.get("organization_id") or agent.get("organizationId")
+        if not agent_organization or agent_organization != group_organization:
+            outcomes.append(
+                _membership_outcome(
+                    deployment_id,
+                    agent_id,
+                    "rejected",
+                    "organization_mismatch",
+                    "Agent and group do not share the same organization.",
+                )
+            )
+            continue
+        other_groups = sorted(memberships.get(key, set()) - {group_id})
+        if other_groups:
+            outcomes.append(
+                _membership_outcome(
+                    deployment_id,
+                    agent_id,
+                    "rejected",
+                    "already_assigned",
+                    "Agent already belongs to another policy group.",
+                )
+            )
+            continue
+        ready_keys.append(key)
+        outcomes.append(
+            _membership_outcome(
+                deployment_id,
+                agent_id,
+                "ready",
+                "eligible",
+                "Agent is eligible for assignment.",
+            )
+        )
+    return outcomes, ready_keys
+
+
+def _membership_audit_record(tenant, event_type, actor, payload, *, now):
+    """Build primary immutable evidence committed with a membership batch."""
+    event_id = str(uuid.uuid4())
+    redacted = {
+        "event_type": event_type,
+        "actor": actor,
+        "tenant_id": tenant,
+        "occurred_at": now,
+        "payload": payload,
+    }
+    return {
+        **_item_key(tenant, "GROUP_MEMBERSHIP_AUDIT", f"{now:012d}#{event_id}"),
+        **redacted,
+        "id": event_id,
+        "payload_hash": hashlib.sha256(
+            json.dumps(redacted, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+
+
+def _transact_group_membership(operations):
+    """Atomically commit membership authority, idempotency and durable evidence."""
+    try:
+        DYNAMODB.transact_write_items(TransactItems=operations)
+    except Exception as error:
+        code = getattr(error, "response", {}).get("Error", {}).get("Code")
+        if code in {"ConditionalCheckFailedException", "TransactionCanceledException"}:
+            raise PolicyConflict("group membership changed concurrently") from error
+        raise
+
+
+def _export_group_membership_audit(tenant, event_type, actor, payload):
+    """Best-effort replicate already durable membership evidence into S3."""
+    try:
+        _audit(tenant, event_type, actor, payload)
+    except Exception:
+        print(
+            json.dumps(
+                {"warning": "group membership audit replication failed", "event": event_type}
+            )
+        )
+
+
+def _bulk_assign_group_membership(
+    tenant, group_id, body, actor, *, event_type="group_membership_bulk_assigned"
+):
+    """Preview or atomically apply one bounded, idempotent assignment batch."""
+    mode, request_id, expected, reason, agents = _membership_request(body)
+    semantic_request = {
+        "actor": actor,
+        "agents": [
+            {"deploymentId": item["deploymentId"], "agentId": item["agentId"]} for item in agents
+        ],
+        "expectedMembershipRevision": expected,
+        "groupId": group_id,
+        "reason": reason,
+    }
+    request_hash = hashlib.sha256(
+        json.dumps(semantic_request, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    operation_key = _item_key(tenant, "GROUP_MEMBERSHIP_OPERATION", request_id)
+    if mode == "apply":
+        existing = TABLE.get_item(Key=operation_key, ConsistentRead=True).get("Item")
+        if existing:
+            if not secrets.compare_digest(str(existing.get("request_hash", "")), request_hash):
+                raise PolicyConflict("requestId is already bound to a different assignment")
+            response = existing.get("response")
+            if not isinstance(response, dict):
+                raise PolicyConflict("stored bulk assignment result is malformed")
+            return int(existing.get("status_code", 200)), {**response, "replayed": True}
+    group = TABLE.get_item(Key=_item_key(tenant, "GROUP", group_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not group:
+        raise LookupError("group not found")
+    current_revision = _group_membership_revision(group)
+    if current_revision != expected:
+        raise PolicyConflict("group membership revision is stale")
+    current_keys = _group_agent_keys(group)
+    outcomes, ready_keys = _preview_group_membership(tenant, group, agents)
+    counts = {
+        "requested": len(outcomes),
+        "ready": len(ready_keys) if mode == "preview" else 0,
+        "applied": 0,
+        "unchanged": sum(item["status"] == "unchanged" for item in outcomes),
+        "rejected": sum(item["status"] == "rejected" for item in outcomes),
+    }
+    next_revision = current_revision
+    if mode == "apply":
+        outcomes = [
+            {
+                **item,
+                "status": "applied",
+                "reasonCode": "assigned",
+                "message": "Agent was assigned.",
+            }
+            if item["status"] == "ready"
+            else item
+            for item in outcomes
+        ]
+        counts["applied"] = len(ready_keys)
+        counts["ready"] = 0
+        if ready_keys:
+            next_revision += 1
+    response = {
+        "groupId": group_id,
+        "requestId": request_id,
+        "mode": mode,
+        "membershipRevision": current_revision,
+        "resultingMembershipRevision": next_revision,
+        "counts": counts,
+        "outcomes": outcomes,
+        "canApply": mode == "preview" and bool(ready_keys),
+        "partialFailure": bool(counts["rejected"]),
+        "replayed": False,
+    }
+    if mode == "preview":
+        return 200, response
+    now = int(time.time())
+    audit_payload = {
+        "request_id": request_id,
+        "request_hash": request_hash,
+        "group_id": group_id,
+        "membership_revision_before": current_revision,
+        "membership_revision_after": next_revision,
+        "requested_count": counts["requested"],
+        "applied_count": counts["applied"],
+        "unchanged_count": counts["unchanged"],
+        "rejected_count": counts["rejected"],
+        "reason": reason,
+    }
+    audit = _membership_audit_record(tenant, event_type, actor, audit_payload, now=now)
+    status_code = 207 if counts["rejected"] else 200
+    operation = {
+        **operation_key,
+        "id": request_id,
+        "group_id": group_id,
+        "actor": actor,
+        "request_hash": request_hash,
+        "status_code": status_code,
+        "created_at": now,
+        "response": response,
+    }
+    operations = []
+    if ready_keys:
+        updated = {
+            **group,
+            "agent_keys": sorted(set(current_keys + ready_keys)),
+            "membership_revision": next_revision,
+        }
+        if "membership_revision" in group:
+            condition = "agent_keys = :agent_keys AND membership_revision = :membership_revision"
+            values = {
+                ":agent_keys": current_keys,
+                ":membership_revision": current_revision,
+            }
+        else:
+            condition = "agent_keys = :agent_keys AND attribute_not_exists(membership_revision)"
+            values = {":agent_keys": current_keys}
+        operations.append(_transaction_put(updated, condition=condition, values=values))
+    operations.extend(
+        [
+            _transaction_put(operation, condition="attribute_not_exists(pk)"),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _transact_group_membership(operations)
+    _export_group_membership_audit(tenant, event_type, actor, audit_payload)
+    return status_code, response
+
+
+def _remove_group_member(tenant, group_id, agent_key, actor):
+    """Remove one membership with compare-and-swap and co-committed evidence."""
+    group = TABLE.get_item(Key=_item_key(tenant, "GROUP", group_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not group:
+        raise LookupError("group not found")
+    current_keys = _group_agent_keys(group)
+    if agent_key not in current_keys:
+        return group
+    revision = _group_membership_revision(group)
+    updated = {
+        **group,
+        "agent_keys": [key for key in current_keys if key != agent_key],
+        "membership_revision": revision + 1,
+    }
+    now = int(time.time())
+    deployment_id, agent_id = agent_key.split(":", 1)
+    payload = {
+        "group_id": group_id,
+        "deployment_id": deployment_id,
+        "agent_id": agent_id,
+        "membership_revision_before": revision,
+        "membership_revision_after": revision + 1,
+    }
+    audit = _membership_audit_record(tenant, "agent_removed_from_group", actor, payload, now=now)
+    if "membership_revision" in group:
+        condition = "agent_keys = :agent_keys AND membership_revision = :membership_revision"
+        values = {":agent_keys": current_keys, ":membership_revision": revision}
+    else:
+        condition = "agent_keys = :agent_keys AND attribute_not_exists(membership_revision)"
+        values = {":agent_keys": current_keys}
+    _transact_group_membership(
+        [
+            _transaction_put(updated, condition=condition, values=values),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_group_membership_audit(tenant, "agent_removed_from_group", actor, payload)
+    return updated
+
+
 def _decision_value(body, field, allowed):
     """Return one value from a closed decision-evidence vocabulary."""
     value = body.get(field)
@@ -3663,6 +4063,7 @@ def _seed(tenant):
             "policyName": "Safe default policy",
             "createdAt": now,
             "agent_keys": ["deployment-claude-local:agent-claude-local"],
+            "membership_revision": 1,
         },
     )
     _put(
@@ -3720,6 +4121,7 @@ def _fleet(tenant):
     agents = _all_agents(tenant)
     groups = []
     for group in _list(tenant, "GROUP"):
+        group["membershipRevision"] = _group_membership_revision(group)
         group["agents"] = [
             a for a in agents if f"{a['deployment_id']}:{a['id']}" in group.get("agent_keys", [])
         ]
@@ -4409,24 +4811,29 @@ def _replace_agent(tenant, deployment_id, agent_id, body, actor):
         _transaction_put(successor, condition="attribute_not_exists(pk)"),
     ]
     for group in groups:
-        current_keys = group.get("agent_keys", [])
-        if (
-            not isinstance(current_keys, list)
-            or len(current_keys) > _MAX_LIST_ITEMS
-            or any(not isinstance(key, str) or not key for key in current_keys)
-        ):
-            raise PolicyConflict("agent group membership is malformed")
+        current_keys = _group_agent_keys(group)
+        membership_revision = _group_membership_revision(group)
         updated_group = {
             **group,
             # Keep the revoked predecessor as retained assignment evidence;
             # only the new active identity can exercise authority.
             "agent_keys": sorted(set(current_keys + [replacement_key])),
+            "membership_revision": membership_revision + 1,
         }
+        if "membership_revision" in group:
+            condition = "agent_keys = :agent_keys AND membership_revision = :membership_revision"
+            values = {
+                ":agent_keys": current_keys,
+                ":membership_revision": membership_revision,
+            }
+        else:
+            condition = "agent_keys = :agent_keys AND attribute_not_exists(membership_revision)"
+            values = {":agent_keys": current_keys}
         operations.append(
             _transaction_put(
                 updated_group,
-                condition="agent_keys = :agent_keys",
-                values={":agent_keys": current_keys},
+                condition=condition,
+                values=values,
             )
         )
     audit = _agent_lifecycle_audit_record(
@@ -5663,6 +6070,7 @@ def handler(event, context):
                             "policyName": policy["name"],
                             "createdAt": int(time.time()),
                             "agent_keys": [],
+                            "membership_revision": 1,
                         },
                     )
                 except Exception as error:
@@ -5670,7 +6078,7 @@ def handler(event, context):
                         return _response(409, {"error": "group already exists"})
                     raise
                 _audit(tenant, "group_created", actor, {"group_id": group_id})
-                return _response(201, {**item, "agents": []})
+                return _response(201, {**item, "membershipRevision": 1, "agents": []})
             if (
                 method == "POST"
                 and len(parts) == 3
@@ -5704,8 +6112,22 @@ def handler(event, context):
                 policy = _ensure_policy_governance(tenant, policy)
                 if int(policy.get("version", 0)) <= 0:
                     raise PolicyConflict("group policies must have an active governed version")
+                current_agent_keys = _group_agent_keys(group)
+                current_policy_id = group.get("policyId")
                 group.update({"policyId": policy["id"], "policyName": policy["name"]})
-                TABLE.put_item(Item=group)
+                try:
+                    TABLE.put_item(
+                        Item=group,
+                        ConditionExpression="agent_keys = :agent_keys AND policyId = :policy_id",
+                        ExpressionAttributeValues={
+                            ":agent_keys": current_agent_keys,
+                            ":policy_id": current_policy_id,
+                        },
+                    )
+                except Exception as error:
+                    if _is_conditional_conflict(error):
+                        raise PolicyConflict("group authority changed concurrently") from error
+                    raise
                 _audit(
                     tenant,
                     "group_policy_changed",
@@ -5715,6 +6137,19 @@ def handler(event, context):
                 return _response(
                     200, next(g for g in _fleet(tenant)["groups"] if g["id"] == parts[1])
                 )
+            if (
+                method == "POST"
+                and len(parts) == 4
+                and parts[0] == "groups"
+                and parts[2:] == ["agents", "bulk"]
+            ):
+                status_code, result = _bulk_assign_group_membership(
+                    tenant,
+                    _bounded_identifier(parts[1], "groupId"),
+                    _body(event),
+                    actor,
+                )
+                return _response(status_code, result)
             if (
                 method == "POST"
                 and len(parts) == 3
@@ -5753,14 +6188,22 @@ def handler(event, context):
                         409,
                         {"error": "group and agent must belong to the same organization"},
                     )
-                group["agent_keys"] = sorted(set(group.get("agent_keys", []) + [key]))
-                TABLE.put_item(Item=group)
-                _audit(
+                status_code, result = _bulk_assign_group_membership(
                     tenant,
-                    "agent_added_to_group",
+                    parts[1],
+                    {
+                        "mode": "apply",
+                        "requestId": str(uuid.uuid4()),
+                        "expectedMembershipRevision": _group_membership_revision(group),
+                        "agents": [{"deploymentId": deployment_id, "agentId": agent_id}],
+                        "reason": "Single-agent assignment requested by an authorized operator.",
+                    },
                     actor,
-                    {"group_id": parts[1], "agent_id": agent_id},
+                    event_type="agent_added_to_group",
                 )
+                if status_code == 207:
+                    outcome = result["outcomes"][0]
+                    return _response(409, {"error": outcome["message"]})
                 return _response(
                     200, next(g for g in _fleet(tenant)["groups"] if g["id"] == parts[1])
                 )
@@ -5770,18 +6213,13 @@ def handler(event, context):
                 and parts[0] == "groups"
                 and parts[2] == "agents"
             ):
-                group = TABLE.get_item(Key=_item_key(tenant, "GROUP", parts[1])).get("Item")
+                group = TABLE.get_item(
+                    Key=_item_key(tenant, "GROUP", parts[1]), ConsistentRead=True
+                ).get("Item")
                 key = f"{parts[3]}:{parts[4]}"
                 if not group:
                     return _response(404, {"error": "group not found"})
-                group["agent_keys"] = [item for item in group.get("agent_keys", []) if item != key]
-                TABLE.put_item(Item=group)
-                _audit(
-                    tenant,
-                    "agent_removed_from_group",
-                    actor,
-                    {"group_id": parts[1], "agent_id": parts[4]},
-                )
+                _remove_group_member(tenant, parts[1], key, actor)
                 return _response(
                     200, next(g for g in _fleet(tenant)["groups"] if g["id"] == parts[1])
                 )

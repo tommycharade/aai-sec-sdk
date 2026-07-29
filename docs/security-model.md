@@ -119,6 +119,19 @@ cannot attach an enrolled agent or policy from a sibling organization by
 guessing its identifier. Missing legacy ownership and nonexistent agents fail
 closed rather than creating a dangling or cross-boundary reference.
 
+Bulk membership assignment preserves that boundary at fleet scale. Requests
+are limited to 100 unique targets, carry an exact expected membership revision,
+and are evaluated from strongly consistent group and agent records. Preview is
+read-only and grants no reservation or authority. Apply repeats validation and
+uses one DynamoDB transaction to compare-and-swap the membership set, persist
+an actor-bound idempotency result, and create immutable content-minimised audit
+evidence. A concurrent membership change rolls back the entire transaction.
+Per-agent business rejection may produce an explicit partial result, but no
+rejected target is mutated. Reusing a request ID with different actor, group,
+revision, reason, or target set fails closed. The API also rejects adding an
+active agent already present in another group so a browser cannot create the
+ambiguous multi-group authority that runtime verification denies.
+
 ## Guarantees and non-guarantees
 
 The SDK aims to guarantee that unknown or unauthorized actions do not execute
