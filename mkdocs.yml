@@ -58,6 +58,7 @@ nav:
   - Enterprise user journeys: enterprise-user-journeys.md
   - Enterprise rollout P0 and P1 requirements: enterprise-rollout-p0-p1-requirements.md
   - Enterprise P0 and P1 implementation status: p0-p1-implementation-status.md
+  - AWS pilot acceptance evidence — 2026-07-29: aws-pilot-acceptance-2026-07-29.md
   - Microsoft Entra SCIM lifecycle runbook: entra-scim-runbook.md
   - Enterprise operations readiness: enterprise-operations-readiness.md
   - Product Owner rollout review: product-owner-enterprise-claude-rollout-review-2026-07-27.md

@@ -109,7 +109,7 @@ Follow the [Entra SCIM lifecycle runbook](entra-scim-runbook.md).
 | `platform-admin` | All administrative capabilities; reserve for tenant administration and break glass |
 | `security-operator` | Exact-action approval and incident response |
 | `policy-author` | Policy, Skill and MCP resource changes |
-| `policy-approver` | Exact-action approval and future four-eyes policy approval |
+| `policy-approver` | Independently review, stage and activate governed policy versions |
 | `fleet-operator` | Deployments, groups and agent lifecycle |
 | `incident-responder` | Emergency stop, containment and alert response |
 | `auditor` | Read-only evidence |
@@ -118,6 +118,11 @@ After deployment, retain evidence for one successful Entra login, tenant
 resolution, every permitted role action, every denied cross-role action, an
 unknown role, and a mismatched Entra tenant. Federation configuration alone is
 not enterprise SSO acceptance evidence.
+
+The current pilot's post-deployment result is recorded in
+[AWS pilot acceptance evidence](aws-pilot-acceptance-2026-07-29.md). Entra OIDC
+and SCIM are not configured in that environment, so the source contracts must
+not be presented as live federation acceptance.
 
 The authenticated `GET /enterprise/identity` route returns redaction-safe
 provider status, tenant hint, active roles and the enforced role matrix. It

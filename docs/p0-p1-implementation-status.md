@@ -78,7 +78,7 @@ installation or live host-load acceptance.
 | Workstream | Status | Implemented foundation | Major remaining work |
 | --- | --- | --- | --- |
 | Fleet lifecycle | Partial | Enrollment, groups, assignment, health, rollouts, rollback, drift and emergency stop | Bulk operations, dynamic groups, revoke/delete/replace, owner metadata, managed upgrades, exception expiry and offboarding |
-| Policy governance | Partial | Typed editor, immutable version number, readable effective policy, assignment impact and rollback | Draft/review/approve lifecycle, four-eyes, simulation, semantic diff, signed bundles, inheritance and expiring exceptions |
+| Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, self-approval denial, staging, atomic activation, assignment impact and rollback | Historical simulation, richer semantic diff, signed bundles, scheduling, inheritance, expiring exceptions and measured endpoint convergence |
 | Security operations | Partial | Alerts, approvals, audit timeline and emergency stops | Cases, quarantine, automatic containment, credential revocation, detections, anomaly controls and workflow integrations |
 | Reporting and administration | Partial | Fleet posture, health, SLO and compliance evidence summaries | Coverage denominator, executive/auditor reports, delegated scopes, service identities, Terraform, CMK/residency and private access |
 
@@ -113,3 +113,17 @@ fail-closed evidence, not an acceptance pass. P0-06 still requires a configured
 pilot tenant and real Entra OIDC sign-in, role transition and token-revocation
 exercise, followed by break glass, quarterly access certification and
 delegated administrative scopes.
+
+## Current AWS acceptance — 2026-07-29
+
+The governed policy lifecycle and hosted UI are merged and deployed. The live
+safe-default policy migrated to an immutable active version-2 ledger entry
+without changing active authority. Public unauthenticated policy and identity
+requests fail with HTTP 401.
+
+The managed Claude Code and Codex registrations on Kratos are not currently
+verified: both heartbeats are expired, runtime manifests are not configured,
+and exact managed configuration is not freshly proven. Entra OIDC and SCIM are
+also not configured. These are explicit rollout blockers, not dashboard-only
+warnings. See [AWS pilot acceptance evidence](aws-pilot-acceptance-2026-07-29.md)
+for the exact pass/fail record and release sequence.
