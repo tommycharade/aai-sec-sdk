@@ -1,5 +1,14 @@
 # Changelog
 
+- Added irreversible agent lifecycle governance to the AWS control plane and
+  enterprise UI. Revocation immediately denies every existing session and
+  unused bootstrap token through the live agent record; replacement atomically
+  creates a new offline identity and inherits group assignment without
+  reactivating the predecessor; offboarding stores a content-minimised
+  tombstone instead of deleting required evidence. Every transition uses an
+  optimistic lifecycle revision and commits immutable DynamoDB evidence in the
+  same transaction. The UI shows exact impact and requires a reason plus typed
+  identity confirmation.
 - Fixed group authority edges so a group can reference only an existing agent
   and active policy owned by the same server-resolved organization. Missing
   ownership, missing agents and cross-organization membership or policy

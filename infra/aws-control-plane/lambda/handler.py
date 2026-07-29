@@ -91,6 +91,12 @@ _AGENT_TELEMETRY_INTEGER_FIELDS = _AGENT_TELEMETRY_FIELDS - {
     "maxLatencyMs",
 }
 
+# Presence and lifecycle are separate trust dimensions. Presence may move
+# between connected and offline; lifecycle authority moves only forward from
+# active to revoked to deleted and is checked on every authenticated request.
+_AGENT_LIFECYCLE_STATES = frozenset({"active", "revoked", "deleted"})
+_AGENT_REPLACEMENT_GROUP_LIMIT = 97
+
 # Agent decision evidence is operationally useful but never authoritative.
 # The authenticated host may report only this fixed, content-free vocabulary;
 # tenant, agent, deployment, policy and timestamps are derived server-side.
@@ -598,6 +604,27 @@ def _token_key(prefix, token):
     return f"{prefix}#{hashlib.sha256(token.encode()).hexdigest()}"
 
 
+def _agent_lifecycle_state(agent):
+    """Return a valid lifecycle state while treating legacy records as active.
+
+    Legacy compatibility is intentionally one-way: a missing field means the
+    pre-lifecycle active state, but an unknown or malformed field fails closed.
+    Mutation paths migrate legacy records to an explicit revision before a
+    transition so concurrent operators cannot overwrite each other.
+    """
+    state = agent.get("lifecycle_state", "active") if isinstance(agent, dict) else None
+    return state if state in _AGENT_LIFECYCLE_STATES else "invalid"
+
+
+def _require_active_agent(agent):
+    """Reject any missing, revoked, deleted or malformed agent authority."""
+    if not agent:
+        raise LookupError("agent not found")
+    if _agent_lifecycle_state(agent) != "active":
+        raise PolicyConflict("agent identity is revoked or offboarded")
+    return agent
+
+
 def _agent_session(event):
     """Resolve an unexpired, one-time-issued agent session token."""
     token = _bearer(event)
@@ -629,10 +656,12 @@ def _agent_identity(path, event):
         or not secrets.compare_digest(supplied_scope, session_scope)
     ):
         raise PermissionError("agent session project scope mismatch")
-    agent = TABLE.get_item(
-        Key=_item_key(session["tenant_id"], "AGENT", f"{parts[1]}:{parts[2]}"),
-        ConsistentRead=True,
-    ).get("Item")
+    agent = _explicit_agent_lifecycle(session["tenant_id"], parts[1], parts[2])
+    if not agent or _agent_lifecycle_state(agent) != "active":
+        # Session rows are deliberately short lived and keyed only by a token
+        # digest. The authoritative agent record is therefore the immediate
+        # revocation point for every previously issued session.
+        raise PermissionError("agent identity is revoked or offboarded")
     registered_root = agent.get("project_root") if agent else None
     if (
         not isinstance(registered_root, str)
@@ -1326,7 +1355,7 @@ def _export_identity_governance_audit(tenant, event_type, actor, payload):
     """Best-effort replicate an already durable governance event into S3 audit."""
     try:
         _audit(tenant, event_type, actor, payload)
-    except Exception as error:
+    except Exception:
         # DynamoDB transaction evidence is already durable. Do not make a
         # committed authority change look uncommitted because its secondary
         # S3 replication failed; emit only a content-free operational signal.
@@ -1334,6 +1363,53 @@ def _export_identity_governance_audit(tenant, event_type, actor, payload):
             json.dumps(
                 {"warning": "identity governance audit replication failed", "event": event_type}
             )
+        )
+
+
+def _agent_lifecycle_audit_record(tenant, event_type, actor, payload, *, now):
+    """Build immutable lifecycle evidence committed with the authority change.
+
+    This DynamoDB record is the primary durable evidence. S3 is a secondary
+    export, so an audit-bucket outage can never leave a lifecycle transition
+    without a reviewable record or falsely report a committed transition as
+    failed.
+    """
+    event_id = str(uuid.uuid4())
+    redacted = {
+        "event_type": event_type,
+        "actor": actor,
+        "tenant_id": tenant,
+        "occurred_at": now,
+        "payload": payload,
+    }
+    return {
+        **_item_key(tenant, "AGENT_LIFECYCLE_AUDIT", f"{now:012d}#{event_id}"),
+        **redacted,
+        "id": event_id,
+        "payload_hash": hashlib.sha256(
+            json.dumps(redacted, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+
+
+def _transact_agent_lifecycle(operations):
+    """Atomically commit lifecycle authority, memberships and durable audit."""
+    try:
+        DYNAMODB.transact_write_items(TransactItems=operations)
+    except Exception as error:
+        code = getattr(error, "response", {}).get("Error", {}).get("Code")
+        if code in {"ConditionalCheckFailedException", "TransactionCanceledException"}:
+            raise PolicyConflict("agent lifecycle state changed concurrently") from error
+        raise
+
+
+def _export_agent_lifecycle_audit(tenant, event_type, actor, payload):
+    """Best-effort replicate an already durable lifecycle event into S3."""
+    try:
+        _audit(tenant, event_type, actor, payload)
+    except Exception:
+        print(
+            json.dumps({"warning": "agent lifecycle audit replication failed", "event": event_type})
         )
 
 
@@ -1868,8 +1944,8 @@ def _enterprise_integrations():
 def _body(event):
     try:
         return json.loads(event.get("body") or "{}")
-    except json.JSONDecodeError:
-        raise ValueError("Malformed JSON")
+    except json.JSONDecodeError as error:
+        raise ValueError("Malformed JSON") from error
 
 
 def _agent_telemetry(value):
@@ -3072,7 +3148,10 @@ def _audit(tenant, event_type, actor, payload):
     encoded = json.dumps(redacted, sort_keys=True).encode()
     digest = hashlib.sha256(encoded).hexdigest()
     redacted["payload_hash"] = digest
-    key = f"tenant={tenant}/year={time.gmtime().tm_year}/month={time.gmtime().tm_mon:02d}/{int(time.time())}-{uuid.uuid4()}.json"
+    key = (
+        f"tenant={tenant}/year={time.gmtime().tm_year}/"
+        f"month={time.gmtime().tm_mon:02d}/{int(time.time())}-{uuid.uuid4()}.json"
+    )
     S3.put_object(
         Bucket=os.environ["AUDIT_BUCKET"],
         Key=key,
@@ -3316,7 +3395,9 @@ def _seed(tenant):
                     "name": "Repository review",
                     "description": "Read-only repository review guidance.",
                     "version": "1.0.0",
-                    "content": "# Repository review\\nReview source changes and report findings.\\n",
+                    "content": (
+                        "# Repository review\\nReview source changes and report findings.\\n"
+                    ),
                     "digest": "sha256:synthetic-repository-review",
                     "enabled": True,
                     "createdAt": now,
@@ -3478,6 +3559,9 @@ def _seed(tenant):
             "last_heartbeat": now,
             "expires_at": now + 300,
             "emergencyStop": False,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            "created_at": now,
         },
     )
     _audit(tenant, "bootstrap_seeded", "system", {"deployment_id": "deployment-claude-local"})
@@ -3487,7 +3571,13 @@ def _all_agents(tenant):
     agents = _list(tenant, "AGENT")
     now = int(time.time())
     for agent in agents:
-        if agent.get("expires_at", 0) < now and agent.get("status") != "offline":
+        if _agent_lifecycle_state(agent) != "active":
+            # Historical records remain visible as evidence but can never be
+            # presented as live presence or counted as an active session.
+            agent.update(
+                {"status": "offline", "last_heartbeat": 0, "expires_at": 0, "emergencyStop": True}
+            )
+        elif agent.get("expires_at", 0) < now and agent.get("status") != "offline":
             agent["status"] = "offline"
         agent["managed_configuration"] = _managed_configuration_posture(tenant, agent, now=now)
     return agents
@@ -3541,7 +3631,13 @@ def _fleet(tenant):
             "schemaVersion": 1,
             "organizationId": "org-demo",
             "generatedAt": int(time.time()),
-            "activeSessionCount": len(agents),
+            "activeSessionCount": sum(
+                1
+                for agent in agents
+                if _agent_lifecycle_state(agent) == "active"
+                and agent.get("status") == "connected"
+                and int(agent.get("expires_at", 0)) > int(time.time())
+            ),
             "deploymentCount": len(_list(tenant, "DEPLOYMENT")),
             "deployments": [],
             "audit": [],
@@ -3585,8 +3681,10 @@ def _verify_agent(tenant, deployment_id, agent_id):
     fleet_stopped = _fleet_emergency_stop_active(tenant)
     agent_stopped = bool(agent and agent.get("emergencyStop", False))
     registered = bool(agent)
+    lifecycle_active = bool(agent and _agent_lifecycle_state(agent) == "active")
     heartbeat_current = bool(
         agent
+        and lifecycle_active
         and agent.get("status") == "connected"
         and int(agent.get("expires_at", 0)) > checked_at
     )
@@ -3626,6 +3724,14 @@ def _verify_agent(tenant, deployment_id, agent_id):
                 "Agent is registered to this deployment."
                 if registered
                 else "Agent is not registered to this deployment."
+            ),
+        },
+        "lifecycle": {
+            "passed": lifecycle_active,
+            "detail": (
+                "Agent identity is active."
+                if lifecycle_active
+                else "Agent identity is revoked, offboarded, or malformed."
             ),
         },
         "heartbeat": {
@@ -3725,11 +3831,19 @@ def _configuration(tenant):
     utc = time.gmtime()
     today_start = int(time.time()) - (utc.tm_hour * 3600 + utc.tm_min * 60 + utc.tm_sec)
     decisions_today = [item for item in decisions if int(item.get("observed_at", 0)) >= today_start]
+    agents = _all_agents(tenant)
+    active_sessions = sum(
+        1
+        for agent in agents
+        if _agent_lifecycle_state(agent) == "active"
+        and agent.get("status") == "connected"
+        and int(agent.get("expires_at", 0)) > int(time.time())
+    )
     return {
         "dashboard": {
             "generatedAt": now,
             "posture": "critical" if fleet_stopped else "healthy",
-            "activeSessions": len(_all_agents(tenant)),
+            "activeSessions": active_sessions,
             "decisionsToday": len(decisions_today),
             "decisionCountsTruncated": decisions_truncated,
             "deniedToday": sum(1 for item in decisions_today if item.get("decision") == "denied"),
@@ -3746,7 +3860,7 @@ def _configuration(tenant):
                     "tools": 0,
                     "projectRoot": a.get("project_root"),
                 }
-                for a in _all_agents(tenant)
+                for a in agents
             ],
             "recentAudit": [_decision_view(item) for item in decisions[:50]],
         },
@@ -3796,6 +3910,294 @@ def _configuration(tenant):
     }
 
 
+def _agent_lifecycle_revision(value):
+    """Require an explicit positive revision for optimistic concurrency."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("expectedLifecycleRevision must be a positive integer")
+    return value
+
+
+def _stored_agent_lifecycle_revision(value):
+    """Normalize one DynamoDB integral revision without accepting booleans."""
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        return None
+    if isinstance(value, Decimal) and value != value.to_integral_value():
+        return None
+    normalized = int(value)
+    return normalized if normalized > 0 else None
+
+
+def _agent_lifecycle_reason(value):
+    """Require enough operator context for a useful retained evidence record."""
+    reason = _bounded_text(value, "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("reason must contain at least 20 characters")
+    return reason
+
+
+def _explicit_agent_lifecycle(tenant, deployment_id, agent_id):
+    """Load an agent and migrate a legacy active record without replacing it."""
+    key = _item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}")
+    agent = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if not agent:
+        return None
+    state = _agent_lifecycle_state(agent)
+    revision = _stored_agent_lifecycle_revision(agent.get("lifecycle_revision"))
+    if state != "invalid" and revision is not None:
+        return agent
+    if "lifecycle_state" in agent or "lifecycle_revision" in agent:
+        raise PolicyConflict("agent lifecycle record is malformed")
+    try:
+        updated = TABLE.update_item(
+            Key=key,
+            UpdateExpression="SET lifecycle_state = :active, lifecycle_revision = :one",
+            ConditionExpression=(
+                "attribute_exists(pk) AND attribute_not_exists(lifecycle_state) "
+                "AND attribute_not_exists(lifecycle_revision)"
+            ),
+            ExpressionAttributeValues={":active": "active", ":one": 1},
+            ReturnValues="ALL_NEW",
+        ).get("Attributes")
+    except Exception as error:
+        if not _is_conditional_conflict(error):
+            raise
+        updated = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if (
+        not updated
+        or _agent_lifecycle_state(updated) == "invalid"
+        or _stored_agent_lifecycle_revision(updated.get("lifecycle_revision")) is None
+    ):
+        raise PolicyConflict("agent lifecycle record is malformed")
+    return updated
+
+
+def _agent_lifecycle_condition(record, expected_revision, expected_state):
+    """Build a compare-and-swap Put for one explicit lifecycle revision."""
+    return _transaction_put(
+        record,
+        condition="#lifecycle_state = :expected_state AND #lifecycle_revision = :revision",
+        names={
+            "#lifecycle_state": "lifecycle_state",
+            "#lifecycle_revision": "lifecycle_revision",
+        },
+        values={":expected_state": expected_state, ":revision": expected_revision},
+    )
+
+
+def _revoke_agent(tenant, deployment_id, agent_id, body, actor):
+    """Irreversibly revoke one identity and every old session/bootstrap token."""
+    if not isinstance(body, dict) or set(body) != {"expectedLifecycleRevision", "reason"}:
+        raise ValueError("agent revoke request schema is invalid")
+    expected = _agent_lifecycle_revision(body.get("expectedLifecycleRevision"))
+    reason = _agent_lifecycle_reason(body.get("reason"))
+    agent = _explicit_agent_lifecycle(tenant, deployment_id, agent_id)
+    if not agent:
+        return None
+    if _agent_lifecycle_state(agent) != "active":
+        raise PolicyConflict("only an active agent can be revoked")
+    if int(agent["lifecycle_revision"]) != expected:
+        raise PolicyConflict("agent lifecycle revision is stale")
+    now = int(time.time())
+    updated = {
+        **agent,
+        "lifecycle_state": "revoked",
+        "lifecycle_revision": expected + 1,
+        "revoked_at": now,
+        "revoked_by": actor,
+        "revocation_reason": reason,
+        "status": "offline",
+        "last_heartbeat": 0,
+        "expires_at": 0,
+        "emergencyStop": True,
+    }
+    payload = {
+        "deployment_id": deployment_id,
+        "agent_id": agent_id,
+        "lifecycle_revision": expected + 1,
+        "reason": reason,
+    }
+    audit = _agent_lifecycle_audit_record(tenant, "agent_identity_revoked", actor, payload, now=now)
+    _transact_agent_lifecycle(
+        [
+            _agent_lifecycle_condition(updated, expected, "active"),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_agent_lifecycle_audit(tenant, "agent_identity_revoked", actor, payload)
+    return updated
+
+
+def _offboard_agent(tenant, deployment_id, agent_id, body, actor):
+    """Tombstone a revoked identity while retaining content-minimised evidence."""
+    if not isinstance(body, dict) or set(body) != {"expectedLifecycleRevision", "reason"}:
+        raise ValueError("agent offboard request schema is invalid")
+    expected = _agent_lifecycle_revision(body.get("expectedLifecycleRevision"))
+    reason = _agent_lifecycle_reason(body.get("reason"))
+    agent = _explicit_agent_lifecycle(tenant, deployment_id, agent_id)
+    if not agent:
+        return None
+    if _agent_lifecycle_state(agent) != "revoked":
+        raise PolicyConflict("an agent must be revoked before it can be offboarded")
+    if int(agent["lifecycle_revision"]) != expected:
+        raise PolicyConflict("agent lifecycle revision is stale")
+    now = int(time.time())
+    project_root = agent.get("project_root", "")
+    tombstone = {
+        **_item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}"),
+        "tenant_id": tenant,
+        "id": agent_id,
+        "organization_id": agent.get("organization_id", ""),
+        "project_id": agent.get("project_id", ""),
+        "deployment_id": deployment_id,
+        "host": agent.get("host", ""),
+        "project_root": "",
+        "project_root_hash": (
+            hashlib.sha256(project_root.encode()).hexdigest() if project_root else ""
+        ),
+        "environment": agent.get("environment", ""),
+        "region": agent.get("region", ""),
+        "status": "offline",
+        "last_heartbeat": 0,
+        "expires_at": 0,
+        "emergencyStop": True,
+        "created_at": int(agent.get("created_at", 0)),
+        "lifecycle_state": "deleted",
+        "lifecycle_revision": expected + 1,
+        "revoked_at": int(agent.get("revoked_at", 0)),
+        "revoked_by": agent.get("revoked_by", ""),
+        "revocation_reason": agent.get("revocation_reason", ""),
+        "deleted_at": now,
+        "deleted_by": actor,
+        "deletion_reason": reason,
+        "replacement_agent_id": agent.get("replacement_agent_id", ""),
+        "successor_of": agent.get("successor_of", ""),
+    }
+    payload = {
+        "deployment_id": deployment_id,
+        "agent_id": agent_id,
+        "lifecycle_revision": expected + 1,
+        "reason": reason,
+        "project_root_hash": tombstone["project_root_hash"],
+    }
+    audit = _agent_lifecycle_audit_record(
+        tenant, "agent_identity_offboarded", actor, payload, now=now
+    )
+    _transact_agent_lifecycle(
+        [
+            _agent_lifecycle_condition(tombstone, expected, "revoked"),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_agent_lifecycle_audit(tenant, "agent_identity_offboarded", actor, payload)
+    return tombstone
+
+
+def _replace_agent(tenant, deployment_id, agent_id, body, actor):
+    """Create a successor and revoke its predecessor in one bounded transaction."""
+    required = {"expectedLifecycleRevision", "reason", "replacementAgentId"}
+    if not isinstance(body, dict) or set(body) != required:
+        raise ValueError("agent replacement request schema is invalid")
+    expected = _agent_lifecycle_revision(body.get("expectedLifecycleRevision"))
+    reason = _agent_lifecycle_reason(body.get("reason"))
+    replacement_id = _bounded_identifier(body.get("replacementAgentId"), "replacementAgentId")
+    if replacement_id == agent_id:
+        raise ValueError("replacementAgentId must create a new identity")
+    agent = _explicit_agent_lifecycle(tenant, deployment_id, agent_id)
+    if not agent:
+        return None
+    if _agent_lifecycle_state(agent) != "active":
+        raise PolicyConflict("only an active agent can be replaced")
+    if int(agent["lifecycle_revision"]) != expected:
+        raise PolicyConflict("agent lifecycle revision is stale")
+    replacement_key = f"{deployment_id}:{replacement_id}"
+    if TABLE.get_item(Key=_item_key(tenant, "AGENT", replacement_key), ConsistentRead=True).get(
+        "Item"
+    ):
+        raise PolicyConflict("replacement agent identity already exists")
+    old_key = f"{deployment_id}:{agent_id}"
+    groups = [
+        group
+        for group in _list(tenant, "GROUP", consistent_read=True)
+        if old_key in group.get("agent_keys", [])
+    ]
+    if len(groups) > _AGENT_REPLACEMENT_GROUP_LIMIT:
+        raise PolicyConflict("agent belongs to too many groups for atomic replacement")
+    now = int(time.time())
+    predecessor = {
+        **agent,
+        "lifecycle_state": "revoked",
+        "lifecycle_revision": expected + 1,
+        "revoked_at": now,
+        "revoked_by": actor,
+        "revocation_reason": reason,
+        "replacement_agent_id": replacement_id,
+        "status": "offline",
+        "last_heartbeat": 0,
+        "expires_at": 0,
+        "emergencyStop": True,
+    }
+    successor = {
+        **_item_key(tenant, "AGENT", replacement_key),
+        "tenant_id": tenant,
+        "id": replacement_id,
+        "organization_id": agent.get("organization_id", ""),
+        "project_id": agent.get("project_id", ""),
+        "deployment_id": deployment_id,
+        "host": agent.get("host", ""),
+        "project_root": agent.get("project_root", ""),
+        "environment": agent.get("environment", ""),
+        "region": agent.get("region", ""),
+        "status": "offline",
+        "last_heartbeat": 0,
+        "expires_at": 0,
+        "emergencyStop": False,
+        "created_at": now,
+        "lifecycle_state": "active",
+        "lifecycle_revision": 1,
+        "successor_of": agent_id,
+    }
+    payload = {
+        "deployment_id": deployment_id,
+        "agent_id": agent_id,
+        "replacement_agent_id": replacement_id,
+        "lifecycle_revision": expected + 1,
+        "inherited_group_ids": sorted(group.get("id", "") for group in groups),
+        "reason": reason,
+    }
+    operations = [
+        _agent_lifecycle_condition(predecessor, expected, "active"),
+        _transaction_put(successor, condition="attribute_not_exists(pk)"),
+    ]
+    for group in groups:
+        current_keys = group.get("agent_keys", [])
+        if (
+            not isinstance(current_keys, list)
+            or len(current_keys) > _MAX_LIST_ITEMS
+            or any(not isinstance(key, str) or not key for key in current_keys)
+        ):
+            raise PolicyConflict("agent group membership is malformed")
+        updated_group = {
+            **group,
+            # Keep the revoked predecessor as retained assignment evidence;
+            # only the new active identity can exercise authority.
+            "agent_keys": sorted(set(current_keys + [replacement_key])),
+        }
+        operations.append(
+            _transaction_put(
+                updated_group,
+                condition="agent_keys = :agent_keys",
+                values={":agent_keys": current_keys},
+            )
+        )
+    audit = _agent_lifecycle_audit_record(
+        tenant, "agent_identity_replaced", actor, payload, now=now
+    )
+    operations.append(_transaction_put(audit, condition="attribute_not_exists(pk)"))
+    _transact_agent_lifecycle(operations)
+    _export_agent_lifecycle_audit(tenant, "agent_identity_replaced", actor, payload)
+    return {"predecessor": predecessor, "replacement": successor, "requiresBootstrap": True}
+
+
 def _issue_agent_bootstrap(tenant, body, actor):
     """Create a one-time enrollment secret for an already registered agent."""
     deployment_id = body.get("deploymentId")
@@ -3808,9 +4210,12 @@ def _issue_agent_bootstrap(tenant, body, actor):
     ):
         raise ValueError("deploymentId and agentId are required")
     agent_key = f"{deployment_id}:{agent_id}"
-    agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key)).get("Item")
+    agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
+        "Item"
+    )
     if not agent:
         raise ValueError("agent must be registered before enrollment")
+    _require_active_agent(agent)
     project_root = agent.get("project_root")
     if not isinstance(project_root, str) or not project_root:
         raise ValueError("agent must have a project root before enrollment")
@@ -3866,7 +4271,9 @@ def _enroll_agent(event):
         Key=_item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}"),
         ConsistentRead=True,
     ).get("Item")
-    if not agent or agent.get("project_root") != project_root:
+    if not agent or _agent_lifecycle_state(agent) != "active":
+        raise PermissionError("agent identity is revoked or offboarded")
+    if agent.get("project_root") != project_root:
         raise PermissionError("registered agent project scope mismatch")
     # Validate immutable scope before consuming the one-time secret. The
     # conditional delete then makes successful exchange one-shot under races.
@@ -3942,6 +4349,7 @@ def _renew_agent_session(tenant, session, current_token):
 
 
 def handler(event, context):
+    """Route one API Gateway request through agent or operator trust boundaries."""
     try:
         method, path = _method_path(event)
         if method == "OPTIONS":
@@ -3993,7 +4401,23 @@ def handler(event, context):
                         "expires_at": int(time.time()) + 300,
                     }
                 )
-                TABLE.put_item(Item=item)
+                try:
+                    TABLE.put_item(
+                        Item=item,
+                        ConditionExpression=(
+                            "lifecycle_state = :active AND lifecycle_revision = :revision"
+                        ),
+                        ExpressionAttributeValues={
+                            ":active": "active",
+                            ":revision": int(item["lifecycle_revision"]),
+                        },
+                    )
+                except Exception as error:
+                    if _is_conditional_conflict(error):
+                        raise PermissionError(
+                            "agent identity changed while heartbeat was processed"
+                        ) from error
+                    raise
                 return _response(
                     200, {**item, **_renew_agent_session(tenant, session, _bearer(event))}
                 )
@@ -4137,8 +4561,16 @@ def handler(event, context):
                 try:
                     updated = TABLE.update_item(
                         Key=_item_key(tenant, "APPROVAL", approval_id),
-                        UpdateExpression="SET #consumed = :true, #status = :consumed_status, consumed_at = :now",
-                        ConditionExpression="attribute_exists(pk) AND #status = :approved_status AND #consumed = :false AND #expires_at > :now AND #agent_key = :agent AND #action_hash = :action_hash AND #tool_name = :tool_name AND #proposal_id = :proposal_id AND #task_id = :task_id AND #principal_id = :principal_id",
+                        UpdateExpression=(
+                            "SET #consumed = :true, #status = :consumed_status, consumed_at = :now"
+                        ),
+                        ConditionExpression=(
+                            "attribute_exists(pk) AND #status = :approved_status AND "
+                            "#consumed = :false AND #expires_at > :now AND "
+                            "#agent_key = :agent AND #action_hash = :action_hash AND "
+                            "#tool_name = :tool_name AND #proposal_id = :proposal_id AND "
+                            "#task_id = :task_id AND #principal_id = :principal_id"
+                        ),
                         ExpressionAttributeNames={
                             "#consumed": "consumed",
                             "#status": "status",
@@ -4926,8 +5358,14 @@ def handler(event, context):
                 try:
                     updated = TABLE.update_item(
                         Key=_item_key(tenant, "APPROVAL", approval_id),
-                        UpdateExpression="SET #status = :decision, decided_at = :now, decided_by = :actor, decision_reason = :reason, expires_at = :expires_at, #ttl = :ttl",
-                        ConditionExpression="attribute_exists(pk) AND #status = :pending AND expires_at > :now",
+                        UpdateExpression=(
+                            "SET #status = :decision, decided_at = :now, "
+                            "decided_by = :actor, decision_reason = :reason, "
+                            "expires_at = :expires_at, #ttl = :ttl"
+                        ),
+                        ConditionExpression=(
+                            "attribute_exists(pk) AND #status = :pending AND expires_at > :now"
+                        ),
                         ExpressionAttributeNames={"#status": "status", "#ttl": "ttl"},
                         ExpressionAttributeValues={
                             ":decision": decision,
@@ -5012,12 +5450,8 @@ def handler(event, context):
                 # Group policy is an authority edge. Resolve both organization
                 # owners from server records so a browser or delegated operator
                 # cannot bridge two business-unit boundaries by identifier.
-                group_organization = group.get("organizationId") or group.get(
-                    "organization_id"
-                )
-                policy_organization = policy.get("organization_id") or policy.get(
-                    "organizationId"
-                )
+                group_organization = group.get("organizationId") or group.get("organization_id")
+                policy_organization = policy.get("organization_id") or policy.get("organizationId")
                 if (
                     not group_organization
                     or not policy_organization
@@ -5061,15 +5495,15 @@ def handler(event, context):
                 ).get("Item")
                 if not agent:
                     return _response(404, {"error": "agent not found"})
+                if _agent_lifecycle_state(agent) != "active":
+                    return _response(
+                        409, {"error": "only an active agent can receive group authority"}
+                    )
                 # Membership changes policy authority. The enrolled agent's
                 # immutable server-owned organization must exactly match the
                 # group's owner; missing legacy ownership fails closed.
-                group_organization = group.get("organizationId") or group.get(
-                    "organization_id"
-                )
-                agent_organization = agent.get("organization_id") or agent.get(
-                    "organizationId"
-                )
+                group_organization = group.get("organizationId") or group.get("organization_id")
+                agent_organization = agent.get("organization_id") or agent.get("organizationId")
                 if (
                     not group_organization
                     or not agent_organization
@@ -5128,6 +5562,12 @@ def handler(event, context):
                     ConsistentRead=True,
                 ).get("Item")
                 if existing:
+                    existing = _explicit_agent_lifecycle(tenant, deployment_id, agent_id)
+                    if _agent_lifecycle_state(existing) != "active":
+                        return _response(
+                            409,
+                            {"error": "revoked or offboarded agent identities cannot be reused"},
+                        )
                     existing_root = existing.get("project_root")
                     if existing_root:
                         if existing_root != project_root:
@@ -5198,6 +5638,8 @@ def handler(event, context):
                             "expires_at": 0,
                             "emergencyStop": False,
                             "created_at": now,
+                            "lifecycle_state": "active",
+                            "lifecycle_revision": 1,
                         },
                     )
                 except Exception as error:
@@ -5212,6 +5654,24 @@ def handler(event, context):
                 )
                 return _response(201, item)
             if (
+                method == "POST"
+                and len(parts) == 4
+                and parts[0] == "agents"
+                and parts[3] in {"revoke", "replace", "offboard"}
+            ):
+                deployment_id = _bounded_identifier(parts[1], "deploymentId")
+                agent_id = _bounded_identifier(parts[2], "agentId")
+                operation = parts[3]
+                lifecycle_handler = {
+                    "revoke": _revoke_agent,
+                    "replace": _replace_agent,
+                    "offboard": _offboard_agent,
+                }[operation]
+                result = lifecycle_handler(tenant, deployment_id, agent_id, _body(event), actor)
+                if result is None:
+                    return _response(404, {"error": "agent not found"})
+                return _response(201 if operation == "replace" else 200, result)
+            if (
                 method == "GET"
                 and len(parts) == 4
                 and parts[0] == "agents"
@@ -5221,6 +5681,8 @@ def handler(event, context):
                 agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key)).get("Item")
                 if not agent:
                     return _response(404, {"error": "agent not found"})
+                if _agent_lifecycle_state(agent) != "active":
+                    return _response(409, {"error": "agent identity is revoked or offboarded"})
                 scope = _delegated_item_scope(tenant, "AGENT", agent)
                 if not _operator_roles(event) and (
                     scope is None or not _delegated_operator_can_read(tenant, event, "AGENT", scope)
@@ -5282,10 +5744,32 @@ def handler(event, context):
                 and parts[-1] == "emergency-stop"
             ):
                 agent = TABLE.get_item(
-                    Key=_item_key(tenant, "AGENT", f"{parts[1]}:{parts[2]}")
+                    Key=_item_key(tenant, "AGENT", f"{parts[1]}:{parts[2]}"),
+                    ConsistentRead=True,
                 ).get("Item")
+                if not agent:
+                    return _response(404, {"error": "agent not found"})
+                if _agent_lifecycle_state(agent) != "active":
+                    return _response(409, {"error": "agent identity is revoked or offboarded"})
+                agent = _require_active_agent(_explicit_agent_lifecycle(tenant, parts[1], parts[2]))
                 agent["emergencyStop"] = bool(_body(event).get("active", True))
-                TABLE.put_item(Item=agent)
+                try:
+                    TABLE.put_item(
+                        Item=agent,
+                        ConditionExpression=(
+                            "lifecycle_state = :active AND lifecycle_revision = :revision"
+                        ),
+                        ExpressionAttributeValues={
+                            ":active": "active",
+                            ":revision": int(agent["lifecycle_revision"]),
+                        },
+                    )
+                except Exception as error:
+                    if _is_conditional_conflict(error):
+                        raise PolicyConflict(
+                            "agent lifecycle state changed concurrently"
+                        ) from error
+                    raise
                 _audit(
                     tenant,
                     "agent_emergency_stop",
