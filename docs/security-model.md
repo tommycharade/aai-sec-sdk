@@ -38,6 +38,29 @@ An authorization decision should include, at minimum:
 - current policy and manifest versions;
 - approval, budget, idempotency, and kill-switch state.
 
+## Operator identity and authorization
+
+The hosted control plane treats operator authentication, tenant entitlement
+and role authority as separate facts. Cognito verifies the token. A native
+trial user resolves tenant through an immutable claim or server-owned subject
+mapping. A Microsoft Entra ID user receives provider provenance from a Cognito
+pre-token trigger only after that trigger identifies the configured federated
+profile. The API then compares the Entra tenant to deployment configuration
+and selects a provisioned AAI tenant; request JSON and browser state never
+select tenant authority.
+
+Entra authentication does not directly grant an AAI role. Canonical roles are
+currently controlled through Cognito-managed groups and are translated into
+explicit capabilities for runtime administration, policy authoring, policy
+approval, fleet operation, action approval and incident response. Exact role
+names are parsed from bounded JWT claims; malformed values and lookalike names
+grant no authority. Read-only auditors receive no mutation capability.
+
+The current Entra adapter does not yet provide SCIM lifecycle or automatic app
+role/group reconciliation. Those gaps remain visible in the UI and in the
+[P0/P1 implementation status](p0-p1-implementation-status.md). A configured
+identity provider is not evidence that joiner, mover and leaver controls work.
+
 ## Guarantees and non-guarantees
 
 The SDK aims to guarantee that unknown or unauthorized actions do not execute

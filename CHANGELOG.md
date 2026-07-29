@@ -1,5 +1,13 @@
 # Changelog
 
+- Added the first Microsoft Entra ID enterprise federation boundary for the
+  AWS control plane. Deployment uses tenant-specific OIDC, resolves the client
+  secret from Secrets Manager, annotates Cognito tokens with non-authoritative
+  provider provenance, and independently maps the configured directory to a
+  provisioned AAI tenant. Seven canonical operator roles now authorize explicit
+  route capabilities instead of a generic mutation bit. New redaction-safe
+  identity/integration APIs expose verified posture while labelling SCIM as
+  unconfigured and Splunk as a non-delivering stub.
 - Corrected Codex CLI onboarding order so engineers establish project trust
   before attempting MCP or hook verification. The installer now explains that
   Codex skips the entire project security layer while untrusted, prints the

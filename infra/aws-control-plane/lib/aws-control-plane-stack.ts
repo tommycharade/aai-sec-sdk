@@ -24,6 +24,23 @@ export class AwsControlPlaneStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    const entraTenantId = process.env.ENTRA_TENANT_ID?.trim();
+    const entraClientId = process.env.ENTRA_CLIENT_ID?.trim();
+    const entraClientSecretName = process.env.ENTRA_CLIENT_SECRET_NAME?.trim();
+    const entraAaiTenantId = process.env.ENTRA_AAI_TENANT_ID?.trim();
+    const entraInputs = [entraTenantId, entraClientId, entraClientSecretName, entraAaiTenantId];
+    if (entraInputs.some(Boolean) && !entraInputs.every(Boolean)) {
+      throw new Error(
+        "ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET_NAME and ENTRA_AAI_TENANT_ID must be configured together",
+      );
+    }
+    if (
+      entraTenantId
+      && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entraTenantId)
+    ) {
+      throw new Error("ENTRA_TENANT_ID must be a tenant-specific UUID");
+    }
+
     const table = new dynamodb.Table(this, "ControlPlaneTable", {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "sk", type: dynamodb.AttributeType.STRING },
@@ -154,7 +171,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
       signInAliases: { email: true },
       mfa: cognito.Mfa.OPTIONAL,
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
-      customAttributes: { tenant_id: new cognito.StringAttribute({ mutable: false }) },
+      customAttributes: {
+        tenant_id: new cognito.StringAttribute({ mutable: false }),
+      },
       passwordPolicy: { minLength: 14, requireLowercase: true, requireUppercase: true, requireDigits: true, requireSymbols: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
@@ -165,7 +184,22 @@ export class AwsControlPlaneStack extends cdk.Stack {
       // can carry the same visual identity as the control-plane landing page.
       managedLoginVersion: cognito.ManagedLoginVersion.NEWER_MANAGED_LOGIN,
     });
-    new cognito.CfnUserPoolGroup(this, "PlatformAdmins", { userPoolId: userPool.userPoolId, groupName: "platform-admin", description: "Operators allowed to change tenant control-plane state" });
+    const nativeOperatorGroups = [
+      ["PlatformAdmins", "platform-admin", "Tenant administration and break-glass recovery"],
+      ["SecurityOperators", "security-operator", "Security monitoring, response and approval operations"],
+      ["PolicyAuthors", "policy-author", "Draft and update policy resources"],
+      ["PolicyApprovers", "policy-approver", "Approve policy and exact-action changes"],
+      ["FleetOperators", "fleet-operator", "Manage deployments, groups and enrolled agents"],
+      ["IncidentResponders", "incident-responder", "Contain agents and acknowledge incidents"],
+      ["Auditors", "auditor", "Read-only evidence and compliance access"],
+    ] as const;
+    for (const [constructId, groupName, description] of nativeOperatorGroups) {
+      new cognito.CfnUserPoolGroup(this, constructId, {
+        userPoolId: userPool.userPoolId,
+        groupName,
+        description,
+      });
+    }
     const trialOnboarding = new lambda.Function(this, "TrialOnboarding", {
       runtime: lambda.Runtime.PYTHON_3_13,
       architecture: lambda.Architecture.ARM_64,
@@ -183,9 +217,57 @@ export class AwsControlPlaneStack extends cdk.Stack {
     // not receive user lookup, attribute-write, or pool-management rights.
     trialOnboarding.addToRolePolicy(new iam.PolicyStatement({ actions: ["cognito-idp:AdminAddUserToGroup"], resources: [`arn:aws:cognito-idp:${this.region}:${this.account}:userpool/*`] }));
     userPool.addTrigger(cognito.UserPoolOperation.POST_CONFIRMATION, trialOnboarding);
+    let entraProvider: cognito.UserPoolIdentityProviderOidc | undefined;
+    if (entraTenantId && entraClientId && entraClientSecretName && entraAaiTenantId) {
+      entraProvider = new cognito.UserPoolIdentityProviderOidc(this, "MicrosoftEntraId", {
+        userPool,
+        name: "MicrosoftEntraID",
+        issuerUrl: `https://login.microsoftonline.com/${entraTenantId}/v2.0`,
+        clientId: entraClientId,
+        // Resolve the secret at deployment time. It is never written to the
+        // repository, Lambda environment or CloudFormation plaintext output.
+        clientSecret: cdk.SecretValue.secretsManager(entraClientSecretName).toString(),
+        scopes: ["openid", "email", "profile"],
+        attributeRequestMethod: cognito.OidcAttributeRequestMethod.GET,
+        attributeMapping: {
+          email: cognito.ProviderAttribute.other("email"),
+          givenName: cognito.ProviderAttribute.other("given_name"),
+          familyName: cognito.ProviderAttribute.other("family_name"),
+        },
+      });
+      const entraClaims = new lambda.Function(this, "MicrosoftEntraClaims", {
+        runtime: lambda.Runtime.PYTHON_3_13,
+        architecture: lambda.Architecture.ARM_64,
+        handler: "pre_token.handler",
+        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+        timeout: cdk.Duration.seconds(5),
+        memorySize: 128,
+        environment: {
+          ENTRA_PROVIDER_NAME: entraProvider.providerName,
+          ENTRA_TENANT_ID: entraTenantId,
+        },
+      });
+      // V2 can add independently verified provider provenance to both ID and
+      // access tokens. The API still resolves application tenant and roles
+      // from server-owned configuration; these claims are not authorization.
+      userPool.addTrigger(
+        cognito.UserPoolOperation.PRE_TOKEN_GENERATION_CONFIG,
+        entraClaims,
+        cognito.LambdaVersion.V2_0,
+      );
+    }
     const client = userPool.addClient("WebClient", {
       generateSecret: false,
       authFlows: { userSrp: true },
+      supportedIdentityProviders: [
+        cognito.UserPoolClientIdentityProvider.COGNITO,
+        ...(entraProvider
+          ? [cognito.UserPoolClientIdentityProvider.custom(entraProvider.providerName)]
+          : []),
+      ],
+      readAttributes: new cognito.ClientAttributes()
+        .withStandardAttributes({ email: true, givenName: true, familyName: true })
+        .withCustomAttributes("tenant_id"),
       oAuth: {
         flows: { authorizationCodeGrant: true },
         scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
@@ -222,6 +304,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
         PRESENCE_TABLE: presence.tableName,
         IDEMPOTENCY_TABLE: idempotency.tableName,
         AUDIT_BUCKET: audit.bucketName,
+        ENTRA_PROVIDER_ENABLED: entraProvider ? "true" : "false",
+        ENTRA_TENANT_ID: entraTenantId ?? "",
+        ENTRA_AAI_TENANT_ID: entraAaiTenantId ?? "",
+        SPLUNK_STUB_ENABLED: "true",
       },
       tracing: lambda.Tracing.PASS_THROUGH,
     });
@@ -284,6 +370,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "SecurityAlertsTopicArn", { value: securityAlerts.topicArn });
     new cdk.CfnOutput(this, "SecurityAlertsQueueArn", { value: securityAlertsQueue.queueArn });
     new cdk.CfnOutput(this, "SecurityAlertsDlqArn", { value: securityAlertsDlq.queueArn });
+    new cdk.CfnOutput(this, "MicrosoftEntraIdStatus", {
+      value: entraProvider ? "configured" : "not-configured",
+    });
     if (auditReplicaArn) {
       new cdk.CfnOutput(this, "AuditReplicaBucketArn", { value: auditReplicaArn });
       new cdk.CfnOutput(this, "AuditReplicaRegion", { value: process.env.AUDIT_REPLICA_REGION ?? "eu-west-1" });

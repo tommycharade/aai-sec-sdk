@@ -93,6 +93,27 @@ _DECISION_RESOURCE_LABELS = {
     "unknown": "Content redacted",
 }
 
+_CANONICAL_OPERATOR_ROLES = frozenset(
+    {
+        "platform-admin",
+        "security-operator",
+        "policy-author",
+        "policy-approver",
+        "fleet-operator",
+        "incident-responder",
+        "auditor",
+    }
+)
+_ROLE_CAPABILITIES = {
+    "platform-admin": frozenset({"*"}),
+    "security-operator": frozenset({"approval_decision", "incident_response"}),
+    "policy-author": frozenset({"policy_write"}),
+    "policy-approver": frozenset({"approval_decision", "policy_approval"}),
+    "fleet-operator": frozenset({"fleet_write"}),
+    "incident-responder": frozenset({"incident_response"}),
+    "auditor": frozenset(),
+}
+
 
 def _json_default(value):
     """Convert DynamoDB decimals without changing integer API contracts to floats."""
@@ -200,6 +221,22 @@ def _tenant(event):
     # claim is an authentication/entitlement failure, not a default tenant.
     claims = _claims(event)
     tenant = claims.get("custom:tenant_id")
+    if not tenant:
+        # Cognito's pre-token trigger adds this provenance only after inspecting
+        # the server-owned federated identity. It is still not authority: the
+        # deployment-owned mapping below chooses the application tenant and the
+        # tenant must have an independently provisioned root record.
+        provider = claims.get("aai:identity_provider")
+        entra_tenant = claims.get("aai:entra_tenant_id")
+        configured_entra_tenant = os.environ.get("ENTRA_TENANT_ID", "")
+        configured_aai_tenant = os.environ.get("ENTRA_AAI_TENANT_ID", "")
+        if (
+            provider == "microsoft_entra_id"
+            and isinstance(entra_tenant, str)
+            and configured_entra_tenant
+            and secrets.compare_digest(entra_tenant, configured_entra_tenant)
+        ):
+            tenant = configured_aai_tenant
     # Self-signup users are provisioned by the Cognito post-confirmation
     # trigger. Their first token intentionally does not contain a mutable
     # tenant attribute, so resolve the immutable Cognito subject through the
@@ -225,8 +262,72 @@ def _tenant(event):
     return tenant
 
 
+def _bounded_claim_values(raw_value):
+    """Normalize one bounded list-shaped JWT claim without substring matching."""
+    values = []
+    if isinstance(raw_value, list):
+        values = raw_value
+    elif isinstance(raw_value, str) and len(raw_value) <= 2048:
+        value = raw_value.strip()
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, list):
+            values = decoded
+        elif isinstance(decoded, str):
+            values = [decoded]
+        else:
+            if value.startswith("[") and value.endswith("]"):
+                value = value[1:-1]
+            values = [item.strip().strip("\"'") for item in value.split(",")]
+    return {value for value in values if isinstance(value, str) and value and len(value) <= 128}
+
+
+def _operator_roles(event):
+    """Return exact canonical roles from Cognito's server-managed groups.
+
+    Entra authenticates the operator, but its raw claims never directly grant
+    product authority. Entra users are assigned to these canonical groups by
+    the deployment's controlled provisioning/group-mapping process.
+    """
+    return (
+        _bounded_claim_values(_claims(event).get("cognito:groups", [])) & _CANONICAL_OPERATOR_ROLES
+    )
+
+
+def _required_mutation_capability(path):
+    """Classify a mutating route into one least-privilege capability."""
+    normalized = path.removeprefix("/api")
+    if normalized in {"/emergency-stop", "/enterprise/emergency-stop"}:
+        return "incident_response"
+    if "/emergency-stop" in normalized or normalized.endswith("/alerts/dispatch"):
+        return "incident_response"
+    if normalized.startswith("/enterprise/alerts/"):
+        return "incident_response"
+    if normalized.startswith("/enterprise/approvals/"):
+        return "approval_decision"
+    if normalized.startswith("/enterprise/policies"):
+        return "policy_write"
+    if normalized.startswith("/enterprise/skills") or normalized.startswith(
+        "/enterprise/mcp-servers"
+    ):
+        return "policy_write"
+    if normalized.startswith("/configuration"):
+        return "runtime_admin"
+    return "fleet_write"
+
+
+def _operator_authorized(event, capability):
+    """Authorize one explicit capability from canonical operator roles."""
+    return any(
+        "*" in _ROLE_CAPABILITIES[role] or capability in _ROLE_CAPABILITIES[role]
+        for role in _operator_roles(event)
+    )
+
+
 def _mutation_authorized(event):
-    """Authorize operator mutations from API Gateway's string-shaped claims.
+    """Retain the compatibility predicate while enforcing canonical roles.
 
     Cognito represents ``cognito:groups`` as an array in the JWT, while HTTP
     API authorizers expose claim values as strings. Depending on the gateway
@@ -234,28 +335,46 @@ def _mutation_authorized(event):
     bracket/comma text. Normalize only exact group names; malformed values and
     lookalike substrings grant no authority.
     """
-    raw_groups = _claims(event).get("cognito:groups", [])
-    groups = []
-    if isinstance(raw_groups, list):
-        groups = raw_groups
-    elif isinstance(raw_groups, str) and len(raw_groups) <= 2048:
-        value = raw_groups.strip()
-        try:
-            decoded = json.loads(value)
-        except json.JSONDecodeError:
-            decoded = None
-        if isinstance(decoded, list):
-            groups = decoded
-        elif isinstance(decoded, str):
-            groups = [decoded]
-        else:
-            if value.startswith("[") and value.endswith("]"):
-                value = value[1:-1]
-            groups = [item.strip().strip("\"'") for item in value.split(",")]
-    normalized = {
-        group for group in groups if isinstance(group, str) and group and len(group) <= 128
+    return bool(_operator_roles(event))
+
+
+def _identity_access(tenant, event):
+    """Return redaction-safe identity provenance and the enforced role matrix."""
+    entra_tenant = os.environ.get("ENTRA_TENANT_ID", "")
+    configured = (
+        os.environ.get("ENTRA_PROVIDER_ENABLED") == "true"
+        and bool(entra_tenant)
+        and os.environ.get("ENTRA_AAI_TENANT_ID") == tenant
+    )
+    return {
+        "provider": "microsoft_entra_id",
+        "providerLabel": "Microsoft Entra ID",
+        "protocol": "oidc",
+        "status": "configured" if configured else "not_configured",
+        "tenantHint": f"{entra_tenant[:8]}…" if configured else None,
+        "tenantBinding": "server_owned",
+        "roleSource": "cognito_managed_groups",
+        "scimStatus": "not_configured",
+        "activeRoles": sorted(_operator_roles(event)),
+        "roleMatrix": [
+            {"role": role, "capabilities": sorted(capabilities)}
+            for role, capabilities in _ROLE_CAPABILITIES.items()
+        ],
     }
-    return bool({"platform-admin", "security-operator"}.intersection(normalized))
+
+
+def _enterprise_integrations():
+    """Return honest integration posture without exposing destination secrets."""
+    return {
+        "splunk": {
+            "provider": "splunk_hec",
+            "status": "stub" if os.environ.get("SPLUNK_STUB_ENABLED") == "true" else "disabled",
+            "deliveryVerified": False,
+            "description": (
+                "Schema and operator workflow placeholder only; no event delivery is configured."
+            ),
+        }
+    }
 
 
 def _body(event):
@@ -497,12 +616,8 @@ def _decision_view(item):
         "agent": item.get("agent_id", "unknown-agent"),
         "tool": item.get("tool_name", "unknown-tool"),
         "decision": item["decision"],
-        "reason": _DECISION_REASON_LABELS.get(
-            item.get("reason_code"), "Policy decision recorded"
-        ),
-        "resource": _DECISION_RESOURCE_LABELS.get(
-            item.get("resource_kind"), "Content redacted"
-        ),
+        "reason": _DECISION_REASON_LABELS.get(item.get("reason_code"), "Policy decision recorded"),
+        "resource": _DECISION_RESOURCE_LABELS.get(item.get("resource_kind"), "Content redacted"),
         "source": item.get("source", "sdk_runtime"),
         "deploymentId": item.get("deployment_id", ""),
         "policyId": item.get("policy_id", ""),
@@ -529,33 +644,26 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
     }
     supplied_fields = set(body) if isinstance(body, dict) else set()
     if not isinstance(body, dict) or (
-        supplied_fields != required_fields
-        and supplied_fields != required_fields | {"actionDigest"}
+        supplied_fields != required_fields and supplied_fields != required_fields | {"actionDigest"}
     ):
         raise ValueError("decision evidence contains unsupported fields")
     decision_id = body.get("decisionId")
-    if (
-        not isinstance(decision_id, str)
-        or not re.fullmatch(r"[0-9a-f]{64}", decision_id)
-    ):
+    if not isinstance(decision_id, str) or not re.fullmatch(r"[0-9a-f]{64}", decision_id):
         raise ValueError("decisionId must be a SHA-256 event digest")
     tool_name = _bounded_text(body.get("toolName"), "toolName", 128)
     decision = _decision_value(body, "decision", _DECISION_VALUES)
     source = _decision_value(body, "source", _DECISION_SOURCES)
-    resource_kind = _decision_value(
-        body, "resourceKind", _DECISION_RESOURCE_KINDS
-    )
+    resource_kind = _decision_value(body, "resourceKind", _DECISION_RESOURCE_KINDS)
     reason_code = _decision_value(body, "reasonCode", _DECISION_REASON_CODES)
     action_digest = body.get("actionDigest")
     if action_digest is not None and (
-        not isinstance(action_digest, str)
-        or not re.fullmatch(r"[0-9a-f]{64}", action_digest)
+        not isinstance(action_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", action_digest)
     ):
         raise ValueError("actionDigest must be a SHA-256 action digest")
     agent_key = f"{deployment_id}:{agent_id}"
-    agent = TABLE.get_item(
-        Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True
-    ).get("Item")
+    agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
+        "Item"
+    )
     if not agent:
         raise PermissionError("registered agent is required")
     groups = [
@@ -1070,12 +1178,8 @@ def _configuration(tenant):
     fleet_stopped = _fleet_emergency_stop_active(tenant)
     decisions, decisions_truncated = _decision_window(tenant)
     utc = time.gmtime()
-    today_start = int(time.time()) - (
-        utc.tm_hour * 3600 + utc.tm_min * 60 + utc.tm_sec
-    )
-    decisions_today = [
-        item for item in decisions if int(item.get("observed_at", 0)) >= today_start
-    ]
+    today_start = int(time.time()) - (utc.tm_hour * 3600 + utc.tm_min * 60 + utc.tm_sec)
+    decisions_today = [item for item in decisions if int(item.get("observed_at", 0)) >= today_start]
     return {
         "dashboard": {
             "generatedAt": now,
@@ -1083,9 +1187,7 @@ def _configuration(tenant):
             "activeSessions": len(_all_agents(tenant)),
             "decisionsToday": len(decisions_today),
             "decisionCountsTruncated": decisions_truncated,
-            "deniedToday": sum(
-                1 for item in decisions_today if item.get("decision") == "denied"
-            ),
+            "deniedToday": sum(1 for item in decisions_today if item.get("decision") == "denied"),
             "approvalQueue": _pending_approval_count(tenant),
             "timedOutWorkers": 0,
             "emergencyStop": fleet_stopped,
@@ -1330,9 +1432,7 @@ def handler(event, context):
                     200, {**item, **_renew_agent_session(tenant, session, _bearer(event))}
                 )
             if method == "POST" and action == ["decisions"]:
-                recorded = _record_agent_decision(
-                    tenant, deployment_id, agent_id, _body(event)
-                )
+                recorded = _record_agent_decision(tenant, deployment_id, agent_id, _body(event))
                 return _response(409 if recorded.get("conflict") else 202, recorded)
             if method == "GET" and action == ["effective-policy"]:
                 agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key)).get("Item")
@@ -1515,8 +1615,16 @@ def handler(event, context):
         tenant = _tenant(event)
         _seed(tenant)
         actor = _claims(event).get("sub", "cognito-operator")
-        if method in {"POST", "PUT", "PATCH", "DELETE"} and not _mutation_authorized(event):
-            return _response(403, {"error": "operator mutation role is required"})
+        if method in {"POST", "PUT", "PATCH", "DELETE"}:
+            capability = _required_mutation_capability(path)
+            if not _operator_authorized(event, capability):
+                return _response(
+                    403,
+                    {
+                        "error": "operator role does not permit this action",
+                        "requiredCapability": capability,
+                    },
+                )
         if path in ("/configuration", "/api/configuration") and method == "GET":
             return _response(200, _configuration(tenant))
         if path in ("/dashboard", "/api/dashboard") and method == "GET":
@@ -1592,6 +1700,10 @@ def handler(event, context):
                 return _response(200, {"items": items, "nextCursor": None})
             if method == "GET" and parts == ["capabilities"]:
                 return _response(200, _fleet(tenant)["capabilities"])
+            if method == "GET" and parts == ["identity"]:
+                return _response(200, _identity_access(tenant, event))
+            if method == "GET" and parts == ["integrations"]:
+                return _response(200, _enterprise_integrations())
             if method == "GET" and parts == ["tenant"]:
                 root = TABLE.get_item(
                     Key=_item_key(tenant, "TENANT", "root"), ConsistentRead=True
@@ -1610,9 +1722,7 @@ def handler(event, context):
                 return _response(200, _fleet(tenant)["complianceEvidence"])
             if method == "POST" and parts == ["projects"]:
                 body = _body(event)
-                organization_id = _bounded_identifier(
-                    body.get("organizationId"), "organizationId"
-                )
+                organization_id = _bounded_identifier(body.get("organizationId"), "organizationId")
                 project_id = _bounded_identifier(body.get("projectId"), "projectId")
                 organization = TABLE.get_item(
                     Key=_item_key(tenant, "ORG", organization_id),
@@ -1640,13 +1750,9 @@ def handler(event, context):
                 return _response(201, item)
             if method == "POST" and parts == ["deployments"]:
                 body = _body(event)
-                organization_id = _bounded_identifier(
-                    body.get("organizationId"), "organizationId"
-                )
+                organization_id = _bounded_identifier(body.get("organizationId"), "organizationId")
                 project_id = _bounded_identifier(body.get("projectId"), "projectId")
-                deployment_id = _bounded_identifier(
-                    body.get("deploymentId"), "deploymentId"
-                )
+                deployment_id = _bounded_identifier(body.get("deploymentId"), "deploymentId")
                 project = TABLE.get_item(
                     Key=_item_key(tenant, "PROJECT", project_id),
                     ConsistentRead=True,
@@ -1658,9 +1764,7 @@ def handler(event, context):
                     "organization_id": organization_id,
                     "project_id": project_id,
                     "name": _bounded_text(body.get("name"), "name"),
-                    "environment": _bounded_text(
-                        body.get("environment"), "environment", 64
-                    ),
+                    "environment": _bounded_text(body.get("environment"), "environment", 64),
                     "region": _bounded_text(body.get("region"), "region", 64),
                     "team": _bounded_text(body.get("team", "Unassigned"), "team", 128),
                     "sdk_version": _bounded_text(
@@ -1669,9 +1773,7 @@ def handler(event, context):
                     "created_at": int(time.time()),
                 }
                 try:
-                    item = _create_item(
-                        tenant, "DEPLOYMENT", deployment_id, item_values
-                    )
+                    item = _create_item(tenant, "DEPLOYMENT", deployment_id, item_values)
                 except Exception as error:
                     if _is_conditional_conflict(error):
                         return _response(409, {"error": "deployment already exists"})
@@ -2111,9 +2213,7 @@ def handler(event, context):
                 body = _body(event)
                 group_id = _bounded_identifier(body.get("groupId"), "groupId")
                 policy_id = _bounded_identifier(body.get("policyId"), "policyId")
-                policy = next(
-                    (p for p in _list(tenant, "POLICY") if p["id"] == policy_id), None
-                )
+                policy = next((p for p in _list(tenant, "POLICY") if p["id"] == policy_id), None)
                 if not policy:
                     return _response(400, {"error": "policy not found"})
                 try:
@@ -2207,9 +2307,7 @@ def handler(event, context):
             if method == "POST" and parts == ["agents", "register"]:
                 body = _body(event)
                 agent_id = _bounded_identifier(body.get("agentId"), "agentId")
-                deployment_id = _bounded_identifier(
-                    body.get("deploymentId"), "deploymentId"
-                )
+                deployment_id = _bounded_identifier(body.get("deploymentId"), "deploymentId")
                 deployment = TABLE.get_item(
                     Key=_item_key(tenant, "DEPLOYMENT", deployment_id),
                     ConsistentRead=True,
