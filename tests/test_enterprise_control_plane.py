@@ -447,6 +447,86 @@ def test_agent_registration_heartbeat_expiry_and_disconnect_are_secret_safe(tmp_
     }
 
 
+def test_managed_configuration_posture_is_server_derived_and_fail_closed(tmp_path: Path) -> None:
+    """Desired and observed managed bundles match exactly and expire predictably."""
+    clock = Clock()
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite", now=clock)
+    seed(store)
+    operator = identity("org-a")
+    registered = store.register_agent(
+        operator,
+        deployment_id="deploy-a",
+        agent_id="codex-a",
+        host="codex-cli",
+        project_root="/workspace/payments",
+    )
+    desired = {
+        "host": "codex-cli",
+        "hostVersion": "0.146.0",
+        "platform": "linux",
+        "bundleHash": "b" * 64,
+        "policyId": "policy-safe",
+        "policyVersion": 4,
+    }
+    store.create_template(
+        operator,
+        template_id="managed-codex",
+        name="Managed Codex",
+        configuration={"managedHost": desired},
+    )
+    store.assign_template(operator, "deploy-a", "managed-codex")
+    assert (
+        store.list_inventory(operator, "agents").items[0]["managed_configuration"]["status"]
+        == "missing"
+    )
+
+    report = {
+        **desired,
+        "source": "codex-system",
+        "verifiedAt": 990,
+        "expiresAt": 1_100,
+    }
+    enforced = store.heartbeat(
+        operator,
+        "deploy-a",
+        "codex-a",
+        registered["sessionId"],
+        managed_configuration=report,
+    )
+    assert enforced["managed_configuration"]["status"] == "enforced"
+    assert enforced["managed_configuration"]["observed"]["source"] == "codex-system"
+
+    changed = dict(report, bundleHash="c" * 64)
+    conflict = store.heartbeat(
+        operator,
+        "deploy-a",
+        "codex-a",
+        registered["sessionId"],
+        managed_configuration=changed,
+    )
+    assert conflict["managed_configuration"]["status"] == "conflict"
+    with pytest.raises(FleetConfigurationError):
+        store.heartbeat(
+            operator,
+            "deploy-a",
+            "codex-a",
+            registered["sessionId"],
+            managed_configuration=dict(report, source="project-file"),
+        )
+    store.heartbeat(
+        operator,
+        "deploy-a",
+        "codex-a",
+        registered["sessionId"],
+        managed_configuration=report,
+    )
+    clock.value = 1_200
+    assert (
+        store.list_inventory(operator, "agents").items[0]["managed_configuration"]["status"]
+        == "stale"
+    )
+
+
 def test_slo_samples_are_bounded_scoped_and_fail_closed(tmp_path: Path) -> None:
     """Availability uses explicit samples, excludes stale data, and isolates tenants."""
     clock = Clock()
@@ -1494,7 +1574,7 @@ def test_agent_verification_reports_each_enrollment_prerequisite(tmp_path: Path)
     store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
     operator = identity("org-a")
     seed(store)
-    store.register_agent(
+    registered = store.register_agent(
         operator,
         deployment_id="deploy-a",
         agent_id="claude-a",
@@ -1517,8 +1597,36 @@ def test_agent_verification_reports_each_enrollment_prerequisite(tmp_path: Path)
     store.add_agent_to_group(
         operator, group_id="group-platform", deployment_id="deploy-a", agent_id="claude-a"
     )
+    desired = {
+        "host": "claude-code",
+        "hostVersion": "2.1.211",
+        "platform": "linux",
+        "bundleHash": "a" * 64,
+        "policyId": "policy-safe",
+        "policyVersion": 1,
+    }
+    store.create_template(
+        operator,
+        template_id="managed-claude",
+        name="Managed Claude",
+        configuration={"managedHost": desired},
+    )
+    store.assign_template(operator, "deploy-a", "managed-claude")
+    store.heartbeat(
+        operator,
+        "deploy-a",
+        "claude-a",
+        registered["sessionId"],
+        managed_configuration={
+            **desired,
+            "source": "endpoint-managed-file",
+            "verifiedAt": 1,
+            "expiresAt": 1_900_000_000,
+        },
+    )
     result = store.verify_agent(operator, deployment_id="deploy-a", agent_id="claude-a")
     assert result["verified"] is True
+    assert result["checks"]["managedConfiguration"]["passed"] is True
     assert result["host"] == "claude-code"
     assert result["groups"] == ["group-platform"]
     assert result["policyId"] == "policy-safe"
