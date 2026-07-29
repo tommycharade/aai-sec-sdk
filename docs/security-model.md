@@ -480,3 +480,25 @@ identity, role, or credential material and are treated as untrusted offsets;
 tenant and project authorization is re-evaluated on every page, and malformed,
 repeated, or excessive pagination fails closed rather than returning an
 unbounded response.
+
+## Managed host configuration boundary
+
+Central policy intent, generated artifacts, installed files, and configuration
+loaded by a running host are distinct security states. The compiler is not an
+installer and desired state is not enforcement evidence. A host has effective
+managed authority only after short-lived endpoint evidence binds the same host
+to the exact bundle digest. Missing, stale, future-dated, wrong-host, and
+mismatched evidence withholds every intended allow.
+
+Generated artifacts contain no credentials and use only absolute managed hook
+commands. Relative paths and shell-composed commands are rejected before
+serialization. MCP identities use HTTPS or absolute local executables and do
+not carry environment values. Endpoint management must independently protect
+the files, executable, launch profile, OS identity, and credential sources.
+
+Host limitations remain visible as coverage rather than being silently
+promoted to enforcement. Claude command/path behavior routed through the AAI
+hook is labelled SDK-enforced; Codex experimental network controls require a
+pinned canary; native Windows Codex deny-read does not constrain reads made by
+shell subprocesses. A policy expression requested with multiple outcomes
+resolves deny-first and remains a conflict requiring audited operator repair.

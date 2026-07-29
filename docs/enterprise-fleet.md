@@ -68,7 +68,7 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/projects` | Create a tenant-scoped project under an existing organization |
 | `POST /api/enterprise/deployments` | Create a deployment whose ownership is derived from its existing project |
 | `POST /api/enterprise/agents/register` | Register an authenticated agent |
-| `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence and optionally publish bounded aggregate SDK telemetry |
+| `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence and optionally publish bounded aggregate SDK telemetry plus managed-host evidence |
 | `POST /api/enterprise/agents/{deployment}/{agent}/disconnect` | Mark offline |
 | `POST /api/agent/{deployment}/{agent}/decisions` | Record one authenticated, content-minimised host decision as operational evidence |
 | `POST /api/agent/{deployment}/{agent}/approvals/request` | Submit a bounded approval request using the authenticated agent session |
@@ -153,6 +153,20 @@ negative, non-finite, oversized, or secret-like fields are rejected. The
 control plane stores the latest snapshot with the agent metadata and exposes
 only that fixed projection to operators; it never stores tool arguments,
 resources, outputs, or credentials as telemetry.
+
+The same heartbeat may include `managedConfiguration`. Its closed schema binds
+`host`, `hostVersion`, `platform`, `bundleHash`, `policyId`, `policyVersion`,
+`source`, `verifiedAt` and `expiresAt`. The server compares those fields with
+the deployment template's `managedHost` desired state and derives posture; the
+agent cannot report `status`. A missing desired bundle is `not_configured`, a
+missing report is `missing`, expired or future-dated evidence is `stale`, and
+any identity or digest difference is `conflict`. Only an exact fresh match is
+`enforced`.
+
+Agent verification requires `enforced` managed posture. This evidence remains
+content-minimised and credential-free. It proves what the approved runtime
+reported, not hardware-backed device identity; endpoint ownership, file
+permissions and approved launch controls remain deployment responsibilities.
 
 ### Host decision evidence
 

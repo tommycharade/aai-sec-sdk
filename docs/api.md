@@ -105,6 +105,30 @@ The example is synthetic and does not connect to a model or external service.
 
 ::: agentic_security.codex_cli
 
+## Managed host policy compilation
+
+The compiler produces deployment artifacts but does not write privileged host
+paths. Effective authority remains fail-closed until independently observed
+endpoint evidence matches the complete desired bundle.
+
+::: agentic_security.managed_configuration.ManagedConfigurationCompiler
+
+::: agentic_security.managed_configuration.ManagedPolicyIntent
+
+::: agentic_security.managed_configuration.NativeActionRule
+
+::: agentic_security.managed_configuration.ManagedCommandRule
+
+::: agentic_security.managed_configuration.ManagedMcpServer
+
+::: agentic_security.managed_configuration.ManagedConfigurationBundle
+
+::: agentic_security.managed_configuration.ObservedManagedConfiguration
+
+::: agentic_security.managed_configuration.EffectiveAuthority
+
+::: agentic_security.managed_configuration.reconcile_effective_authority
+
 Applications normally continue to use `GuardedRuntime`; these contracts are
 provided for integrations and contract tests. Do not construct a permit from
 model output or bypass the runtime lifecycle.

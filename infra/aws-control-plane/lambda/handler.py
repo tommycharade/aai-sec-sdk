@@ -884,6 +884,106 @@ def _agent_telemetry(value):
     return result
 
 
+_MANAGED_HOST_FIELDS = {
+    "host",
+    "hostVersion",
+    "platform",
+    "bundleHash",
+    "policyId",
+    "policyVersion",
+}
+_MANAGED_REPORT_FIELDS = _MANAGED_HOST_FIELDS | {"source", "verifiedAt", "expiresAt"}
+_MANAGED_SOURCES = {
+    "claude-server-managed",
+    "endpoint-managed-file",
+    "mdm",
+    "codex-system",
+    "codex-cloud",
+    "codex-mdm",
+}
+
+
+def _managed_host(value, *, report=False):
+    """Validate desired or endpoint-observed managed host configuration."""
+    expected = _MANAGED_REPORT_FIELDS if report else _MANAGED_HOST_FIELDS
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("managed host configuration has an invalid schema")
+    host = _agent_host(value.get("host"))
+    platform = _bounded_text(value.get("platform"), "platform", 16)
+    bundle_hash = _bounded_text(value.get("bundleHash"), "bundleHash", 64)
+    policy_version = value.get("policyVersion")
+    if platform not in {"macos", "linux", "windows"}:
+        raise ValueError("managed host platform is unsupported")
+    if not re.fullmatch(r"[0-9a-f]{64}", bundle_hash):
+        raise ValueError("managed host bundleHash must be lowercase SHA-256")
+    if (
+        isinstance(policy_version, bool)
+        or not isinstance(policy_version, int)
+        or policy_version <= 0
+    ):
+        raise ValueError("managed host policyVersion must be positive")
+    result = {
+        "host": host,
+        "hostVersion": _bounded_text(value.get("hostVersion"), "hostVersion", 64),
+        "platform": platform,
+        "bundleHash": bundle_hash,
+        "policyId": _bounded_identifier(value.get("policyId"), "policyId"),
+        "policyVersion": policy_version,
+    }
+    if report:
+        source = _bounded_text(value.get("source"), "source", 64)
+        verified_at, expires_at = value.get("verifiedAt"), value.get("expiresAt")
+        if source not in _MANAGED_SOURCES:
+            raise ValueError("managed configuration source is unsupported")
+        if (
+            isinstance(verified_at, bool)
+            or not isinstance(verified_at, int)
+            or isinstance(expires_at, bool)
+            or not isinstance(expires_at, int)
+            or verified_at < 0
+            or expires_at <= verified_at
+        ):
+            raise ValueError("managed configuration timestamps are invalid")
+        result.update({"source": source, "verifiedAt": verified_at, "expiresAt": expires_at})
+    return result
+
+
+def _managed_configuration_posture(tenant, agent, *, now=None):
+    """Compare server-owned desired state with the authenticated endpoint report."""
+    configuration = TABLE.get_item(
+        Key=_item_key(tenant, "CONFIGURATION", agent.get("deployment_id", "")),
+        ConsistentRead=True,
+    ).get("Item")
+    desired_configuration = configuration.get("desiredConfiguration", {}) if configuration else {}
+    desired_value = (
+        desired_configuration.get("managedHost")
+        if isinstance(desired_configuration, dict)
+        else None
+    )
+    desired = _managed_host(desired_value) if isinstance(desired_value, dict) else None
+    observed_value = agent.get("managed_configuration_report")
+    observed = (
+        _managed_host(observed_value, report=True) if isinstance(observed_value, dict) else None
+    )
+    if desired is None:
+        return {"status": "not_configured", "desired": None, "observed": observed}
+    if observed is None:
+        return {"status": "missing", "desired": desired, "observed": None}
+    identity_fields = tuple(_MANAGED_HOST_FIELDS)
+    if agent.get("host") != desired["host"] or any(
+        observed[field] != desired[field] for field in identity_fields
+    ):
+        status = "conflict"
+    else:
+        current = int(time.time()) if now is None else now
+        status = (
+            "stale"
+            if observed["verifiedAt"] > current or observed["expiresAt"] <= current
+            else "enforced"
+        )
+    return {"status": status, "desired": desired, "observed": observed}
+
+
 def _key(kind, identifier):
     return {"pk": f"TENANT#{identifier}", "sk": f"{kind}#{identifier}"}
 
@@ -1486,6 +1586,7 @@ def _all_agents(tenant):
     for agent in agents:
         if agent.get("expires_at", 0) < now and agent.get("status") != "offline":
             agent["status"] = "offline"
+        agent["managed_configuration"] = _managed_configuration_posture(tenant, agent, now=now)
     return agents
 
 
@@ -1585,6 +1686,12 @@ def _verify_agent(tenant, deployment_id, agent_id):
         and agent.get("attestation_status") == "compliant"
         and int(agent.get("attestation_expires_at", 0)) > checked_at
     )
+    managed_configuration = (
+        _managed_configuration_posture(tenant, agent, now=checked_at) if agent else None
+    )
+    managed_configuration_current = bool(
+        managed_configuration and managed_configuration.get("status") == "enforced"
+    )
     if not agent:
         heartbeat_detail = "Agent is not registered to this deployment."
     elif agent.get("status") != "connected":
@@ -1624,6 +1731,14 @@ def _verify_agent(tenant, deployment_id, agent_id):
                 )
             ),
         },
+        "managedConfiguration": {
+            "passed": managed_configuration_current,
+            "detail": (
+                "Exact managed host bundle is freshly observed."
+                if managed_configuration_current
+                else "Managed host configuration is not freshly proven."
+            ),
+        },
         "policyAssignment": {
             "passed": policy_assigned,
             "detail": policy_detail,
@@ -1661,6 +1776,7 @@ def _verify_agent(tenant, deployment_id, agent_id):
             "sdkVersion": agent.get("attestation_sdk_version") if agent else None,
             "sdkRevision": agent.get("attestation_sdk_revision") if agent else None,
         },
+        "managedConfiguration": managed_configuration,
     }
 
 
@@ -1952,6 +2068,11 @@ def handler(event, context):
                 telemetry = _agent_telemetry(body.get("telemetry"))
                 if telemetry is not None:
                     item["telemetry"] = telemetry
+                managed_configuration = body.get("managedConfiguration")
+                if managed_configuration is not None:
+                    item["managed_configuration_report"] = _managed_host(
+                        managed_configuration, report=True
+                    )
                 item.update(
                     {
                         "status": "connected",
@@ -2343,6 +2464,11 @@ def handler(event, context):
                     raise ValueError("templateId is required")
                 if not isinstance(configuration, dict):
                     raise ValueError("template configuration must be an object")
+                if "managedHost" in configuration:
+                    configuration = {
+                        **configuration,
+                        "managedHost": _managed_host(configuration["managedHost"]),
+                    }
                 item = _put(
                     tenant,
                     "TEMPLATE",

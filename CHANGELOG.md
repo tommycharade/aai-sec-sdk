@@ -1,5 +1,11 @@
 # Changelog
 
+- Added typed, deterministic managed-configuration compilation for Claude Code
+  and Codex. Generated endpoint artifacts bind complete policy intent, target
+  host/version, paths and content hashes without carrying credentials. A new
+  effective-authority reconciler withholds all allows for missing, stale,
+  future-dated, wrong-host or mismatched endpoint evidence and reports
+  deny-first policy conflicts rather than presenting desired state as active.
 - Added fail-closed runtime-manifest generation for Claude Code and Codex.
   Operators must use a clean exact-tag checkout, a complete release-evidence
   bundle and successful GitHub provenance verification for both published

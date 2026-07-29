@@ -151,6 +151,15 @@ bearer without writing credentials into project configuration. Missed
 heartbeats, failed renewal, an unsafe cache, and emergency stops remain
 fail-closed.
 
+Heartbeats can also report the exact managed-host bundle loaded by Claude Code
+or Codex. A deployment configuration must first contain a complete
+`managedHost` desired identity (host/client version, platform, policy ID and
+version, and lowercase SHA-256 bundle digest). The Lambda validates a closed
+report schema, compares desired and observed values, and returns the derived
+posture in agent inventory and verification. Missing, stale and conflicting
+evidence blocks a positive verification result. The report carries no file
+contents, commands, MCP credentials or environment values.
+
 The stack also creates a synthetic least-privilege role for scope
 verification. In the current `p1` deployment, IAM simulation allowed
 `s3:GetObject` only below the `tenant-demo/agent-claude-local/` prefix and

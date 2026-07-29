@@ -122,7 +122,31 @@ _FLEET_GOVERNANCE_KEYS: dict[str, frozenset[str]] = {
             "allowedMcpServers",
         }
     ),
+    "managedHost": frozenset(
+        {
+            "host",
+            "hostVersion",
+            "platform",
+            "bundleHash",
+            "policyId",
+            "policyVersion",
+        }
+    ),
 }
+
+_MANAGED_HOSTS = frozenset({"claude-code", "codex-cli"})
+_MANAGED_PLATFORMS = frozenset({"macos", "linux", "windows"})
+_MANAGED_SOURCES = frozenset(
+    {
+        "claude-server-managed",
+        "endpoint-managed-file",
+        "mdm",
+        "codex-system",
+        "codex-cloud",
+        "codex-mdm",
+    }
+)
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 
 
 class FleetConfigurationError(ValueError):
@@ -543,7 +567,15 @@ def _optional_text(value: object, name: str) -> str | None:
 
 def _json_object(value: Mapping[str, Any] | None, name: str) -> str:
     """Serialize bounded metadata while rejecting secret-like fields."""
-    safe_keys = {"environment", "region", "team", "labels", "version", "telemetry"}
+    safe_keys = {
+        "environment",
+        "region",
+        "team",
+        "labels",
+        "version",
+        "telemetry",
+        "managedConfiguration",
+    }
     data = dict(value or {})
     if len(data) > 20 or any(str(key) not in safe_keys for key in data):
         raise FleetConfigurationError(f"{name} contains unsupported metadata")
@@ -551,9 +583,68 @@ def _json_object(value: Mapping[str, Any] | None, name: str) -> str:
         if key == "telemetry":
             data[key] = _normalize_agent_telemetry(item, name)
             continue
+        if key == "managedConfiguration":
+            data[key] = _normalize_managed_configuration_report(item)
+            continue
         if not isinstance(key, str) or not isinstance(item, (str, int, float, bool, list)):
             raise FleetConfigurationError(f"{name} must contain JSON scalar metadata")
     return json.dumps(data, sort_keys=True, separators=(",", ":"))
+
+
+def _normalize_managed_host(value: object, name: str = "managedHost") -> dict[str, Any]:
+    """Validate desired managed-host identity without treating it as observed state."""
+    if not isinstance(value, Mapping) or set(value) != _FLEET_GOVERNANCE_KEYS["managedHost"]:
+        raise FleetConfigurationError(f"{name} must contain the complete managed-host schema")
+    host = _text(value.get("host"), f"{name}.host")
+    platform = _text(value.get("platform"), f"{name}.platform")
+    bundle_hash = _text(value.get("bundleHash"), f"{name}.bundleHash")
+    version = value.get("policyVersion")
+    if host not in _MANAGED_HOSTS:
+        raise FleetConfigurationError(f"{name}.host is unsupported")
+    if platform not in _MANAGED_PLATFORMS:
+        raise FleetConfigurationError(f"{name}.platform is unsupported")
+    if _SHA256_HEX.fullmatch(bundle_hash) is None:
+        raise FleetConfigurationError(f"{name}.bundleHash must be lowercase SHA-256")
+    if not isinstance(version, int) or isinstance(version, bool) or version <= 0:
+        raise FleetConfigurationError(f"{name}.policyVersion must be positive")
+    return {
+        "host": host,
+        "hostVersion": _text(value.get("hostVersion"), f"{name}.hostVersion"),
+        "platform": platform,
+        "bundleHash": bundle_hash,
+        "policyId": _text(value.get("policyId"), f"{name}.policyId"),
+        "policyVersion": version,
+    }
+
+
+def _normalize_managed_configuration_report(value: object) -> dict[str, Any]:
+    """Validate content-minimised endpoint evidence carried by a heartbeat."""
+    required = _FLEET_GOVERNANCE_KEYS["managedHost"] | frozenset(
+        {"source", "verifiedAt", "expiresAt"}
+    )
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise FleetConfigurationError("managedConfiguration has an invalid schema")
+    result = _normalize_managed_host(
+        {key: value.get(key) for key in _FLEET_GOVERNANCE_KEYS["managedHost"]},
+        "managedConfiguration",
+    )
+    source = _text(value.get("source"), "managedConfiguration.source")
+    verified_at, expires_at = value.get("verifiedAt"), value.get("expiresAt")
+    if source not in _MANAGED_SOURCES:
+        raise FleetConfigurationError("managedConfiguration.source is unsupported")
+    if (
+        isinstance(verified_at, bool)
+        or not isinstance(verified_at, (int, float))
+        or isinstance(expires_at, bool)
+        or not isinstance(expires_at, (int, float))
+        or not math.isfinite(float(verified_at))
+        or not math.isfinite(float(expires_at))
+        or verified_at < 0
+        or expires_at <= verified_at
+    ):
+        raise FleetConfigurationError("managedConfiguration timestamps are invalid")
+    result.update({"source": source, "verifiedAt": verified_at, "expiresAt": expires_at})
+    return result
 
 
 def _normalize_agent_telemetry(value: object, name: str = "telemetry") -> dict[str, int | float]:
@@ -634,6 +725,8 @@ def validate_fleet_configuration(configuration: Mapping[str, Any]) -> dict[str, 
                     section[field] = [
                         _command_pattern(pattern, f"claudeCode.{field}") for pattern in patterns
                     ]
+            elif key_text == "managedHost":
+                section = _normalize_managed_host(section)
             normalized[key_text] = section
         else:
             # Preserve legacy extension sections; the recursive bounded and
@@ -906,7 +999,17 @@ class EnterpriseFleetStore:
                     for row in rows
                     if not identity.project_ids or row["project_id"] in identity.project_ids
                 ]
-            items = tuple(_agent_inventory_projection(row) for row in rows)
+            if resource == "agents":
+                projected = []
+                for row in rows:
+                    item = _agent_inventory_projection(row)
+                    item["managed_configuration"] = self._managed_configuration_posture(
+                        row["deployment_id"], row["host"], row["metadata"]
+                    )
+                    projected.append(item)
+                items = tuple(projected)
+            else:
+                items = tuple(_agent_inventory_projection(row) for row in rows)
         return _paginate(items, cursor, limit)
 
     def create_template(
@@ -1432,6 +1535,14 @@ class EnterpriseFleetStore:
                         "Exactly one valid policy group is assigned."
                         if assigned_policy is not None
                         else "Agent must belong to exactly one group with a valid policy."
+                    ),
+                },
+                "managedConfiguration": {
+                    "passed": agent["managed_configuration"]["status"] == "enforced",
+                    "detail": (
+                        "Exact managed host bundle is freshly observed."
+                        if agent["managed_configuration"]["status"] == "enforced"
+                        else "Managed host configuration is not freshly proven."
                     ),
                 },
                 "emergencyStop": {
@@ -2255,8 +2366,9 @@ class EnterpriseFleetStore:
         agent_id: str,
         session_id: str,
         telemetry: Mapping[str, int | float] | None = None,
+        managed_configuration: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Refresh a session and persist only validated aggregate telemetry."""
+        """Refresh a session and persist bounded telemetry and managed evidence."""
         deployment_id, agent_id, session_id = (
             _text(deployment_id, "deploymentId"),
             _text(agent_id, "agentId"),
@@ -2290,6 +2402,10 @@ class EnterpriseFleetStore:
                     metadata = {}
             if telemetry is not None:
                 metadata["telemetry"] = _normalize_agent_telemetry(telemetry)
+            if managed_configuration is not None:
+                metadata["managedConfiguration"] = _normalize_managed_configuration_report(
+                    managed_configuration
+                )
             metadata_json = _json_object(metadata, "metadata")
             self._connection.execute(
                 "UPDATE agents SET status='connected',last_heartbeat=?,expires_at=?,metadata=? "
@@ -2801,7 +2917,60 @@ class EnterpriseFleetStore:
         telemetry = _agent_telemetry(row["metadata"])
         if telemetry is not None:
             result["telemetry"] = telemetry
+        result["managed_configuration"] = self._managed_configuration_posture(
+            row["deployment_id"], row["host"], row["metadata"]
+        )
         return result
+
+    def _managed_configuration_posture(
+        self, deployment_id: str, host: str, metadata: object
+    ) -> dict[str, Any]:
+        """Compare desired managed policy with fresh endpoint-reported evidence."""
+        desired_row = self._connection.execute(
+            "SELECT desired_configuration FROM deployment_configs WHERE deployment_id=?",
+            (deployment_id,),
+        ).fetchone()
+        desired: dict[str, Any] | None = None
+        if desired_row is not None:
+            try:
+                configuration = json.loads(desired_row["desired_configuration"])
+                candidate = (
+                    configuration.get("managedHost") if isinstance(configuration, Mapping) else None
+                )
+                if isinstance(candidate, Mapping):
+                    desired = _normalize_managed_host(candidate)
+            except (FleetConfigurationError, TypeError, ValueError):
+                desired = None
+        report: dict[str, Any] | None = None
+        if isinstance(metadata, str):
+            try:
+                value = json.loads(metadata)
+                candidate = (
+                    value.get("managedConfiguration") if isinstance(value, Mapping) else None
+                )
+                if isinstance(candidate, Mapping):
+                    report = _normalize_managed_configuration_report(candidate)
+            except (FleetConfigurationError, TypeError, ValueError):
+                report = None
+        if desired is None:
+            return {"status": "not_configured", "desired": None, "observed": report}
+        if report is None:
+            return {"status": "missing", "desired": desired, "observed": None}
+        identity_fields = (
+            "host",
+            "hostVersion",
+            "platform",
+            "bundleHash",
+            "policyId",
+            "policyVersion",
+        )
+        if host != desired["host"] or any(report[key] != desired[key] for key in identity_fields):
+            status = "conflict"
+        elif report["verifiedAt"] > self._now() or report["expiresAt"] <= self._now():
+            status = "stale"
+        else:
+            status = "enforced"
+        return {"status": status, "desired": desired, "observed": report}
 
     def _agent_emergency_stop(self, deployment_id: str, agent_id: str) -> bool:
         """Resolve the effective stop from agent, group and deployment scopes."""
@@ -3398,6 +3567,7 @@ class EnterpriseFleetApplication:
                     agent_id,
                     _text(body.get("sessionId"), "sessionId"),
                     body.get("telemetry"),
+                    body.get("managedConfiguration"),
                 )
                 return self._respond(start_response, 200, result)
             if method == "POST" and path.startswith(prefix) and path.endswith("/disconnect"):

@@ -1022,6 +1022,18 @@ def test_runtime_attestation_binds_heartbeat_and_quarantines_tampering(
             "sdk_version": "1.1.0",
         }
     )
+    managed = {
+        "host": "claude-code",
+        "hostVersion": "2.1.211",
+        "platform": "linux",
+        "bundleHash": "d" * 64,
+        "policyId": "policy-a",
+        "policyVersion": 1,
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "CONFIGURATION", "dep-a")
+        | {"desiredConfiguration": {"managedHost": managed}}
+    )
     agent = module._item_key(tenant, "AGENT", "dep-a:agent-a") | {
         "id": "agent-a",
         "deployment_id": "dep-a",
@@ -1074,7 +1086,15 @@ def test_runtime_attestation_binds_heartbeat_and_quarantines_tampering(
             "/agent/dep-a/agent-a/heartbeat",
             "POST",
             token=token,
-            body={"attestation": _runtime_evidence(nonce, observed_at=now)},
+            body={
+                "attestation": _runtime_evidence(nonce, observed_at=now),
+                "managedConfiguration": {
+                    **managed,
+                    "source": "endpoint-managed-file",
+                    "verifiedAt": now,
+                    "expiresAt": now + 300,
+                },
+            },
         ),
     )
     assert heartbeat["statusCode"] == 200
@@ -1082,6 +1102,7 @@ def test_runtime_attestation_binds_heartbeat_and_quarantines_tampering(
     assert stored["status"] == "connected"
     assert stored["attestation_status"] == "compliant"
     assert stored["attestation_expires_at"] == now + 300
+    assert stored["managed_configuration_report"]["bundleHash"] == "d" * 64
     assert "configurationDigest" not in stored
 
     claims = {"custom:tenant_id": tenant, "cognito:groups": ["auditor"], "sub": "auditor"}
@@ -1580,6 +1601,18 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
         Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
         | {"id": "dep-a", "sdk_version": "1.1.0"}
     )
+    managed = {
+        "host": "claude-code",
+        "hostVersion": "2.1.211",
+        "platform": "linux",
+        "bundleHash": "a" * 64,
+        "policyId": "policy-a",
+        "policyVersion": 1,
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "CONFIGURATION", "dep-a")
+        | {"deploymentId": "dep-a", "desiredConfiguration": {"managedHost": managed}}
+    )
     table.put_item(
         Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
         | {
@@ -1594,6 +1627,12 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
             "attestation_observed_at": now,
             "attestation_expires_at": now + 300,
             "attestation_reason_codes": [],
+            "managed_configuration_report": {
+                **managed,
+                "source": "endpoint-managed-file",
+                "verifiedAt": now,
+                "expiresAt": now + 300,
+            },
         }
     )
     table.put_item(
@@ -1622,6 +1661,7 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
     assert payload["groups"] == ["group-a"]
     assert payload["policyId"] == "policy-a"
     assert payload["policyVersion"] == 1
+    assert payload["managedConfiguration"]["status"] == "enforced"
 
     group["agent_keys"] = []
     unassigned = _invoke(
@@ -1694,6 +1734,66 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
         "passed": False,
         "detail": "Agent is not registered to this deployment.",
     }
+
+
+def test_aws_managed_configuration_posture_rejects_drift_and_staleness(
+    monkeypatch: Any,
+) -> None:
+    """The deployed projection derives posture instead of trusting a status field."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-managed"
+    desired = {
+        "host": "codex-cli",
+        "hostVersion": "0.146.0",
+        "platform": "linux",
+        "bundleHash": "b" * 64,
+        "policyId": "policy-safe",
+        "policyVersion": 3,
+    }
+    agent: dict[str, object] = {
+        "id": "codex-a",
+        "deployment_id": "dep-a",
+        "host": "codex-cli",
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "CONFIGURATION", "dep-a")
+        | {"desiredConfiguration": {"managedHost": desired}}
+    )
+    assert module._managed_configuration_posture(tenant, agent, now=100)["status"] == "missing"
+
+    enforced_report: dict[str, object] = {
+        **desired,
+        "source": "codex-system",
+        "verifiedAt": 90,
+        "expiresAt": 200,
+    }
+    agent["managed_configuration_report"] = enforced_report
+    assert module._managed_configuration_posture(tenant, agent, now=100)["status"] == "enforced"
+    agent["managed_configuration_report"] = {
+        **enforced_report,
+        "bundleHash": "c" * 64,
+    }
+    assert module._managed_configuration_posture(tenant, agent, now=100)["status"] == "conflict"
+    agent["managed_configuration_report"] = {
+        **desired,
+        "source": "codex-system",
+        "verifiedAt": 90,
+        "expiresAt": 95,
+    }
+    assert module._managed_configuration_posture(tenant, agent, now=100)["status"] == "stale"
+
+    with pytest.raises(ValueError, match="source"):
+        module._managed_host(
+            {
+                **desired,
+                "source": "project-file",
+                "verifiedAt": 90,
+                "expiresAt": 200,
+            },
+            report=True,
+        )
+    with pytest.raises(ValueError, match="SHA-256"):
+        module._managed_host({**desired, "bundleHash": "not-a-digest"})
 
 
 def test_list_reads_every_dynamodb_page_before_policy_verification(monkeypatch: Any) -> None:
