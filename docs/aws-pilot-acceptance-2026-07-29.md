@@ -13,11 +13,11 @@ Codex has loaded and enforced it.
 | CloudFormation stack | `AaiSecControlPlane` — `UPDATE_COMPLETE` |
 | Hosted UI | `https://d2ir54klde64bd.cloudfront.net` |
 | API | `https://lwg33pxwk8.execute-api.eu-west-2.amazonaws.com` |
-| SDK deployed merge | `2db821ca13c9377bd5955279b86f7a4b8bd68c46` |
-| UI deployed merge | `570f3bda04429824a609b051875cf521bfabe1e2` |
-| Deployed UI JavaScript | `assets/index-Psmot4yk.js` |
-| Deployed UI CSS | `assets/index-C43Nx9cW.css` |
-| CloudFront invalidation | `ICW1FFK3FXI6UTE5TVK89D8W64` |
+| SDK deployed merge | `ef1b19260902f14c37c77e75e22cadf03cb35789` |
+| UI deployed merge | `6e45fbe2b6c585b753da51de54de48ad802cd959` |
+| Deployed UI JavaScript | `assets/index-s1dzxwjs.js` |
+| Deployed UI CSS | `assets/index-GjcLWlT8.css` |
+| CloudFront invalidation | `IC6IXRE64DTLLMLZ6Z88UCD1C0` — `Completed` |
 
 The deployed CloudFront index referenced the exact JavaScript and CSS build
 assets, both assets returned HTTP 200, and the deployment invalidation reached
@@ -95,6 +95,28 @@ transactional contract suite separately proves that the review and durable
 lifecycle audit record commit together, stale/missing ownership fails
 verification, malformed contacts fail closed, and an Entra-enabled tenant
 accepts only an active SCIM-provisioned owner UUID.
+
+## Bulk group assignment
+
+The deployed control-plane harness exercised the revision-safe bulk assignment
+route against the merged Lambda, DynamoDB transaction boundary and immutable
+audit store:
+
+| Assertion | Result |
+| --- | --- |
+| Preview one eligible and one missing agent | No writes; one `ready`, one `rejected` |
+| Apply the same reviewed request | HTTP 207; one `applied`, one `rejected` |
+| Replay the exact request ID and semantic payload | Stored result returned with `replayed: true` |
+| Reuse the request ID with a different payload | HTTP 409 |
+| Apply with the stale membership revision | HTTP 409; no overwrite |
+| Inspect the primary operation record | Actor, request hash and partial outcome retained |
+| Inspect the primary membership audit record | Immutable transactional evidence present |
+
+The route re-evaluated the live group, every selected agent, tenant ownership,
+agent lifecycle and sole-group membership at apply time. The group revision
+advanced only for the successful member, while the missing agent remained a
+content-minimised rejection. Synthetic operational records were removed after
+the run; immutable audit evidence remains by design.
 
 ## Hosted UI and responsive workflow
 
