@@ -25,8 +25,13 @@ contract. The Entra adapter now accepts tenant-bound SCIM user, group and
 membership lifecycle and lets a platform administrator map exact directory
 groups to canonical roles. Token issuance reconciles that live state every
 five minutes and fails closed for inactive, unprovisioned or roleless users.
-Live Entra acceptance, break-glass access, certification and delegated
-administration remain required before enterprise-wide rollout.
+Emergency access is a separate server-owned capability grant: a recent-MFA
+requester can request only their own subject and exact capabilities, a
+different recent-MFA identity administrator decides it, and the control plane
+rechecks the maximum-60-minute grant on every mutation. Auditors can export a
+content-addressed complete SCIM, role and emergency-access review artifact.
+Live Entra acceptance and delegated administration remain required before
+enterprise-wide rollout.
 
 SIEM adapters use the same honest-capability rule. The initial Splunk surface
 is a schema and workflow stub and must report `deliveryVerified: false`; it

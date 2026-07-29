@@ -63,8 +63,28 @@ directory-to-role mappings.
 
 Access and ID tokens expire after five minutes, bounding mover and leaver
 convergence when refresh reruns lifecycle checks. This is not immediate global
-revocation. Live Entra acceptance, break-glass access, access certification
-and delegated administration remain open in the
+revocation.
+
+Break-glass authority is not represented by a role claim. A strongly
+authenticated incident responder requests exact capabilities for their own
+signed subject, and a different strongly authenticated identity administrator
+must approve the request within 15 minutes. Both token authentication times
+must be no older than 10 minutes. The grant starts only after approval, has a
+hard 60-minute maximum, and is resolved from consistent server-owned state on
+every mutation. Wildcards, caller-selected subjects, self-approval, replay,
+extension, stale grants and lookup failures grant no authority. Revocation and
+expiry therefore take effect without waiting for the five-minute Cognito token
+boundary. Request, decision, revocation and export events are independently
+audited. Emergency capabilities cannot request or decide another emergency
+grant; those lifecycle controls require normal directory-derived authority.
+
+The auditor-only access-certification API exports a bounded complete view of
+SCIM operators, memberships, group-to-role mappings, canonical capabilities
+and break-glass history with a stable SHA-256 content digest. It refuses a
+partial oversized inventory and marks an export incomplete when SCIM is not
+configured. The digest is integrity evidence, not a signature, human review,
+or compliance certification. Live Entra acceptance and delegated
+administration remain open in the
 [P0/P1 implementation status](p0-p1-implementation-status.md). A configured
 identity provider or synthetic contract test is not production joiner, mover
 and leaver evidence.

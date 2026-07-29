@@ -61,7 +61,8 @@ not prove the deployed claim projection.
 Mutating routes are classified into `runtime_admin`, `policy_write`,
 `policy_approval`, `fleet_write`, `approval_decision`, or
 `incident_response`; identity lifecycle changes additionally require
-`identity_admin`. A role must grant the exact capability. Entra proves the
+`identity_admin`; access-certification export requires
+`access_certification_read`. A role must grant the exact capability. Entra proves the
 operator identity but does not select the AAI tenant or grant a product role:
 the deployment maps the configured Entra tenant to one provisioned AAI tenant,
 and Cognito-managed groups remain the authorization source. This separation
@@ -73,8 +74,9 @@ authority.
 Create a single-tenant Microsoft Entra application registration. Configure its
 web redirect URI as the Cognito domain followed by `/oauth2/idpresponse`. Store
 the client secret in AWS Secrets Manager. To enable lifecycle provisioning,
-create a different 32-character-or-longer SCIM bearer secret and deploy with
-all five variables:
+create a different 32-character-or-longer SCIM bearer secret, enforce MFA for
+the enterprise application with Conditional Access, and deploy with all six
+variables:
 
 ```bash
 ENTRA_TENANT_ID=<entra-directory-uuid> \
@@ -82,6 +84,7 @@ ENTRA_CLIENT_ID=<entra-application-client-id> \
 ENTRA_CLIENT_SECRET_NAME=<secrets-manager-secret-name> \
 ENTRA_AAI_TENANT_ID=<provisioned-aai-tenant-id> \
 ENTRA_SCIM_TOKEN_SECRET_NAME=<scim-bearer-secret-name> \
+ENTRA_STRONG_AUTH_ENFORCED=true \
 AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 ```
 
@@ -89,6 +92,15 @@ The deployment fails if only some values are present or if the Entra tenant is
 not a tenant-specific UUID. The generated OIDC provider requests only
 `openid`, `email`, and `profile`; its secret is a CloudFormation dynamic
 reference and is not copied to Lambda or output values.
+
+The pre-token trigger emits a server-owned strong-authentication assertion
+only when `ENTRA_STRONG_AUTH_ENFORCED=true` and the exact configured Entra
+provider authenticated the operator. No mutable user attribute or browser
+value can create it. Break-glass request and decision routes require that
+assertion plus `auth_time` no older than 10 minutes. Set the deployment flag
+only after enforcing MFA for these operators with Entra Conditional Access;
+retain the policy and sign-in evidence and prove the deployed API Gateway claim
+projection before pilot use.
 
 A Cognito pre-token trigger inspects the server-owned federated identity and
 adds provider provenance to ID and access tokens. The API compares the Entra
@@ -112,7 +124,7 @@ Follow the [Entra SCIM lifecycle runbook](entra-scim-runbook.md).
 | `policy-approver` | Independently review, stage and activate governed policy versions |
 | `fleet-operator` | Deployments, groups and agent lifecycle |
 | `incident-responder` | Emergency stop, containment and alert response |
-| `auditor` | Read-only evidence |
+| `auditor` | Read-only evidence and access-certification export |
 
 After deployment, retain evidence for one successful Entra login, tenant
 resolution, every permitted role action, every denied cross-role action, an
@@ -129,6 +141,14 @@ provider status, tenant hint, active roles and the enforced role matrix. It
 never returns the OIDC client ID or secret. `GET /enterprise/integrations`
 currently reports Splunk as a stub with `deliveryVerified: false`; no Splunk
 event delivery is implemented or claimed.
+
+`POST /enterprise/identity/break-glass/requests` creates a self-targeted,
+exact-capability request lasting 5–60 minutes. A different platform
+administrator uses the request-specific `approve`, `deny`, or `revoke` route;
+the server conditionally enforces state, MFA freshness, requester separation
+and expiry. `GET /enterprise/identity/access-certification` is auditor-only and
+returns a digest-bound review artifact. Follow the
+[emergency access and access certification runbook](access-governance-runbook.md).
 
 The control plane also exposes a separate agent boundary. An operator creates a
 short-lived bootstrap secret for a registered agent; the agent exchanges it

@@ -208,9 +208,22 @@ class FakeDynamoClient:
                     permitted = existing is not None
                     current = existing or {}
                     for clause in condition.split(" AND "):
-                        field_name, expected_name = clause.split(" = ")
+                        if " <> " in clause:
+                            field_name, expected_name = clause.split(" <> ")
+                            comparison = "not_equal"
+                        elif " > " in clause:
+                            field_name, expected_name = clause.split(" > ")
+                            comparison = "greater_than"
+                        else:
+                            field_name, expected_name = clause.split(" = ")
+                            comparison = "equal"
                         field = names.get(field_name, field_name)
-                        permitted = permitted and current.get(field) == values[expected_name]
+                        if comparison == "not_equal":
+                            permitted = permitted and current.get(field) != values[expected_name]
+                        elif comparison == "greater_than":
+                            permitted = permitted and current.get(field, 0) > values[expected_name]
+                        else:
+                            permitted = permitted and current.get(field) == values[expected_name]
                 if not permitted:
                     raise ConditionalFailure()
                 self.table.items[key] = record
@@ -268,6 +281,7 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("ENTRA_PROVIDER_ENABLED", "false")
     monkeypatch.setenv("ENTRA_TENANT_ID", "")
     monkeypatch.setenv("ENTRA_AAI_TENANT_ID", "")
+    monkeypatch.setenv("ENTRA_STRONG_AUTH_ENFORCED", "false")
     monkeypatch.setenv("SCIM_ENABLED", "false")
     monkeypatch.setenv("SCIM_TABLE", "")
     monkeypatch.setenv("SPLUNK_STUB_ENABLED", "true")
@@ -510,6 +524,10 @@ def test_identity_and_splunk_stub_report_truthful_enterprise_posture(monkeypatch
     assert payload["tenantBinding"] == "server_owned"
     assert payload["activeRoles"] == ["auditor", "incident-responder"]
     assert payload["subject"] == "operator-a"
+    assert payload["strongAuthentication"] == {
+        "status": "not_configured",
+        "maxAuthenticationAgeSeconds": 600,
+    }
     assert "ENTRA_CLIENT_SECRET" not in json.dumps(payload)
 
     integrations = _invoke(module, _event("/enterprise/integrations", "GET", claims=claims))
@@ -524,6 +542,7 @@ def test_entra_pre_token_trigger_uses_only_cognito_federation_identity(
     """Only the exact configured OIDC identity receives Entra provenance."""
     monkeypatch.setenv("ENTRA_PROVIDER_NAME", "MicrosoftEntraID")
     monkeypatch.setenv("ENTRA_TENANT_ID", "11111111-2222-4333-8444-555555555555")
+    monkeypatch.setenv("ENTRA_STRONG_AUTH_ENFORCED", "true")
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/pre_token.py"
     spec = importlib.util.spec_from_file_location("aai_pre_token", path)
     assert spec and spec.loader
@@ -539,6 +558,7 @@ def test_entra_pre_token_trigger_uses_only_cognito_federation_identity(
         assert overrides[token_name]["claimsToAddOrOverride"] == {
             "aai:identity_provider": "microsoft_entra_id",
             "aai:entra_tenant_id": "11111111-2222-4333-8444-555555555555",
+            "aai:strong_auth_enforced": "true",
         }
     hostile = {
         "request": {
@@ -674,6 +694,471 @@ def test_scim_group_role_mapping_is_platform_admin_only_and_audited(monkeypatch:
     assert payload["scim"]["groups"] == {"total": 1, "mapped": 1, "unmapped": 0}
     assert table.items[(f"TENANT#{tenant}", f"GROUP#{group_id}")]["mapped_role"] == (
         "policy-approver"
+    )
+
+
+def test_break_glass_requires_mfa_four_eyes_scope_and_immediate_revocation(
+    monkeypatch: Any,
+) -> None:
+    """Emergency authority is exact, short-lived, independently approved and live."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-emergency"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    audit_events: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "_audit",
+        lambda _tenant, event_type, _actor, _payload: audit_events.append(event_type),
+    )
+    now = int(time.time())
+    requester = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["incident-responder"],
+        "sub": "responder-a",
+        "amr": ["mfa"],
+        "auth_time": str(now),
+    }
+    request_path = "/enterprise/identity/break-glass/requests"
+    no_mfa = _invoke(
+        module,
+        _event(
+            request_path,
+            "POST",
+            body={
+                "reason": "Restore the policy service during incident INC-42",
+                "capabilities": ["policy_write"],
+                "durationMinutes": 15,
+            },
+            claims={
+                **{key: value for key, value in requester.items() if key != "amr"},
+                "custom:entra_auth_methods": '["mfa"]',
+            },
+        ),
+    )
+    assert no_mfa["statusCode"] == 403
+
+    created = _invoke(
+        module,
+        _event(
+            request_path,
+            "POST",
+            body={
+                "reason": "Restore the policy service during incident INC-42",
+                "capabilities": ["policy_write"],
+                "durationMinutes": 15,
+                "subject": "attacker-selected-subject",
+            },
+            claims=requester,
+        ),
+    )
+    assert created["statusCode"] == 201
+    request = json.loads(created["body"])
+    assert request["subject"] == "responder-a"
+    assert request["effectiveStatus"] == "pending"
+    request_id = request["id"]
+
+    approver = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-b",
+        "aai:identity_provider": "microsoft_entra_id",
+        "aai:strong_auth_enforced": "true",
+        "auth_time": str(now),
+    }
+    approved = _invoke(
+        module,
+        _event(
+            f"{request_path}/{request_id}/approve",
+            "POST",
+            claims=approver,
+        ),
+    )
+    assert approved["statusCode"] == 200
+    grant = json.loads(approved["body"])
+    assert grant["effectiveStatus"] == "active"
+    assert grant["approvedBy"] == "admin-b"
+    assert grant["grantExpiresAt"] - grant["grantStartsAt"] == 15 * 60
+    assert module._operator_authorized(_event("/", "GET", claims=requester), "policy_write", tenant)
+    assert not module._operator_authorized(
+        _event("/", "GET", claims=requester), "identity_admin", tenant
+    )
+    assert not module._operator_authorized(
+        _event("/", "GET", claims={**requester, "custom:tenant_id": "tenant-other"}),
+        "policy_write",
+        "tenant-other",
+    )
+    grant_key = (f"TENANT#{tenant}", f"BREAK_GLASS#{request_id}")
+    saved_expiry = table.items[grant_key]["grant_expires_at"]
+    table.items[grant_key]["grant_expires_at"] = now - 1
+    assert not module._operator_authorized(
+        _event("/", "GET", claims=requester), "policy_write", tenant
+    )
+    table.items[grant_key]["grant_expires_at"] = saved_expiry
+
+    replay = _invoke(
+        module,
+        _event(f"{request_path}/{request_id}/approve", "POST", claims=approver),
+    )
+    assert replay["statusCode"] == 409
+    revoked = _invoke(
+        module,
+        _event(f"{request_path}/{request_id}/revoke", "POST", claims=approver),
+    )
+    assert revoked["statusCode"] == 200
+    assert json.loads(revoked["body"])["effectiveStatus"] == "revoked"
+    assert not module._operator_authorized(
+        _event("/", "GET", claims=requester), "policy_write", tenant
+    )
+    assert audit_events == [
+        "break_glass_requested",
+        "break_glass_approved",
+        "break_glass_revoked",
+    ]
+
+
+def test_break_glass_rejects_self_approval_wildcards_and_excessive_duration(
+    monkeypatch: Any,
+) -> None:
+    """A privileged requester cannot create permanent or self-approved authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-emergency-bounds"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+        "amr": ["mfa"],
+        "auth_time": str(int(time.time())),
+    }
+    path = "/enterprise/identity/break-glass/requests"
+    stale = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                "reason": "Need policy authority during incident INC-98",
+                "capabilities": ["policy_write"],
+                "durationMinutes": 5,
+            },
+            claims={**claims, "auth_time": str(int(time.time()) - 601)},
+        ),
+    )
+    assert stale["statusCode"] == 403
+    assert "too old" in json.loads(stale["body"])["error"]
+    for body in (
+        {
+            "reason": "Need unrestricted authority during an incident",
+            "capabilities": ["*"],
+            "durationMinutes": 15,
+        },
+        {
+            "reason": "Need policy authority during an extended incident",
+            "capabilities": ["policy_write"],
+            "durationMinutes": 61,
+        },
+    ):
+        response = _invoke(module, _event(path, "POST", body=body, claims=claims))
+        assert response["statusCode"] == 400
+    created = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                "reason": "Need policy authority during incident INC-99",
+                "capabilities": ["policy_write"],
+                "durationMinutes": 5,
+            },
+            claims=claims,
+        ),
+    )
+    request_id = json.loads(created["body"])["id"]
+    self_approval = _invoke(
+        module,
+        _event(f"{path}/{request_id}/approve", "POST", claims=claims),
+    )
+    assert self_approval["statusCode"] == 403
+    assert "own request" in json.loads(self_approval["body"])["error"]
+    table.items[(f"TENANT#{tenant}", f"BREAK_GLASS#{request_id}")]["request_expires_at"] = (
+        int(time.time()) - 1
+    )
+    expired = _invoke(
+        module,
+        _event(
+            f"{path}/{request_id}/approve",
+            "POST",
+            claims={**claims, "sub": "admin-b"},
+        ),
+    )
+    assert expired["statusCode"] == 409
+    denied_request = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                "reason": "Need runtime authority during incident INC-101",
+                "capabilities": ["runtime_admin"],
+                "durationMinutes": 5,
+            },
+            claims=claims,
+        ),
+    )
+    denied_id = json.loads(denied_request["body"])["id"]
+    denied = _invoke(
+        module,
+        _event(
+            f"{path}/{denied_id}/deny",
+            "POST",
+            claims={**claims, "sub": "admin-b"},
+        ),
+    )
+    denied_body = json.loads(denied["body"])
+    assert denied["statusCode"] == 200
+    assert denied_body["effectiveStatus"] == "denied"
+    assert denied_body["decidedBy"] == "admin-b"
+    assert denied_body["approvedBy"] is None
+
+
+def test_break_glass_authority_cannot_govern_more_break_glass(monkeypatch: Any) -> None:
+    """Emergency identity administration cannot bootstrap another emergency grant."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-emergency-chain"
+    now = int(time.time())
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "BREAK_GLASS", "active-emergency-admin")
+        | {
+            "id": "active-emergency-admin",
+            "subject": "emergency-admin",
+            "capabilities": ["identity_admin"],
+            "status": "approved",
+            "grant_starts_at": now - 1,
+            "grant_expires_at": now + 600,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "BREAK_GLASS", "pending-victim")
+        | {
+            "id": "pending-victim",
+            "subject": "responder-b",
+            "requested_by": "responder-b",
+            "capabilities": ["policy_write"],
+            "duration_seconds": 300,
+            "reason": "Restore policy service during synthetic incident INC-100",
+            "status": "pending",
+            "requested_at": now,
+            "request_expires_at": now + 600,
+        }
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": [],
+        "sub": "emergency-admin",
+        "amr": ["mfa"],
+        "auth_time": str(now),
+    }
+    assert module._operator_authorized(_event("/", "GET", claims=claims), "identity_admin", tenant)
+    response = _invoke(
+        module,
+        _event(
+            "/enterprise/identity/break-glass/requests/pending-victim/approve",
+            "POST",
+            claims=claims,
+        ),
+    )
+    assert response["statusCode"] == 403
+
+
+def test_break_glass_authority_and_audit_commit_before_s3_replication(monkeypatch: Any) -> None:
+    """A secondary audit outage cannot create an unaudited or ambiguous grant request."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-emergency-audit"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+
+    def failed_replication(*_args: Any, **_kwargs: Any) -> None:
+        raise OSError("synthetic audit replication outage")
+
+    monkeypatch.setattr(module, "_audit", failed_replication)
+    response = _invoke(
+        module,
+        _event(
+            "/enterprise/identity/break-glass/requests",
+            "POST",
+            body={
+                "reason": "Restore fleet authority during synthetic incident INC-102",
+                "capabilities": ["fleet_write"],
+                "durationMinutes": 5,
+            },
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["incident-responder"],
+                "sub": "responder-a",
+                "amr": ["mfa"],
+                "auth_time": str(int(time.time())),
+            },
+        ),
+    )
+    assert response["statusCode"] == 201
+    requests = [
+        item for item in table.items.values() if str(item.get("sk", "")).startswith("BREAK_GLASS#")
+    ]
+    audits = [
+        item
+        for item in table.items.values()
+        if str(item.get("sk", "")).startswith("BREAK_GLASS_AUDIT#")
+    ]
+    assert len(requests) == 1
+    assert len(audits) == 1
+    assert audits[0]["event_type"] == "break_glass_requested"
+    assert len(audits[0]["payload_hash"]) == 64
+
+
+def test_break_glass_concurrent_decision_cannot_diverge_from_audit(monkeypatch: Any) -> None:
+    """A revision race commits neither the stale decision nor its audit event."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-emergency-race"
+    now = int(time.time())
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    requester = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["incident-responder"],
+        "sub": "responder-a",
+        "amr": ["mfa"],
+        "auth_time": str(now),
+    }
+    created = _invoke(
+        module,
+        _event(
+            "/enterprise/identity/break-glass/requests",
+            "POST",
+            body={
+                "reason": "Restore policy authority during synthetic incident INC-103",
+                "capabilities": ["policy_write"],
+                "durationMinutes": 5,
+            },
+            claims=requester,
+        ),
+    )
+    request_id = json.loads(created["body"])["id"]
+    request_key = (f"TENANT#{tenant}", f"BREAK_GLASS#{request_id}")
+
+    def concurrent_change() -> None:
+        table.items[request_key]["revision"] = 2
+
+    module.DYNAMODB.before_transaction = concurrent_change
+    response = _invoke(
+        module,
+        _event(
+            f"/enterprise/identity/break-glass/requests/{request_id}/approve",
+            "POST",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["platform-admin"],
+                "sub": "admin-b",
+                "amr": ["mfa"],
+                "auth_time": str(now),
+            },
+        ),
+    )
+    assert response["statusCode"] == 409
+    assert table.items[request_key]["status"] == "pending"
+    audit_types = [
+        item.get("event_type")
+        for item in table.items.values()
+        if str(item.get("sk", "")).startswith("BREAK_GLASS_AUDIT#")
+    ]
+    assert audit_types == ["break_glass_requested"]
+
+
+def test_access_certification_is_complete_bounded_and_auditor_only(monkeypatch: Any) -> None:
+    """The export binds SCIM access, role mappings and emergency grants by digest."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-certification"
+    monkeypatch.setenv("SCIM_ENABLED", "true")
+    monkeypatch.setenv("ENTRA_AAI_TENANT_ID", tenant)
+    module.SCIM = table
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    user_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    group_id = "99999999-8888-4777-8666-555555555555"
+    table.put_item(
+        Item={
+            "pk": f"TENANT#{tenant}",
+            "sk": f"USER#{user_id}",
+            "id": user_id,
+            "user_name": "synthetic.auditor@example.invalid",
+            "display_name": "Synthetic Auditor",
+            "active": True,
+            "updated_at": 100,
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": f"TENANT#{tenant}",
+            "sk": f"GROUP#{group_id}",
+            "id": group_id,
+            "display_name": "AAI Auditors",
+            "active": True,
+            "mapped_role": "auditor",
+            "updated_at": 101,
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": f"TENANT#{tenant}#USER#{user_id}",
+            "sk": f"GROUP#{group_id}",
+        }
+    )
+    path = "/enterprise/identity/access-certification"
+    denied = _invoke(
+        module,
+        _event(
+            path,
+            "GET",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["fleet-operator"],
+                "sub": "operator-a",
+            },
+        ),
+    )
+    assert denied["statusCode"] == 403
+    exported = _invoke(
+        module,
+        _event(
+            path,
+            "GET",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["auditor"],
+                "sub": "auditor-a",
+            },
+        ),
+    )
+    assert exported["statusCode"] == 200
+    payload = json.loads(exported["body"])
+    assert payload["complete"] is True
+    assert payload["operators"] == [
+        {
+            "subjectId": user_id,
+            "userName": "synthetic.auditor@example.invalid",
+            "displayName": "Synthetic Auditor",
+            "active": True,
+            "groupIds": [group_id],
+            "roles": ["auditor"],
+            "lastProvisionedAt": 100,
+        }
+    ]
+    assert len(payload["contentHash"]) == 64
+    artifact = {
+        key: value for key, value in payload.items() if key not in {"generatedAt", "contentHash"}
+    }
+    assert (
+        payload["contentHash"]
+        == hashlib.sha256(
+            json.dumps(artifact, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
     )
 
 
@@ -1010,6 +1495,15 @@ def test_aws_policy_governance_deployment_grants_transaction_authority() -> None
         Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
     ).read_text(encoding="utf-8")
     assert 'table.grant(handler, "dynamodb:TransactWriteItems")' in stack
+
+
+def test_aws_strong_authentication_assertion_is_server_owned() -> None:
+    """Emergency MFA posture must not be derived from a mutable user attribute."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    assert "ENTRA_STRONG_AUTH_ENFORCED" in stack
+    assert "entra_auth_methods" not in stack
 
 
 def test_trial_foundation_creation_is_tenant_scoped_and_agent_identity_is_derived(

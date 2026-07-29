@@ -334,6 +334,14 @@ authorization.
 
 ## Unreleased
 
+- Added tenant-scoped identity governance to the AWS control plane: emergency
+  access requires recent MFA, a different approver, exact capabilities and a
+  maximum 60-minute grant that is re-evaluated on every mutation. Auditors can
+  export a complete bounded SCIM, role and break-glass review artifact with a
+  stable content digest; partial inventories fail closed and every lifecycle
+  transition commits atomically with immutable audit-ledger evidence before
+  secondary S3 replication.
+
 - Added the provider-neutral governed policy-version foundation: new policy
   content remains inactive until a distinct authenticated subject approves it,
   lifecycle transitions are ordered and audited, activation uses active-version
