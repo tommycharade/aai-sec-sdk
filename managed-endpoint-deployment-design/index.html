@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/testing/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/managed-endpoint-deployment-design/">
       
       
-        <link rel="prev" href="../runbooks/">
+        <link rel="prev" href="../managed-host-configuration/">
       
       
-        <link rel="next" href="../production-readiness/">
+        <link rel="next" href="../enterprise-user-journeys/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Testing and assurance - Agentic AI Security SDK</title>
+        <title>Managed endpoint deployment design - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#testing-and-assurance" class="md-skip">
+        <a href="#managed-endpoint-deployment-design" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Testing and assurance
+              Managed endpoint deployment design
             
           </span>
         </div>
@@ -367,37 +367,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Testing and assurance
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
         
   
   
@@ -413,59 +386,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#deterministic-propertyfuzz-coverage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deterministic property/fuzz coverage
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mutation-testing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mutation testing
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#adapter-contracts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Adapter contracts
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -825,10 +745,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../managed-endpoint-deployment-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed endpoint deployment design
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -844,6 +791,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#threat-and-trust-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threat and trust boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#package-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Package contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installation-transaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation transaction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#creating-a-package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creating a package
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evidence-and-remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evidence and remaining work
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1442,10 +1464,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#deterministic-propertyfuzz-coverage" class="md-nav__link">
+  <a href="#threat-and-trust-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Deterministic property/fuzz coverage
+        Threat and trust boundary
       
     </span>
   </a>
@@ -1453,10 +1475,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#mutation-testing" class="md-nav__link">
+  <a href="#package-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Mutation testing
+        Package contract
       
     </span>
   </a>
@@ -1464,10 +1486,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#adapter-contracts" class="md-nav__link">
+  <a href="#installation-transaction" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Adapter contracts
+        Installation transaction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#creating-a-package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creating a package
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evidence-and-remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evidence and remaining work
       
     </span>
   </a>
@@ -1494,142 +1538,125 @@
   
 
 
-<h1 id="testing-and-assurance">Testing and assurance</h1>
-<p><code>make check</code> is the required local and CI quality gate. It runs formatting,
-linting, strict typing, unit and adversarial tests, 90% branch coverage,
-guardrail checks, a strict documentation build, package validation, dependency
-audits, and mutation-baseline validation. When the separate private
-<code>aai-sec-ui</code> checkout is present beside the SDK sources, the same command also
-runs its React typecheck, contract tests, and production build. A clean public
-SDK checkout reports that the private UI is absent and completes the SDK gate;
-the UI repository enforces its own mandatory <code>npm run check</code> workflow.
-<code>tests/test_enterprise_e2e.py</code> starts the
-actual reference WSGI server on an ephemeral localhost port and exercises
-authenticated HTTP registration, template assignment, rollout, and compliance
-evidence. The browser smoke path for the live
-reference server is documented in the enterprise fleet runbook and is used
-before release evidence is accepted.</p>
-<p>The optional live PostgreSQL path is exercised by the <code>postgres-integration</code>
-GitHub Actions job. Locally, install <code>.[postgres]</code>, set
-<code>AAI_SEC_POSTGRES_DSN</code>, and run:</p>
-<pre><code class="language-bash">python -m pytest -q tests/test_enterprise_postgres_integration.py
+<h1 id="managed-endpoint-deployment-design">Managed endpoint deployment design</h1>
+<p>This design connects a centrally compiled Claude Code or Codex policy to
+administrator-owned endpoint files without treating desired state as proof of
+enforcement. It introduces a deterministic deployment package and an optional
+offline privileged installer. It does not turn the SDK process, model, browser,
+or package file into an endpoint administrator.</p>
+<h2 id="threat-and-trust-boundary">Threat and trust boundary</h2>
+<p>The package file, its path, its JSON fields and every embedded artifact are
+untrusted input. An attacker may alter bytes, add duplicate JSON keys, replace
+paths, target another host, substitute a hook, race a symlink or interrupt a
+multi-file update. The installer grants no authority from those values alone.</p>
+<p>Endpoint management must deliver these four expected values through an
+authenticated, administrator-controlled channel:</p>
+<ul>
+<li>package SHA-256;</li>
+<li>compiled bundle SHA-256;</li>
+<li>exact host (<code>claude-code</code> or <code>codex-cli</code>); and</li>
+<li>exact platform (<code>macos</code> or <code>linux</code>).</li>
+</ul>
+<p>Delivering a package and its expected digest together over an unauthenticated
+channel provides no integrity. A production adapter should pin the digest in
+MDM, signed device-management metadata or a future control-plane signature.
+The current AWS desired-state contract does not yet distribute package bytes;
+that remains the next control-plane integration slice.</p>
+<h2 id="package-contract">Package contract</h2>
+<p><code>ManagedDeploymentPackage</code> serializes canonical schema-1 JSON containing:</p>
+<ul>
+<li>host, host version and operating-system family;</li>
+<li>policy ID and immutable policy version;</li>
+<li>the compiler's complete bundle digest;</li>
+<li>the complete ordered set of documented managed files, including exact UTF-8
+  content and individual digests; and</li>
+<li>one to eight administrator-owned executable prerequisites with absolute path
+  and digest.</li>
+</ul>
+<p>The package contains no credentials, bearer tokens or environment values. It
+rejects unknown or duplicate fields, non-canonical JSON, unknown hosts,
+incomplete artifact sets, unsafe paths, duplicate executables, oversized data,
+digest mismatches and cross-platform executable locations.</p>
+<p>The package deliberately does not embed executable code. Endpoint management
+installs the reviewed native hook and MCP gateway first under
+<code>/opt/aai-security/</code>. The installer verifies regular-file type, administrator
+ownership, restrictive write permissions, executable mode and exact bytes
+before touching host configuration. This prevents a valid configuration from
+activating an unreviewed local enforcement process.</p>
+<h2 id="installation-transaction">Installation transaction</h2>
+<p><code>scripts/install_managed_host_package.py</code> has two explicit modes:</p>
+<ul>
+<li><code>--check</code> performs target, prerequisite and filesystem preflight without
+  changing endpoint state; and</li>
+<li><code>--install</code> additionally requires administrator identity and performs the
+  update.</li>
+</ul>
+<p>Before the first write it validates every package field, prerequisite,
+existing target and parent directory. It rejects symlinks, devices, foreign
+ownership and group/world-writable state. New files are staged beside their
+targets with administrator ownership and mode <code>0644</code>, flushed to disk and then
+replaced with same-filesystem renames. Existing files are moved to unique
+same-directory backups. Any later replacement or directory-sync failure rolls
+back every changed target in reverse order. Backups are removed only after all
+artifacts are installed.</p>
+<p>Windows installation remains fail-closed until an ACL-aware adapter can prove
+owner SID, inherited ACLs and protected path semantics. The package format can
+represent Windows targets, but the POSIX installer cannot apply them.</p>
+<h2 id="creating-a-package">Creating a package</h2>
+<p>This abbreviated example assumes the native hook has already been built and
+reviewed. The package digest must be copied into authenticated MDM metadata,
+not derived from the downloaded package on the endpoint:</p>
+<pre><code class="language-python">import hashlib
+from pathlib import Path
+
+from agentic_security import (
+    ManagedDeploymentPackage,
+    ManagedExecutableRequirement,
+)
+
+# `bundle` is the result of ManagedConfigurationCompiler.compile(...).
+hook_bytes = Path(&quot;/staging/native-policy&quot;).read_bytes()
+package = ManagedDeploymentPackage.from_bundle(
+    bundle,
+    required_executables=(
+        ManagedExecutableRequirement(
+            &quot;/opt/aai-security/hooks/native-policy&quot;,
+            hashlib.sha256(hook_bytes).hexdigest(),
+        ),
+    ),
+)
+Path(&quot;managed-endpoint-package.json&quot;).write_bytes(package.to_json())
+print(package.package_sha256)
 </code></pre>
-<p>Without a DSN the test skips; the CI service job always supplies one.</p>
-<p>Runtime-manifest assurance is split across three boundaries:</p>
+<p>On the endpoint, first run no-write preflight and compare the reported policy,
+bundle and package identifiers with the rollout record:</p>
+<pre><code class="language-bash">PYTHONPATH=src python scripts/install_managed_host_package.py \
+  --package /var/lib/aai-security/managed-endpoint-package.json \
+  --expected-package-sha256 &lt;digest-from-authenticated-mdm&gt; \
+  --expected-bundle-hash &lt;desired-bundle-digest&gt; \
+  --host claude-code \
+  --platform macos \
+  --check
+</code></pre>
+<p>After approval, repeat with <code>sudo</code> and <code>--install</code>. Restart the host, use
+<code>measure_managed_configuration</code> to prove exact protected bytes, then run live
+allowed, denied, approval-required and unapproved-MCP probes. File installation
+alone is never recorded as proof that Claude Code or Codex loaded the policy.</p>
+<h2 id="evidence-and-remaining-work">Evidence and remaining work</h2>
+<p>Automated contracts cover canonical parsing, package and artifact tampering,
+duplicate keys, traversal, cross-target substitution, missing or changed
+executables, symlink targets, non-administrator calls, restrictive installed
+modes and complete rollback after a synthetic second-file failure.</p>
+<p>This closes the repository's package/install transaction gap but does not
+complete P0-01 through P0-03. Remaining acceptance requires:</p>
 <ul>
-<li><code>tests/test_runtime_attestation.py</code> covers content-minimised measurement,
-  linked worktrees, packed refs, symlink/race bounds and changed artifacts;</li>
-<li><code>tests/test_runtime_manifest_generator.py</code> covers clean-checkout enforcement,
-  release identity, deterministic Claude/Codex manifests, GitHub provenance
-  invocation and safe output handling; and</li>
-<li><code>tests/test_aws_lambda_contract.py</code> proves exact manifest/provenance binding,
-  challenge freshness, mismatch quarantine, session revocation and governed
-  route denial.</li>
+<li>control-plane package storage, authenticated download and digest delivery;</li>
+<li>MDM deployment of the SDK wheel, gateway, native hook and package;</li>
+<li>approved-launch enforcement, including Codex flag restrictions;</li>
+<li>real root-owned macOS/Linux installation and host restart evidence;</li>
+<li>live Claude/Codex effective-source and action probes; and</li>
+<li>Windows ACL installation plus hardware-backed endpoint identity.</li>
 </ul>
-<p><code>npm run build &amp;&amp; npm run synth</code> in <code>infra/aws-control-plane</code> additionally
-proves that CDK accepts the checked-in empty development pair and will reject a
-stale pair before deployment. Live modified-host acceptance remains required
-before P0-05 is complete.</p>
-<p><code>scripts/test_aws_control_plane.py</code> now stages an isolated synthetic deployment
-with a managed-host bundle and proves that missing and conflicting evidence
-block governed agent routes before an exact fresh report restores access. The
-report used by this control-plane smoke is synthetic and proves the deployed
-API protocol only; it is not evidence that a real Claude Code process loaded a
-managed file. Retain separate device evidence from the privileged-file
-measurement and live host action probes in
-<a href="../managed-host-configuration/">Managed host configuration</a>.</p>
-<p><code>tests/test_managed_deployment.py</code> validates canonical package parsing,
-out-of-band digest binding, exact host file sets, artifact/executable digests,
-duplicate-key denial, cross-target denial and path confinement.
-<code>tests/test_managed_endpoint_installer.py</code> runs the privileged transaction
-against an isolated synthetic endpoint image. It proves no-write preflight,
-administrator checks, exact restrictive files, hook tamper denial, symlink
-denial and reverse-order restoration after an injected second-file failure.
-Real root-owned host loading and MDM acceptance remain separate evidence; see
-<a href="../managed-endpoint-deployment-design/">Managed endpoint deployment</a>.</p>
-<p><code>scripts/test_aws_entra_scim.py</code> is the live Microsoft Entra provisioning
-acceptance command. It discovers Entra and SCIM status from the selected
-CloudFormation stack, resolves the dedicated bearer directly from Secrets
-Manager, and tests invalid authentication, bounded capability discovery,
-joiner, duplicate, mover, leaver and inactive-user denial. It returns <code>2</code>
-without reading a secret or writing lifecycle state when the stack is not
-configured. Exact synthetic state is removed on success or failure while the
-content-minimised lifecycle audit is retained. Unit contracts live in
-<code>tests/test_aws_entra_scim_script.py</code>; the Lambda's adversarial protocol
-contracts remain in <code>tests/test_aws_scim_contract.py</code>. This does not replace a
-real Entra OIDC login and token-revocation exercise.</p>
-<h2 id="deterministic-propertyfuzz-coverage">Deterministic property/fuzz coverage</h2>
-<p><code>tests/test_assurance.py</code> runs a finite checked-in corpus from
-<code>tests/corpus/malformed_inputs.json</code>. It exercises proposal construction,
-action fingerprints, nested redaction, policy response mapping, and audit
-acknowledgement behavior. The corpus is capped at 32 cases and has no random
-seed, network call, sleep, or unbounded loop, so CI remains reproducible.
-Expand the corpus with a regression case whenever malformed input reaches a
-new boundary.</p>
-<h2 id="mutation-testing">Mutation testing</h2>
-<p><code>mutation-baseline.json</code> records the security branches and the bounded command.
-<code>critical-mutants.json</code> is the schema-3 companion manifest of stable invariant
-IDs, exact module/class/method symbols, executable test IDs, and static source
-contracts. The runner emits a commit-bound symbol-to-mutant mapping with the
-source span, AST-node fingerprint, and mutation class reconstructed by the
-verifier; numeric mutmut IDs are evidence identifiers and are never used as a
-substitute for the reviewed symbol contract. Symbols listed
-under <code>static_contracts</code> have no generated mutation operator and require the
-listed adversarial tests instead. Diagnostic strings, event names, mapping
-keys, enum/state labels, operation names, timeout phases, and policy or
-approval metadata are not automatically exempt: any exclusion requires an
-explicit mutation-site rationale and executable contract evidence.
-The declared mutation source scope includes the runtime boundary, typed
-components, approvals, budgets, credentials, idempotency, isolation, policy,
-audit/redaction, and provider adapters. It is checked exactly against
-<code>pyproject.toml</code>:</p>
-<ul>
-<li><code>src/agentic_security/components.py</code></li>
-<li><code>src/agentic_security/runtime.py</code></li>
-<li><code>src/agentic_security/approvals.py</code></li>
-<li><code>src/agentic_security/budgets.py</code></li>
-<li><code>src/agentic_security/credentials.py</code></li>
-<li><code>src/agentic_security/idempotency.py</code></li>
-<li><code>src/agentic_security/isolation.py</code></li>
-<li><code>src/agentic_security/policies.py</code></li>
-<li><code>src/agentic_security/policy_adapters.py</code></li>
-<li><code>src/agentic_security/audit.py</code></li>
-<li><code>src/agentic_security/adapters.py</code></li>
-</ul>
-<p><code>make mutation</code> runs the actual tool in a pinned development environment and
-fails unless the overall threshold is met. It also requires at least 75% killed
-mutants in every declared component and 100% of the exact critical-symbol
-mapping. Any unmatched critical symbol, timeout, suspicious, skipped, or
-not-checked result fails
-closed. Surviving non-critical mutants count against the aggregate and
-component thresholds but are not execution gaps; critical-symbol mutants must
-all be killed. Run it when changing authorization, approval, credential, idempotency,
-timeout, isolation, budget, or audit code. CI runs the same <code>make mutation</code> command on pull requests and
-releases, uploads <code>.mutmut-cache/evidence.json</code> and <code>results.txt</code>, and fails
-on stale/missing/truncated/timeout/unparseable evidence or evidence generated
-for another commit. The evidence records the exact score, commit, tool,
-command, and source scope. No mutation score is claimed without the runner's
-parsed result file. One deliberately timing-heavy
-worker stress test is excluded from mutmut's baseline selection because
-mutation process overhead makes it nondeterministic; it remains mandatory in
-the normal unit/adversarial suite and is not excluded from <code>make check</code>.
-No source file is excluded because its mutants are difficult to kill. Only
-objectively non-security tooling may be outside the scope, and each such
-boundary requires contract tests. The runner records raw results with a
-commit header, per-component scores, critical-mutant results, and negative
-control outcomes. High-impact adoption must retain that raw evidence with the
-reviewed commit.</p>
-<p><code>scripts/verify_mutation_evidence.py</code> independently rechecks the uploaded
-evidence against the current commit, <code>pyproject.toml</code>, the baseline threshold,
-and the results-file hash. It fails closed for missing, stale, cross-commit,
-scope-mismatched, malformed, or tampered evidence.</p>
-<h2 id="adapter-contracts">Adapter contracts</h2>
-<p>The local contract suite uses synthetic fakes for OPA, Cedar, approval, IAM,
-idempotency, remote audit, and isolation boundaries. These tests verify request
-shape, binding, malformed-response handling, and fail-closed behavior. They do
-not certify an external deployment. Provider integrations should add
-ephemeral-service tests for authentication, timeouts, stale versions, replay,
-and service-unavailable responses.</p>
 
 
 

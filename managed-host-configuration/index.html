@@ -16,7 +16,7 @@
         <link rel="prev" href="../runtime-attestation-design/">
       
       
-        <link rel="next" href="../enterprise-user-journeys/">
+        <link rel="next" href="../managed-endpoint-deployment-design/">
       
       
         
@@ -850,6 +850,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../managed-endpoint-deployment-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed endpoint deployment design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -1529,6 +1556,11 @@ configuration and keeps desired state separate from observed state.</p>
 <p>It does <strong>not</strong> install privileged files or prove that a host loaded them.
 Endpoint management, MDM, or a separately authenticated host service must
 deploy the artifacts atomically and protect them from modification.</p>
+<p>The optional <a href="../managed-endpoint-deployment-design/">managed endpoint deployment</a>
+package binds those artifacts to exact administrator-installed executables and
+provides preflight, restrictive atomic replacement and complete rollback. The
+package is authoritative only when its expected digest, bundle, host and
+platform arrive through authenticated endpoint management.</p>
 <p><code>reconcile_effective_authority</code> accepts endpoint-owned evidence only. Missing,
 expired, future-dated, wrong-host, or mismatched evidence produces no effective
 allows. Duplicate action expressions resolve in this order:</p>
@@ -1690,7 +1722,9 @@ policy must constrain those separately.</p>
 </ol>
 <p>The SDK supplies compilation, protected-file measurement, authenticated
 heartbeat ingestion and desired-versus-observed reconciliation. It does not
-write privileged files or control host launch. When a managed bundle is
+write privileged files or control host launch. The separate operator CLI can
+perform an explicit root installation after deployment-owned digest and hook
+verification; it is not invoked by the SDK or agent. When a managed bundle is
 assigned, the control plane blocks effective-policy and other governed agent
 routes until exact fresh evidence arrives. The UI must continue to label the
 deployment blocked until live action probes additionally prove that the host

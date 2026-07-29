@@ -748,6 +748,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../managed-endpoint-deployment-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed endpoint deployment design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -1542,15 +1569,15 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.</p>
 <td>P0-01</td>
 <td>Enterprise-enforced Claude configuration</td>
 <td>Partial</td>
-<td>Typed endpoint-managed settings and exclusive MCP compilation; desired/observed source, version, digest and freshness posture in the fleet API/UI</td>
-<td>Deploy through a real MDM channel, run local deletion/weakening acceptance and prove approved launch profiles</td>
+<td>Typed endpoint-managed settings and exclusive MCP compilation; canonical digest-bound package; root installer preflight/rollback; desired/observed source, version, digest and freshness posture</td>
+<td>Connect package distribution to the control plane/MDM, run real root-owned install/deletion/weakening acceptance and prove approved launch profiles</td>
 </tr>
 <tr>
 <td>P0-02</td>
 <td>Codex managed requirements</td>
 <td>Partial</td>
-<td>Typed system <code>requirements.toml</code> compilation for profiles, hooks, restrictive command rules, MCP identity, deny-read and network controls; desired/observed posture in the fleet API/UI</td>
-<td>Deploy to a real managed Codex host, enforce the launcher and run malformed/upgrade/bypass acceptance</td>
+<td>Typed system <code>requirements.toml</code> compilation for profiles, hooks, restrictive command rules, MCP identity, deny-read and network controls; canonical package and POSIX installer transaction</td>
+<td>Connect package distribution to control plane/MDM, deploy to a real managed Codex host, enforce the launcher and run malformed/upgrade/bypass acceptance</td>
 </tr>
 <tr>
 <td>P0-03</td>
