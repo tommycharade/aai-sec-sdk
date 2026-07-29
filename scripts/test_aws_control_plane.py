@@ -267,6 +267,10 @@ def main() -> int:
                     "agentId": agent_id,
                     "host": "claude-code",
                     "projectRoot": "/synthetic/project",
+                    # These browser-authored values are deliberately forged.
+                    # The service must derive both fields from the deployment.
+                    "environment": "forged-production",
+                    "team": "forged-team",
                     "ownership": {
                         "ownerId": "aws-control-plane-smoke",
                         "ownerName": "Synthetic acceptance owner",
@@ -279,6 +283,72 @@ def main() -> int:
         )
         if registered["statusCode"] != 201:
             raise RuntimeError(f"agent registration failed: {registered}")
+        registered_body = json.loads(registered["body"])
+        registered_ownership = registered_body.get("ownership", {})
+        if (
+            registered_body.get("environment") != "synthetic"
+            or registered_body.get("team") != "automated-acceptance"
+            or registered_ownership.get("status") != "current"
+            or registered_ownership.get("revision") != 1
+            or registered_ownership.get("team") != "automated-acceptance"
+            or registered_ownership.get("environment") != "synthetic"
+        ):
+            raise RuntimeError(
+                "agent registration trusted forged scope or omitted accountable ownership: "
+                f"{registered_body}"
+            )
+        reviewed = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                f"/enterprise/agents/{deployment_id}/{agent_id}/ownership",
+                "PUT",
+                {
+                    "expectedOwnershipRevision": 1,
+                    "ownership": {
+                        "ownerId": "aws-control-plane-smoke-reviewed",
+                        "ownerName": "Reviewed synthetic acceptance owner",
+                        "businessContact": "reviewed-acceptance@example.invalid",
+                        "criticality": "medium",
+                    },
+                    "reason": "Synthetic quarterly ownership acceptance review completed.",
+                },
+                arguments.tenant,
+            ),
+        )
+        reviewed_body = json.loads(reviewed["body"])
+        reviewed_ownership = reviewed_body.get("ownership", {})
+        if (
+            reviewed["statusCode"] != 200
+            or reviewed_ownership.get("status") != "current"
+            or reviewed_ownership.get("revision") != 2
+            or reviewed_ownership.get("ownerId") != "aws-control-plane-smoke-reviewed"
+            or reviewed_ownership.get("criticality") != "medium"
+            or reviewed_ownership.get("team") != "automated-acceptance"
+            or reviewed_ownership.get("environment") != "synthetic"
+        ):
+            raise RuntimeError(f"agent ownership review failed: {reviewed}")
+        stale_review = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                f"/enterprise/agents/{deployment_id}/{agent_id}/ownership",
+                "PUT",
+                {
+                    "expectedOwnershipRevision": 1,
+                    "ownership": {
+                        "ownerId": "stale-overwrite",
+                        "ownerName": "Stale overwrite attempt",
+                        "businessContact": "stale@example.invalid",
+                        "criticality": "critical",
+                    },
+                    "reason": "Synthetic stale ownership update must be rejected safely.",
+                },
+                arguments.tenant,
+            ),
+        )
+        if stale_review["statusCode"] != 409:
+            raise RuntimeError(f"stale ownership review was not rejected: {stale_review}")
         unassigned_verification = _invoke(
             lambda_client,
             arguments.function_name,
@@ -815,6 +885,10 @@ def main() -> int:
             replacement_body.get("predecessor", {}).get("lifecycle_state") != "revoked"
             or replacement_body.get("replacement", {}).get("lifecycle_state") != "active"
             or replacement_body.get("requiresBootstrap") is not True
+            or replacement_body.get("replacement", {}).get("owner_id")
+            != "aws-control-plane-smoke-reviewed"
+            or replacement_body.get("replacement", {}).get("ownership_revision") != 2
+            or replacement_body.get("replacement", {}).get("team") != "automated-acceptance"
         ):
             raise RuntimeError(f"replacement lifecycle contract failed: {replacement_body}")
         denied_old_session, _ = _request(
@@ -886,7 +960,8 @@ def main() -> int:
         ):
             raise RuntimeError(f"evidence-retaining offboarding failed: {offboarded}")
         print(
-            "AWS control-plane smoke passed: auth, enrollment, heartbeat, managed-host "
+            "AWS control-plane smoke passed: auth, enrollment, accountable ownership/CAS, "
+            "heartbeat, managed-host "
             "missing/conflict enforcement, policy, agent verification, "
             "approval replay, emergency-stop enforcement/recovery, and "
             "multi-process/runtime-connected durable idempotency, and WORM audit "

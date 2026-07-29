@@ -13,9 +13,11 @@ Codex has loaded and enforced it.
 | CloudFormation stack | `AaiSecControlPlane` — `UPDATE_COMPLETE` |
 | Hosted UI | `https://d2ir54klde64bd.cloudfront.net` |
 | API | `https://lwg33pxwk8.execute-api.eu-west-2.amazonaws.com` |
-| SDK deployed merge | `6bead88002e436071b5a6dd3d66c13c38a212f92` |
-| UI deployed merge | `9311a52f53914e70f2bb82f905f791701658d2c1` |
-| Deployed UI JavaScript | `assets/index-BgcTctCD.js` |
+| SDK deployed merge | `2db821ca13c9377bd5955279b86f7a4b8bd68c46` |
+| UI deployed merge | `570f3bda04429824a609b051875cf521bfabe1e2` |
+| Deployed UI JavaScript | `assets/index-Psmot4yk.js` |
+| Deployed UI CSS | `assets/index-C43Nx9cW.css` |
+| CloudFront invalidation | `ICW1FFK3FXI6UTE5TVK89D8W64` |
 
 The deployed CloudFront index referenced the exact JavaScript and CSS build
 assets, both assets returned HTTP 200, and the deployment invalidation reached
@@ -72,6 +74,45 @@ multi-process idempotency, WORM audit retention and SNS/SQS alert delivery.
 Exact synthetic agent, session, bootstrap, membership, deployment, template,
 configuration, approval and idempotency records were removed afterward;
 content-minimised immutable lifecycle audit records remain as intended.
+
+## Accountable agent ownership
+
+The same deployed harness exercised accountable ownership as an authority
+condition rather than treating it as presentation metadata:
+
+| Assertion | Result |
+| --- | --- |
+| Register with forged browser scope | Browser-supplied team and environment ignored |
+| Register with complete accountable owner | HTTP 201; status `current`, revision `1` |
+| Derive team and environment | `automated-acceptance`, `synthetic` from the deployment |
+| Complete a new ownership review | HTTP 200; revision `2`, 90-day review window |
+| Retry with stale expected revision `1` | HTTP 409; no overwrite |
+| Verify the connected agent after review | Ownership check passed |
+| Replace the identity | Successor inherited reviewed owner, team and revision `2` |
+
+The test used only synthetic names and `example.invalid` contacts. The
+transactional contract suite separately proves that the review and durable
+lifecycle audit record commit together, stale/missing ownership fails
+verification, malformed contacts fail closed, and an Entra-enabled tenant
+accepts only an active SCIM-provisioned owner UUID.
+
+## Hosted UI and responsive workflow
+
+The deployed CloudFront landing page loaded the merged JavaScript and CSS
+without console-visible load failure. This browser session did not contain an
+authenticated Cognito console session, so this record does **not** claim a
+signed-in production browser acceptance pass.
+
+The exact merged UI was also exercised in its explicitly labelled local
+simulation mode. The operator journey proved the owner column, accountable
+ownership inspector, 90-day review dialog, field help, disabled-until-valid
+review action, server-derived team/environment presentation, and required
+ownership fields in Claude Code enrollment. At a `390 x 844` viewport the
+review dialog remained inside `x=10..380`; browser QA found and fixed a
+non-wrapping inspector action row, then observed document width and viewport
+width both equal to `390` with no horizontal overflow. This validates the
+rendered interaction and responsive containment, but it does not substitute
+for the pending authenticated Cognito role and cross-tenant exercise.
 
 Runtime attestation was the sole failed positive-verification check and the
 deployed API explicitly returned `not_configured`. The harness continued only
