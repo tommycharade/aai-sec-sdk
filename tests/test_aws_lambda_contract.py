@@ -5886,3 +5886,235 @@ def test_discovery_source_authority_revision_and_fail_closed_completeness(
         "non_current_source:identity",
         "non_current_source:source_control",
     ]
+
+
+def test_discovery_connector_commits_complete_paginated_generation_atomically(
+    monkeypatch: Any,
+) -> None:
+    """Partial, forged, replayed and concurrently stale connector uploads stay invisible."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-discovery-connector"
+    now = int(time.time())
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+    credential_path = "/api/enterprise/discovery/sources/github/connector-credential"
+    issued = _invoke(
+        module,
+        _event(
+            credential_path,
+            "POST",
+            body={"sourceKind": "source_control", "expectedRevision": 0},
+            claims=platform,
+        ),
+    )
+    assert issued["statusCode"] == 201
+    credential = json.loads(issued["body"])
+    token = credential["token"]
+    stored = table.get_item(Key=module._item_key(tenant, "DISCOVERY_CONNECTOR", "github"))["Item"]
+    assert token not in json.dumps(stored)
+    assert stored["tokenHash"] == hashlib.sha256(token.encode()).hexdigest()
+
+    base = f"/api/discovery-ingest/{tenant}/github/generations"
+    generation = {
+        "generation": "github-page-set-1",
+        "expectedRevision": 0,
+        "observedAt": now,
+        "expiresAt": now + 300,
+        "pageCount": 2,
+    }
+    forged_credential = "synthetic-invalid-connector-credential"  # noqa: S105
+    forged = _event(base, "POST", body=generation, token=forged_credential)
+    assert _invoke(module, forged)["statusCode"] == 403
+    assert _invoke(module, _event(base, "POST", body=generation, token=token))["statusCode"] == 201
+    generation_key = (
+        f"TENANT#{tenant}",
+        "DISCOVERY_GENERATION#github:github-page-set-1",
+    )
+    # boto3 returns DynamoDB numbers as Decimal in the deployed Lambda.
+    for field in ("expectedRevision", "observedAt", "expiresAt", "pageCount"):
+        table.items[generation_key][field] = Decimal(table.items[generation_key][field])
+
+    digest_a = hashlib.sha256(b"/synthetic/repository-a").hexdigest()
+    digest_b = hashlib.sha256(b"/synthetic/repository-b").hexdigest()
+    pages = [
+        {
+            "observations": [
+                {
+                    "kind": "repository",
+                    "id": "repository-a",
+                    "projectRootDigest": digest_a,
+                    "expectedHosts": ["claude-code"],
+                }
+            ]
+        },
+        {
+            "observations": [
+                {
+                    "kind": "repository",
+                    "id": "repository-b",
+                    "projectRootDigest": digest_b,
+                    "expectedHosts": ["codex-cli"],
+                }
+            ]
+        },
+    ]
+    page_hashes = []
+    for page_number, body in enumerate(pages):
+        response = _invoke(
+            module,
+            _event(
+                f"{base}/github-page-set-1/pages/{page_number}",
+                "PUT",
+                body=body,
+                token=token,
+            ),
+        )
+        assert response["statusCode"] == 201
+        page_hashes.append(json.loads(response["body"])["pageHash"])
+
+    before_commit = json.loads(
+        _invoke(module, _event("/api/enterprise/discovery", "GET", claims=platform))["body"]
+    )
+    assert before_commit["sources"] == []
+    assert before_commit["summary"]["coverageAvailable"] is False
+
+    bad_commit = _invoke(
+        module,
+        _event(
+            f"{base}/github-page-set-1/commit",
+            "POST",
+            body={"pageHashes": [page_hashes[0], "0" * 64]},
+            token=token,
+        ),
+    )
+    assert bad_commit["statusCode"] == 400
+    committed = _invoke(
+        module,
+        _event(
+            f"{base}/github-page-set-1/commit",
+            "POST",
+            body={"pageHashes": page_hashes},
+            token=token,
+        ),
+    )
+    assert committed["statusCode"] == 200
+    current = json.loads(
+        _invoke(module, _event("/api/enterprise/discovery", "GET", claims=platform))["body"]
+    )
+    assert current["sources"][0]["status"] == "current"
+    assert current["sources"][0]["observationCount"] == 2
+    assert current["summary"]["denominator"] == 2
+    assert current["summary"]["coverageAvailable"] is False
+    assert (
+        _invoke(
+            module,
+            _event(
+                f"{base}/github-page-set-1/commit",
+                "POST",
+                body={"pageHashes": page_hashes},
+                token=token,
+            ),
+        )["statusCode"]
+        == 404
+    )
+
+    stale_generation = {
+        **generation,
+        "generation": "github-stale-writer",
+        "expectedRevision": 1,
+        "pageCount": 1,
+    }
+    assert (
+        _invoke(module, _event(base, "POST", body=stale_generation, token=token))["statusCode"]
+        == 201
+    )
+    stale_page = _invoke(
+        module,
+        _event(
+            f"{base}/github-stale-writer/pages/0",
+            "PUT",
+            body=pages[0],
+            token=token,
+        ),
+    )
+    stale_hash = json.loads(stale_page["body"])["pageHash"]
+    legacy_snapshot = _discovery_snapshot(
+        "source_control", pages[1]["observations"], now=now, expected_revision=1
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/discovery/sources/github/snapshots",
+                "POST",
+                body=legacy_snapshot,
+                claims=platform,
+            ),
+        )["statusCode"]
+        == 201
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                f"{base}/github-stale-writer/commit",
+                "POST",
+                body={"pageHashes": [stale_hash]},
+                token=token,
+            ),
+        )["statusCode"]
+        == 409
+    )
+
+    duplicate_generation = {
+        **generation,
+        "generation": "github-cross-page-duplicate",
+        "expectedRevision": 2,
+    }
+    assert (
+        _invoke(module, _event(base, "POST", body=duplicate_generation, token=token))["statusCode"]
+        == 201
+    )
+    duplicate_hashes = []
+    for page_number in range(2):
+        duplicate_page = _invoke(
+            module,
+            _event(
+                f"{base}/github-cross-page-duplicate/pages/{page_number}",
+                "PUT",
+                body=pages[0],
+                token=token,
+            ),
+        )
+        duplicate_hashes.append(json.loads(duplicate_page["body"])["pageHash"])
+    assert (
+        _invoke(
+            module,
+            _event(
+                f"{base}/github-cross-page-duplicate/commit",
+                "POST",
+                body={"pageHashes": duplicate_hashes},
+                token=token,
+            ),
+        )["statusCode"]
+        == 400
+    )
+
+    revoked = _invoke(module, _event(credential_path, "DELETE", claims=platform))
+    assert revoked["statusCode"] == 200
+    assert (
+        _invoke(
+            module,
+            _event(
+                base,
+                "POST",
+                body={**generation, "generation": "github-page-set-2", "expectedRevision": 2},
+                token=token,
+            ),
+        )["statusCode"]
+        == 403
+    )

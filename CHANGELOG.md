@@ -1,5 +1,9 @@
 # Changelog
 
+- Added source-scoped, revocable discovery connector credentials and bounded
+  paginated inventory generations. Connectors upload immutable hash-addressed
+  pages and an atomic commit alone advances current coverage, so partial,
+  forged, replayed, hash-mismatched or concurrently stale uploads fail closed.
 - Added enterprise agent-population discovery for Claude Code and Codex. The
   AWS control plane accepts bounded, revision-bound and expiring identity,
   endpoint and source-control snapshots; computes a complete-source denominator;
