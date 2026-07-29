@@ -24,7 +24,7 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.
 | P0-03 | Native-control reconciliation | Partial | Deterministic deny-first reconciliation, protected-file measurement on every enrolled heartbeat, exact desired/evidence checks, governed-route denial and conflict/missing/stale UI | Bind complete host-native effective settings (not only protected-file measurement) and prove displayed authority against live Claude/Codex execution |
 | P0-04 | Complete agent discovery | Partial | Enrolled inventory and health | Device/user/repository discovery and unmanaged-instance denominator |
 | P0-05 | Runtime attestation | Partial | Typed Claude/Codex measurement, release-bound clean-checkout manifest generator, exact manifest/provenance validation, nonce-bound heartbeat, baseline drift detection, quarantine/session revocation, fleet/group posture UI and adversarial contracts | Publish and pin the next independently verified release manifests, then complete live modified-package/hook/config/process and hardware-backed identity acceptance |
-| P0-06 | Entra SSO, SCIM and granular RBAC | Partial | Tenant-specific Entra OIDC, tenant-bound SCIM users/groups/memberships, admin-controlled canonical-role mapping, five-minute token reconciliation, adversarial contracts and Identity & Trust UI | Live Entra joiner/mover/leaver acceptance, break glass, access certification and delegated scopes |
+| P0-06 | Entra SSO, SCIM and granular RBAC | Partial | Tenant-specific Entra OIDC, tenant-bound SCIM users/groups/memberships, admin-controlled canonical-role mapping, five-minute token reconciliation, adversarial contracts, Identity & Trust UI and a fail-closed live lifecycle acceptance command | Configure the pilot tenant, run live SCIM plus real OIDC joiner/mover/leaver acceptance, then add break glass, access certification and delegated scopes |
 | P0-07 | SIEM/SOAR | Stub | Splunk status contract and honest UI state with `deliveryVerified: false` | HEC delivery, authentication, schema, retry, dead letter, monitoring and replay |
 | P0-08 | Durable evidence | Partial | S3 Object Lock, retention and cross-region pilot evidence | Tenant retention, legal hold, complete export and evidence-loss recovery SLO |
 | P0-09 | Production credential broker | Partial | Typed broker contracts and AWS scoped STS reference | Real AWS/Azure/GCP production role inventory and revocation evidence |
@@ -96,6 +96,11 @@ with Microsoft Entra ID as the first adapter:
    preserving honest degraded and not-configured states. Splunk remains a
    non-delivering stub.
 
-This advances but does not close P0-06. The next identity acceptance slice is
-a live Entra joiner/mover/leaver exercise, followed by break glass, quarterly
-access certification and delegated administrative scopes.
+The live acceptance command now discovers deployed posture, reads its bearer
+only from Secrets Manager, and exercises synthetic joiner, mover and leaver
+state with exact cleanup. The 2026-07-29 AWS preflight returned `NOT READY`
+because the pilot stack has no Entra tenant configuration; this is correct
+fail-closed evidence, not an acceptance pass. P0-06 still requires a configured
+pilot tenant and real Entra OIDC sign-in, role transition and token-revocation
+exercise, followed by break glass, quarterly access certification and
+delegated administrative scopes.

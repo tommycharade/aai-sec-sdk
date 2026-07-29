@@ -70,6 +70,27 @@ operations per request and inventories beyond its bounded response limit.
 
 Use synthetic identities and retain redaction-safe timestamps and result IDs.
 
+Before testing with a real Entra pilot identity, run the deployment acceptance
+command. It discovers the endpoint from CloudFormation, reads the dedicated
+bearer directly from Secrets Manager, rejects an invalid bearer, and exercises
+synthetic joiner, mover and leaver behavior. The bearer is never accepted as a
+command argument or written to output:
+
+```bash
+ENTRA_SCIM_TOKEN_SECRET_NAME=<scim-bearer-secret-name> \
+ENTRA_AAI_TENANT_ID=<provisioned-aai-tenant-id> \
+PYTHONPATH=src python scripts/test_aws_entra_scim.py \
+  --stack-name AaiSecControlPlane \
+  --profile p1 \
+  --region eu-west-2
+```
+
+Exit status `0` proves the live SCIM endpoint behavior. Exit status `2` means
+the stack or required operator inputs are not configured and must never be
+recorded as an acceptance pass. Exit status `1` means configured behavior
+failed. Exact synthetic user, group and membership records are removed on exit;
+content-minimised lifecycle audit records are intentionally retained.
+
 ### Joiner
 
 1. Assign a new pilot operator and mapped group to the Entra application.
@@ -115,7 +136,9 @@ Use synthetic identities and retain redaction-safe timestamps and result IDs.
 
 ## Current limitations
 
-This implementation advances P0-06 but does not complete it. Live Entra
-acceptance, configurable provisioning SLO alarms, immediate global token
+This implementation advances P0-06 but does not complete it. The automated
+command proves the deployed SCIM protocol once configured; real Entra OIDC
+sign-in and joiner/mover/leaver acceptance, configurable provisioning SLO
+alarms, immediate global token
 revocation, break-glass workflow, quarterly access certification and delegated
 administrative scopes remain outstanding. Splunk remains a non-delivering stub.

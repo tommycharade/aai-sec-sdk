@@ -50,6 +50,18 @@ managed file. Retain separate device evidence from the privileged-file
 measurement and live host action probes in
 [Managed host configuration](managed-host-configuration.md).
 
+`scripts/test_aws_entra_scim.py` is the live Microsoft Entra provisioning
+acceptance command. It discovers Entra and SCIM status from the selected
+CloudFormation stack, resolves the dedicated bearer directly from Secrets
+Manager, and tests invalid authentication, bounded capability discovery,
+joiner, duplicate, mover, leaver and inactive-user denial. It returns `2`
+without reading a secret or writing lifecycle state when the stack is not
+configured. Exact synthetic state is removed on success or failure while the
+content-minimised lifecycle audit is retained. Unit contracts live in
+`tests/test_aws_entra_scim_script.py`; the Lambda's adversarial protocol
+contracts remain in `tests/test_aws_scim_contract.py`. This does not replace a
+real Entra OIDC login and token-revocation exercise.
+
 ## Deterministic property/fuzz coverage
 
 `tests/test_assurance.py` runs a finite checked-in corpus from
