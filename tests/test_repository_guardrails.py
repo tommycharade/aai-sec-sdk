@@ -3,7 +3,16 @@ import re
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+
+def _repository_root() -> Path:
+    """Locate the checkout when tests run normally or below Mutmut's copy."""
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / ".git").exists():
+            return candidate
+    raise RuntimeError("repository root containing .git was not found")
+
+
+ROOT = _repository_root()
 
 
 def test_required_guardrail_files_exist() -> None:
