@@ -613,6 +613,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-discovery-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent population discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dynamic-groups-design/" class="md-nav__link">
         
   
@@ -983,6 +1010,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Journey 4: Monitor the enterprise">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#journey-4a-establish-population-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journey 4a: Establish population coverage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1732,6 +1776,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Journey 4: Monitor the enterprise">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#journey-4a-establish-population-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journey 4a: Establish population coverage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1846,6 +1907,23 @@ session. New actions are evaluated against the live authority.</p>
 <p>From the dashboard, the operator can open a filtered fleet view, group view,
 agent detail, audit event or deployment rollout without losing the active
 filters.</p>
+<h3 id="journey-4a-establish-population-coverage">Journey 4a: Establish population coverage</h3>
+<p><strong>Actor:</strong> Endpoint, identity, or security operations engineer.</p>
+<ol>
+<li>Configure deployment-owned identity, endpoint, and source-control collectors.</li>
+<li>Publish complete, short-lived snapshots through source-scoped authority.</li>
+<li>Open <strong>Coverage</strong> and confirm all required sources are current.</li>
+<li>Review the expected Claude Code and Codex denominator before using any
+   percentage.</li>
+<li>Investigate unmanaged or duplicate instances, inactive owners/users, and
+   active enrollments absent from the expected inventory.</li>
+<li>Connect a missing agent or use the Agents lifecycle controls for a verified
+   leaver or orphan.</li>
+<li>Export the content-hashed report for assessment evidence.</li>
+</ol>
+<p>If any source is missing, incomplete, or stale, the journey stops at source
+recovery. The UI must not present a percentage or recommend destructive action
+from absence alone.</p>
 <h2 id="journey-5-respond-to-an-incident">Journey 5: Respond to an incident</h2>
 <p><strong>Actor:</strong> Security operations engineer.</p>
 <ol>

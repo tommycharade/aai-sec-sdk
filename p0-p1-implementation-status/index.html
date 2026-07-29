@@ -613,6 +613,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-discovery-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent population discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dynamic-groups-design/" class="md-nav__link">
         
   
@@ -1884,8 +1911,8 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.</p>
 <td>P0-04</td>
 <td>Complete agent discovery</td>
 <td>Partial</td>
-<td>Enrolled inventory and health</td>
-<td>Device/user/repository discovery and unmanaged-instance denominator</td>
+<td>Revision-bound, expiring identity/endpoint/source-control snapshots; fail-closed complete-source denominator; unmanaged, duplicate, leaver and orphan reconciliation; redacted hash-bound export; dedicated Coverage UI; adversarial contracts for authority, replay, malformed input, incompleteness and expiry</td>
+<td>Build authenticated IdP/MDM/source-control connector services, replace the 100-record pilot snapshot bound with paginated atomic generations, and prove at least 95% real pilot discovery coverage</td>
 </tr>
 <tr>
 <td>P0-05</td>
@@ -1993,8 +2020,8 @@ installation or live host-load acceptance.</p>
 <tr>
 <td>Fleet lifecycle</td>
 <td>Partial</td>
-<td>Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and deterministic reevaluation, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, required accountable ownership and 90-day stale-review reporting</td>
-<td>Bulk enrollment import, scheduled dynamic reevaluation, managed upgrades, exception expiry and automatic orphan/leaver detection</td>
+<td>Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and deterministic reevaluation, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, and source-reconciled orphan/leaver detection</td>
+<td>Bulk enrollment import, scheduled dynamic reevaluation, managed upgrades, exception expiry, live discovery connectors and response automation</td>
 </tr>
 <tr>
 <td>Policy governance</td>
@@ -2011,8 +2038,8 @@ installation or live host-load acceptance.</p>
 <tr>
 <td>Reporting and administration</td>
 <td>Partial</td>
-<td>Fleet posture, health, SLO and compliance evidence summaries</td>
-<td>Coverage denominator, executive/auditor reports, delegated scopes, service identities, Terraform, CMK/residency and private access</td>
+<td>Fleet posture, health, SLO and compliance summaries plus fail-closed population coverage and content-hashed export</td>
+<td>Executive/auditor report packs, connector service identities, Terraform, CMK/residency and private access</td>
 </tr>
 </tbody>
 </table>

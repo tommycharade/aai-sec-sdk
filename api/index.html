@@ -613,6 +613,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent-discovery-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent population discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dynamic-groups-design/" class="md-nav__link">
         
   
@@ -5452,6 +5479,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#enterprise-population-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enterprise population discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -9828,6 +9866,17 @@
     <span class="md-ellipsis">
       
         append
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#enterprise-population-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enterprise population discovery
       
     </span>
   </a>
@@ -52039,7 +52088,23 @@ it is serialized into span attributes.</p>
 
     </div>
 
-</div>
+</div><h2 id="enterprise-population-discovery">Enterprise population discovery</h2>
+<p>The AWS control plane exposes a content-minimised discovery contract for
+reconciling the expected Claude Code and Codex population with enrolled agents:</p>
+<ul>
+<li><code>POST /api/enterprise/discovery/sources/{sourceId}/snapshots</code> publishes one
+  complete, expiring, revision-bound identity, endpoint, or source-control
+  snapshot. It requires <code>discovery_write</code>, currently limited to platform
+  administrators.</li>
+<li><code>GET /api/enterprise/discovery</code> returns current source confidence, the
+  expected-instance denominator, findings, and business-unit/repository/device
+  breakdowns.</li>
+<li><code>GET /api/enterprise/discovery/export</code> adds a canonical content hash for
+  evidence handling.</li>
+</ul>
+<p>Percentages are <code>null</code> unless every required source class is complete and
+current. See <a href="../agent-discovery-design/">Agent population discovery</a> for exact
+schemas, limits, semantics, and trust boundaries.</p>
 
 
 
