@@ -1,0 +1,2544 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source execution security runtime for agentic AI systems">
+      
+      
+      
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/enterprise-rollout-p0-p1-requirements/">
+      
+      
+        <link rel="prev" href="../enterprise-user-journeys/">
+      
+      
+        <link rel="next" href="../enterprise-operations-readiness/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Enterprise rollout P0 and P1 requirements - Agentic AI Security SDK</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#enterprise-rollout-p0-and-p1-requirements" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Agentic AI Security SDK" class="md-header__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agentic AI Security SDK
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Enterprise rollout P0 and P1 requirements
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Agentic AI Security SDK" class="md-nav__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agentic AI Security SDK
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tommycharade/aai-sec-sdk" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tommycharade/aai-sec-sdk
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operational runbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../production-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent integrations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-code/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Claude Code example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codex-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex CLI example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Management UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-fleet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise fleet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-editor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claude-managed-resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed Claude resources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Wider enterprise UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-integration-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise integration design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-user-journeys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise user journeys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise rollout P0 and P1 requirements
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise rollout P0 and P1 requirements
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#priority-definitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Priority definitions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current baseline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p0-enterprise-rollout-blockers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0 enterprise rollout blockers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P0 enterprise rollout blockers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#p0-01-enterprise-enforced-claude-code-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-01 — Enterprise-enforced Claude Code configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-02-codex-managed-requirements-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-02 — Codex managed-requirements integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-03-native-control-reconciliation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-03 — Native-control reconciliation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-04-complete-agent-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-04 — Complete agent discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-05-runtime-attestation-and-tamper-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-05 — Runtime attestation and tamper detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-06-enterprise-sso-scim-and-granular-rbac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-06 — Enterprise SSO, SCIM and granular RBAC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-07-siem-and-soar-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-07 — SIEM and SOAR integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-08-durable-evidence-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-08 — Durable evidence guarantees
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-09-production-credential-broker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-09 — Production credential broker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-10-production-isolation-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-10 — Production isolation integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-11-high-availability-and-disaster-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-11 — High availability and disaster recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-12-security-assurance-and-enterprise-trust-package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-12 — Security assurance and enterprise trust package
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p1-enterprise-scale-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1 enterprise scale requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P1 enterprise scale requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fleet-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fleet lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#policy-governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy governance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security operations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reporting-and-administration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reporting and administration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delivery-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery sequence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#enterprise-rollout-acceptance-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enterprise rollout acceptance gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#definition-of-done-for-each-requirement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Definition of done for each requirement
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#immutable-security-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Immutable security principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#product-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Product decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-operations-readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise operations readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../product-owner-enterprise-claude-rollout-review-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product Owner rollout review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-claude-rollout-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise Claude Code rollout plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../real-claude-code-acceptance-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real Claude Code acceptance evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aws-deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../code-owned-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code-owned controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end-to-end-example/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End-to-end example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guardrails/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Engineering guardrails
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licensing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../p1-p2-closure-evidence-2026-07-27/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    P1/P2 closure evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release-evidence-v1.0.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release evidence v1.0.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-25)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../critical-adopter-review-2026-07-26/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Critical adopter review (2026-07-26)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#priority-definitions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Priority definitions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current baseline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p0-enterprise-rollout-blockers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0 enterprise rollout blockers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P0 enterprise rollout blockers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#p0-01-enterprise-enforced-claude-code-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-01 — Enterprise-enforced Claude Code configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-02-codex-managed-requirements-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-02 — Codex managed-requirements integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-03-native-control-reconciliation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-03 — Native-control reconciliation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-04-complete-agent-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-04 — Complete agent discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-05-runtime-attestation-and-tamper-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-05 — Runtime attestation and tamper detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-06-enterprise-sso-scim-and-granular-rbac" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-06 — Enterprise SSO, SCIM and granular RBAC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-07-siem-and-soar-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-07 — SIEM and SOAR integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-08-durable-evidence-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-08 — Durable evidence guarantees
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-09-production-credential-broker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-09 — Production credential broker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-10-production-isolation-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-10 — Production isolation integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-11-high-availability-and-disaster-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-11 — High availability and disaster recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p0-12-security-assurance-and-enterprise-trust-package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P0-12 — Security assurance and enterprise trust package
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p1-enterprise-scale-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1 enterprise scale requirements
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P1 enterprise scale requirements">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fleet-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fleet lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#policy-governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy governance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security operations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reporting-and-administration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reporting and administration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delivery-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery sequence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#enterprise-rollout-acceptance-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enterprise rollout acceptance gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#definition-of-done-for-each-requirement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Definition of done for each requirement
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#immutable-security-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Immutable security principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#product-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Product decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="enterprise-rollout-p0-and-p1-requirements">Enterprise rollout P0 and P1 requirements</h1>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Status</td>
+<td>Proposed</td>
+</tr>
+<tr>
+<td>Scope</td>
+<td>Enterprise-wide management of Claude Code and Codex CLI</td>
+</tr>
+<tr>
+<td>Audience</td>
+<td>Product, architecture, engineering, QA, security operations, compliance</td>
+</tr>
+<tr>
+<td>Decision owner</td>
+<td>Product owner and enterprise security owner</td>
+</tr>
+<tr>
+<td>Last updated</td>
+<td>2026-07-29</td>
+</tr>
+</tbody>
+</table>
+<p>This document converts the CISO product review into implementable and
+testable requirements. It is the release gate for describing the product as
+an enterprise-wide control for Claude Code and Codex CLI.</p>
+<h2 id="priority-definitions">Priority definitions</h2>
+<ul>
+<li><strong>P0 — enterprise rollout blocker:</strong> must be implemented and evidenced before
+  an enterprise-wide production purchase or mandatory rollout. A limited,
+  low-risk pilot may proceed only under the restrictions in
+  <a href="../enterprise-operations-readiness/">enterprise operations readiness</a>.</li>
+<li><strong>P1 — enterprise scale requirement:</strong> needed to operate the product safely
+  and efficiently at scale after the P0 foundations exist. A P1 may become a
+  P0 for a particular customer because of regulation, fleet size or operating
+  model.</li>
+</ul>
+<h2 id="current-baseline">Current baseline</h2>
+<p>The requirements below build on capabilities already present in the reference
+implementation:</p>
+<ul>
+<li>a Cognito-authenticated, tenant-scoped AWS control plane and web UI;</li>
+<li>typed policies, groups, agent enrollment and effective-policy retrieval;</li>
+<li>authenticated heartbeats, fleet health, staged rollouts, drift reporting and
+  emergency stops;</li>
+<li>exact-action, expiring, single-use approvals and redaction-safe audit events;</li>
+<li>local Claude Code and Codex hook/MCP onboarding and synthetic acceptance
+  evidence;</li>
+<li>fail-closed SDK controls for policy, budgets, credentials, isolation,
+  idempotency and telemetry adapters.</li>
+</ul>
+<p>This baseline proves a controlled pilot. It does <strong>not</strong> prove that every
+enterprise agent installation is discovered, tamper-resistant or governed by
+an independently verified production enforcement boundary.</p>
+<h2 id="p0-enterprise-rollout-blockers">P0 enterprise rollout blockers</h2>
+<h3 id="p0-01-enterprise-enforced-claude-code-configuration">P0-01 — Enterprise-enforced Claude Code configuration</h3>
+<p><strong>Risk.</strong> Project-owned <code>.claude</code> files can be changed or removed by a user or
+process with repository access. They are useful for onboarding and pilots but
+are not an immutable enterprise control.</p>
+<p><strong>Required outcome.</strong> Distribute and enforce the approved hook, MCP gateway,
+launch settings and policy routing through Claude server-managed settings,
+device management, or another enterprise-owned configuration channel. The
+control plane must distinguish centrally managed configuration from local
+project configuration and report the effective source.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>A real managed Claude Code device receives the configuration without a
+  repository commit.</li>
+<li>Local deletion or weakening is rejected, restored or reported as non-compliant
+  within five minutes.</li>
+<li>Tests prove that project files and launch flags cannot bypass the managed
+  hook and gateway.</li>
+<li>The UI shows configuration source, version, hash and last verification time.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> Endpoint engineering; Claude enterprise administration;
+runtime integration team.</p>
+<h3 id="p0-02-codex-managed-requirements-integration">P0-02 — Codex managed-requirements integration</h3>
+<p><strong>Risk.</strong> A user can start an unmanaged Codex process or alter project-local
+configuration, bypassing policy enforced only by onboarding files.</p>
+<p><strong>Required outcome.</strong> Generate and distribute enterprise-managed Codex
+requirements, managed hooks and approved launch profiles. Where supported,
+cloud-managed or device-managed <code>requirements.toml</code> must constrain sandbox,
+network, MCP, identity and command-rule configuration.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>A real managed Codex installation receives the required configuration.</li>
+<li>An unmanaged launch, conflicting local configuration and weakening command-line
+  flag are denied or reported as non-compliant.</li>
+<li>The UI shows the effective managed requirements and their provenance.</li>
+<li>Contract and adversarial tests cover upgrades and malformed requirements.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> Endpoint engineering; Codex administration; runtime
+integration team.</p>
+<h3 id="p0-03-native-control-reconciliation">P0-03 — Native-control reconciliation</h3>
+<p><strong>Risk.</strong> The AAI policy alone does not express every host-native control. An
+operator could believe an action is denied while a weaker Claude or Codex
+setting remains effective, or vice versa.</p>
+<p><strong>Required outcome.</strong> Reconcile the AAI policy with Claude managed permissions
+and Codex sandbox, network, identity, rule and requirement settings. Present a
+single effective-authority view without treating the UI as the enforcement
+boundary. Conflicts must fail closed or require an explicit, audited resolution.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>A deterministic reconciliation engine produces allowed, denied and
+  approval-required actions with provenance for each contributing control.</li>
+<li>Conflict, missing-source and stale-source tests fail closed.</li>
+<li>The policy and agent views show the combined effective authority and explain
+  each conflict.</li>
+<li>Live Claude and Codex tests prove the displayed result matches execution.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> Security architecture; policy team; P0-01 and P0-02.</p>
+<h3 id="p0-04-complete-agent-discovery">P0-04 — Complete agent discovery</h3>
+<p><strong>Risk.</strong> Enrollment inventory shows known agents, not every authorized or
+running Claude/Codex instance. Shadow installations can remain outside policy
+and monitoring.</p>
+<p><strong>Required outcome.</strong> Reconcile authorized users, managed devices, repositories,
+installed binaries, active processes and enrolled agents. Flag unmanaged,
+duplicate, stale and orphaned instances with a clear coverage denominator.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>Discovery covers at least 95% of the agreed pilot population and documents
+  the remaining blind spots.</li>
+<li>Known unmanaged and duplicate test installations appear in the UI within the
+  discovery SLO.</li>
+<li>Reconciliation is tenant-scoped, privacy-reviewed and tested for stale data.</li>
+<li>Coverage reports can be exported by business unit, repository and device.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> Endpoint platform; identity; source-control platform;
+security operations.</p>
+<h3 id="p0-05-runtime-attestation-and-tamper-detection">P0-05 — Runtime attestation and tamper detection</h3>
+<p><strong>Risk.</strong> A heartbeat proves that something possessing a credential called the
+control plane; it does not prove the approved binary, hook, configuration or
+gateway is running untampered.</p>
+<p><strong>Required outcome.</strong> Verify signed package identity, executable provenance,
+hook/configuration hashes, SDK version and expected process/launch context.
+Continuously calculate posture and revoke or quarantine an agent that cannot
+prove the required state.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>Signed release and provenance verification are bound to enrollment and
+  heartbeat evidence.</li>
+<li>Modified binary, hook, configuration and process identity tests become
+  non-compliant within five minutes.</li>
+<li>Attestation freshness and reason codes are visible and auditable.</li>
+<li>A failed or expired attestation cannot receive effective policy or execute a
+  consequential governed action.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> Supply-chain security; endpoint engineering; agent
+runtime team.</p>
+<h3 id="p0-06-enterprise-sso-scim-and-granular-rbac">P0-06 — Enterprise SSO, SCIM and granular RBAC</h3>
+<p><strong>Risk.</strong> Basic authentication and broad operator groups do not provide the
+identity lifecycle, delegation or separation of duties expected in a large
+enterprise.</p>
+<p><strong>Required outcome.</strong> Support enterprise SAML/OIDC federation, SCIM lifecycle,
+IdP group mapping, least-privilege roles and separation between policy author,
+approver, fleet operator, incident responder, auditor and tenant administrator.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>Joiner, mover and leaver tests provision, change and revoke access through
+  SCIM within the agreed SLO.</li>
+<li>A role-permission matrix is enforced by API and UI, including cross-tenant
+  denial and four-eyes restrictions.</li>
+<li>Break-glass access is time-bound, strongly authenticated and independently
+  audited.</li>
+<li>Quarterly access-certification evidence can be exported.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> Identity platform; control-plane team; compliance.</p>
+<h3 id="p0-07-siem-and-soar-integration">P0-07 — SIEM and SOAR integration</h3>
+<p><strong>Risk.</strong> Product-local alerts and evidence do not enter the enterprise's
+monitored incident workflow; delivery failure may go unnoticed.</p>
+<p><strong>Required outcome.</strong> Export normalized, redacted events to supported SIEM/SOAR
+destinations such as Splunk, Microsoft Sentinel or Google Chronicle. Provide
+signed webhooks, bounded retries, dead-letter handling, delivery health and
+replay.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>Synthetic allow, deny, approval, tamper, drift and emergency-stop events are
+  searchable in the customer's destination with tenant and agent correlation.</li>
+<li>Delivery interruption raises an alert, retains events and successfully
+  replays them without duplication.</li>
+<li>Schema versioning, redaction and destination authentication have contract
+  and adversarial tests.</li>
+<li>A SOC runbook assigns alert ownership and response SLOs.</li>
+</ul>
+<p><strong>Sequencing note.</strong> SIEM implementation is parked for the current product
+iteration by product decision. It remains a P0 exit criterion for an
+enterprise-wide rollout and must not be represented as complete.</p>
+<p><strong>Owner/dependencies.</strong> Security operations; telemetry team; customer SIEM
+platform.</p>
+<h3 id="p0-08-durable-evidence-guarantees">P0-08 — Durable evidence guarantees</h3>
+<p><strong>Risk.</strong> In-process or ordinarily mutable evidence cannot support incident,
+legal or regulatory investigation when records are lost, altered or retained
+for the wrong period.</p>
+<p><strong>Required outcome.</strong> Provide immutable/WORM retention, configurable tenant
+retention, legal hold, integrity verification, complete export, evidence-loss
+alerts and tested recovery.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>Attempts to overwrite or delete retained evidence fail and generate an
+  auditable result.</li>
+<li>Legal hold and tenant retention policies are exercised against synthetic
+  records.</li>
+<li>Cross-region recovery proves record count, ordering, hashes and retention.</li>
+<li>Delivery gaps are detected within the monitoring SLO and can be replayed.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> Cloud platform; records management; compliance.</p>
+<h3 id="p0-09-production-credential-broker">P0-09 — Production credential broker</h3>
+<p><strong>Risk.</strong> A configured credential requirement is not proof that a real tool
+received only the identity and permissions intended for one approved action.</p>
+<p><strong>Required outcome.</strong> Integrate supported AWS, Azure and GCP workload-identity
+or secret-broker paths. Credentials must be short-lived, principal/resource
+scoped, issued only after authorization, revocable and absent from model output,
+project files and normal telemetry.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>Real provider tests prove allowed access and deny sibling tenant, agent,
+  resource and expired-session access.</li>
+<li>Credential issuance, use, expiry and revocation are correlated without
+  recording the credential value.</li>
+<li>Denial, broker outage and partial issuance cause no tool side effect.</li>
+<li>Incident response can revoke active authority within its SLO.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> Cloud IAM; credential platform; runtime team.</p>
+<h3 id="p0-10-production-isolation-integration">P0-10 — Production isolation integration</h3>
+<p><strong>Risk.</strong> Declaring an isolation requirement does not prove that untrusted code
+ran inside the expected boundary or that the boundary resisted escape.</p>
+<p><strong>Required outcome.</strong> Support attested container, microVM, endpoint sandbox or
+equivalent adapters with explicit filesystem, network, process, resource and
+credential constraints. Match isolation strength to workload risk.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>A live adapter verifies the boundary before execution and records its
+  immutable identity and configuration.</li>
+<li>Escape, forbidden network, filesystem, process and resource-exhaustion tests
+  are denied or contained.</li>
+<li>Missing, stale or weaker-than-policy isolation fails closed.</li>
+<li>Independent assessment covers the production boundary and its host
+  assumptions.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> Platform security; endpoint/container platform;
+runtime team.</p>
+<h3 id="p0-11-high-availability-and-disaster-recovery">P0-11 — High availability and disaster recovery</h3>
+<p><strong>Risk.</strong> A control-plane outage can either stop all engineering work or tempt
+operators to bypass controls. Evidence and approvals may be lost or become
+inconsistent during failure.</p>
+<p><strong>Required outcome.</strong> Define and meet RTO/RPO, use multi-region operation or a
+proven regional recovery design, test backups, and document fail-closed outage
+and controlled recovery runbooks.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>Load, dependency-failure and regional-recovery tests meet approved SLOs and
+  target fleet size.</li>
+<li>Policy, identity, approval, idempotency and audit consistency survive
+  failover without authority widening or replay.</li>
+<li>Backup restoration and key recovery are tested on a schedule.</li>
+<li>Operators rehearse fail-closed outage, emergency access and return-to-service
+  procedures.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> SRE; cloud platform; security architecture.</p>
+<h3 id="p0-12-security-assurance-and-enterprise-trust-package">P0-12 — Security assurance and enterprise trust package</h3>
+<p><strong>Risk.</strong> Buyers cannot approve a critical security control without independent
+assurance, vulnerability-management commitments and contractual data handling
+evidence.</p>
+<p><strong>Required outcome.</strong> Provide an independent penetration test, remediation
+evidence, SBOM and signed provenance, vulnerability disclosure and SLA,
+security architecture/threat model, DPA/subprocessor information and a credible
+SOC 2 Type II and ISO 27001 roadmap.</p>
+<p><strong>Acceptance evidence.</strong></p>
+<ul>
+<li>No unresolved critical or high finding remains from an independent test.</li>
+<li>Every release publishes verifiable provenance, checksums and an SBOM.</li>
+<li>Vulnerability intake, severity, notification and remediation SLAs are tested.</li>
+<li>The customer assurance pack has an owner, review date and approved statements
+  of guarantees and non-guarantees.</li>
+</ul>
+<p><strong>Owner/dependencies.</strong> Security assurance; legal/privacy; release engineering.</p>
+<h2 id="p1-enterprise-scale-requirements">P1 enterprise scale requirements</h2>
+<h3 id="fleet-lifecycle">Fleet lifecycle</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Required outcome and acceptance evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1-FLT-01</td>
+<td>Bulk enrollment and assignment</td>
+<td>Import or select many agents and assign them to a group/policy with preview, bounded batches, progress, partial-failure handling and an audit record.</td>
+</tr>
+<tr>
+<td>P1-FLT-02</td>
+<td>Dynamic groups</td>
+<td>Build groups from trusted attributes such as business unit, repository, device posture and risk; preview membership and test deterministic reevaluation.</td>
+</tr>
+<tr>
+<td>P1-FLT-03</td>
+<td>Full agent lifecycle</td>
+<td>Replace, revoke and delete agents while retaining required evidence; prevent a revoked identity from reusing its prior session.</td>
+</tr>
+<tr>
+<td>P1-FLT-04</td>
+<td>Ownership metadata</td>
+<td>Require accountable owner, team, business contact, environment and criticality; report missing or stale ownership.</td>
+</tr>
+<tr>
+<td>P1-FLT-05</td>
+<td>Expiring enrollment</td>
+<td>Enrollment links/secrets are single-use, scoped and time-bound; expiry and replay fail closed.</td>
+</tr>
+<tr>
+<td>P1-FLT-06</td>
+<td>Managed upgrades</td>
+<td>Roll out pinned SDK, gateway and hook versions by channel/ring with compatibility checks and automatic pause.</td>
+</tr>
+<tr>
+<td>P1-FLT-07</td>
+<td>Drift remediation</td>
+<td>Preview and automatically remediate approved drift classes; dangerous or ambiguous changes require approval.</td>
+</tr>
+<tr>
+<td>P1-FLT-08</td>
+<td>Maintenance windows and rings</td>
+<td>Schedule rollout windows and canary rings by time zone and business criticality with tested pause/rollback.</td>
+</tr>
+<tr>
+<td>P1-FLT-09</td>
+<td>Exception expiry</td>
+<td>Every temporary exception has owner, justification and expiry; expiry automatically restores the prior secure state.</td>
+</tr>
+<tr>
+<td>P1-FLT-10</td>
+<td>Orphan/offboarding handling</td>
+<td>Detect archived repositories, departed employees and ownerless agents; revoke sessions and authority within the offboarding SLO.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="policy-governance">Policy governance</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Required outcome and acceptance evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1-POL-01</td>
+<td>Governed lifecycle</td>
+<td>Enforce draft, review, approval, staging and activation states; activated versions are immutable.</td>
+</tr>
+<tr>
+<td>P1-POL-02</td>
+<td>Four-eyes approval</td>
+<td>Prevent an author from solely approving a protected policy or exception; enforce in both API and UI.</td>
+</tr>
+<tr>
+<td>P1-POL-03</td>
+<td>Historical simulation</td>
+<td>Evaluate a draft against redacted historical actions without executing them and report predicted changes.</td>
+</tr>
+<tr>
+<td>P1-POL-04</td>
+<td>Semantic change view</td>
+<td>Show newly allowed, denied and approval-required actions plus changed limits, credentials, isolation and capture behavior.</td>
+</tr>
+<tr>
+<td>P1-POL-05</td>
+<td>Canary and scheduling</td>
+<td>Activate by selected agents or percentage, schedule expansion and automatically pause on health/security thresholds.</td>
+</tr>
+<tr>
+<td>P1-POL-06</td>
+<td>Deterministic rollback</td>
+<td>Restore the prior known-good version and prove affected agents converge within the rollout SLO.</td>
+</tr>
+<tr>
+<td>P1-POL-07</td>
+<td>Policy as code</td>
+<td>Import/export schema-validated policy through Git with review status, signatures and control-plane provenance.</td>
+</tr>
+<tr>
+<td>P1-POL-08</td>
+<td>Signed bundles</td>
+<td>Sign policy artifacts and reject altered, unsigned or untrusted versions at the runtime boundary.</td>
+</tr>
+<tr>
+<td>P1-POL-09</td>
+<td>Reuse and inheritance</td>
+<td>Support versioned policy components with deterministic composition and an understandable effective-policy explanation.</td>
+</tr>
+<tr>
+<td>P1-POL-10</td>
+<td>Time-limited exceptions</td>
+<td>Scope exceptions to owner, purpose, agent/resource and expiry; include review and automatic reversion.</td>
+</tr>
+<tr>
+<td>P1-POL-11</td>
+<td>Native-control conflicts</td>
+<td>Detect and explain conflicts between AAI policy and Claude/Codex controls before activation.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="security-operations">Security operations</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Required outcome and acceptance evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1-SOC-01</td>
+<td>Incident cases</td>
+<td>Create a case from an alert with agents, policies, actions, approvals, evidence, owner, status and timeline.</td>
+</tr>
+<tr>
+<td>P1-SOC-02</td>
+<td>Automatic containment</td>
+<td>Permit approved detection rules to stop or restrict a bounded scope with safeguards, evidence and rollback.</td>
+</tr>
+<tr>
+<td>P1-SOC-03</td>
+<td>Quarantine</td>
+<td>Separate investigative quarantine from emergency stop and policy denial; display the exact resulting authority.</td>
+</tr>
+<tr>
+<td>P1-SOC-04</td>
+<td>Credential revocation</td>
+<td>Revoke relevant active sessions and brokered authority from an incident without requiring a policy edit.</td>
+</tr>
+<tr>
+<td>P1-SOC-05</td>
+<td>Investigation timeline</td>
+<td>Correlate identity, policy, tool, MCP, approval, credential, isolation, evidence and operator events in one ordered view.</td>
+</tr>
+<tr>
+<td>P1-SOC-06</td>
+<td>Detection rules</td>
+<td>Detect unusual tool, MCP server, repository, approval, configuration and execution behavior with versioned rules.</td>
+</tr>
+<tr>
+<td>P1-SOC-07</td>
+<td>Baseline and anomaly signals</td>
+<td>Establish explainable baselines with tunable sensitivity and no autonomous authority widening.</td>
+</tr>
+<tr>
+<td>P1-SOC-08</td>
+<td>Suppression and deduplication</td>
+<td>Group repeated alerts by stable identity/action facts; every suppression is scoped, expiring and auditable.</td>
+</tr>
+<tr>
+<td>P1-SOC-09</td>
+<td>Workflow integrations</td>
+<td>Integrate with ServiceNow, Jira and PagerDuty using scoped credentials, idempotency and monitored delivery.</td>
+</tr>
+<tr>
+<td>P1-SOC-10</td>
+<td>Audit-ready case export</td>
+<td>Export a complete, integrity-verifiable case without raw credentials or unapproved sensitive content.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="reporting-and-administration">Reporting and administration</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Required outcome and acceptance evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1-ADM-01</td>
+<td>Coverage reporting</td>
+<td>Report discovered, enrolled, healthy, compliant and unmanaged coverage by business unit, repository, environment and risk.</td>
+</tr>
+<tr>
+<td>P1-ADM-02</td>
+<td>Version compliance</td>
+<td>Report the percentage on approved SDK/hook/gateway versions and identify blocked or stale upgrades.</td>
+</tr>
+<tr>
+<td>P1-ADM-03</td>
+<td>Exception and effectiveness reports</td>
+<td>Report active/expiring exceptions, approval volume/latency, most-denied actions, stale agents, drift and mean time to detect/contain.</td>
+</tr>
+<tr>
+<td>P1-ADM-04</td>
+<td>Evidence delivery reporting</td>
+<td>Show retention, delivery latency, loss, dead-letter and replay status for every configured sink.</td>
+</tr>
+<tr>
+<td>P1-ADM-05</td>
+<td>Executive and auditor views</td>
+<td>Provide purpose-specific summaries with traceability to immutable detailed evidence and no misleading compliance claim.</td>
+</tr>
+<tr>
+<td>P1-ADM-06</td>
+<td>Delegated administration</td>
+<td>Support custom roles and administrative scopes bounded by tenant, business unit, project and environment.</td>
+</tr>
+<tr>
+<td>P1-ADM-07</td>
+<td>Access governance</td>
+<td>Provide IdP group mapping, break-glass workflow and periodic access certification.</td>
+</tr>
+<tr>
+<td>P1-ADM-08</td>
+<td>Machine access</td>
+<td>Issue scoped, expiring service identities/API credentials with rotation, revocation and usage evidence.</td>
+</tr>
+<tr>
+<td>P1-ADM-09</td>
+<td>Automation surface</td>
+<td>Provide a versioned management API and Terraform provider for repeatable tenant, group, policy and integration configuration.</td>
+</tr>
+<tr>
+<td>P1-ADM-10</td>
+<td>Secure webhooks</td>
+<td>Sign webhooks, rotate keys without interruption and protect against replay.</td>
+</tr>
+<tr>
+<td>P1-ADM-11</td>
+<td>Enterprise data controls</td>
+<td>Support customer-managed keys, approved data residency, documented deletion and tenant-isolation tests.</td>
+</tr>
+<tr>
+<td>P1-ADM-12</td>
+<td>Private access</td>
+<td>Support PrivateLink or equivalent private connectivity, IP restrictions and conditional-access integration where required.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="delivery-sequence">Delivery sequence</h2>
+<ol>
+<li><strong>Wave 1 — authority and coverage:</strong> P0-01 through P0-06 establish managed
+   enforcement, effective authority, discovery, attestation and operator
+   identity.</li>
+<li><strong>Wave 2 — operational control:</strong> P0-07 through P0-10 establish enterprise
+   event delivery, durable evidence, scoped credentials and verified isolation.</li>
+<li><strong>Wave 3 — resilience and assurance:</strong> P0-11 and P0-12 prove recovery and
+   provide independent assurance.</li>
+<li><strong>Scale-out:</strong> deliver P1 fleet and policy capabilities first, followed by
+   security-operations workflows and advanced administration/reporting.</li>
+</ol>
+<p>Dependencies do not permit a later wave to weaken an earlier control. Work may
+run in parallel when its acceptance evidence remains independently testable.</p>
+<h2 id="enterprise-rollout-acceptance-gate">Enterprise rollout acceptance gate</h2>
+<p>Before enterprise-wide approval, retained evidence must prove all of the
+following in the target environment:</p>
+<ol>
+<li>At least 95% of target Claude Code and Codex installations are discovered.</li>
+<li>Every enrolled agent resolves to one unambiguous effective policy.</li>
+<li>Unmanaged or tampered agents are detected within five minutes.</li>
+<li>Project files and launch flags cannot bypass enterprise-managed controls.</li>
+<li>A fleet-wide emergency stop reaches healthy agents within the approved SLO.</li>
+<li>A canary policy rollout and deterministic rollback complete successfully.</li>
+<li>Approval replay, expiry, identity mismatch and argument mutation are blocked.</li>
+<li>SIEM delivery failure is detected and retained events are replayed without
+   duplication.</li>
+<li>Credential scope and isolation posture are verified at execution time, not
+   merely present in configuration.</li>
+<li>Offboarding revokes sessions and authority within the approved SLO.</li>
+<li>Load and disaster-recovery tests meet the target fleet size, RTO and RPO.</li>
+<li>An independent penetration test has no unresolved critical or high finding.</li>
+</ol>
+<p>An unmet gate must be shown as an explicit exception with owner, affected scope,
+compensating controls and expiry. It cannot be hidden by a healthy heartbeat or
+a successful local synthetic test.</p>
+<h2 id="definition-of-done-for-each-requirement">Definition of done for each requirement</h2>
+<p>A requirement is complete only when all applicable evidence exists:</p>
+<ul>
+<li>implementation at the real authority or deployment boundary;</li>
+<li>deterministic positive, negative, bypass and failure-mode tests;</li>
+<li>a live Claude Code and/or Codex acceptance test where the control applies;</li>
+<li>tenant-isolation, authentication and authorization tests for control-plane
+  behavior;</li>
+<li>threat-model, public documentation, operator runbook and rollback update;</li>
+<li>redaction-safe telemetry and immutable audit evidence;</li>
+<li>performance, recovery and delivery SLO evidence where relevant;</li>
+<li><code>make check</code> and the authenticated AWS acceptance suite passing; and</li>
+<li>named product, engineering, QA and security acceptance owners.</li>
+</ul>
+<p>Configuration fields or UI controls alone do not satisfy this definition.</p>
+<h2 id="immutable-security-principles">Immutable security principles</h2>
+<ul>
+<li>The model never supplies or overrides identity, policy, credentials,
+  approvals or attestation.</li>
+<li>Unknown tools, malformed configuration, missing authority, conflicting policy
+  and stale security state fail closed.</li>
+<li>Every consequential action is authorized with its live arguments, resource,
+  principal, purpose and current policy.</li>
+<li>The UI cannot disable immutable SDK safeguards such as approval binding,
+  replay protection, tenant isolation or pre-export redaction.</li>
+<li>Host-native Claude and Codex controls remain visible contributors to effective
+  authority; they are never assumed equivalent to SDK runtime enforcement.</li>
+</ul>
+<h2 id="product-decision">Product decision</h2>
+<p>The product may be presented as suitable for a controlled, low-risk enterprise
+pilot when the pilot acceptance plan is met. It must not be marketed or approved
+as a comprehensive enterprise-wide management and enforcement control until all
+P0 requirements and the enterprise rollout acceptance gate have retained,
+reviewed evidence.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
