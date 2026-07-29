@@ -294,6 +294,22 @@ identity and endpoint management remain outside this SDK boundary and are
 required for a stronger device-integrity claim. See
 [Runtime attestation design](runtime-attestation-design.md).
 
+Managed-host evidence is an independent boundary. A deployment-owned callback
+opens the compiled Claude or Codex files without following symlinks and checks
+regular-file type, root ownership, restrictive modes, bounded exact bytes and
+host/source identity before each authenticated heartbeat. The callback cannot
+grant authority: the server compares its fixed evidence schema with
+server-owned desired state and derives the posture. If a deployment has an
+assigned managed bundle, missing, stale or conflicting evidence blocks
+effective policy, decision and approval routes. A project file, healthy
+heartbeat, or desired bundle cannot satisfy this gate.
+
+This remains software evidence from the enrolled process. It does not prove
+that Claude Code or Codex loaded the measured source and cannot resist a root
+attacker replacing process memory. Endpoint management, approved launch
+controls, live allowed/denied/approval/MCP probes and hardware-backed identity
+remain required for enterprise acceptance.
+
 Host decision reports are a separate evidence boundary. A valid agent session
 authenticates which enrolled process sent a report, but does not make the report
 authoritative. The control plane accepts only a fixed decision vocabulary and a

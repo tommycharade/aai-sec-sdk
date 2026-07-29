@@ -498,6 +498,13 @@ def _require_current_attestation(tenant, deployment_id, agent):
         raise PermissionError("runtime attestation is missing, expired, or non-compliant")
 
 
+def _require_current_managed_configuration(tenant, agent):
+    """Withhold governed routes when assigned host policy is not freshly proven."""
+    posture = _managed_configuration_posture(tenant, agent)
+    if posture.get("desired") is not None and posture.get("status") != "enforced":
+        raise PermissionError("managed host configuration is not freshly enforced")
+
+
 def _json_default(value):
     """Convert DynamoDB decimals without changing integer API contracts to floats."""
     if isinstance(value, Decimal):
@@ -2090,6 +2097,7 @@ def handler(event, context):
             if not governed_agent:
                 return _response(404, {"error": "agent not found"})
             _require_current_attestation(tenant, deployment_id, governed_agent)
+            _require_current_managed_configuration(tenant, governed_agent)
             if method == "POST" and action == ["decisions"]:
                 recorded = _record_agent_decision(tenant, deployment_id, agent_id, _body(event))
                 return _response(409 if recorded.get("conflict") else 202, recorded)

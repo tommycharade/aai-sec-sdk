@@ -1612,6 +1612,12 @@ def test_agent_verification_reports_each_enrollment_prerequisite(tmp_path: Path)
         configuration={"managedHost": desired},
     )
     store.assign_template(operator, "deploy-a", "managed-claude")
+    with pytest.raises(FleetConfigurationError, match="not freshly enforced"):
+        store.effective_agent_policy(
+            operator,
+            deployment_id="deploy-a",
+            agent_id="claude-a",
+        )
     store.heartbeat(
         operator,
         "deploy-a",
@@ -1631,6 +1637,14 @@ def test_agent_verification_reports_each_enrollment_prerequisite(tmp_path: Path)
     assert result["groups"] == ["group-platform"]
     assert result["policyId"] == "policy-safe"
     assert result["policyVersion"] == 1
+    assert (
+        store.effective_agent_policy(
+            operator,
+            deployment_id="deploy-a",
+            agent_id="claude-a",
+        )["policy"]["id"]
+        == "policy-safe"
+    )
     store.set_agent_emergency_stop(
         operator, deployment_id="deploy-a", agent_id="claude-a", active=True
     )

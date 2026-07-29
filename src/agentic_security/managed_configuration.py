@@ -14,9 +14,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import os
+import platform as host_platform
 import re
+import stat
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Final
 from urllib.parse import urlsplit
 
@@ -237,6 +242,84 @@ class ManagedConfigurationBundle:
     denied_actions: tuple[str, ...]
     approval_required_actions: tuple[str, ...]
     conflicts: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedConfigurationEvidence:
+    """Content-minimised proof of one measured administrator-owned bundle.
+
+    The evidence binds the host, version, platform, policy version and complete
+    bundle digest. It contains no file content, paths, credentials or model
+    output and can therefore be sent on an authenticated fleet heartbeat.
+    """
+
+    host: AgentHost
+    host_version: str
+    platform: ManagedPlatform
+    bundle_hash: str
+    policy_id: str
+    policy_version: int
+    source: ManagedConfigurationSource
+    verified_at: float
+    expires_at: float
+
+    def __post_init__(self) -> None:
+        """Reject ambiguous identity or non-expiring evidence at construction."""
+        if not isinstance(self.host, AgentHost):
+            raise SecurityConfigurationError("managed evidence host must be typed")
+        if not isinstance(self.platform, ManagedPlatform):
+            raise SecurityConfigurationError("managed evidence platform must be typed")
+        if not isinstance(self.source, ManagedConfigurationSource):
+            raise SecurityConfigurationError("managed evidence source must be typed")
+        compatible_sources = {
+            AgentHost.CLAUDE_CODE: {
+                ManagedConfigurationSource.CLAUDE_SERVER_MANAGED,
+                ManagedConfigurationSource.ENDPOINT_MANAGED_FILE,
+                ManagedConfigurationSource.MDM,
+            },
+            AgentHost.CODEX_CLI: {
+                ManagedConfigurationSource.CODEX_SYSTEM,
+                ManagedConfigurationSource.CODEX_CLOUD,
+                ManagedConfigurationSource.CODEX_MDM,
+            },
+        }
+        if self.source not in compatible_sources[self.host]:
+            raise SecurityConfigurationError("managed evidence source does not match the host")
+        _parse_version(self.host_version)
+        if _SHA256_PATTERN.fullmatch(self.bundle_hash) is None:
+            raise SecurityConfigurationError("managed evidence bundle hash must be SHA-256")
+        _bounded_text(self.policy_id, "managed evidence policy id")
+        if (
+            not isinstance(self.policy_version, int)
+            or isinstance(self.policy_version, bool)
+            or self.policy_version <= 0
+        ):
+            raise SecurityConfigurationError("managed evidence policy version must be positive")
+        if (
+            isinstance(self.verified_at, bool)
+            or not isinstance(self.verified_at, (int, float))
+            or isinstance(self.expires_at, bool)
+            or not isinstance(self.expires_at, (int, float))
+            or not math.isfinite(float(self.verified_at))
+            or not math.isfinite(float(self.expires_at))
+            or self.verified_at < 0
+            or self.expires_at <= self.verified_at
+        ):
+            raise SecurityConfigurationError("managed evidence expiry is invalid")
+
+    def to_wire(self) -> dict[str, object]:
+        """Return the fixed control-plane heartbeat schema."""
+        return {
+            "host": self.host.value,
+            "hostVersion": self.host_version,
+            "platform": self.platform.value,
+            "bundleHash": self.bundle_hash,
+            "policyId": self.policy_id,
+            "policyVersion": self.policy_version,
+            "source": self.source.value,
+            "verifiedAt": self.verified_at,
+            "expiresAt": self.expires_at,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -519,6 +602,105 @@ class ManagedConfigurationCompiler:
             ),
         )
         return (artifact,), coverage
+
+
+def measure_managed_configuration(
+    bundle: ManagedConfigurationBundle,
+    *,
+    source: ManagedConfigurationSource,
+    now: float,
+    ttl_seconds: int = 300,
+) -> ManagedConfigurationEvidence:
+    """Verify exact protected files and return short-lived heartbeat evidence.
+
+    This verifier is deliberately read-only. On macOS and Linux every artifact
+    must be a root-owned regular file, must not be a symlink, and must not be
+    group- or world-writable. Exact UTF-8 bytes must match the reviewed bundle.
+    Windows ACL verification remains deployment-owned and therefore fails
+    closed in this provider-neutral verifier.
+
+    File equality proves the administrator-owned source on disk. A live host
+    acceptance test must additionally prove that Claude Code or Codex loaded
+    that source and enforced its decisions.
+    """
+    if not isinstance(bundle, ManagedConfigurationBundle):
+        raise SecurityConfigurationError("managed measurement requires a compiled bundle")
+    if not isinstance(source, ManagedConfigurationSource):
+        raise SecurityConfigurationError("managed measurement source must be typed")
+    file_sources = {
+        AgentHost.CLAUDE_CODE: {
+            ManagedConfigurationSource.ENDPOINT_MANAGED_FILE,
+            ManagedConfigurationSource.MDM,
+        },
+        AgentHost.CODEX_CLI: {
+            ManagedConfigurationSource.CODEX_SYSTEM,
+            ManagedConfigurationSource.CODEX_MDM,
+        },
+    }
+    if source not in file_sources.get(bundle.host, set()):
+        raise SecurityConfigurationError(
+            "managed-file measurement cannot prove a remote configuration source"
+        )
+    if (
+        isinstance(now, bool)
+        or not isinstance(now, (int, float))
+        or not math.isfinite(float(now))
+        or now < 0
+    ):
+        raise SecurityConfigurationError("managed measurement time is invalid")
+    if (
+        not isinstance(ttl_seconds, int)
+        or isinstance(ttl_seconds, bool)
+        or not 30 <= ttl_seconds <= 600
+    ):
+        raise SecurityConfigurationError("managed measurement TTL must be 30 to 600 seconds")
+    expected_platform = {
+        "Darwin": ManagedPlatform.MACOS,
+        "Linux": ManagedPlatform.LINUX,
+        "Windows": ManagedPlatform.WINDOWS,
+    }.get(host_platform.system())
+    if expected_platform is None or bundle.platform is not expected_platform:
+        raise SecurityConfigurationError("managed bundle does not match the current platform")
+    if bundle.platform is ManagedPlatform.WINDOWS:
+        raise SecurityConfigurationError(
+            "Windows managed-file ACL verification requires an adapter"
+        )
+    if _SHA256_PATTERN.fullmatch(bundle.bundle_hash) is None:
+        raise SecurityConfigurationError("compiled bundle hash must be SHA-256")
+    if not bundle.artifacts:
+        raise SecurityConfigurationError("compiled bundle contains no managed artifacts")
+    for artifact in bundle.artifacts:
+        path = Path(artifact.path)
+        if not path.is_absolute():
+            raise SecurityConfigurationError("managed artifact path must be absolute")
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path, flags)
+            with os.fdopen(descriptor, "rb") as managed_file:
+                metadata = os.fstat(managed_file.fileno())
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise SecurityConfigurationError("managed artifact must be a regular file")
+                if metadata.st_uid != 0 or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                    raise SecurityConfigurationError("managed artifact ownership or mode is unsafe")
+                if metadata.st_size > 1_000_000:
+                    raise SecurityConfigurationError("managed artifact exceeds the safe size limit")
+                content = managed_file.read(1_000_001)
+        except OSError as exc:
+            raise SecurityConfigurationError("managed artifact cannot be measured") from exc
+        expected = artifact.content.encode("utf-8")
+        if content != expected or hashlib.sha256(content).hexdigest() != artifact.sha256:
+            raise SecurityConfigurationError("managed artifact content does not match the bundle")
+    return ManagedConfigurationEvidence(
+        host=bundle.host,
+        host_version=bundle.host_version,
+        platform=bundle.platform,
+        bundle_hash=bundle.bundle_hash,
+        policy_id=bundle.policy_id,
+        policy_version=bundle.policy_version,
+        source=source,
+        verified_at=now,
+        expires_at=now + ttl_seconds,
+    )
 
 
 def reconcile_effective_authority(

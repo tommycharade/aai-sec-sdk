@@ -88,6 +88,7 @@ approved launch profile as additional boundaries.
 ```python
 from agentic_security import (
     AgentHost,
+    ControlPlaneAgentClient,
     ManagedConfigurationCompiler,
     ManagedConfigurationSource,
     ManagedMcpServer,
@@ -96,6 +97,7 @@ from agentic_security import (
     NativeActionDecision,
     NativeActionRule,
     ObservedManagedConfiguration,
+    measure_managed_configuration,
     reconcile_effective_authority,
 )
 
@@ -131,6 +133,35 @@ authority = reconcile_effective_authority(bundle, observed, now=120.0)
 assert authority.allowed_actions == ("Read",)
 ```
 
+For an enrolled AWS agent, report only freshly measured protected files:
+
+```python
+import time
+
+client = ControlPlaneAgentClient(
+    "https://control-plane.example",
+    "synthetic-short-lived-agent-session",
+    agent_id="claude-example",
+    project_root="/workspace/example",
+    deployment_id="deployment-example",
+    aws_agent_session=True,
+    managed_configuration_provider=lambda: measure_managed_configuration(
+        bundle,
+        source=ManagedConfigurationSource.MDM,
+        now=time.time(),
+    ),
+)
+client.heartbeat("synthetic-short-lived-agent-session")
+```
+
+The verifier is read-only and supports root-owned macOS/Linux managed files.
+It opens files without following symlinks, verifies regular-file type, root
+ownership, restrictive write permissions, a one-megabyte bound and exact
+reviewed bytes. Windows requires an ACL-aware deployment adapter and therefore
+fails closed in this provider-neutral verifier. File equality still does not
+prove that the host process loaded the file; the live action tests below remain
+mandatory.
+
 Never put credentials in an MCP definition. Use per-user OAuth, environment
 expansion, a credential helper, or the SDK credential broker. The generated
 MCP identity does not inspect arbitrary environment variables, so deployment
@@ -151,6 +182,10 @@ For each managed endpoint:
 7. delete or weaken a local project file and prove effective authority does not
    change.
 
-The current SDK API supplies compilation and reconciliation. Live privileged
-deployment and host heartbeat ingestion remain deployment integrations; the UI
-must label them `deployment_required` until exact endpoint evidence arrives.
+The SDK supplies compilation, protected-file measurement, authenticated
+heartbeat ingestion and desired-versus-observed reconciliation. It does not
+write privileged files or control host launch. When a managed bundle is
+assigned, the control plane blocks effective-policy and other governed agent
+routes until exact fresh evidence arrives. The UI must continue to label the
+deployment blocked until live action probes additionally prove that the host
+loaded and enforced the managed source.

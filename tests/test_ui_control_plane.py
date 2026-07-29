@@ -25,6 +25,9 @@ from agentic_security import (
     ControlPlaneStore,
     InMemoryAuditSink,
     InMemoryControlPlaneAuthority,
+    ManagedConfigurationEvidence,
+    ManagedConfigurationSource,
+    ManagedPlatform,
     OperatorIdentity,
     StaticBearerAuthenticator,
     validate_configuration,
@@ -415,6 +418,117 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
         "https://control.example.test/api/agent/deployment-prod/claude-code-local/effective-policy",
     ]
     assert aws_client.disconnect(TOKEN) == {"status": "disconnect_pending_expiry"}
+
+
+def test_agent_client_remeasures_and_reports_typed_managed_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every AWS heartbeat obtains fresh host evidence from a deployment callback."""
+    import agentic_security.ui_control_plane as control_plane
+
+    bodies: list[dict[str, object]] = []
+    provider_calls = 0
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return b'{"status":"connected"}'
+
+    def fake_urlopen(request: Any, **_kwargs: object) -> Response:
+        bodies.append(json.loads(request.data))
+        return Response()
+
+    def evidence_provider() -> ManagedConfigurationEvidence:
+        nonlocal provider_calls
+        provider_calls += 1
+        return ManagedConfigurationEvidence(
+            host=AgentHost.CLAUDE_CODE,
+            host_version="2.1.220",
+            platform=ManagedPlatform.MACOS,
+            bundle_hash="a" * 64,
+            policy_id="policy-safe",
+            policy_version=4,
+            source=ManagedConfigurationSource.MDM,
+            verified_at=100 + provider_calls,
+            expires_at=200 + provider_calls,
+        )
+
+    monkeypatch.setattr(control_plane, "urlopen", fake_urlopen)
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-managed",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+        managed_configuration_provider=evidence_provider,
+    )
+
+    client.heartbeat(TOKEN)
+    client.heartbeat(TOKEN)
+
+    assert provider_calls == 2
+    assert bodies[0]["managedConfiguration"] == {
+        "host": "claude-code",
+        "hostVersion": "2.1.220",
+        "platform": "macos",
+        "bundleHash": "a" * 64,
+        "policyId": "policy-safe",
+        "policyVersion": 4,
+        "source": "mdm",
+        "verifiedAt": 101,
+        "expiresAt": 201,
+    }
+    assert bodies[1]["managedConfiguration"]["verifiedAt"] == 102  # type: ignore[index]
+
+
+def test_agent_client_rejects_untrusted_managed_configuration_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A callback cannot report a mapping or evidence for another host."""
+    import agentic_security.ui_control_plane as control_plane
+
+    with pytest.raises(ValueError, match="requires an AWS agent session"):
+        ControlPlaneAgentClient(
+            "https://control.example.test/api",
+            TOKEN,
+            agent_id="claude-managed",
+            project_root="/workspace/kratos",
+            managed_configuration_provider=lambda: cast(ManagedConfigurationEvidence, {}),
+        )
+
+    monkeypatch.setattr(control_plane, "urlopen", lambda *_args, **_kwargs: None)
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-managed",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+        managed_configuration_provider=lambda: cast(ManagedConfigurationEvidence, {}),
+    )
+    with pytest.raises(ControlPlaneConfigurationError, match="invalid evidence"):
+        client.heartbeat(TOKEN)
+
+    wrong_host = ManagedConfigurationEvidence(
+        host=AgentHost.CODEX_CLI,
+        host_version="0.146.0",
+        platform=ManagedPlatform.MACOS,
+        bundle_hash="b" * 64,
+        policy_id="policy-safe",
+        policy_version=1,
+        source=ManagedConfigurationSource.CODEX_MDM,
+        verified_at=100,
+        expires_at=200,
+    )
+    client.managed_configuration_provider = lambda: wrong_host
+    with pytest.raises(ControlPlaneConfigurationError, match="does not match"):
+        client.heartbeat(TOKEN)
 
 
 def test_agent_client_and_exporter_report_only_bounded_decision_metadata(

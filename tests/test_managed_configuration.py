@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import tomllib
+from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -12,7 +18,9 @@ from agentic_security.integrations import AgentHost
 from agentic_security.managed_configuration import (
     EnforcementState,
     ManagedCommandRule,
+    ManagedConfigurationBundle,
     ManagedConfigurationCompiler,
+    ManagedConfigurationEvidence,
     ManagedConfigurationSource,
     ManagedMcpServer,
     ManagedPlatform,
@@ -20,6 +28,7 @@ from agentic_security.managed_configuration import (
     NativeActionDecision,
     NativeActionRule,
     ObservedManagedConfiguration,
+    measure_managed_configuration,
     reconcile_effective_authority,
 )
 
@@ -146,6 +155,236 @@ def test_windows_compilation_uses_machine_managed_paths() -> None:
     assert codex.artifacts[0].path == r"C:\ProgramData\OpenAI\Codex\requirements.toml"
     requirements = tomllib.loads(codex.artifacts[0].content)
     assert requirements["hooks"]["windows_managed_dir"] == (r"C:\Program Files\AAI Security\hooks")
+
+
+def test_managed_file_measurement_binds_exact_root_owned_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A heartbeat proof is created only from exact protected artifact bytes."""
+    compiled = ManagedConfigurationCompiler().compile(
+        policy(),
+        host=AgentHost.CLAUDE_CODE,
+        host_version="2.1.220",
+        platform=ManagedPlatform.MACOS,
+        hook_command="/opt/aai-security/hooks/claude-policy",
+    )
+    managed_file = tmp_path / "managed-settings.json"
+    managed_file.write_text(compiled.artifacts[0].content, encoding="utf-8")
+    measured = replace(
+        compiled,
+        artifacts=(replace(compiled.artifacts[0], path=str(managed_file)),),
+    )
+    real_fstat = os.fstat
+
+    def root_owned(descriptor: int) -> SimpleNamespace:
+        metadata = real_fstat(descriptor)
+        return SimpleNamespace(st_mode=metadata.st_mode, st_uid=0, st_size=metadata.st_size)
+
+    monkeypatch.setattr("agentic_security.managed_configuration.os.fstat", root_owned)
+    monkeypatch.setattr(
+        "agentic_security.managed_configuration.host_platform.system", lambda: "Darwin"
+    )
+
+    evidence = measure_managed_configuration(
+        measured,
+        source=ManagedConfigurationSource.MDM,
+        now=100,
+        ttl_seconds=60,
+    )
+
+    assert isinstance(evidence, ManagedConfigurationEvidence)
+    assert evidence.to_wire() == {
+        "host": "claude-code",
+        "hostVersion": "2.1.220",
+        "platform": "macos",
+        "bundleHash": compiled.bundle_hash,
+        "policyId": "policy-safe",
+        "policyVersion": 7,
+        "source": "mdm",
+        "verifiedAt": 100,
+        "expiresAt": 160,
+    }
+
+    managed_file.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(SecurityConfigurationError, match="does not match"):
+        measure_managed_configuration(
+            measured,
+            source=ManagedConfigurationSource.MDM,
+            now=101,
+        )
+
+
+def test_managed_file_measurement_rejects_unsafe_owner_and_platform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """User-writable or wrong-platform policy can never become enforced evidence."""
+    compiled = ManagedConfigurationCompiler().compile(
+        ManagedPolicyIntent("policy-safe", 1),
+        host=AgentHost.CODEX_CLI,
+        host_version="0.146.0",
+        platform=ManagedPlatform.MACOS,
+        hook_command="/opt/aai-security/hooks/codex-policy",
+    )
+    managed_file = tmp_path / "requirements.toml"
+    managed_file.write_text(compiled.artifacts[0].content, encoding="utf-8")
+    measured = replace(
+        compiled,
+        artifacts=(replace(compiled.artifacts[0], path=str(managed_file)),),
+    )
+    metadata = managed_file.stat()
+    monkeypatch.setattr(
+        "agentic_security.managed_configuration.host_platform.system", lambda: "Darwin"
+    )
+    monkeypatch.setattr(
+        "agentic_security.managed_configuration.os.fstat",
+        lambda _descriptor: SimpleNamespace(
+            st_mode=metadata.st_mode,
+            st_uid=501,
+            st_size=metadata.st_size,
+        ),
+    )
+    with pytest.raises(SecurityConfigurationError, match="ownership or mode"):
+        measure_managed_configuration(
+            measured,
+            source=ManagedConfigurationSource.CODEX_MDM,
+            now=100,
+        )
+
+    monkeypatch.setattr(
+        "agentic_security.managed_configuration.host_platform.system", lambda: "Linux"
+    )
+    with pytest.raises(SecurityConfigurationError, match="current platform"):
+        measure_managed_configuration(
+            measured,
+            source=ManagedConfigurationSource.CODEX_MDM,
+            now=100,
+        )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"host": "claude-code"},
+        {"platform": "macos"},
+        {"source": "mdm"},
+        {"source": ManagedConfigurationSource.CODEX_SYSTEM},
+        {"host_version": "latest"},
+        {"bundle_hash": "A" * 64},
+        {"policy_id": " "},
+        {"policy_version": 0},
+        {"policy_version": True},
+        {"verified_at": float("inf")},
+        {"verified_at": -1},
+        {"expires_at": 99},
+    ],
+)
+def test_managed_evidence_rejects_ambiguous_identity_and_expiry(
+    changes: dict[str, object],
+) -> None:
+    """Malformed, cross-host, and non-expiring evidence fails at construction."""
+    values: dict[str, object] = {
+        "host": AgentHost.CLAUDE_CODE,
+        "host_version": "2.1.220",
+        "platform": ManagedPlatform.MACOS,
+        "bundle_hash": "a" * 64,
+        "policy_id": "policy-safe",
+        "policy_version": 1,
+        "source": ManagedConfigurationSource.MDM,
+        "verified_at": 100,
+        "expires_at": 200,
+    }
+    with pytest.raises(SecurityConfigurationError):
+        ManagedConfigurationEvidence(**(values | changes))  # type: ignore[arg-type]
+
+
+def test_managed_measurement_rejects_untrusted_inputs_and_missing_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The verifier rejects untyped input, unsafe bounds, and absent artifacts."""
+    compiled = ManagedConfigurationCompiler().compile(
+        ManagedPolicyIntent("policy-safe", 1),
+        host=AgentHost.CLAUDE_CODE,
+        host_version="2.1.220",
+        platform=ManagedPlatform.MACOS,
+        hook_command="/opt/aai-security/hooks/claude-policy",
+    )
+    monkeypatch.setattr(
+        "agentic_security.managed_configuration.host_platform.system", lambda: "Darwin"
+    )
+    invalid_calls: tuple[Callable[[], ManagedConfigurationEvidence], ...] = (
+        lambda: measure_managed_configuration(
+            cast(ManagedConfigurationBundle, {}),
+            source=ManagedConfigurationSource.MDM,
+            now=100,
+        ),
+        lambda: measure_managed_configuration(
+            compiled,
+            source=cast(ManagedConfigurationSource, "mdm"),
+            now=100,
+        ),
+        lambda: measure_managed_configuration(
+            compiled,
+            source=ManagedConfigurationSource.CLAUDE_SERVER_MANAGED,
+            now=100,
+        ),
+        lambda: measure_managed_configuration(
+            compiled, source=ManagedConfigurationSource.MDM, now=float("inf")
+        ),
+        lambda: measure_managed_configuration(
+            compiled, source=ManagedConfigurationSource.MDM, now=100, ttl_seconds=29
+        ),
+        lambda: measure_managed_configuration(
+            replace(compiled, bundle_hash="bad"),
+            source=ManagedConfigurationSource.MDM,
+            now=100,
+        ),
+        lambda: measure_managed_configuration(
+            replace(compiled, artifacts=()),
+            source=ManagedConfigurationSource.MDM,
+            now=100,
+        ),
+        lambda: measure_managed_configuration(
+            replace(
+                compiled,
+                artifacts=(replace(compiled.artifacts[0], path="relative.json"),),
+            ),
+            source=ManagedConfigurationSource.MDM,
+            now=100,
+        ),
+        lambda: measure_managed_configuration(
+            replace(
+                compiled,
+                artifacts=(replace(compiled.artifacts[0], path="/missing/managed.json"),),
+            ),
+            source=ManagedConfigurationSource.MDM,
+            now=100,
+        ),
+    )
+    for invalid_call in invalid_calls:
+        with pytest.raises(SecurityConfigurationError):
+            invalid_call()
+
+
+def test_managed_measurement_rejects_windows_without_acl_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider-neutral evidence never guesses whether Windows ACLs are safe."""
+    compiled = ManagedConfigurationCompiler().compile(
+        ManagedPolicyIntent("policy-safe", 1),
+        host=AgentHost.CODEX_CLI,
+        host_version="0.146.0",
+        platform=ManagedPlatform.WINDOWS,
+        hook_command=r"C:\Program Files\AAI Security\hooks\codex-policy.exe",
+    )
+    monkeypatch.setattr(
+        "agentic_security.managed_configuration.host_platform.system", lambda: "Windows"
+    )
+    with pytest.raises(SecurityConfigurationError, match="ACL verification"):
+        measure_managed_configuration(
+            compiled,
+            source=ManagedConfigurationSource.CODEX_MDM,
+            now=100,
+        )
 
 
 @pytest.mark.parametrize(

@@ -21,7 +21,7 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.
 | --- | --- | --- | --- | --- |
 | P0-01 | Enterprise-enforced Claude configuration | Partial | Typed endpoint-managed settings and exclusive MCP compilation; desired/observed source, version, digest and freshness posture in the fleet API/UI | Deploy through a real MDM channel, run local deletion/weakening acceptance and prove approved launch profiles |
 | P0-02 | Codex managed requirements | Partial | Typed system `requirements.toml` compilation for profiles, hooks, restrictive command rules, MCP identity, deny-read and network controls; desired/observed posture in the fleet API/UI | Deploy to a real managed Codex host, enforce the launcher and run malformed/upgrade/bypass acceptance |
-| P0-03 | Native-control reconciliation | Partial | Deterministic deny-first action reconciliation, per-control enforcement coverage and exact fresh bundle-evidence checks; conflict and missing/stale state UI | Bind complete host-native effective settings (not only bundle measurement) and prove displayed authority against live Claude/Codex execution |
+| P0-03 | Native-control reconciliation | Partial | Deterministic deny-first reconciliation, protected-file measurement on every enrolled heartbeat, exact desired/evidence checks, governed-route denial and conflict/missing/stale UI | Bind complete host-native effective settings (not only protected-file measurement) and prove displayed authority against live Claude/Codex execution |
 | P0-04 | Complete agent discovery | Partial | Enrolled inventory and health | Device/user/repository discovery and unmanaged-instance denominator |
 | P0-05 | Runtime attestation | Partial | Typed Claude/Codex measurement, release-bound clean-checkout manifest generator, exact manifest/provenance validation, nonce-bound heartbeat, baseline drift detection, quarantine/session revocation, fleet/group posture UI and adversarial contracts | Publish and pin the next independently verified release manifests, then complete live modified-package/hook/config/process and hardware-backed identity acceptance |
 | P0-06 | Entra SSO, SCIM and granular RBAC | Partial | Tenant-specific Entra OIDC, tenant-bound SCIM users/groups/memberships, admin-controlled canonical-role mapping, five-minute token reconciliation, adversarial contracts and Identity & Trust UI | Live Entra joiner/mover/leaver acceptance, break glass, access certification and delegated scopes |
@@ -54,6 +54,15 @@ system paths, Claude server-managed configuration cannot express per-group
 settings, and a bearer-authenticated host measurement is not hardware-backed
 device attestation. Live MDM deployment, approved-launch enforcement and
 execution-matching acceptance remain required.
+
+The enrolled-agent client now closes the protocol gap between measurement and
+fleet posture. A deployment-owned callback reopens protected files without
+following symlinks, verifies root ownership, restrictive modes, exact bounded
+bytes and host/source identity, and sends typed evidence on every heartbeat.
+When a managed bundle is assigned, missing, stale or conflicting evidence
+blocks governed agent routes instead of merely lowering a dashboard score.
+This is still software evidence and does not replace the outstanding live host
+execution and MDM acceptance.
 
 ## P1 ledger
 

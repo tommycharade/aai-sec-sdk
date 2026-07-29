@@ -41,6 +41,15 @@ proves that CDK accepts the checked-in empty development pair and will reject a
 stale pair before deployment. Live modified-host acceptance remains required
 before P0-05 is complete.
 
+`scripts/test_aws_control_plane.py` now stages an isolated synthetic deployment
+with a managed-host bundle and proves that missing and conflicting evidence
+block governed agent routes before an exact fresh report restores access. The
+report used by this control-plane smoke is synthetic and proves the deployed
+API protocol only; it is not evidence that a real Claude Code process loaded a
+managed file. Retain separate device evidence from the privileged-file
+measurement and live host action probes in
+[Managed host configuration](managed-host-configuration.md).
+
 ## Deterministic property/fuzz coverage
 
 `tests/test_assurance.py` runs a finite checked-in corpus from
