@@ -501,6 +501,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
       tracing: lambda.Tracing.PASS_THROUGH,
     });
     table.grantReadWriteData(handler);
+    // CDK's read/write convenience grant excludes TransactWriteItems. Policy
+    // activation uses one same-table transaction so active authority, the
+    // immutable candidate, and the retired predecessor cannot diverge.
+    table.grant(handler, "dynamodb:TransactWriteItems");
     presence.grantReadWriteData(handler);
     idempotency.grantReadWriteData(handler);
     scim.grantReadWriteData(handler);

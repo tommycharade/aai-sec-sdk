@@ -20,11 +20,13 @@ from pathlib import Path
 import boto3
 from boto3.dynamodb.conditions import Key
 
-TABLE = boto3.resource("dynamodb").Table(os.environ["CONTROL_TABLE"])
+CONTROL_TABLE_NAME = os.environ["CONTROL_TABLE"]
+TABLE = boto3.resource("dynamodb").Table(CONTROL_TABLE_NAME)
 PRESENCE = boto3.resource("dynamodb").Table(os.environ["PRESENCE_TABLE"])
 IDEMPOTENCY = boto3.resource("dynamodb").Table(os.environ["IDEMPOTENCY_TABLE"])
 SCIM_TABLE_NAME = os.environ.get("SCIM_TABLE", "")
 SCIM = boto3.resource("dynamodb").Table(SCIM_TABLE_NAME) if SCIM_TABLE_NAME else None
+DYNAMODB = boto3.client("dynamodb")
 S3 = boto3.client("s3")
 
 # Tenant list reads are deliberately finite. Callers that require complete
@@ -147,6 +149,27 @@ _ROLE_CAPABILITIES = {
     "incident-responder": frozenset({"incident_response"}),
     "auditor": frozenset(),
 }
+_POLICY_VERSION_STATES = frozenset(
+    {"draft", "review", "approved", "staged", "active", "rejected", "retired"}
+)
+_POLICY_PENDING_STATES = frozenset({"draft", "review", "approved", "staged"})
+_POLICY_SECRET_KEYS = frozenset(
+    {
+        "token",
+        "secret",
+        "password",
+        "privatekey",
+        "private_key",
+        "clientsecret",
+        "access_token",
+        "refresh_token",
+        "authorization",
+    }
+)
+
+
+class PolicyConflict(RuntimeError):
+    """Raised when governed policy state no longer matches a requested transition."""
 
 
 def _runtime_manifests():
@@ -700,6 +723,11 @@ def _required_mutation_capability(path):
         return "approval_decision"
     if normalized.startswith("/enterprise/identity/scim"):
         return "identity_admin"
+    if re.fullmatch(
+        r"/enterprise/policies/[^/]+/versions/[1-9][0-9]*/(decision|stage|activate)",
+        normalized,
+    ):
+        return "policy_approval"
     if normalized.startswith("/enterprise/policies"):
         return "policy_write"
     if normalized.startswith("/enterprise/deployments/") and normalized.endswith(
@@ -975,17 +1003,11 @@ def _managed_host(value, *, report=False):
     }
     if report:
         source = _bounded_text(value.get("source"), "source", 64)
-        verified_at = _managed_integer(
-            value.get("verifiedAt"), "managed configuration verifiedAt"
-        )
-        expires_at = _managed_integer(
-            value.get("expiresAt"), "managed configuration expiresAt"
-        )
+        verified_at = _managed_integer(value.get("verifiedAt"), "managed configuration verifiedAt")
+        expires_at = _managed_integer(value.get("expiresAt"), "managed configuration expiresAt")
         if source not in _MANAGED_SOURCES:
             raise ValueError("managed configuration source is unsupported")
-        if (
-            expires_at <= verified_at
-        ):
+        if expires_at <= verified_at:
             raise ValueError("managed configuration timestamps are invalid")
         result.update({"source": source, "verifiedAt": verified_at, "expiresAt": expires_at})
     return result
@@ -1052,9 +1074,9 @@ def _managed_package(package_base64, expected_digest):
         or value.get("schemaVersion") != 1
     ):
         raise ValueError("managed package schema is invalid")
-    canonical = json.dumps(
-        value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-    ).encode("utf-8")
+    canonical = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
+        "utf-8"
+    )
     if canonical != encoded:
         raise ValueError("managed package is not canonical")
     target = _managed_host(
@@ -1067,9 +1089,7 @@ def _managed_package(package_base64, expected_digest):
             "policyVersion": value.get("policyVersion"),
         }
     )
-    if not re.fullmatch(
-        r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", target["hostVersion"]
-    ):
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", target["hostVersion"]):
         raise ValueError("managed package host version is invalid")
     artifacts = value.get("artifacts")
     expected_artifacts = _expected_managed_artifacts(target["host"], target["platform"])
@@ -1270,9 +1290,7 @@ def _agent_managed_package(tenant, deployment_id, agent_id, agent):
         raise ManagedPackageConflict("emergency stop blocks managed package retrieval")
     agent_key = f"{deployment_id}:{agent_id}"
     groups = [
-        group
-        for group in _fleet(tenant)["groups"]
-        if agent_key in group.get("agent_keys", [])
+        group for group in _fleet(tenant)["groups"] if agent_key in group.get("agent_keys", [])
     ]
     if any(group.get("emergencyStop") is True for group in groups):
         raise ManagedPackageConflict("emergency stop blocks managed package retrieval")
@@ -1354,6 +1372,565 @@ def _configuration_hash(configuration):
     """Create a stable desired-state hash without storing configuration secrets."""
     encoded = json.dumps(configuration, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _policy_configuration(tenant, value):
+    """Validate one bounded, secret-free policy document at the AWS boundary."""
+    if not isinstance(value, dict):
+        raise ValueError("policy configuration must be an object")
+
+    def visit(item, depth=0):
+        if depth > 12:
+            raise ValueError("policy configuration nesting is too deep")
+        if isinstance(item, dict):
+            if len(item) > 1_000:
+                raise ValueError("policy configuration object is too large")
+            result = {}
+            for key, nested in item.items():
+                if not isinstance(key, str) or not key or len(key) > 256:
+                    raise ValueError("policy configuration keys must be bounded text")
+                normalized_key = key.lower().replace("-", "_")
+                if normalized_key in _POLICY_SECRET_KEYS:
+                    raise ValueError("policy configuration must not contain secrets")
+                result[key] = visit(nested, depth + 1)
+            return result
+        if isinstance(item, list):
+            if len(item) > 10_000:
+                raise ValueError("policy configuration list is too large")
+            return [visit(nested, depth + 1) for nested in item]
+        if item is None or isinstance(item, (str, int, bool)):
+            return item
+        if isinstance(item, float) and math.isfinite(item):
+            return item
+        raise ValueError("policy configuration contains unsupported data")
+
+    normalized = visit(value)
+    if len(json.dumps(normalized, sort_keys=True, separators=(",", ":"))) > 1_000_000:
+        raise ValueError("policy configuration is too large")
+    # Resolve registry references on a copy to prove every selected resource
+    # exists and is enabled. Managed resource content is never stored in policy.
+    _managed_policy_configuration(tenant, normalized)
+    return normalized
+
+
+def _positive_policy_version(value):
+    """Require a positive integral policy version without accepting booleans."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("policy version must be a positive integer")
+    return value
+
+
+def _ddb_value(value):
+    """Serialize the bounded policy data model for DynamoDB transactions."""
+    if value is None:
+        return {"NULL": True}
+    if isinstance(value, bool):
+        return {"BOOL": value}
+    if isinstance(value, str):
+        return {"S": value}
+    if isinstance(value, (int, Decimal)) and not isinstance(value, bool):
+        return {"N": str(value)}
+    if isinstance(value, float) and math.isfinite(value):
+        return {"N": str(value)}
+    if isinstance(value, list):
+        return {"L": [_ddb_value(item) for item in value]}
+    if isinstance(value, dict):
+        return {"M": {str(key): _ddb_value(item) for key, item in value.items()}}
+    raise ValueError("transaction item contains unsupported data")
+
+
+def _ddb_item(value):
+    """Serialize a complete DynamoDB item for a low-level transaction call."""
+    return {str(key): _ddb_value(item) for key, item in value.items()}
+
+
+def _transaction_put(record, *, condition, names=None, values=None):
+    """Build one explicit conditional Put operation for TransactWriteItems."""
+    operation = {
+        "TableName": CONTROL_TABLE_NAME,
+        "Item": _ddb_item(record),
+        "ConditionExpression": condition,
+    }
+    if names:
+        operation["ExpressionAttributeNames"] = names
+    if values:
+        operation["ExpressionAttributeValues"] = _ddb_item(values)
+    return {"Put": operation}
+
+
+def _transact_policy_records(operations):
+    """Commit policy authority changes atomically or normalize a stale-state conflict."""
+    try:
+        DYNAMODB.transact_write_items(TransactItems=operations)
+    except Exception as error:
+        code = getattr(error, "response", {}).get("Error", {}).get("Code")
+        if code in {"ConditionalCheckFailedException", "TransactionCanceledException"}:
+            raise PolicyConflict("policy state changed before the operation completed") from error
+        raise
+
+
+def _policy_version_identifier(policy_id, version):
+    """Return a lexically sortable tenant-scoped policy-version identifier."""
+    return f"{policy_id}:{version:020d}"
+
+
+def _policy_versions(tenant, policy_id, *, consistent_read=False):
+    """Return the bounded immutable version ledger for one tenant policy."""
+    items = [
+        item
+        for item in _list(tenant, "POLICY_VERSION", consistent_read=consistent_read)
+        if item.get("policy_id") == policy_id
+    ]
+    return sorted(items, key=lambda item: int(item.get("version", 0)), reverse=True)
+
+
+def _ensure_policy_governance(tenant, policy):
+    """Lazily migrate one legacy active policy into the immutable version ledger."""
+    if int(policy.get("governance_schema_version", 0)) == 1:
+        return policy
+    active_version = int(policy.get("version", 0))
+    if active_version <= 0 or not isinstance(policy.get("configuration"), dict):
+        raise PolicyConflict("legacy policy cannot be migrated safely")
+    now = int(policy.get("updatedAt", policy.get("createdAt", time.time())))
+    author = str(policy.get("author", "legacy-migration"))
+    version_record = {
+        **_item_key(
+            tenant,
+            "POLICY_VERSION",
+            _policy_version_identifier(policy["id"], active_version),
+        ),
+        "tenant_id": tenant,
+        "id": _policy_version_identifier(policy["id"], active_version),
+        "policy_id": policy["id"],
+        "organization_id": policy.get("organization_id", ""),
+        "version": active_version,
+        "base_version": max(0, active_version - 1),
+        "name": policy.get("name", policy["id"]),
+        "configuration": _json(policy["configuration"]),
+        "content_hash": _configuration_hash(_json(policy["configuration"])),
+        "state": "active",
+        "author": author,
+        "created_at": now,
+        "activated_by": "legacy-migration",
+        "activated_at": now,
+    }
+    try:
+        TABLE.put_item(
+            Item=version_record,
+            ConditionExpression="attribute_not_exists(pk)",
+        )
+    except Exception as error:
+        if not _is_conditional_conflict(error):
+            raise
+    migrated = {
+        **policy,
+        "activeVersion": active_version,
+        "latestVersion": active_version,
+        "governanceState": "active",
+        "pendingVersion": None,
+        "pendingAuthor": None,
+        "governance_schema_version": 1,
+    }
+    TABLE.put_item(Item=migrated)
+    return migrated
+
+
+def _policy_version_view(tenant, record, versions=None):
+    """Project one immutable ledger record into the secret-free operator contract."""
+    all_versions = (
+        versions if versions is not None else _policy_versions(tenant, record["policy_id"])
+    )
+    base = next(
+        (
+            item
+            for item in all_versions
+            if int(item.get("version", 0)) == int(record.get("base_version", 0))
+        ),
+        None,
+    )
+    configuration = _json(record.get("configuration", {}))
+    base_configuration = _json(base.get("configuration", {})) if base else {}
+    changed_sections = sorted(
+        key
+        for key in set(configuration) | set(base_configuration)
+        if configuration.get(key) != base_configuration.get(key)
+    )
+    approved_by = (
+        record.get("decided_by")
+        if record.get("decision") == "approved"
+        and record.get("state") in {"approved", "staged", "active"}
+        else None
+    )
+    return {
+        "policyId": record["policy_id"],
+        "organizationId": record.get("organization_id", ""),
+        "version": int(record["version"]),
+        "baseVersion": int(record.get("base_version", 0)),
+        "name": record["name"],
+        "configuration": configuration,
+        "contentHash": record["content_hash"],
+        "state": record["state"],
+        "author": record["author"],
+        "createdAt": int(record["created_at"]),
+        "submittedBy": record.get("submitted_by"),
+        "submittedAt": record.get("submitted_at"),
+        "decidedBy": record.get("decided_by"),
+        "decidedAt": record.get("decided_at"),
+        "decision": record.get("decision"),
+        "decisionReason": record.get("decision_reason"),
+        "approvedBy": approved_by,
+        "stagedBy": record.get("staged_by"),
+        "stagedAt": record.get("staged_at"),
+        "activatedBy": record.get("activated_by"),
+        "activatedAt": record.get("activated_at"),
+        "changeSummary": {"changedSections": changed_sections},
+    }
+
+
+def _policy_summary(tenant, policy, versions=None):
+    """Return active authority separately from the latest pending governed change."""
+    governed = _ensure_policy_governance(tenant, policy)
+    all_versions = versions if versions is not None else _policy_versions(tenant, governed["id"])
+    pending = next(
+        (item for item in all_versions if item.get("state") in _POLICY_PENDING_STATES), None
+    )
+    active_version = int(governed.get("version", 0)) or None
+    latest_version = max((int(item.get("version", 0)) for item in all_versions), default=0)
+    return {
+        **governed,
+        "version": int(governed.get("version", 0)),
+        "activeVersion": active_version,
+        "latestVersion": latest_version,
+        "governanceState": pending.get("state")
+        if pending
+        else ("active" if active_version else "draft"),
+        "pendingVersion": int(pending["version"]) if pending else None,
+        "pendingAuthor": pending.get("author") if pending else None,
+    }
+
+
+def _policy_organization(tenant, body):
+    """Resolve policy organization only from tenant-owned inventory."""
+    organizations = _list(tenant, "ORG", consistent_read=True)
+    requested = body.get("organizationId")
+    if requested is None and len(organizations) == 1:
+        return organizations[0]["id"]
+    organization_id = _bounded_identifier(requested, "organizationId")
+    if not any(item.get("id") == organization_id for item in organizations):
+        raise ValueError("policy organization is not in the authenticated tenant")
+    return organization_id
+
+
+def _create_governed_policy(tenant, body, actor):
+    """Atomically create a policy shell and its first inactive draft."""
+    policy_id = _bounded_identifier(body.get("policyId"), "policyId")
+    name = _bounded_text(body.get("name"), "name")
+    configuration = _policy_configuration(tenant, body.get("configuration", {}))
+    organization_id = _policy_organization(tenant, body)
+    now = int(time.time())
+    policy = {
+        **_item_key(tenant, "POLICY", policy_id),
+        "tenant_id": tenant,
+        "id": policy_id,
+        "organization_id": organization_id,
+        "name": name,
+        "configuration": {},
+        "version": 0,
+        "activeVersion": None,
+        "latestVersion": 1,
+        "governanceState": "draft",
+        "pendingVersion": 1,
+        "pendingAuthor": actor,
+        "governance_schema_version": 1,
+        "createdAt": now,
+        "author": actor,
+    }
+    version = {
+        **_item_key(
+            tenant,
+            "POLICY_VERSION",
+            _policy_version_identifier(policy_id, 1),
+        ),
+        "tenant_id": tenant,
+        "id": _policy_version_identifier(policy_id, 1),
+        "policy_id": policy_id,
+        "organization_id": organization_id,
+        "version": 1,
+        "base_version": 0,
+        "name": name,
+        "configuration": configuration,
+        "content_hash": _configuration_hash(configuration),
+        "state": "draft",
+        "author": actor,
+        "created_at": now,
+    }
+    _transact_policy_records(
+        [
+            _transaction_put(policy, condition="attribute_not_exists(pk)"),
+            _transaction_put(version, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _audit(tenant, "policy_draft_created", actor, {"policy_id": policy_id, "version": 1})
+    return _policy_summary(tenant, policy, [version])
+
+
+def _create_policy_draft(tenant, policy_id, body, actor):
+    """Atomically append one draft without changing current active authority."""
+    policy_id = _bounded_identifier(policy_id, "policyId")
+    current = TABLE.get_item(Key=_item_key(tenant, "POLICY", policy_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not current:
+        raise LookupError("policy not found")
+    policy = _ensure_policy_governance(tenant, current)
+    versions = _policy_versions(tenant, policy_id, consistent_read=True)
+    if any(item.get("state") in _POLICY_PENDING_STATES for item in versions):
+        raise PolicyConflict("policy already has a pending governed version")
+    latest = max((int(item.get("version", 0)) for item in versions), default=0)
+    version_number = latest + 1
+    name = _bounded_text(body.get("name"), "name")
+    configuration = _policy_configuration(tenant, body.get("configuration", {}))
+    now = int(time.time())
+    version = {
+        **_item_key(
+            tenant,
+            "POLICY_VERSION",
+            _policy_version_identifier(policy_id, version_number),
+        ),
+        "tenant_id": tenant,
+        "id": _policy_version_identifier(policy_id, version_number),
+        "policy_id": policy_id,
+        "organization_id": policy.get("organization_id", ""),
+        "version": version_number,
+        "base_version": int(policy.get("version", 0)),
+        "name": name,
+        "configuration": configuration,
+        "content_hash": _configuration_hash(configuration),
+        "state": "draft",
+        "author": actor,
+        "created_at": now,
+    }
+    updated_policy = {
+        **policy,
+        "latestVersion": version_number,
+        "governanceState": "draft",
+        "pendingVersion": version_number,
+        "pendingAuthor": actor,
+        "updatedAt": now,
+    }
+    _transact_policy_records(
+        [
+            _transaction_put(version, condition="attribute_not_exists(pk)"),
+            _transaction_put(
+                updated_policy,
+                condition="#version = :active AND #latest = :latest",
+                names={"#version": "version", "#latest": "latestVersion"},
+                values={":active": int(policy.get("version", 0)), ":latest": latest},
+            ),
+        ]
+    )
+    _audit(
+        tenant,
+        "policy_draft_created",
+        actor,
+        {"policy_id": policy_id, "version": version_number},
+    )
+    return _policy_version_view(tenant, version, [version, *versions])
+
+
+def _policy_version_record(tenant, policy_id, version):
+    """Load one exact tenant policy version with a strongly consistent read."""
+    record = TABLE.get_item(
+        Key=_item_key(
+            tenant,
+            "POLICY_VERSION",
+            _policy_version_identifier(policy_id, version),
+        ),
+        ConsistentRead=True,
+    ).get("Item")
+    if not record or record.get("policy_id") != policy_id:
+        raise LookupError("policy version not found")
+    return record
+
+
+def _put_policy_transition(tenant, record, *, expected_state, event, actor):
+    """Commit one exact-state lifecycle transition without accepting request syntax."""
+    try:
+        TABLE.put_item(
+            Item=record,
+            ConditionExpression="#state = :expected",
+            ExpressionAttributeNames={"#state": "state"},
+            ExpressionAttributeValues={":expected": expected_state},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict(
+                f"policy version must be {expected_state} before this transition"
+            ) from error
+        raise
+    _audit(
+        tenant,
+        event,
+        actor,
+        {"policy_id": record["policy_id"], "version": int(record["version"])},
+    )
+    return _policy_version_view(tenant, record)
+
+
+def _submit_policy_version(tenant, policy_id, version, actor):
+    """Freeze one draft and submit it for independent review."""
+    record = _policy_version_record(tenant, policy_id, version)
+    if record.get("state") != "draft":
+        raise PolicyConflict("policy version is not a draft")
+    updated = {
+        **record,
+        "state": "review",
+        "submitted_by": actor,
+        "submitted_at": int(time.time()),
+    }
+    return _put_policy_transition(
+        tenant,
+        updated,
+        expected_state="draft",
+        event="policy_submitted",
+        actor=actor,
+    )
+
+
+def _decide_policy_version(tenant, policy_id, version, body, actor):
+    """Approve or reject a submitted version with two-subject separation."""
+    decision = body.get("decision")
+    if decision not in {"approved", "rejected"}:
+        raise ValueError("policy decision must be approved or rejected")
+    reason = _bounded_text(body.get("reason"), "reason", 1_000)
+    record = _policy_version_record(tenant, policy_id, version)
+    if record.get("state") != "review":
+        raise PolicyConflict("policy version is not awaiting review")
+    if decision == "approved" and secrets.compare_digest(str(record.get("author", "")), actor):
+        raise PermissionError("policy authors cannot approve their own version")
+    now = int(time.time())
+    updated = {
+        **record,
+        "state": decision,
+        "decision": decision,
+        "decided_by": actor,
+        "decided_at": now,
+        "decision_reason": reason,
+    }
+    return _put_policy_transition(
+        tenant,
+        updated,
+        expected_state="review",
+        event="policy_decided",
+        actor=actor,
+    )
+
+
+def _stage_policy_version(tenant, policy_id, version, actor):
+    """Stage an independently approved version against its exact active base."""
+    record = _policy_version_record(tenant, policy_id, version)
+    policy = TABLE.get_item(Key=_item_key(tenant, "POLICY", policy_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not policy:
+        raise LookupError("policy not found")
+    policy = _ensure_policy_governance(tenant, policy)
+    if record.get("state") != "approved":
+        raise PolicyConflict("policy version is not approved")
+    if not record.get("decided_by") or record.get("decided_by") == record.get("author"):
+        raise PermissionError("policy version lacks independent approval")
+    if int(record.get("base_version", -1)) != int(policy.get("version", 0)):
+        raise PolicyConflict("policy active version changed before staging")
+    updated = {
+        **record,
+        "state": "staged",
+        "staged_by": actor,
+        "staged_at": int(time.time()),
+    }
+    return _put_policy_transition(
+        tenant,
+        updated,
+        expected_state="approved",
+        event="policy_staged",
+        actor=actor,
+    )
+
+
+def _activate_policy_version(tenant, policy_id, version, body, actor):
+    """Atomically activate a staged version and retire previous fleet authority."""
+    expected = body.get("expectedActiveVersion")
+    if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
+        raise ValueError("expectedActiveVersion must be a non-negative integer")
+    candidate = _policy_version_record(tenant, policy_id, version)
+    current = TABLE.get_item(Key=_item_key(tenant, "POLICY", policy_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not current:
+        raise LookupError("policy not found")
+    policy = _ensure_policy_governance(tenant, current)
+    if candidate.get("state") != "staged":
+        raise PolicyConflict("policy version is not staged")
+    if not candidate.get("decided_by") or candidate.get("decided_by") == candidate.get("author"):
+        raise PermissionError("policy version lacks independent approval")
+    if (
+        int(policy.get("version", 0)) != expected
+        or int(candidate.get("base_version", -1)) != expected
+    ):
+        raise PolicyConflict("policy active version changed before activation")
+    now = int(time.time())
+    active_candidate = {
+        **candidate,
+        "state": "active",
+        "activated_by": actor,
+        "activated_at": now,
+    }
+    active_policy = {
+        **policy,
+        "name": candidate["name"],
+        "configuration": candidate["configuration"],
+        "version": version,
+        "activeVersion": version,
+        "latestVersion": max(int(policy.get("latestVersion", 0)), version),
+        "governanceState": "active",
+        "pendingVersion": None,
+        "pendingAuthor": None,
+        "updatedAt": now,
+    }
+    operations = [
+        _transaction_put(
+            active_candidate,
+            condition="#state = :staged",
+            names={"#state": "state"},
+            values={":staged": "staged"},
+        )
+    ]
+    if expected > 0:
+        previous = _policy_version_record(tenant, policy_id, expected)
+        retired = {**previous, "state": "retired"}
+        operations.append(
+            _transaction_put(
+                retired,
+                condition="#state = :active",
+                names={"#state": "state"},
+                values={":active": "active"},
+            )
+        )
+    operations.append(
+        _transaction_put(
+            active_policy,
+            condition="#version = :expected",
+            names={"#version": "version"},
+            values={":expected": expected},
+        )
+    )
+    _transact_policy_records(operations)
+    _audit(
+        tenant,
+        "policy_activated",
+        actor,
+        {"policy_id": policy_id, "version": version, "previous_version": expected},
+    )
+    return _policy_summary(tenant, active_policy)
 
 
 def _put(tenant, kind, identifier, item):
@@ -1834,7 +2411,7 @@ def _seed(tenant):
             "sdk_version": "1.0.1",
         },
     )
-    _put(
+    seed_policy = _put(
         tenant,
         "POLICY",
         "policy-safe-default",
@@ -1866,6 +2443,7 @@ def _seed(tenant):
             "createdAt": now,
         },
     )
+    _ensure_policy_governance(tenant, seed_policy)
     _put(
         tenant,
         "SKILL",
@@ -1956,6 +2534,16 @@ def _fleet(tenant):
             a for a in agents if f"{a['deployment_id']}:{a['id']}" in group.get("agent_keys", [])
         ]
         groups.append(group)
+    policy_versions = _list(tenant, "POLICY_VERSION")
+    policies = []
+    for policy in _list(tenant, "POLICY"):
+        governed = _ensure_policy_governance(tenant, policy)
+        versions = [item for item in policy_versions if item.get("policy_id") == governed.get("id")]
+        # A legacy migration may have created the first ledger record after
+        # the snapshot above. Reload only that one policy's ledger when needed.
+        if not versions:
+            versions = _policy_versions(tenant, governed["id"])
+        policies.append(_policy_summary(tenant, governed, versions))
     return {
         "organizations": _list(tenant, "ORG"),
         "projects": _list(tenant, "PROJECT"),
@@ -1964,7 +2552,7 @@ def _fleet(tenant):
         "sessions": [],
         "drift": [item for item in _list(tenant, "CONFIGURATION") if item.get("drifted")],
         "templates": _list(tenant, "TEMPLATE"),
-        "policies": _list(tenant, "POLICY"),
+        "policies": policies,
         "groups": groups,
         "skills": _list(tenant, "SKILL"),
         "mcpServers": _list(tenant, "MCP"),
@@ -2451,9 +3039,7 @@ def handler(event, context):
             if method == "GET" and action == ["managed-package"]:
                 return _response(
                     200,
-                    _agent_managed_package(
-                        tenant, deployment_id, agent_id, governed_agent
-                    ),
+                    _agent_managed_package(tenant, deployment_id, agent_id, governed_agent),
                 )
             _require_current_managed_configuration(tenant, governed_agent)
             if method == "POST" and action == ["decisions"]:
@@ -2496,6 +3082,9 @@ def handler(event, context):
                 )
                 if not policy:
                     return _response(409, {"error": "assigned policy is unavailable"})
+                policy = _ensure_policy_governance(tenant, policy)
+                if int(policy.get("version", 0)) <= 0:
+                    return _response(409, {"error": "assigned policy has no active version"})
                 return _response(
                     200,
                     {
@@ -2632,7 +3221,7 @@ def handler(event, context):
 
         tenant = _tenant(event)
         _seed(tenant)
-        actor = _claims(event).get("sub", "cognito-operator")
+        actor = _bounded_text(_claims(event).get("sub", "cognito-operator"), "actor", 256)
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
             capability = _required_mutation_capability(path)
             if not _operator_authorized(event, capability):
@@ -2763,9 +3352,7 @@ def handler(event, context):
                 ).get("Item")
                 if not deployment:
                     return _response(404, {"error": "deployment not found"})
-                return _response(
-                    200, _managed_package_metadata(tenant, deployment_id)
-                )
+                return _response(200, _managed_package_metadata(tenant, deployment_id))
             if method == "GET" and parts == ["compliance", "evidence"]:
                 return _response(200, _fleet(tenant)["complianceEvidence"])
             if method == "POST" and parts == ["projects"]:
@@ -2842,9 +3429,7 @@ def handler(event, context):
                 deployment_id = _bounded_identifier(parts[1], "deploymentId")
                 return _response(
                     201,
-                    _publish_managed_package(
-                        tenant, deployment_id, _body(event), actor
-                    ),
+                    _publish_managed_package(tenant, deployment_id, _body(event), actor),
                 )
             if method == "GET" and parts in (
                 ["deployment-config"],
@@ -3029,31 +3614,74 @@ def handler(event, context):
                     200, {"id": parts[1], "active": active, "agents": group.get("agent_keys", [])}
                 )
             if (
+                method == "GET"
+                and len(parts) == 3
+                and parts[0] == "policies"
+                and parts[2] == "versions"
+            ):
+                policy_id = _bounded_identifier(parts[1], "policyId")
+                policy = TABLE.get_item(
+                    Key=_item_key(tenant, "POLICY", policy_id), ConsistentRead=True
+                ).get("Item")
+                if not policy:
+                    return _response(404, {"error": "policy not found"})
+                _ensure_policy_governance(tenant, policy)
+                versions = _policy_versions(tenant, policy_id, consistent_read=True)
+                return _response(
+                    200,
+                    {
+                        "items": [
+                            _policy_version_view(tenant, item, versions) for item in versions
+                        ],
+                        "nextCursor": None,
+                    },
+                )
+            if (
+                method == "GET"
+                and len(parts) == 4
+                and parts[0] == "policies"
+                and parts[2] == "versions"
+            ):
+                policy_id = _bounded_identifier(parts[1], "policyId")
+                version = _positive_policy_version(int(parts[3]))
+                return _response(
+                    200,
+                    _policy_version_view(
+                        tenant, _policy_version_record(tenant, policy_id, version)
+                    ),
+                )
+            if (
+                method == "POST"
+                and len(parts) == 5
+                and parts[0] == "policies"
+                and parts[2] == "versions"
+            ):
+                policy_id = _bounded_identifier(parts[1], "policyId")
+                version = _positive_policy_version(int(parts[3]))
+                action = parts[4]
+                if action == "submit":
+                    result = _submit_policy_version(tenant, policy_id, version, actor)
+                elif action == "decision":
+                    result = _decide_policy_version(tenant, policy_id, version, _body(event), actor)
+                elif action == "stage":
+                    result = _stage_policy_version(tenant, policy_id, version, actor)
+                elif action == "activate":
+                    result = _activate_policy_version(
+                        tenant, policy_id, version, _body(event), actor
+                    )
+                else:
+                    raise ValueError("policy transition is unsupported")
+                return _response(200, result)
+            if (
                 method == "POST"
                 and len(parts) == 3
                 and parts[0] == "policies"
                 and parts[2] == "versions"
             ):
-                body = _body(event)
-                policy = TABLE.get_item(Key=_item_key(tenant, "POLICY", parts[1])).get("Item")
-                if not policy:
-                    return _response(404, {"error": "policy not found"})
-                policy.update(
-                    {
-                        "name": body["name"],
-                        "configuration": body.get("configuration", {}),
-                        "version": int(policy.get("version", 1)) + 1,
-                        "updatedAt": int(time.time()),
-                    }
+                return _response(
+                    200,
+                    _create_policy_draft(tenant, parts[1], _body(event), actor),
                 )
-                TABLE.put_item(Item=policy)
-                _audit(
-                    tenant,
-                    "policy_updated",
-                    actor,
-                    {"policy_id": parts[1], "version": policy["version"]},
-                )
-                return _response(200, policy)
             if method == "POST" and parts == ["skills"]:
                 body = _body(event)
                 content = body.get("content", "")
@@ -3119,22 +3747,7 @@ def handler(event, context):
                 _audit(tenant, "mcp_server_created", actor, {"server_id": server_id})
                 return _response(201, item)
             if method == "POST" and parts == ["policies"]:
-                body = _body(event)
-                item = _put(
-                    tenant,
-                    "POLICY",
-                    body["policyId"],
-                    {
-                        "id": body["policyId"],
-                        "organization_id": "org-demo",
-                        "name": body["name"],
-                        "configuration": body.get("configuration", {}),
-                        "version": 1,
-                        "createdAt": int(time.time()),
-                    },
-                )
-                _audit(tenant, "policy_created", actor, {"policy_id": body["policyId"]})
-                return _response(201, item)
+                return _response(201, _create_governed_policy(tenant, _body(event), actor))
             if method == "POST" and parts == ["agents", "bootstrap"]:
                 return _response(201, _issue_agent_bootstrap(tenant, _body(event), actor))
             if method == "POST" and parts == ["approvals"]:
@@ -3282,6 +3895,9 @@ def handler(event, context):
                 policy = next((p for p in _list(tenant, "POLICY") if p["id"] == policy_id), None)
                 if not policy:
                     return _response(400, {"error": "policy not found"})
+                policy = _ensure_policy_governance(tenant, policy)
+                if int(policy.get("version", 0)) <= 0:
+                    raise PolicyConflict("group policies must have an active governed version")
                 try:
                     item = _create_item(
                         tenant,
@@ -3316,6 +3932,9 @@ def handler(event, context):
                 ).get("Item")
                 if not group or not policy:
                     return _response(404, {"error": "group or policy not found"})
+                policy = _ensure_policy_governance(tenant, policy)
+                if int(policy.get("version", 0)) <= 0:
+                    raise PolicyConflict("group policies must have an active governed version")
                 group.update({"policyId": policy["id"], "policyName": policy["name"]})
                 TABLE.put_item(Item=group)
                 _audit(
@@ -3513,6 +4132,11 @@ def handler(event, context):
                 policy = TABLE.get_item(Key=_item_key(tenant, "POLICY", group["policyId"])).get(
                     "Item"
                 )
+                if not policy:
+                    return _response(409, {"error": "assigned policy is unavailable"})
+                policy = _ensure_policy_governance(tenant, policy)
+                if int(policy.get("version", 0)) <= 0:
+                    return _response(409, {"error": "assigned policy has no active version"})
                 return _response(
                     200,
                     {
@@ -3558,6 +4182,10 @@ def handler(event, context):
         return _response(400, {"error": str(exc)})
     except PermissionError as exc:
         return _response(403, {"error": str(exc)})
+    except LookupError as exc:
+        return _response(404, {"error": str(exc)})
+    except PolicyConflict as exc:
+        return _response(409, {"error": str(exc)})
     except ManagedPackageConflict as exc:
         return _response(409, {"error": str(exc)})
     except ManagedPackageNotFound as exc:
