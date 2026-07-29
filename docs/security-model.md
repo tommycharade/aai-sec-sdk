@@ -155,6 +155,8 @@ The checked-in offline fallback permits only exact `pwd`/`ls` and narrowly
 enumerated read-only `git status`, `git diff --stat`, and `git log --oneline`
 forms. It does not admit arbitrary Git flag tails or test runners: Git output
 flags can overwrite authority files, and project tests execute repository code.
+AWS demo and trial safe-default policies use the same exact command forms, so
+first enrollment behaves consistently across Claude Code and Codex CLI.
 Operator verification is bound to the live host identity and the sole assigned
 effective policy ID/version. The console must compare that tuple before offering
 activation commands; an inventory heartbeat or group name alone is insufficient

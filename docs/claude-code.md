@@ -67,6 +67,10 @@ default policy used by the example hook. Preview the changes first with
 `--dry-run`. It does not invoke Claude or silently replace an existing
 configuration or policy.
 
+Repeating onboarding from a newer SDK checkout replaces every legacy
+`claude_code_hook.py` command with one authoritative SDK hook while preserving
+unrelated commands, including commands that share the same Claude matcher.
+
 The default policy is intentionally narrow: `Read`, `Glob`, and `Grep` are the
 only explicitly allowed native tools; read-only/status/test commands are
 allowed; publishing, commits, pushes, and deployments require approval; and

@@ -31,6 +31,7 @@ def _onboard(project: Path) -> Path:
 
 def test_onboard_codex_uses_host_cache_without_project_bearer_configuration(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The project config contains routing metadata but never a bearer value."""
     config_path = _onboard(tmp_path)
@@ -58,6 +59,12 @@ def test_onboard_codex_uses_host_cache_without_project_bearer_configuration(
     assert f"AAI_SEC_PROJECT_ROOT={tmp_path}" in handler["command"]
     assert f"PYTHONPATH={Path.cwd() / 'src'}" in handler["command"]
     assert "AAI_SEC_AGENT_TOKEN" not in handler["command"]
+    output = capsys.readouterr().out
+    assert "Codex ignores project MCP and hook" in output
+    assert "codex mcp get agentic-security --json" in output
+    assert f'[projects."{tmp_path}"]' in output
+    assert 'trust_level = "trusted"' in output
+    assert output.index("Approve the project trust prompt") < output.index("codex mcp get")
 
 
 def test_generated_codex_hook_runs_from_checkout_without_installed_sdk(tmp_path: Path) -> None:

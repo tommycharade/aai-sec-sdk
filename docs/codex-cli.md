@@ -51,10 +51,30 @@ Existing TOML outside the marked block is preserved.
 Invalid TOML, ambiguous ownership, unsafe identifiers, unsafe cache state and
 configuration symlinks fail closed.
 
-Run `codex mcp get agentic-security --json`, start `codex`, review the project
-hook trust prompt, and inspect `/hooks`. The project `.codex` layer must be
-trusted before a project hook runs. This is appropriate for a pilot, but it is
-not an immutable enterprise control.
+Codex ignores the complete project `.codex` layer—including the security MCP
+and hook—until the project is trusted. After onboarding:
+
+1. start `codex` from the project root and approve its project trust prompt;
+2. restart Codex;
+3. run `codex mcp get agentic-security --json` in another terminal and confirm
+   the server is enabled with `stdio` transport;
+4. open `/hooks` in Codex and approve the reviewed AAI Security hook hash.
+
+If Codex does not offer the project prompt, add the following exact block to
+the user configuration at `~/.codex/config.toml`, then restart Codex. Replace
+the example path with the canonical absolute project root printed by the
+installer:
+
+```toml
+[projects."/absolute/path/to/project"]
+trust_level = "trusted"
+```
+
+Do not treat a generated `.codex/config.toml` as successful enrollment until
+the MCP query and `/hooks` checks both pass. Project trust is appropriate for a
+pilot, but it trusts the project's full Codex configuration and is not an
+immutable enterprise control. The installer therefore explains this decision
+but never silently edits the user-wide trust store.
 
 ## What the native hook enforces
 

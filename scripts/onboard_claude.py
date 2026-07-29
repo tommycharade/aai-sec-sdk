@@ -104,6 +104,43 @@ def _copy_policy(source: Path, destination: Path, *, dry_run: bool) -> None:
     os.chmod(destination, 0o600)
 
 
+def _is_managed_hook(candidate: object) -> bool:
+    """Return whether a Claude hook command invokes the SDK's hook entry point.
+
+    Detection uses an exact command-token basename so onboarding can migrate a
+    hook installed from an older checkout without deleting similarly named
+    user commands or unrelated hooks that share the same matcher entry.
+    """
+    if not isinstance(candidate, dict) or candidate.get("type") != "command":
+        return False
+    command = candidate.get("command")
+    if not isinstance(command, str):
+        return False
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        # A malformed user command is preserved; onboarding must not guess at
+        # ownership when shell tokenization cannot establish the exact target.
+        return False
+    return any(Path(token).name == "claude_code_hook.py" for token in tokens)
+
+
+def _remove_managed_hooks(entries: list[object]) -> list[object]:
+    """Remove every legacy SDK hook while preserving all user-owned hooks."""
+    retained: list[object] = []
+    for item in entries:
+        if not isinstance(item, dict) or not isinstance(item.get("hooks"), list):
+            retained.append(item)
+            continue
+        candidates = item["hooks"]
+        remaining = [candidate for candidate in candidates if not _is_managed_hook(candidate)]
+        if len(remaining) == len(candidates):
+            retained.append(item)
+        elif remaining:
+            retained.append({**item, "hooks": remaining})
+    return retained
+
+
 def _enroll_agent(
     base_url: str,
     bootstrap_token: str,
@@ -201,6 +238,11 @@ def onboard(
     if not dry_run and agent_session is not None and session_store is not None:
         session_store.save(agent_session)
         session_cached = True
+    elif not dry_run and session_store is not None:
+        try:
+            session_cached = session_store.load() is not None
+        except AgentSessionStoreError as exc:
+            raise SystemExit(f"enterprise session storage is unavailable: {exc}") from exc
 
     source_root = sdk_root / "src"
     hook_environment = {"PYTHONPATH": str(source_root)}
@@ -239,20 +281,10 @@ def onboard(
         "matcher": "Bash|Read|Edit|Write|Glob|Grep",
         "hooks": [{"type": "command", "command": command, "timeout": 10}],
     }
-    # Own exactly the hook entry that invokes this checkout's hook. Replacing
-    # it prevents a mode/configuration change from accumulating contradictory
-    # local and enterprise entries while preserving unrelated user hooks.
-    managed_entries = [
-        item
-        for item in pre_tool_use
-        if isinstance(item, dict)
-        and isinstance(item.get("hooks"), list)
-        and any(
-            isinstance(candidate, dict) and str(hook) in str(candidate.get("command", ""))
-            for candidate in item["hooks"]
-        )
-    ]
-    pre_tool_use[:] = [item for item in pre_tool_use if item not in managed_entries]
+    # Own the SDK hook entry point across checkout upgrades. Matching only the
+    # current absolute path leaves contradictory legacy hooks active; removing
+    # exact entry-point tokens preserves unrelated user automation.
+    pre_tool_use[:] = _remove_managed_hooks(pre_tool_use)
     pre_tool_use.append(entry)
 
     servers = mcp.setdefault("mcpServers", {})

@@ -136,6 +136,9 @@ missing or unprovisioned.
 The first-run console then prepares a pilot foundation before offering any host
 installer. It creates a project under the provisioned organization, a bounded
 deployment under that project, and a policy group bound to the safe default.
+That default permits project-confined reads plus exact `pwd`, `ls`, `git
+status`, `git status --short`, `git diff --stat`, and `git log --oneline`
+commands; all other native commands remain denied unless explicitly governed.
 `POST /api/enterprise/projects` and `POST /api/enterprise/deployments` reject
 unknown or mismatched parents and duplicate identifiers. Agent registration
 requires an existing deployment and derives organization, project,
