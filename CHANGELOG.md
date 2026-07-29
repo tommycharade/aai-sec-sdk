@@ -1,5 +1,15 @@
 # Changelog
 
+- Added enterprise bulk policy-group assignment for up to 100 active agents.
+  Operators now select agents, provide an audit rationale, preview live
+  eligibility, and apply through an optimistic membership revision. The AWS
+  control plane rejects cross-tenant, inactive, missing and already-grouped
+  agents; returns explicit HTTP 207 partial outcomes; binds replay to the exact
+  actor and request; and atomically commits the membership update, idempotency
+  result and immutable DynamoDB audit summary. Single-agent routes now preserve
+  sole-group authority and revision membership changes. The UI provides a
+  responsive three-step Select, Preview and Apply workflow with progress,
+  per-agent outcomes and a completion receipt.
 - Added accountable agent ownership governance to the AWS control plane and
   enterprise UI. New identities require an owner ID, owner name, monitored
   business contact and typed criticality; team and environment are copied from

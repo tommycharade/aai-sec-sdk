@@ -163,6 +163,7 @@ def main() -> int:
     replacement_bootstrap_token = ""
     replacement_agent_id = f"{agent_id}-replacement"
     group_assigned = False
+    membership_request_id = f"aws-smoke-membership-{suffix}"
     operation_key = f"aws-smoke-operation-{suffix}"
     try:
         unauthenticated, _ = _request(f"{arguments.api_url.rstrip('/')}/enterprise/agents", "GET")
@@ -371,19 +372,143 @@ def main() -> int:
             raise RuntimeError(
                 f"verification accepted an enrolled but unassigned agent: {unassigned_verification}"
             )
+        groups = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/groups",
+                "GET",
+                {},
+                arguments.tenant,
+            ),
+        )
+        group = next(
+            (
+                item
+                for item in json.loads(groups["body"]).get("items", [])
+                if item.get("id") == "group-platform"
+            ),
+            None,
+        )
+        if groups["statusCode"] != 200 or not group:
+            raise RuntimeError(f"agent group inventory failed: {groups}")
+        membership_revision = group.get("membershipRevision")
+        membership_body = {
+            "mode": "preview",
+            "requestId": membership_request_id,
+            "expectedMembershipRevision": membership_revision,
+            "reason": "Synthetic bulk assignment acceptance with a partial outcome.",
+            "agents": [
+                {"deploymentId": deployment_id, "agentId": agent_id},
+                {"deploymentId": deployment_id, "agentId": f"{agent_id}-missing"},
+            ],
+        }
+        previewed = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/groups/group-platform/agents/bulk",
+                "POST",
+                membership_body,
+                arguments.tenant,
+            ),
+        )
+        previewed_body = json.loads(previewed["body"])
+        if (
+            previewed["statusCode"] != 200
+            or previewed_body.get("counts", {}).get("ready") != 1
+            or previewed_body.get("counts", {}).get("rejected") != 1
+            or previewed_body.get("canApply") is not True
+        ):
+            raise RuntimeError(f"bulk assignment preview failed: {previewed}")
         assigned = _invoke(
             lambda_client,
             arguments.function_name,
             _event(
-                "/enterprise/groups/group-platform/agents",
+                "/enterprise/groups/group-platform/agents/bulk",
                 "POST",
-                {"deploymentId": deployment_id, "agentId": agent_id},
+                {**membership_body, "mode": "apply"},
                 arguments.tenant,
             ),
         )
-        if assigned["statusCode"] != 200:
-            raise RuntimeError(f"agent group assignment failed: {assigned}")
+        assigned_body = json.loads(assigned["body"])
+        if (
+            assigned["statusCode"] != 207
+            or assigned_body.get("counts", {}).get("applied") != 1
+            or assigned_body.get("counts", {}).get("rejected") != 1
+            or assigned_body.get("resultingMembershipRevision") != membership_revision + 1
+        ):
+            raise RuntimeError(f"bulk agent group assignment failed: {assigned}")
         group_assigned = True
+        replayed = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/groups/group-platform/agents/bulk",
+                "POST",
+                {**membership_body, "mode": "apply"},
+                arguments.tenant,
+            ),
+        )
+        if (
+            replayed["statusCode"] != 207
+            or json.loads(replayed["body"]).get("replayed") is not True
+        ):
+            raise RuntimeError(f"bulk assignment replay was not idempotent: {replayed}")
+        stale_assignment = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/groups/group-platform/agents/bulk",
+                "POST",
+                {
+                    **membership_body,
+                    "mode": "apply",
+                    "requestId": f"{membership_request_id}-stale",
+                },
+                arguments.tenant,
+            ),
+        )
+        if stale_assignment["statusCode"] != 409:
+            raise RuntimeError(f"stale bulk assignment was not rejected: {stale_assignment}")
+        stored_operation = control_table.get_item(
+            Key={
+                "pk": f"TENANT#{arguments.tenant}",
+                "sk": f"GROUP_MEMBERSHIP_OPERATION#{membership_request_id}",
+            },
+            ConsistentRead=True,
+        ).get("Item")
+        if (
+            not stored_operation
+            or stored_operation.get("actor") != "aws-control-plane-smoke"
+            or stored_operation.get("response", {}).get("counts", {}).get("applied") != 1
+        ):
+            raise RuntimeError("durable bulk assignment idempotency evidence is missing")
+        from boto3.dynamodb.conditions import Key  # type: ignore[import-untyped]
+
+        membership_audits = control_table.query(
+            KeyConditionExpression=(
+                Key("pk").eq(f"TENANT#{arguments.tenant}")
+                & Key("sk").begins_with("GROUP_MEMBERSHIP_AUDIT#")
+            ),
+            ScanIndexForward=False,
+            Limit=100,
+            ConsistentRead=True,
+        ).get("Items", [])
+        matching_audit = next(
+            (
+                item
+                for item in membership_audits
+                if item.get("payload", {}).get("request_id") == membership_request_id
+            ),
+            None,
+        )
+        if (
+            not matching_audit
+            or matching_audit.get("event_type") != "group_membership_bulk_assigned"
+            or matching_audit.get("payload", {}).get("rejected_count") != 1
+        ):
+            raise RuntimeError("durable bulk assignment audit evidence is missing")
         bootstrap = _invoke(
             lambda_client,
             arguments.function_name,
@@ -961,6 +1086,7 @@ def main() -> int:
             raise RuntimeError(f"evidence-retaining offboarding failed: {offboarded}")
         print(
             "AWS control-plane smoke passed: auth, enrollment, accountable ownership/CAS, "
+            "bulk group preview/partial apply/replay/audit, "
             "heartbeat, managed-host "
             "missing/conflict enforcement, policy, agent verification, "
             "approval replay, emergency-stop enforcement/recovery, and "
@@ -1037,6 +1163,12 @@ def main() -> int:
         )
         control_table.delete_item(
             Key={"pk": f"TENANT#{arguments.tenant}", "sk": f"APPROVAL#{approval_id}"}
+        )
+        control_table.delete_item(
+            Key={
+                "pk": f"TENANT#{arguments.tenant}",
+                "sk": f"GROUP_MEMBERSHIP_OPERATION#{membership_request_id}",
+            }
         )
         for kind, item_id in (
             ("CONFIGURATION", deployment_id),

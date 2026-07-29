@@ -67,7 +67,7 @@ The recommended navigation is:
 | Configuration validation | Show validation results before activation. |
 | UI authentication | Operators, roles, bearer tokens and enterprise SSO integration. |
 | CORS/origin restriction | Allowed browser origins and deployment environment. |
-| Agent groups | Create groups, select a policy, view members and add/remove agents. |
+| Agent groups | Create groups, select a policy, preview/apply up to 100 assignments, inspect partial outcomes and remove agents. |
 | Claude onboarding script | Display or generate the exact onboarding command for a project. |
 | Configuration backups | Show backup status and provide controlled restore operations. |
 
@@ -84,6 +84,15 @@ Policy -> Group -> Agent deployments -> Agent projects
 Changing group membership must not silently mutate an active session. The
 runtime must re-evaluate live actions using the currently active authority,
 and policy changes should expose rollout state and affected agents.
+
+The group detail journey uses a typed bulk assignment dialog rather than a
+single-agent selector. Operators search or select active unassigned agents,
+enter an auditable rationale, and request a server-authoritative preview. The
+preview shows ready, unchanged and rejected outcomes before **Apply** is
+enabled. Apply is bound to the displayed membership revision and request ID;
+stale revisions require a new preview. Partial success remains visible per
+agent and never appears as an all-success toast. The completion view shows the
+new revision and the exact applied/unchanged/rejected counts.
 
 ## Operational safeguards
 

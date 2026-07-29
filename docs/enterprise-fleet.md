@@ -89,6 +89,7 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/groups` | Create a group and bind it to a policy |
 | `POST /api/enterprise/groups/{group}/policy` | Change a group's immutable policy assignment and audit the change |
 | `POST /api/enterprise/groups/{group}/agents` | Enroll an existing agent in a group |
+| `POST /api/enterprise/groups/{group}/agents/bulk` | Preview or apply one revision-bound batch of up to 100 assignments |
 | `DELETE /api/enterprise/groups/{group}/agents/{deployment}/{agent}` | Remove an agent from a group |
 | `POST /api/enterprise/templates/validate` | Validate safe configuration without persisting it |
 | `POST /api/enterprise/deployment-config` | Assign desired configuration |
@@ -118,6 +119,41 @@ Agent verification returns `host`, the exact sole `group`, and the consistently
 read `policyId`/`policyVersion` alongside liveness and stop checks. Missing or
 conflicting policy state returns null policy identity and cannot verify. A UI
 must compare this complete tuple with its selected activation scope.
+
+### Bulk group assignment
+
+Group membership is a policy-authority edge. The bulk endpoint therefore does
+not accept a browser-computed result or perform a loop of independent
+single-agent writes. It accepts a closed-schema request containing:
+
+- `mode`: `preview` or `apply`;
+- a collision-resistant `requestId` reused between preview and apply;
+- the exact positive `expectedMembershipRevision` shown by the group;
+- one to 100 unique deployment/agent identifiers; and
+- an operator reason of at least 20 characters.
+
+Preview strongly reloads the group, every proposed agent, and the bounded group
+inventory. It makes no write and returns one typed outcome per agent:
+`ready`, `unchanged`, or `rejected`, with fixed reason codes. Missing,
+inactive, cross-organization, malformed, or already-assigned agents are never
+silently skipped. An active agent already in another group is rejected because
+runtime verification requires one unambiguous policy group.
+
+Apply repeats the live evaluation. A changed membership revision returns HTTP
+409 and commits nothing. Eligible agents are committed together with a new
+membership revision, an actor- and request-bound idempotency result, and one
+content-minimised immutable DynamoDB audit summary. A batch containing both
+eligible and rejected agents returns HTTP 207: eligible assignments commit;
+rejected agents remain unchanged and retain explicit outcomes. Replaying the
+same request ID and exact semantic request returns the stored result without a
+second authority or audit change; reuse with different content is rejected.
+S3 receives a best-effort secondary copy after the primary transaction.
+
+The UI follows a three-step **Select → Preview → Apply** journey. It lists only
+currently active, unassigned agents from the browser snapshot, requires a
+rationale, displays server-authoritative counts and per-agent outcomes, and
+shows the resulting revision as the completion receipt. The server remains
+authoritative when browser inventory becomes stale.
 
 ### Agent identity lifecycle
 

@@ -261,12 +261,16 @@ principals remain denied by the selected policy.
 
 Integration rollout is staged per group:
 
-1. Generate configuration and show a diff.
-2. Apply to one canary deployment.
-3. Verify heartbeat, policy version and synthetic checks.
-4. Expand by percentage or deployment selection.
-5. Pause automatically on failed health or verification checks.
-6. Provide rollback to the previous known-good version.
+1. Select up to 100 currently unassigned agents and record the rollout reason.
+2. Preview live eligibility against the exact group membership revision.
+3. Resolve rejected or conflicting agents without weakening sole-group authority.
+4. Apply the eligible assignment batch and retain its immutable audit receipt.
+5. Generate configuration and show a diff.
+6. Apply to one canary deployment.
+7. Verify heartbeat, policy version and synthetic checks.
+8. Expand by percentage or deployment selection.
+9. Pause automatically on failed health or verification checks.
+10. Provide rollback to the previous known-good version.
 
 Emergency stop is a separate control from policy editing. It should stop a
 deployment or group immediately, show the affected agents and preserve audit
