@@ -189,6 +189,19 @@ bearer without writing credentials into project configuration. Missed
 heartbeats, failed renewal, an unsafe cache, and emergency stops remain
 fail-closed.
 
+Agent identity lifecycle is independent from presence and emergency stop. A
+fleet operator can call `POST /enterprise/agents/{deployment}/{agent}/revoke`
+with `expectedLifecycleRevision` and a bounded reason. The transition is
+irreversible: every agent route and bootstrap exchange checks the live agent
+record, so existing sessions and unused bootstrap material fail immediately
+without waiting for their TTL. `replace` atomically creates a distinct offline
+successor and inherits group membership while revoking the predecessor;
+operators must enroll the successor with fresh material. `offboard` is allowed
+only after revocation and replaces operational fields with a content-minimised
+tombstone. Lifecycle authority and immutable DynamoDB evidence commit in one
+transaction; S3 audit is a secondary best-effort replica of that already
+durable event.
+
 Heartbeats can also report the exact managed-host bundle loaded by Claude Code
 or Codex. A deployment configuration must first contain a complete
 `managedHost` desired identity (host/client version, platform, policy ID and

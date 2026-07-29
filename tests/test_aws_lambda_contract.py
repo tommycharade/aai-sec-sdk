@@ -54,6 +54,12 @@ class FakeTable:
             elif condition == "#state = :expected":
                 if self.items.get(key, {}).get("state") != values.get(":expected"):
                     raise ConditionalFailure()
+            elif "lifecycle_state = :active" in condition:
+                current = self.items.get(key, {})
+                if current.get("lifecycle_state") != values.get(":active") or current.get(
+                    "lifecycle_revision"
+                ) != values.get(":revision"):
+                    raise ConditionalFailure()
         self.items[key] = dict(Item)
 
     def delete_item(self, *, Key: dict[str, str], **_: Any) -> None:
@@ -69,6 +75,13 @@ class FakeTable:
         item = self.items.get(key)
         if item is None:
             raise ConditionalFailure()
+        if ":active" in ExpressionAttributeValues and ":one" in ExpressionAttributeValues:
+            if "lifecycle_state" in item or "lifecycle_revision" in item:
+                raise ConditionalFailure()
+            item["lifecycle_state"] = ExpressionAttributeValues[":active"]
+            item["lifecycle_revision"] = ExpressionAttributeValues[":one"]
+            self.items[key] = item
+            return {"Attributes": dict(item)}
         if ":nonce" in ExpressionAttributeValues and ":expires" in ExpressionAttributeValues:
             if item.get("expires_at", 0) <= ExpressionAttributeValues[":now"]:
                 raise ConditionalFailure()
@@ -2926,6 +2939,503 @@ def test_agent_heartbeat_rotates_session_near_expiry(monkeypatch: Any) -> None:
     assert old_replay["statusCode"] == 403
     still_live = _invoke(module, _event("/agent/dep-a/agent-a/heartbeat", "POST", token=new_token))
     assert still_live["statusCode"] == 200
+
+
+def test_agent_revocation_immediately_denies_sessions_bootstrap_and_identity_reuse(
+    monkeypatch: Any,
+) -> None:
+    """One durable transition invalidates every old capability at request time."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-agent-revoke"
+    now = 1_900_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "operator-revoke",
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant, "status": "active"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {
+            "id": "dep-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "environment": "prod",
+            "region": "eu-west-2",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "project_root": "/synthetic/project",
+            "environment": "prod",
+            "region": "eu-west-2",
+            "status": "connected",
+            "last_heartbeat": now,
+            "expires_at": now + 300,
+            "emergencyStop": False,
+            "lifecycle_state": "active",
+            # boto3's resource layer returns DynamoDB numbers as Decimal.
+            "lifecycle_revision": Decimal("1"),
+        }
+    )
+    bootstrap_response = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/bootstrap",
+            "POST",
+            body={"deploymentId": "dep-a", "agentId": "agent-a"},
+            claims=claims,
+        ),
+    )
+    assert bootstrap_response["statusCode"] == 201
+    bootstrap_token = json.loads(bootstrap_response["body"])["bootstrapToken"]
+    session_token = "synthetic-session-before-revocation"  # noqa: S105
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", session_token),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "project_root_hash": hashlib.sha256(b"/synthetic/project").hexdigest(),
+            "expires_at": now + 900,
+        }
+    )
+    # Prove that S3 is only a replica: the immutable transaction evidence must
+    # still make the transition successful during an audit-bucket outage.
+    monkeypatch.setattr(
+        module, "_audit", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError())
+    )
+    revoked = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/revoke",
+            "POST",
+            body={
+                "expectedLifecycleRevision": 1,
+                "reason": "Device is no longer trusted after incident review.",
+            },
+            claims=claims,
+        ),
+    )
+    assert revoked["statusCode"] == 200
+    revoked_payload = json.loads(revoked["body"])
+    assert revoked_payload["lifecycle_state"] == "revoked"
+    assert revoked_payload["lifecycle_revision"] == 2
+    assert revoked_payload["status"] == "offline"
+    assert revoked_payload["emergencyStop"] is True
+    assert "bootstrapToken" not in revoked_payload and "accessToken" not in revoked_payload
+    assert len([key for key in table.items if key[1].startswith("AGENT_LIFECYCLE_AUDIT#")]) == 1
+
+    denied_session = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/heartbeat", "POST", token=session_token),
+    )
+    assert denied_session["statusCode"] == 403
+    denied_bootstrap = _invoke(
+        module,
+        _event(
+            "/agent/enroll",
+            "POST",
+            body={
+                "bootstrapToken": bootstrap_token,
+                "projectRoot": "/synthetic/project",
+            },
+        ),
+    )
+    assert denied_bootstrap["statusCode"] == 403
+    assert "revoked or offboarded" in json.loads(denied_bootstrap["body"])["error"]
+    new_bootstrap = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/bootstrap",
+            "POST",
+            body={"deploymentId": "dep-a", "agentId": "agent-a"},
+            claims=claims,
+        ),
+    )
+    assert new_bootstrap["statusCode"] == 409
+    reused = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/register",
+            "POST",
+            body={
+                "deploymentId": "dep-a",
+                "agentId": "agent-a",
+                "host": "claude-code",
+                "projectRoot": "/synthetic/project",
+            },
+            claims=claims,
+        ),
+    )
+    assert reused["statusCode"] == 409
+    stale_retry = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/revoke",
+            "POST",
+            body={
+                "expectedLifecycleRevision": 1,
+                "reason": "Device is no longer trusted after incident review.",
+            },
+            claims=claims,
+        ),
+    )
+    assert stale_retry["statusCode"] == 409
+    assert len([key for key in table.items if key[1].startswith("AGENT_LIFECYCLE_AUDIT#")]) == 1
+
+
+def test_concurrent_heartbeat_cannot_overwrite_agent_revocation(monkeypatch: Any) -> None:
+    """A stale whole-record heartbeat write is lifecycle-revision guarded."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-agent-heartbeat-race"
+    token = "synthetic-heartbeat-race-session"  # noqa: S105
+    now = int(time.time())
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "project_root": "/synthetic/project",
+            "status": "offline",
+            "expires_at": 0,
+            "emergencyStop": False,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", token),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "project_root_hash": hashlib.sha256(b"/synthetic/project").hexdigest(),
+            "expires_at": now + 900,
+        }
+    )
+    original_put = table.put_item
+    raced = False
+
+    def revoke_before_heartbeat_put(*, Item: dict[str, Any], **kwargs: Any) -> None:
+        nonlocal raced
+        if kwargs.get("ConditionExpression") and Item.get("id") == "agent-a" and not raced:
+            raced = True
+            module._revoke_agent(
+                tenant,
+                "dep-a",
+                "agent-a",
+                {
+                    "expectedLifecycleRevision": 1,
+                    "reason": "Incident response revoked identity during heartbeat processing.",
+                },
+                "incident-operator",
+            )
+        original_put(Item=Item, **kwargs)
+
+    monkeypatch.setattr(table, "put_item", revoke_before_heartbeat_put)
+    heartbeat = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/heartbeat", "POST", token=token),
+    )
+    assert heartbeat["statusCode"] == 403
+    stored = table.items[(f"TENANT#{tenant}", "AGENT#dep-a:agent-a")]
+    assert stored["lifecycle_state"] == "revoked"
+    assert stored["status"] == "offline"
+    assert stored["lifecycle_revision"] == 2
+
+
+def test_agent_replacement_is_atomic_inherits_groups_and_requires_new_enrollment(
+    monkeypatch: Any,
+) -> None:
+    """Replacement never reuses identity or exposes a half-applied authority edge."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-agent-replace"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "operator-replace",
+    }
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {
+            "id": "dep-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "environment": "prod",
+            "region": "eu-west-2",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-old")
+        | {
+            "id": "agent-old",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "dep-a",
+            "host": "codex-cli",
+            "project_root": "/synthetic/project",
+            "environment": "prod",
+            "region": "eu-west-2",
+            "status": "connected",
+            "last_heartbeat": 10,
+            "expires_at": 20,
+            "emergencyStop": False,
+            "created_at": 1,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-a")
+        | {
+            "id": "group-a",
+            "organizationId": "org-a",
+            "policyId": "policy-a",
+            "agent_keys": ["dep-a:agent-old"],
+        }
+    )
+    old_session = "synthetic-old-replacement-session"  # noqa: S105
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", old_session),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-old",
+            "project_root_hash": hashlib.sha256(b"/synthetic/project").hexdigest(),
+            "expires_at": int(time.time()) + 900,
+        }
+    )
+    replaced = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-old/replace",
+            "POST",
+            body={
+                "expectedLifecycleRevision": 1,
+                "replacementAgentId": "agent-new",
+                "reason": "Managed workstation refresh requires a distinct identity.",
+            },
+            claims=claims,
+        ),
+    )
+    assert replaced["statusCode"] == 201
+    payload = json.loads(replaced["body"])
+    assert payload["requiresBootstrap"] is True
+    assert payload["predecessor"]["lifecycle_state"] == "revoked"
+    assert payload["predecessor"]["replacement_agent_id"] == "agent-new"
+    assert payload["replacement"]["lifecycle_state"] == "active"
+    assert payload["replacement"]["lifecycle_revision"] == 1
+    assert payload["replacement"]["successor_of"] == "agent-old"
+    assert payload["replacement"]["status"] == "offline"
+    assert table.items[(f"TENANT#{tenant}", "GROUP#group-a")]["agent_keys"] == [
+        "dep-a:agent-new",
+        "dep-a:agent-old",
+    ]
+    assert (
+        _invoke(
+            module,
+            _event("/agent/dep-a/agent-old/heartbeat", "POST", token=old_session),
+        )["statusCode"]
+        == 403
+    )
+
+    bootstrap = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/bootstrap",
+            "POST",
+            body={"deploymentId": "dep-a", "agentId": "agent-new"},
+            claims=claims,
+        ),
+    )
+    assert bootstrap["statusCode"] == 201
+    enrolled = _invoke(
+        module,
+        _event(
+            "/agent/enroll",
+            "POST",
+            body={
+                "bootstrapToken": json.loads(bootstrap["body"])["bootstrapToken"],
+                "projectRoot": "/synthetic/project",
+            },
+        ),
+    )
+    assert enrolled["statusCode"] == 201
+    assert json.loads(enrolled["body"])["agentId"] == "agent-new"
+
+
+def test_agent_replacement_rolls_back_when_group_membership_changes_concurrently(
+    monkeypatch: Any,
+) -> None:
+    """A stale group snapshot cannot produce partial replacement authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-agent-replace-race"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "operator-replace",
+    }
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-old")
+        | {
+            "id": "agent-old",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "project_root": "/synthetic/project",
+            "status": "offline",
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-a")
+        | {"id": "group-a", "agent_keys": ["dep-a:agent-old"]}
+    )
+
+    def change_membership() -> None:
+        group = table.items[(f"TENANT#{tenant}", "GROUP#group-a")]
+        group["agent_keys"] = ["dep-a:agent-old", "dep-a:concurrent-agent"]
+
+    module.DYNAMODB.before_transaction = change_membership
+    response = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-old/replace",
+            "POST",
+            body={
+                "expectedLifecycleRevision": 1,
+                "replacementAgentId": "agent-new",
+                "reason": "Managed workstation refresh requires a distinct identity.",
+            },
+            claims=claims,
+        ),
+    )
+    assert response["statusCode"] == 409
+    assert table.items[(f"TENANT#{tenant}", "AGENT#dep-a:agent-old")]["lifecycle_state"] == (
+        "active"
+    )
+    assert (f"TENANT#{tenant}", "AGENT#dep-a:agent-new") not in table.items
+    assert table.items[(f"TENANT#{tenant}", "GROUP#group-a")]["agent_keys"] == [
+        "dep-a:agent-old",
+        "dep-a:concurrent-agent",
+    ]
+    assert not [key for key in table.items if key[1].startswith("AGENT_LIFECYCLE_AUDIT#")]
+
+
+def test_agent_offboarding_requires_revocation_and_retains_minimal_tombstone(
+    monkeypatch: Any,
+) -> None:
+    """Deletion removes operational data but preserves immutable lifecycle evidence."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-agent-offboard"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "operator-offboard",
+    }
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "project_root": "/synthetic/private-project",
+            "environment": "prod",
+            "region": "eu-west-2",
+            "status": "connected",
+            "last_heartbeat": 100,
+            "expires_at": 200,
+            "emergencyStop": False,
+            "created_at": 50,
+            "telemetry": {"actionsTotal": 99},
+            "managed_configuration_report": {"bundleHash": "sensitive-operational-state"},
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+    premature = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/offboard",
+            "POST",
+            body={
+                "expectedLifecycleRevision": 1,
+                "reason": "Repository ownership ended under the approved leaver process.",
+            },
+            claims=claims,
+        ),
+    )
+    assert premature["statusCode"] == 409
+    revoke = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/revoke",
+            "POST",
+            body={
+                "expectedLifecycleRevision": 1,
+                "reason": "Repository ownership ended under the approved leaver process.",
+            },
+            claims=claims,
+        ),
+    )
+    assert revoke["statusCode"] == 200
+    offboard = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/offboard",
+            "POST",
+            body={
+                "expectedLifecycleRevision": 2,
+                "reason": "Evidence retained after the approved offboarding review.",
+            },
+            claims=claims,
+        ),
+    )
+    assert offboard["statusCode"] == 200
+    tombstone = json.loads(offboard["body"])
+    assert tombstone["lifecycle_state"] == "deleted"
+    assert tombstone["lifecycle_revision"] == 3
+    assert tombstone["project_root"] == ""
+    assert (
+        tombstone["project_root_hash"] == hashlib.sha256(b"/synthetic/private-project").hexdigest()
+    )
+    assert "telemetry" not in tombstone
+    assert "managed_configuration_report" not in tombstone
+    assert tombstone["created_at"] == 50
+    assert tombstone["revoked_by"] == "operator-offboard"
+    assert tombstone["deleted_by"] == "operator-offboard"
+    assert len([key for key in table.items if key[1].startswith("AGENT_LIFECYCLE_AUDIT#")]) == 2
+    verification = json.loads(
+        _invoke(
+            module,
+            _event("/enterprise/agents/dep-a/agent-a/verify", "GET", claims=claims),
+        )["body"]
+    )
+    assert verification["verified"] is False
+    assert verification["checks"]["lifecycle"] == {
+        "passed": False,
+        "detail": "Agent identity is revoked, offboarded, or malformed.",
+    }
 
 
 def test_agent_verification_requires_every_operational_prerequisite(monkeypatch: Any) -> None:

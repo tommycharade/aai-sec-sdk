@@ -68,6 +68,9 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/projects` | Create a tenant-scoped project under an existing organization |
 | `POST /api/enterprise/deployments` | Create a deployment whose ownership is derived from its existing project |
 | `POST /api/enterprise/agents/register` | Register an authenticated agent |
+| `POST /api/enterprise/agents/{deployment}/{agent}/revoke` | Irreversibly revoke one identity using its expected lifecycle revision |
+| `POST /api/enterprise/agents/{deployment}/{agent}/replace` | Atomically revoke a predecessor, create a new offline successor and inherit group assignment |
+| `POST /api/enterprise/agents/{deployment}/{agent}/offboard` | Remove operational data from a revoked identity while retaining a lifecycle tombstone |
 | `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence and optionally publish bounded aggregate SDK telemetry plus managed-host evidence |
 | `POST /api/enterprise/agents/{deployment}/{agent}/disconnect` | Mark offline |
 | `POST /api/agent/{deployment}/{agent}/decisions` | Record one authenticated, content-minimised host decision as operational evidence |
@@ -114,6 +117,40 @@ Agent verification returns `host`, the exact sole `group`, and the consistently
 read `policyId`/`policyVersion` alongside liveness and stop checks. Missing or
 conflicting policy state returns null policy identity and cannot verify. A UI
 must compare this complete tuple with its selected activation scope.
+
+### Agent identity lifecycle
+
+Presence and identity lifecycle are deliberately separate. `connected` and
+`offline` are reversible presence states. `active → revoked → deleted` is a
+server-owned, forward-only authority transition. Legacy records are migrated
+once to explicit lifecycle revision 1 using a conditional update; malformed or
+partially migrated lifecycle state fails closed.
+
+Revoke, replace and offboard requests require an exact
+`expectedLifecycleRevision` and an operator reason of at least 20 characters.
+The hosted adapter uses one DynamoDB transaction to compare-and-swap the agent
+record and create immutable `AGENT_LIFECYCLE_AUDIT` evidence. Replacement also
+creates a distinct successor and updates every inherited group membership in
+that transaction. A changed lifecycle revision, occupied successor ID, changed
+group membership or oversized replacement fan-out rolls back the entire
+operation.
+
+Revocation does not enumerate bearer records. Instead, every agent route and
+bootstrap exchange strongly reads the live agent record and requires
+`lifecycle_state=active`. This immediately denies old sessions and unused
+bootstrap tokens even if their TTL has not expired. Heartbeat writes and
+operator emergency-stop changes compare the same lifecycle revision so a
+concurrent stale write cannot reactivate or overwrite revocation.
+
+Replacement keeps the predecessor in its historical groups and adds the new
+offline identity to the same groups. The predecessor cannot exercise policy
+authority because its lifecycle is revoked; retaining the relationship makes
+assignment evidence reviewable. The successor must receive and consume fresh
+enrollment material. Offboarding is permitted only after revocation and stores
+a tombstone: tenant lineage, host, lifecycle actors/reasons, timestamps,
+replacement relationship and a project-root digest remain, while the local
+path, telemetry and managed-host observations are removed. Agent IDs are never
+reusable.
 
 ### Central action approvals
 
