@@ -5000,12 +5000,33 @@ def handler(event, context):
                 and parts[2] == "policy"
             ):
                 body = _body(event)
-                group = TABLE.get_item(Key=_item_key(tenant, "GROUP", parts[1])).get("Item")
+                group = TABLE.get_item(
+                    Key=_item_key(tenant, "GROUP", parts[1]), ConsistentRead=True
+                ).get("Item")
+                policy_id = _bounded_identifier(body.get("policyId"), "policyId")
                 policy = TABLE.get_item(
-                    Key=_item_key(tenant, "POLICY", body.get("policyId", ""))
+                    Key=_item_key(tenant, "POLICY", policy_id), ConsistentRead=True
                 ).get("Item")
                 if not group or not policy:
                     return _response(404, {"error": "group or policy not found"})
+                # Group policy is an authority edge. Resolve both organization
+                # owners from server records so a browser or delegated operator
+                # cannot bridge two business-unit boundaries by identifier.
+                group_organization = group.get("organizationId") or group.get(
+                    "organization_id"
+                )
+                policy_organization = policy.get("organization_id") or policy.get(
+                    "organizationId"
+                )
+                if (
+                    not group_organization
+                    or not policy_organization
+                    or group_organization != policy_organization
+                ):
+                    return _response(
+                        409,
+                        {"error": "group and policy must belong to the same organization"},
+                    )
                 policy = _ensure_policy_governance(tenant, policy)
                 if int(policy.get("version", 0)) <= 0:
                     raise PolicyConflict("group policies must have an active governed version")
@@ -5027,17 +5048,44 @@ def handler(event, context):
                 and parts[2] == "agents"
             ):
                 body = _body(event)
-                group = TABLE.get_item(Key=_item_key(tenant, "GROUP", parts[1])).get("Item")
-                key = f"{body['deploymentId']}:{body['agentId']}"
+                deployment_id = _bounded_identifier(body.get("deploymentId"), "deploymentId")
+                agent_id = _bounded_identifier(body.get("agentId"), "agentId")
+                group = TABLE.get_item(
+                    Key=_item_key(tenant, "GROUP", parts[1]), ConsistentRead=True
+                ).get("Item")
+                key = f"{deployment_id}:{agent_id}"
                 if not group:
                     return _response(404, {"error": "group not found"})
+                agent = TABLE.get_item(
+                    Key=_item_key(tenant, "AGENT", key), ConsistentRead=True
+                ).get("Item")
+                if not agent:
+                    return _response(404, {"error": "agent not found"})
+                # Membership changes policy authority. The enrolled agent's
+                # immutable server-owned organization must exactly match the
+                # group's owner; missing legacy ownership fails closed.
+                group_organization = group.get("organizationId") or group.get(
+                    "organization_id"
+                )
+                agent_organization = agent.get("organization_id") or agent.get(
+                    "organizationId"
+                )
+                if (
+                    not group_organization
+                    or not agent_organization
+                    or group_organization != agent_organization
+                ):
+                    return _response(
+                        409,
+                        {"error": "group and agent must belong to the same organization"},
+                    )
                 group["agent_keys"] = sorted(set(group.get("agent_keys", []) + [key]))
                 TABLE.put_item(Item=group)
                 _audit(
                     tenant,
                     "agent_added_to_group",
                     actor,
-                    {"group_id": parts[1], "agent_id": body["agentId"]},
+                    {"group_id": parts[1], "agent_id": agent_id},
                 )
                 return _response(
                     200, next(g for g in _fleet(tenant)["groups"] if g["id"] == parts[1])

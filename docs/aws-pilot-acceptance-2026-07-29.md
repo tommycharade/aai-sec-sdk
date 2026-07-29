@@ -13,9 +13,9 @@ Codex has loaded and enforced it.
 | CloudFormation stack | `AaiSecControlPlane` — `UPDATE_COMPLETE` |
 | Hosted UI | `https://d2ir54klde64bd.cloudfront.net` |
 | API | `https://lwg33pxwk8.execute-api.eu-west-2.amazonaws.com` |
-| SDK governance merge | `021ec969ddc879b7c831abbcebd104ad6531e0a9` |
-| UI governance merge | `533b25eac1a968517c6deaab13be0659bf4435c6` |
-| Deployed UI JavaScript | `assets/index-CnP70Wug.js` |
+| SDK deployed merge | `f3ff32b8f41ad7b6b4002476f978d323a5c2243b` |
+| UI deployed merge | `0dd6cfdd4e642e9330476e8e0618cf3bd283c49c` |
+| Deployed UI JavaScript | `assets/index-B0EySmng.js` |
 
 The deployed CloudFront index referenced the exact JavaScript and CSS build
 assets, both assets returned HTTP 200, and the deployment invalidation reached
@@ -23,6 +23,30 @@ assets, both assets returned HTTP 200, and the deployment invalidation reached
 `/enterprise/identity` returned HTTP 401 through API Gateway. This proves the
 public authorizer rejects missing credentials; it does not replace a signed-in
 role and cross-tenant acceptance exercise.
+
+## Delegated administration
+
+The merged delegated-administration Lambda was deployed and exercised through
+AWS IAM invocation with one unique synthetic tenant. The exercise used two
+organizations and server-owned project/deployment records, then asserted:
+
+| Assertion | Result |
+| --- | --- |
+| Platform administrator creates a seven-day organization-scoped fleet grant | HTTP 201 |
+| Delegated operator creates a deployment below the assigned organization | HTTP 201 |
+| The same operator targets a sibling organization | HTTP 403 |
+| Deployment inventory returns only the in-scope deployment | HTTP 200, exact one-item result |
+| Delegated operator attempts to delegate identity authority | HTTP 403 |
+| An attacker supplies a forged informational delegation claim | HTTP 403 |
+| Platform administrator revokes the live grant | HTTP 200, `revoked` |
+| Revoked operator retries without refreshing its token | HTTP 403 |
+| Access certification contains the governed grant | HTTP 200, schema version 2 |
+
+Cleanup then queried the exact tenant partition and audit prefix and observed
+zero remaining DynamoDB records and zero remaining S3 objects. This proves the
+deployed software boundary, including live revocation. It does not substitute
+for the outstanding real Entra/SCIM and independent multi-business-unit
+exercise.
 
 ## Governed policy ledger
 

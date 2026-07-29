@@ -24,7 +24,7 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.
 | P0-03 | Native-control reconciliation | Partial | Deterministic deny-first reconciliation, protected-file measurement on every enrolled heartbeat, exact desired/evidence checks, governed-route denial and conflict/missing/stale UI | Bind complete host-native effective settings (not only protected-file measurement) and prove displayed authority against live Claude/Codex execution |
 | P0-04 | Complete agent discovery | Partial | Enrolled inventory and health | Device/user/repository discovery and unmanaged-instance denominator |
 | P0-05 | Runtime attestation | Partial | Typed Claude/Codex measurement, release-bound clean-checkout manifest generator, exact manifest/provenance validation, nonce-bound heartbeat, baseline drift detection, quarantine/session revocation, fleet/group posture UI and adversarial contracts | Publish and pin the next independently verified release manifests, then complete live modified-package/hook/config/process and hardware-backed identity acceptance |
-| P0-06 | Entra SSO, SCIM and granular RBAC | Partial | Tenant-specific Entra OIDC; tenant-bound SCIM lifecycle and canonical-role mapping; five-minute token reconciliation; expiring organization/project/deployment role delegation with live revocation and scoped reads; recent-MFA, four-eyes, maximum-60-minute break glass; schema-v2 digest-bound access export; adversarial contracts and Identity & Trust UI | Configure the pilot tenant; prove real OIDC and SCIM joiner/mover/leaver; run deployed two-person MFA, delegated multi-business-unit and certification exercises |
+| P0-06 | Entra SSO, SCIM and granular RBAC | Partial | Tenant-specific Entra OIDC; tenant-bound SCIM lifecycle and canonical-role mapping; five-minute token reconciliation; expiring organization/project/deployment role delegation with live revocation and scoped reads; cross-organization group authority-edge denial; recent-MFA, four-eyes, maximum-60-minute break glass; schema-v2 digest-bound access export; adversarial contracts, deployed synthetic scope acceptance and Identity & Trust UI | Configure the pilot tenant; prove real OIDC and SCIM joiner/mover/leaver; run deployed two-person MFA, delegated multi-business-unit and certification exercises |
 | P0-07 | SIEM/SOAR | Stub | Splunk status contract and honest UI state with `deliveryVerified: false` | HEC delivery, authentication, schema, retry, dead letter, monitoring and replay |
 | P0-08 | Durable evidence | Partial | S3 Object Lock, retention and cross-region pilot evidence | Tenant retention, legal hold, complete export and evidence-loss recovery SLO |
 | P0-09 | Production credential broker | Partial | Typed broker contracts and AWS scoped STS reference | Real AWS/Azure/GCP production role inventory and revocation evidence |
@@ -131,6 +131,15 @@ The governed policy lifecycle and hosted UI are merged and deployed. The live
 safe-default policy migrated to an immutable active version-2 ledger entry
 without changing active authority. Public unauthenticated policy and identity
 requests fail with HTTP 401.
+
+The deployed delegated-administration boundary passed a synthetic live
+organization-scope exercise: create, allowed descendant mutation, sibling
+denial, filtered read, delegated identity-governance denial, forged-claim
+denial, immediate revocation, post-revocation denial and schema-v2 access
+certification all produced the expected HTTP status. Exact synthetic DynamoDB
+and S3 audit records were removed after the exercise. This proves deployed
+software enforcement, not real Entra lifecycle or multi-business-unit
+governance acceptance.
 
 The managed Claude Code and Codex registrations on Kratos are not currently
 verified: both heartbeats are expired, runtime manifests are not configured,
