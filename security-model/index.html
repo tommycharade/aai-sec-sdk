@@ -16,7 +16,7 @@
         <link rel="prev" href="../getting-started/">
       
       
-        <link rel="next" href="../runbooks/">
+        <link rel="next" href="../risk-acceptance-cdk-brace-expansion-2026-07-29/">
       
       
         
@@ -533,6 +533,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../risk-acceptance-cdk-brace-expansion-2026-07-29/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporary CDK risk acceptance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2414,6 +2441,15 @@ adapters never invoke a shell and pass only a JSON context/argument payload.
 The Docker adapter adds a real container boundary but deployments handling
 hostile code must still retain image provenance, daemon/host hardening, and
 filesystem, network, identity, resource, and escape-denial evidence.</p>
+<p>Infrastructure synthesis is a build-time trust boundary, not a hosted product
+API. AWS CDK runs only against reviewed repository configuration and is not
+packaged into SDK, UI or Lambda runtime artifacts. Temporary dependency risk in
+that toolchain still requires an owner, fixed expiry, preserved scanner
+visibility and an automated upstream-remediation signal; it cannot be used to
+waive runtime findings or permit untrusted synthesis input. The active
+exception, controls and closure criteria are recorded in <a href="../risk-acceptance-cdk-brace-expansion-2026-07-29/">Temporary risk
+acceptance: AWS CDK bundled
+brace-expansion</a>.</p>
 <h2 id="enterprise-fleet-trust-boundaries">Enterprise fleet trust boundaries</h2>
 <p>The enterprise fleet layer adds organization, project, and deployment scope
 to the existing runtime boundary. The browser is an untrusted operator client;

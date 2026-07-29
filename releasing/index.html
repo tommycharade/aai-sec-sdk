@@ -343,6 +343,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../risk-acceptance-cdk-brace-expansion-2026-07-29/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporary CDK risk acceptance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../runbooks/" class="md-nav__link">
         
   
@@ -1708,7 +1735,9 @@ latest supported release line.</p>
       proves &gt;=80% overall, &gt;=75% per component, 100% critical mutants, and
       zero timeout/suspicious/skipped/not-checked results; retain the artifact.</li>
 <li>[ ] <code>make package-check</code> builds and validates wheel and source distributions.</li>
-<li>[ ] <code>make security-check</code> reports no known dependency vulnerabilities.</li>
+<li>[ ] <code>make security-check</code> reports no unaccepted dependency vulnerabilities;
+      any build-only exception has a named owner, compensating controls,
+      automated upstream monitoring and an unexpired review date.</li>
 <li>[ ] <code>requirements-ci.txt</code> and <code>requirements-docs.txt</code> are reviewed when
       direct toolchain versions change; direct inputs are exact-pinned.</li>
 <li>[ ] <code>requirements-build.txt</code> matches the exact PEP 517 build requirements.</li>
@@ -1739,6 +1768,14 @@ committed because the supported Python matrix selects different transitive
 wheels; artifact SBOMs, checksums, and provenance are the release evidence.
 PyPI publication, if enabled, must use repository trusted publishing and never
 a developer workstation token.</p>
+<p>Infrastructure tooling is a separate build-time boundary. AWS CDK, its
+construct library and <code>constructs</code> are exact-pinned development dependencies
+and are excluded from deployed SDK, UI and Lambda artifacts. A scanner finding
+in bundled CDK tooling may be accepted only through a dated, owner-approved
+risk record that documents exploitability, preserves full-audit visibility,
+monitors upstream daily and causes CI to fail when the exception expires. The
+current record is <a href="../risk-acceptance-cdk-brace-expansion-2026-07-29/">Temporary risk acceptance: AWS CDK bundled
+brace-expansion</a>.</p>
 <p>The build job adds the raw mutation evidence to <code>dist/</code> before creating
 checksums with <code>scripts/write_checksums.py</code>, excluding only the checksum file
 itself. A separate publish job creates the GitHub Release from that exact
