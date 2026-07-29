@@ -1014,6 +1014,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bulk-group-assignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bulk group assignment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#hosted-ui-and-responsive-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1687,6 +1698,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bulk-group-assignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bulk group assignment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#hosted-ui-and-responsive-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1793,23 +1815,23 @@ Codex has loaded and enforced it.</p>
 </tr>
 <tr>
 <td>SDK deployed merge</td>
-<td><code>2db821ca13c9377bd5955279b86f7a4b8bd68c46</code></td>
+<td><code>ef1b19260902f14c37c77e75e22cadf03cb35789</code></td>
 </tr>
 <tr>
 <td>UI deployed merge</td>
-<td><code>570f3bda04429824a609b051875cf521bfabe1e2</code></td>
+<td><code>6e45fbe2b6c585b753da51de54de48ad802cd959</code></td>
 </tr>
 <tr>
 <td>Deployed UI JavaScript</td>
-<td><code>assets/index-Psmot4yk.js</code></td>
+<td><code>assets/index-s1dzxwjs.js</code></td>
 </tr>
 <tr>
 <td>Deployed UI CSS</td>
-<td><code>assets/index-C43Nx9cW.css</code></td>
+<td><code>assets/index-GjcLWlT8.css</code></td>
 </tr>
 <tr>
 <td>CloudFront invalidation</td>
-<td><code>ICW1FFK3FXI6UTE5TVK89D8W64</code></td>
+<td><code>IC6IXRE64DTLLMLZ6Z88UCD1C0</code> — <code>Completed</code></td>
 </tr>
 </tbody>
 </table>
@@ -1973,6 +1995,53 @@ transactional contract suite separately proves that the review and durable
 lifecycle audit record commit together, stale/missing ownership fails
 verification, malformed contacts fail closed, and an Entra-enabled tenant
 accepts only an active SCIM-provisioned owner UUID.</p>
+<h2 id="bulk-group-assignment">Bulk group assignment</h2>
+<p>The deployed control-plane harness exercised the revision-safe bulk assignment
+route against the merged Lambda, DynamoDB transaction boundary and immutable
+audit store:</p>
+<table>
+<thead>
+<tr>
+<th>Assertion</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Preview one eligible and one missing agent</td>
+<td>No writes; one <code>ready</code>, one <code>rejected</code></td>
+</tr>
+<tr>
+<td>Apply the same reviewed request</td>
+<td>HTTP 207; one <code>applied</code>, one <code>rejected</code></td>
+</tr>
+<tr>
+<td>Replay the exact request ID and semantic payload</td>
+<td>Stored result returned with <code>replayed: true</code></td>
+</tr>
+<tr>
+<td>Reuse the request ID with a different payload</td>
+<td>HTTP 409</td>
+</tr>
+<tr>
+<td>Apply with the stale membership revision</td>
+<td>HTTP 409; no overwrite</td>
+</tr>
+<tr>
+<td>Inspect the primary operation record</td>
+<td>Actor, request hash and partial outcome retained</td>
+</tr>
+<tr>
+<td>Inspect the primary membership audit record</td>
+<td>Immutable transactional evidence present</td>
+</tr>
+</tbody>
+</table>
+<p>The route re-evaluated the live group, every selected agent, tenant ownership,
+agent lifecycle and sole-group membership at apply time. The group revision
+advanced only for the successful member, while the missing agent remained a
+content-minimised rejection. Synthetic operational records were removed after
+the run; immutable audit evidence remains by design.</p>
 <h2 id="hosted-ui-and-responsive-workflow">Hosted UI and responsive workflow</h2>
 <p>The deployed CloudFront landing page loaded the merged JavaScript and CSS
 without console-visible load failure. This browser session did not contain an
