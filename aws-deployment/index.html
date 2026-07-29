@@ -694,6 +694,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../runtime-attestation-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime attestation design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -1010,6 +1037,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="First sign-in">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#runtime-attestation-manifests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime attestation manifests
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1452,6 +1496,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="First sign-in">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#runtime-attestation-manifests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime attestation manifests
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1749,6 +1810,31 @@ requires an existing deployment and derives organization, project,
 environment, and region from that server-owned record; browser-supplied values
 cannot change ownership. Registration and bootstrap exchange leave presence
 offline. Only an authenticated runtime heartbeat marks the agent connected.</p>
+<h3 id="runtime-attestation-manifests">Runtime attestation manifests</h3>
+<p>The control-plane Lambda packages
+<code>infra/aws-control-plane/lambda/runtime-manifests.json</code> and CDK pins its
+SHA-256 digest into the function environment. CDK rejects malformed, duplicate
+or unsupported manifest entries during synthesis, and Lambda revalidates the
+bundle and digest at startup. The checked-in bundle is deliberately empty, so
+a fresh development deployment reports runtime attestation as
+<code>not_configured</code>; this is not production-ready posture.</p>
+<p>Before production enrollment, independently verify the intended release and
+populate one exact manifest for each approved <code>claude-code</code> or <code>codex-cli</code> SDK
+version. Each object must use the schema documented in
+<a href="../runtime-attestation-design/">Runtime attestation design</a> and contain the
+release SDK revision plus SHA-256 identifiers for source origin, installed
+package, MCP gateway and native hook. Generate and review these values from a
+clean, provenance-verified checkout and installation; do not copy values from
+an enrolled endpoint. Commit the reviewed bundle, run <code>make check</code>, synthesize
+CDK and deploy the changed Lambda before onboarding that release.</p>
+<p>After configuration, each heartbeat obtains a 60-second one-time challenge.
+Evidence is accepted only inside a 90-second observation window and compliant
+posture expires after five minutes. A mismatch quarantines the agent, removes
+its live session and denies effective-policy, decision and approval calls. The
+operator verification endpoint exposes status, freshness, SDK version,
+revision and bounded reason codes without returning local paths or file
+content. Recovery requires restoring approved artifacts and re-enrolling; do
+not clear the retained audit history.</p>
 <p>The stack selects Cognito Managed Login version 2 and declares the AAI Security
 branding style in CloudFormation, including the dark/teal form treatment and
 logo asset. This keeps the authentication handoff visually consistent with the

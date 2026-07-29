@@ -873,6 +873,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../runtime-attestation-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime attestation design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -1857,6 +1884,23 @@ audit durability, and isolation remain independent requirements. The client
 uses HTTPS outside explicitly permitted localhost development URLs and bounds
 responses; deployments must still provide TLS termination, token rotation,
 network policy, and monitoring.</p>
+<p>When a deployment-owned approved runtime manifest is configured, every
+heartbeat consumes a one-time control-plane challenge and carries fresh,
+content-minimised hashes for the SDK package, gateway, native hook, project
+configuration, executable, launch context, source revision and project scope.
+Invariant hashes must match the approved manifest; project-specific hashes are
+bound on first compliant enrollment. Missing, stale, replayed or changed
+evidence quarantines the agent, revokes its session and blocks policy,
+decision, and approval routes. Symbolic links, oversized files, unsafe Git
+metadata and measurement races fail closed on the host.</p>
+<p>An empty approved-manifest bundle is an explicit <code>not_configured</code> state, not a
+successful attestation. It preserves development compatibility but fails the
+operator verification check and must not be accepted for production rollout.
+Software measurement cannot defeat an administrator/root attacker able to
+replace the attestor or process memory. Hardware-backed endpoint/workload
+identity and endpoint management remain outside this SDK boundary and are
+required for a stronger device-integrity claim. See
+<a href="../runtime-attestation-design/">Runtime attestation design</a>.</p>
 <p>Host decision reports are a separate evidence boundary. A valid agent session
 authenticates which enrolled process sent a report, but does not make the report
 authoritative. The control plane accepts only a fixed decision vocabulary and a
