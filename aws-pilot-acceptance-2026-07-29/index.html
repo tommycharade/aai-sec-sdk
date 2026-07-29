@@ -1003,6 +1003,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#accountable-agent-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accountable agent ownership
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hosted-ui-and-responsive-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hosted UI and responsive workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#governed-policy-ledger" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1654,6 +1676,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#accountable-agent-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accountable agent ownership
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hosted-ui-and-responsive-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hosted UI and responsive workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#governed-policy-ledger" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1749,15 +1793,23 @@ Codex has loaded and enforced it.</p>
 </tr>
 <tr>
 <td>SDK deployed merge</td>
-<td><code>6bead88002e436071b5a6dd3d66c13c38a212f92</code></td>
+<td><code>2db821ca13c9377bd5955279b86f7a4b8bd68c46</code></td>
 </tr>
 <tr>
 <td>UI deployed merge</td>
-<td><code>9311a52f53914e70f2bb82f905f791701658d2c1</code></td>
+<td><code>570f3bda04429824a609b051875cf521bfabe1e2</code></td>
 </tr>
 <tr>
 <td>Deployed UI JavaScript</td>
-<td><code>assets/index-BgcTctCD.js</code></td>
+<td><code>assets/index-Psmot4yk.js</code></td>
+</tr>
+<tr>
+<td>Deployed UI CSS</td>
+<td><code>assets/index-C43Nx9cW.css</code></td>
+</tr>
+<tr>
+<td>CloudFront invalidation</td>
+<td><code>ICW1FFK3FXI6UTE5TVK89D8W64</code></td>
 </tr>
 </tbody>
 </table>
@@ -1875,6 +1927,67 @@ multi-process idempotency, WORM audit retention and SNS/SQS alert delivery.
 Exact synthetic agent, session, bootstrap, membership, deployment, template,
 configuration, approval and idempotency records were removed afterward;
 content-minimised immutable lifecycle audit records remain as intended.</p>
+<h2 id="accountable-agent-ownership">Accountable agent ownership</h2>
+<p>The same deployed harness exercised accountable ownership as an authority
+condition rather than treating it as presentation metadata:</p>
+<table>
+<thead>
+<tr>
+<th>Assertion</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Register with forged browser scope</td>
+<td>Browser-supplied team and environment ignored</td>
+</tr>
+<tr>
+<td>Register with complete accountable owner</td>
+<td>HTTP 201; status <code>current</code>, revision <code>1</code></td>
+</tr>
+<tr>
+<td>Derive team and environment</td>
+<td><code>automated-acceptance</code>, <code>synthetic</code> from the deployment</td>
+</tr>
+<tr>
+<td>Complete a new ownership review</td>
+<td>HTTP 200; revision <code>2</code>, 90-day review window</td>
+</tr>
+<tr>
+<td>Retry with stale expected revision <code>1</code></td>
+<td>HTTP 409; no overwrite</td>
+</tr>
+<tr>
+<td>Verify the connected agent after review</td>
+<td>Ownership check passed</td>
+</tr>
+<tr>
+<td>Replace the identity</td>
+<td>Successor inherited reviewed owner, team and revision <code>2</code></td>
+</tr>
+</tbody>
+</table>
+<p>The test used only synthetic names and <code>example.invalid</code> contacts. The
+transactional contract suite separately proves that the review and durable
+lifecycle audit record commit together, stale/missing ownership fails
+verification, malformed contacts fail closed, and an Entra-enabled tenant
+accepts only an active SCIM-provisioned owner UUID.</p>
+<h2 id="hosted-ui-and-responsive-workflow">Hosted UI and responsive workflow</h2>
+<p>The deployed CloudFront landing page loaded the merged JavaScript and CSS
+without console-visible load failure. This browser session did not contain an
+authenticated Cognito console session, so this record does <strong>not</strong> claim a
+signed-in production browser acceptance pass.</p>
+<p>The exact merged UI was also exercised in its explicitly labelled local
+simulation mode. The operator journey proved the owner column, accountable
+ownership inspector, 90-day review dialog, field help, disabled-until-valid
+review action, server-derived team/environment presentation, and required
+ownership fields in Claude Code enrollment. At a <code>390 x 844</code> viewport the
+review dialog remained inside <code>x=10..380</code>; browser QA found and fixed a
+non-wrapping inspector action row, then observed document width and viewport
+width both equal to <code>390</code> with no horizontal overflow. This validates the
+rendered interaction and responsive containment, but it does not substitute
+for the pending authenticated Cognito role and cross-tenant exercise.</p>
 <p>Runtime attestation was the sole failed positive-verification check and the
 deployed API explicitly returned <code>not_configured</code>. The harness continued only
 under its named pilot flag and printed that this did not prove release
