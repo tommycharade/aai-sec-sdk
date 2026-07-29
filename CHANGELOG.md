@@ -1,5 +1,13 @@
 # Changelog
 
+- Added canonical digest-bound managed endpoint packages and an optional
+  privileged POSIX installer for Claude Code and Codex configuration. Packages
+  bind exact host files to reviewed administrator-owned executable digests;
+  unknown fields, duplicate keys, tampering, unsafe paths and cross-target use
+  fail closed. The installer supports no-write preflight, validates all state
+  before writing, installs restrictive regular files and rolls back every
+  replacement after a partial failure. Windows remains blocked pending an
+  ACL-aware adapter, and installation is not presented as host-load evidence.
 - Added a bounded live Microsoft Entra SCIM acceptance command. It discovers
   deployment posture from CloudFormation, resolves the dedicated bearer only
   from Secrets Manager, and proves invalid-bearer denial plus synthetic

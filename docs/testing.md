@@ -50,6 +50,16 @@ managed file. Retain separate device evidence from the privileged-file
 measurement and live host action probes in
 [Managed host configuration](managed-host-configuration.md).
 
+`tests/test_managed_deployment.py` validates canonical package parsing,
+out-of-band digest binding, exact host file sets, artifact/executable digests,
+duplicate-key denial, cross-target denial and path confinement.
+`tests/test_managed_endpoint_installer.py` runs the privileged transaction
+against an isolated synthetic endpoint image. It proves no-write preflight,
+administrator checks, exact restrictive files, hook tamper denial, symlink
+denial and reverse-order restoration after an injected second-file failure.
+Real root-owned host loading and MDM acceptance remain separate evidence; see
+[Managed endpoint deployment](managed-endpoint-deployment-design.md).
+
 `scripts/test_aws_entra_scim.py` is the live Microsoft Entra provisioning
 acceptance command. It discovers Entra and SCIM status from the selected
 CloudFormation stack, resolves the dedicated bearer directly from Secrets

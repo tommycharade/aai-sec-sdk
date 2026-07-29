@@ -52,6 +52,7 @@ nav:
   - Enterprise integration design: enterprise-integration-design.md
   - Runtime attestation design: runtime-attestation-design.md
   - Managed host configuration: managed-host-configuration.md
+  - Managed endpoint deployment design: managed-endpoint-deployment-design.md
   - Enterprise user journeys: enterprise-user-journeys.md
   - Enterprise rollout P0 and P1 requirements: enterprise-rollout-p0-p1-requirements.md
   - Enterprise P0 and P1 implementation status: p0-p1-implementation-status.md
