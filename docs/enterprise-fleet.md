@@ -74,7 +74,14 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/agent/{deployment}/{agent}/approvals/request` | Submit a bounded approval request using the authenticated agent session |
 | `POST /api/agent/{deployment}/{agent}/approvals/consume` | Atomically consume one approved exact-action grant |
 | `POST /api/enterprise/templates` | Create a configuration template |
-| `POST /api/enterprise/policies` | Create a configuration policy |
+| `POST /api/enterprise/policies` | Create an inactive policy and version-one draft |
+| `POST /api/enterprise/policies/{policy}/versions` | Create the next draft without changing active authority |
+| `GET /api/enterprise/policies/{policy}/versions` | List the immutable policy version ledger and review metadata |
+| `GET /api/enterprise/policies/{policy}/versions/{version}` | Read one exact immutable policy version |
+| `POST /api/enterprise/policies/{policy}/versions/{version}/submit` | Freeze a draft and submit it for independent review |
+| `POST /api/enterprise/policies/{policy}/versions/{version}/decision` | Approve or reject with a rationale; authors cannot self-approve |
+| `POST /api/enterprise/policies/{policy}/versions/{version}/stage` | Stage an independently approved version against its active base |
+| `POST /api/enterprise/policies/{policy}/versions/{version}/activate` | Atomically activate using `expectedActiveVersion` |
 | `POST /api/enterprise/groups` | Create a group and bind it to a policy |
 | `POST /api/enterprise/groups/{group}/policy` | Change a group's immutable policy assignment and audit the change |
 | `POST /api/enterprise/groups/{group}/agents` | Enroll an existing agent in a group |

@@ -338,8 +338,14 @@ authorization.
   content remains inactive until a distinct authenticated subject approves it,
   lifecycle transitions are ordered and audited, activation uses active-version
   compare-and-swap semantics, and groups reject policies without an active
-  governed version. The AWS adapter and management UI remain separate rollout
-  work and are not claimed by this foundation.
+  governed version.
+
+- Added AWS parity for governed policy versions. DynamoDB now stores immutable
+  version records, separates `policy_write` from `policy_approval`, denies
+  self-approval, rejects inactive group assignments, migrates existing active
+  policies without interrupting coverage, and atomically promotes a staged
+  version with `TransactWriteItems` and active-version compare-and-swap. The
+  management UI remains separate rollout work.
 
 - Fixed the release gates for core-only environments: optional AWS/PostgreSQL
   imports now type-check without forcing provider dependencies, mutation tests

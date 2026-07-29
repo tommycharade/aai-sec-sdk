@@ -1258,6 +1258,7 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
     assert identity_payload["provider"] == "development_static"
     assert identity_payload["status"] == "development_only"
     assert identity_payload["activeRoles"] == ["platform-admin"]
+    assert identity_payload["subject"] == "operator-1"
     assert identity_payload["scim"]["lifecycleEnforced"] is False
     integration_status, integration_payload = call_api(app, "GET", "/api/enterprise/integrations")
     assert integration_status.startswith("200")

@@ -119,6 +119,7 @@ pytest_add_cli_args = [
 also_copy = [
   "examples/",
   "infra/aws-control-plane/lambda/",
+  "infra/aws-control-plane/lib/",
   "scripts/",
   "AGENTS.md",
   "CONTRIBUTING.md",

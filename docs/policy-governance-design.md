@@ -2,9 +2,10 @@
 
 This design defines the governed policy lifecycle required by P1-POL-01,
 P1-POL-02 and the foundation of P1-POL-04. The provider-neutral reference
-control plane implements this lifecycle first; the AWS adapter and management
-UI must satisfy the same contract before hosted rollout. Editing policy content
-must never silently replace the authority applied to enrolled agents.
+control plane and AWS adapter implement this lifecycle; the management UI must
+expose the same honest review and promotion contract before hosted rollout.
+Editing policy content must never silently replace the authority applied to
+enrolled agents.
 
 ## Security boundary and threat model
 
@@ -99,8 +100,9 @@ policies, immutable submitted/active content, self-approval denial, exact role
 checks, cross-tenant denial, replay and out-of-order transition denial,
 stale-base conflicts, atomic activation, group rejection for inactive policy,
 active policy resolution during review, complete audit attribution and honest
-UI state. The AWS adapter must use conditional writes or transactions so
-concurrent activations cannot both succeed.
+UI state. The AWS adapter uses conditional writes for lifecycle steps and one
+DynamoDB transaction for activation, so a concurrent activation cannot
+partially update the candidate, retired predecessor, or active policy snapshot.
 
 Historical simulation, signed policy bundles, scheduling, inheritance,
 time-limited exceptions and measured endpoint convergence remain separate P1

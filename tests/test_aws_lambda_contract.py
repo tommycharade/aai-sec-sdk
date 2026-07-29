@@ -43,13 +43,17 @@ class FakeTable:
 
     def put_item(self, *, Item: dict[str, Any], **kwargs: Any) -> None:
         key = (Item["pk"], Item.get("sk", ""))
-        if kwargs.get("ConditionExpression"):
+        condition = kwargs.get("ConditionExpression")
+        if condition:
             values = kwargs.get("ExpressionAttributeValues", {})
             if ":expected_revision" in values:
                 if self.items.get(key, {}).get("revision") != values[":expected_revision"]:
                     raise ConditionalFailure()
-            elif key in self.items:
+            elif condition == "attribute_not_exists(pk)" and key in self.items:
                 raise ConditionalFailure()
+            elif condition == "#state = :expected":
+                if self.items.get(key, {}).get("state") != values.get(":expected"):
+                    raise ConditionalFailure()
         self.items[key] = dict(Item)
 
     def delete_item(self, *, Key: dict[str, str], **_: Any) -> None:
@@ -156,6 +160,67 @@ class FakeTable:
         return {"Items": [dict(item) for item in values]}
 
 
+def _decode_ddb_value(value: dict[str, Any]) -> Any:
+    """Decode the low-level DynamoDB shape used by transaction contract tests."""
+    if "S" in value:
+        return value["S"]
+    if "N" in value:
+        number = Decimal(value["N"])
+        return int(number) if number == number.to_integral_value() else number
+    if "BOOL" in value:
+        return value["BOOL"]
+    if "NULL" in value:
+        return None
+    if "L" in value:
+        return [_decode_ddb_value(item) for item in value["L"]]
+    if "M" in value:
+        return {key: _decode_ddb_value(item) for key, item in value["M"].items()}
+    raise AssertionError(f"unsupported DynamoDB value: {value}")
+
+
+class FakeDynamoClient:
+    """Atomic DynamoDB transaction double with exact policy preconditions."""
+
+    def __init__(self, table: FakeTable) -> None:
+        self.table = table
+        self.before_transaction: Any = None
+
+    def transact_write_items(self, *, TransactItems: list[dict[str, Any]]) -> None:
+        if callable(self.before_transaction):
+            callback, self.before_transaction = self.before_transaction, None
+            callback()
+        snapshot = {key: dict(item) for key, item in self.table.items.items()}
+        try:
+            for operation in TransactItems:
+                put = operation["Put"]
+                record = {key: _decode_ddb_value(value) for key, value in put["Item"].items()}
+                key = (record["pk"], record.get("sk", ""))
+                existing = self.table.items.get(key)
+                condition = put["ConditionExpression"]
+                names = put.get("ExpressionAttributeNames", {})
+                values = {
+                    key: _decode_ddb_value(value)
+                    for key, value in put.get("ExpressionAttributeValues", {}).items()
+                }
+                if condition == "attribute_not_exists(pk)":
+                    permitted = existing is None
+                else:
+                    permitted = existing is not None
+                    current = existing or {}
+                    for clause in condition.split(" AND "):
+                        field_name, expected_name = clause.split(" = ")
+                        field = names.get(field_name, field_name)
+                        permitted = permitted and current.get(field) == values[expected_name]
+                if not permitted:
+                    raise ConditionalFailure()
+                self.table.items[key] = record
+        except Exception as error:
+            self.table.items = snapshot
+            if isinstance(error, ConditionalFailure):
+                error.response = {"Error": {"Code": "TransactionCanceledException"}}
+            raise
+
+
 class FakeS3:
     """Capture audit writes without retaining sensitive test material."""
 
@@ -182,7 +247,11 @@ def _load_handler(monkeypatch: Any) -> Any:
     boto3.resource = (  # type: ignore[attr-defined]
         lambda *_args, **_kwargs: types.SimpleNamespace(Table=lambda _name: table)
     )
-    boto3.client = lambda *_args, **_kwargs: FakeS3()  # type: ignore[attr-defined]
+    boto3.client = (  # type: ignore[attr-defined]
+        lambda service, *_args, **_kwargs: (
+            FakeDynamoClient(table) if service == "dynamodb" else FakeS3()
+        )
+    )
     dynamodb = types.ModuleType("boto3.dynamodb")
     conditions = types.ModuleType("boto3.dynamodb.conditions")
     conditions.Key = lambda name: types.SimpleNamespace(  # type: ignore[attr-defined]
@@ -440,6 +509,7 @@ def test_identity_and_splunk_stub_report_truthful_enterprise_posture(monkeypatch
     assert payload["tenantHint"] == "11111111…"
     assert payload["tenantBinding"] == "server_owned"
     assert payload["activeRoles"] == ["auditor", "incident-responder"]
+    assert payload["subject"] == "operator-a"
     assert "ENTRA_CLIENT_SECRET" not in json.dumps(payload)
 
     integrations = _invoke(module, _event("/enterprise/integrations", "GET", claims=claims))
@@ -617,6 +687,329 @@ def test_json_boundary_preserves_integral_policy_versions(monkeypatch: Any) -> N
     assert module._managed_policy_configuration("tenant-a", {"version": Decimal("2")}) == {
         "version": 2
     }
+
+
+def test_aws_policy_governance_requires_independent_review_and_atomic_activation(
+    monkeypatch: Any,
+) -> None:
+    """Hosted policy writes remain inactive until an independently approved promotion."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-policy-governance"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(tenant, "ORG", "org-a") | {"id": "org-a", "name": "Alpha"})
+    author_claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-author"],
+        "sub": "author-1",
+    }
+    reviewer_claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-approver"],
+        "sub": "reviewer-2",
+    }
+    admin_author_claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "author-1",
+    }
+    admin_claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-3",
+    }
+
+    created = _invoke(
+        module,
+        _event(
+            "/enterprise/policies",
+            "POST",
+            body={
+                "policyId": "policy-governed",
+                "name": "Governed",
+                "configuration": {"tools": {"allowed": ["read_repository"]}},
+            },
+            claims=author_claims,
+        ),
+    )
+    assert created["statusCode"] == 201
+    created_body = json.loads(created["body"])
+    assert created_body["version"] == 0
+    assert created_body["activeVersion"] is None
+    assert created_body["pendingVersion"] == 1
+    assert created_body["configuration"] == {}
+
+    inactive_group = _invoke(
+        module,
+        _event(
+            "/enterprise/groups",
+            "POST",
+            body={
+                "groupId": "group-too-early",
+                "name": "Too early",
+                "policyId": "policy-governed",
+            },
+            claims=admin_claims,
+        ),
+    )
+    assert inactive_group["statusCode"] == 409
+
+    submitted = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-governed/versions/1/submit",
+            "POST",
+            claims=author_claims,
+        ),
+    )
+    assert submitted["statusCode"] == 200
+    denied_author_role = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-governed/versions/1/decision",
+            "POST",
+            body={"decision": "approved", "reason": "Self approval"},
+            claims=author_claims,
+        ),
+    )
+    assert denied_author_role["statusCode"] == 403
+    assert json.loads(denied_author_role["body"])["requiredCapability"] == "policy_approval"
+    denied_self_approval = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-governed/versions/1/decision",
+            "POST",
+            body={"decision": "approved", "reason": "Admin self approval"},
+            claims=admin_author_claims,
+        ),
+    )
+    assert denied_self_approval["statusCode"] == 403
+    approved = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-governed/versions/1/decision",
+            "POST",
+            body={"decision": "approved", "reason": "Independent review"},
+            claims=reviewer_claims,
+        ),
+    )
+    assert approved["statusCode"] == 200
+    assert json.loads(approved["body"])["approvedBy"] == "reviewer-2"
+    staged = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-governed/versions/1/stage",
+            "POST",
+            claims=reviewer_claims,
+        ),
+    )
+    assert staged["statusCode"] == 200
+    activated = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-governed/versions/1/activate",
+            "POST",
+            body={"expectedActiveVersion": 0},
+            claims=reviewer_claims,
+        ),
+    )
+    assert activated["statusCode"] == 200
+    assert json.loads(activated["body"])["activeVersion"] == 1
+
+    group = _invoke(
+        module,
+        _event(
+            "/enterprise/groups",
+            "POST",
+            body={
+                "groupId": "group-active",
+                "name": "Active",
+                "policyId": "policy-governed",
+            },
+            claims=admin_claims,
+        ),
+    )
+    assert group["statusCode"] == 201
+
+    draft_two = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-governed/versions",
+            "POST",
+            body={
+                "name": "Governed v2",
+                "configuration": {"tools": {"allowed": ["read_repository", "run_tests"]}},
+            },
+            claims=author_claims,
+        ),
+    )
+    assert draft_two["statusCode"] == 200
+    assert json.loads(draft_two["body"])["state"] == "draft"
+    policy_record = table.items[(f"TENANT#{tenant}", "POLICY#policy-governed")]
+    assert policy_record["version"] == 1
+    assert policy_record["configuration"] == {"tools": {"allowed": ["read_repository"]}}
+    duplicate_pending = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-governed/versions",
+            "POST",
+            body={"name": "Bypass", "configuration": {}},
+            claims=author_claims,
+        ),
+    )
+    assert duplicate_pending["statusCode"] == 409
+    versions = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-governed/versions",
+            "GET",
+            claims=reviewer_claims,
+        ),
+    )
+    version_items = json.loads(versions["body"])["items"]
+    assert [item["version"] for item in version_items] == [2, 1]
+    assert version_items[0]["changeSummary"]["changedSections"] == ["tools"]
+
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/enterprise/policies/policy-governed/versions/2/submit",
+                "POST",
+                claims=author_claims,
+            ),
+        )["statusCode"]
+        == 200
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/enterprise/policies/policy-governed/versions/2/decision",
+                "POST",
+                body={"decision": "approved", "reason": "Independent v2 review"},
+                claims=reviewer_claims,
+            ),
+        )["statusCode"]
+        == 200
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/enterprise/policies/policy-governed/versions/2/stage",
+                "POST",
+                claims=reviewer_claims,
+            ),
+        )["statusCode"]
+        == 200
+    )
+    policy_key = (f"TENANT#{tenant}", "POLICY#policy-governed")
+
+    def concurrent_activation() -> None:
+        table.items[policy_key]["version"] = 9
+
+    module.DYNAMODB.before_transaction = concurrent_activation
+    conflicted_activation = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-governed/versions/2/activate",
+            "POST",
+            body={"expectedActiveVersion": 1},
+            claims=reviewer_claims,
+        ),
+    )
+    assert conflicted_activation["statusCode"] == 409
+    assert table.items[policy_key]["version"] == 9
+    assert (
+        table.items[
+            (
+                f"TENANT#{tenant}",
+                "POLICY_VERSION#policy-governed:00000000000000000002",
+            )
+        ]["state"]
+        == "staged"
+    )
+    assert (
+        table.items[
+            (
+                f"TENANT#{tenant}",
+                "POLICY_VERSION#policy-governed:00000000000000000001",
+            )
+        ]["state"]
+        == "active"
+    )
+
+    secret_policy = _invoke(
+        module,
+        _event(
+            "/enterprise/policies",
+            "POST",
+            body={
+                "policyId": "policy-secret",
+                "name": "Secret",
+                "configuration": {"access_token": "synthetic-do-not-store"},
+            },
+            claims=author_claims,
+        ),
+    )
+    assert secret_policy["statusCode"] == 400
+    assert "must not contain secrets" in json.loads(secret_policy["body"])["error"]
+
+
+def test_aws_policy_governance_migrates_existing_active_authority(monkeypatch: Any) -> None:
+    """Legacy active policies gain an immutable ledger without interrupting coverage."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-policy-migration"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(tenant, "ORG", "org-a") | {"id": "org-a", "name": "Alpha"})
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-legacy")
+        | {
+            "id": "policy-legacy",
+            "organization_id": "org-a",
+            "name": "Legacy",
+            "configuration": {"runtime": {"maxActions": 12, "maxTokens": 5000}},
+            "version": 3,
+            "createdAt": 100,
+            "author": "legacy-author",
+        }
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["auditor"],
+        "sub": "auditor-1",
+    }
+
+    response = _invoke(
+        module,
+        _event("/enterprise/policies", "GET", claims=claims),
+    )
+    assert response["statusCode"] == 200
+    policy = json.loads(response["body"])["items"][0]
+    assert policy["activeVersion"] == 3
+    assert policy["governanceState"] == "active"
+    version = table.items[
+        (
+            f"TENANT#{tenant}",
+            "POLICY_VERSION#policy-legacy:00000000000000000003",
+        )
+    ]
+    assert version["state"] == "active"
+    assert version["author"] == "legacy-author"
+    assert (
+        version["content_hash"]
+        == hashlib.sha256(
+            json.dumps(policy["configuration"], sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+
+
+def test_aws_policy_governance_deployment_grants_transaction_authority() -> None:
+    """The Lambda role explicitly permits its same-table atomic activation write."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    assert 'table.grant(handler, "dynamodb:TransactWriteItems")' in stack
 
 
 def test_trial_foundation_creation_is_tenant_scoped_and_agent_identity_is_derived(
@@ -2798,12 +3191,21 @@ def test_trial_provisioner_builds_restrictive_credential_free_records(monkeypatc
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     records = module.build_trial_records("subject-a", "trial@example.test", now=100, trial_days=14)
-    assert len(records) == 5
+    assert len(records) == 6
     assert records[0]["pk"] == "USER#subject-a"
     tenant = records[0]["tenant_id"]
     assert tenant.startswith("trial-") and len(tenant) == 38
     assert records[1]["pk"] == f"TENANT#{tenant}"
     policy = next(item for item in records if item["sk"] == "POLICY#policy-safe-default")
+    policy_version = next(item for item in records if item["sk"].startswith("POLICY_VERSION#"))
+    assert policy["activeVersion"] == 1
+    assert policy_version["state"] == "active"
+    assert (
+        policy_version["content_hash"]
+        == hashlib.sha256(
+            json.dumps(policy["configuration"], sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
     assert policy["configuration"]["policy"]["denyByDefault"] is True
     assert policy["configuration"]["runtime"]["maxActions"] == 25
     assert policy["configuration"]["audit"]["captureToolContent"] is False
