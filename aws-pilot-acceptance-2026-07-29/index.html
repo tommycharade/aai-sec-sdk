@@ -1079,6 +1079,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#trusted-dynamic-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trusted dynamic groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#hosted-ui-and-responsive-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1763,6 +1774,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#trusted-dynamic-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trusted dynamic groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#hosted-ui-and-responsive-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1869,23 +1891,23 @@ Codex has loaded and enforced it.</p>
 </tr>
 <tr>
 <td>SDK deployed merge</td>
-<td><code>ef1b19260902f14c37c77e75e22cadf03cb35789</code></td>
+<td><code>37954425a3c5a989107971b094551e0a10fb5342</code></td>
 </tr>
 <tr>
 <td>UI deployed merge</td>
-<td><code>6e45fbe2b6c585b753da51de54de48ad802cd959</code></td>
+<td><code>e0bd94a001c72dedcfcb364ceea5115b6ee2baf7</code></td>
 </tr>
 <tr>
 <td>Deployed UI JavaScript</td>
-<td><code>assets/index-s1dzxwjs.js</code></td>
+<td><code>assets/index-DxR5xx_M.js</code></td>
 </tr>
 <tr>
 <td>Deployed UI CSS</td>
-<td><code>assets/index-GjcLWlT8.css</code></td>
+<td><code>assets/index-D_yH0ew4.css</code></td>
 </tr>
 <tr>
 <td>CloudFront invalidation</td>
-<td><code>IC6IXRE64DTLLMLZ6Z88UCD1C0</code> — <code>Completed</code></td>
+<td><code>IDCBM8228C6CAQSWT1325U4QK6</code> — <code>Completed</code></td>
 </tr>
 </tbody>
 </table>
@@ -2096,6 +2118,52 @@ agent lifecycle and sole-group membership at apply time. The group revision
 advanced only for the successful member, while the missing agent remained a
 content-minimised rejection. Synthetic operational records were removed after
 the run; immutable audit evidence remains by design.</p>
+<h2 id="trusted-dynamic-groups">Trusted dynamic groups</h2>
+<p>The merged Lambda was deployed after a CDK diff showed only the two expected
+Lambda code-package updates. CloudFormation reached <code>UPDATE_COMPLETE</code>. A live
+IAM-authorized acceptance exercise then created an isolated synthetic
+deployment, agent and policy group under the pilot tenant:</p>
+<table>
+<thead>
+<tr>
+<th>Assertion</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Preview exact deployment selector</td>
+<td>HTTP 200; one match and one addition</td>
+</tr>
+<tr>
+<td>Preview persistence</td>
+<td>Group remained manual at revision <code>1</code> with no members</td>
+</tr>
+<tr>
+<td>Apply the reviewed request</td>
+<td>HTTP 200; dynamic group at revision <code>2</code></td>
+</tr>
+<tr>
+<td>Materialized membership</td>
+<td>Exact synthetic deployment/agent key only</td>
+</tr>
+<tr>
+<td>Manually remove the dynamic member</td>
+<td>HTTP 409</td>
+</tr>
+<tr>
+<td>Inspect durable operation evidence</td>
+<td>Stored rule hash matched the response</td>
+</tr>
+</tbody>
+</table>
+<p>The observed canonical SHA-256 rule hash was
+<code>1145d18178fa496cd03660c44dca667bcd268c0aec2ca2ab29c3d206996250a3</code>.
+The synthetic group, agent, deployment, idempotency result and its acceptance
+audit were deleted after verification. Contract tests separately prove
+overlap denial, stale revision denial, unsupported and duplicate-field denial,
+deterministic removal after a trusted attribute change, request collision
+denial and transaction-race rollback.</p>
 <h2 id="hosted-ui-and-responsive-workflow">Hosted UI and responsive workflow</h2>
 <p>The deployed CloudFront landing page loaded the merged JavaScript and CSS
 without console-visible load failure. This browser session did not contain an
@@ -2111,6 +2179,15 @@ non-wrapping inspector action row, then observed document width and viewport
 width both equal to <code>390</code> with no horizontal overflow. This validates the
 rendered interaction and responsive containment, but it does not substitute
 for the pending authenticated Cognito role and cross-tenant exercise.</p>
+<p>The same merged UI build was subsequently exercised through the complete
+dynamic-group journey. The Groups table labelled membership mode, group detail
+offered <strong>Automate membership</strong>, and the modal exposed typed trusted field,
+operator, exact-value and rationale controls with keyboard-focusable contextual
+help. Preview showed matched/add/remove/conflict counts and a human-readable
+effective rule; apply reused the reviewed request and displayed the revisioned
+completion receipt. No browser console errors were observed. CloudFront served
+the new asset names above, and the deployed JavaScript contained the expected
+dynamic-membership controls.</p>
 <p>Runtime attestation was the sole failed positive-verification check and the
 deployed API explicitly returned <code>not_configured</code>. The harness continued only
 under its named pilot flag and printed that this did not prove release
