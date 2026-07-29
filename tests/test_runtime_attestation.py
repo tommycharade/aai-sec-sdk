@@ -233,6 +233,75 @@ def test_runtime_attestation_supports_git_refs_and_rejects_bad_origin(tmp_path: 
         attestor.artifact_manifest()
 
 
+def test_runtime_attestation_supports_linked_worktrees_and_packed_refs(tmp_path: Path) -> None:
+    """Normal linked-worktree metadata produces the same bounded provenance identity."""
+    attestor = _attestor(tmp_path)
+    sdk = tmp_path / "sdk"
+    common = tmp_path / "common-git"
+    worktree = common / "worktrees" / "sdk"
+    original = sdk / ".git"
+    original.rename(common)
+    worktree.mkdir(parents=True)
+    _write(worktree / "HEAD", "ref: refs/heads/release\n")
+    _write(worktree / "commondir", "../..\n")
+    _write(
+        common / "packed-refs",
+        f"# pack-refs with: peeled fully-peeled sorted\n{REVISION} refs/heads/release\n",
+    )
+    _write(sdk / ".git", f"gitdir: {worktree}\n")
+
+    manifest = attestor.artifact_manifest()
+
+    assert manifest.sdk_revision == REVISION
+    assert (
+        manifest.source_origin_digest
+        == hashlib.sha256(b"https://example.invalid/aai-sec-sdk.git").hexdigest()
+    )
+
+
+def test_runtime_attestation_rejects_unsafe_worktree_metadata(tmp_path: Path) -> None:
+    """Malformed, unavailable or symlinked worktree pointers fail closed."""
+    attestor = _attestor(tmp_path)
+    marker = tmp_path / "sdk" / ".git"
+    original = tmp_path / "git-original"
+    marker.rename(original)
+    _write(marker, "not-a-git-pointer\n")
+    with pytest.raises(RuntimeAttestationError, match="pointer is malformed"):
+        attestor.artifact_manifest()
+
+    _write(marker, "gitdir: unsafe\x00directory\n")
+    with pytest.raises(RuntimeAttestationError, match="pointer is malformed"):
+        attestor.artifact_manifest()
+
+    marker.unlink()
+    marker.symlink_to(original, target_is_directory=True)
+    with pytest.raises(RuntimeAttestationError, match="metadata is unsafe"):
+        attestor.artifact_manifest()
+
+
+def test_runtime_attestation_rejects_malformed_or_ambiguous_packed_refs(
+    tmp_path: Path,
+) -> None:
+    """Packed refs cannot smuggle malformed or duplicate source revisions."""
+    attestor = _attestor(tmp_path)
+    git = tmp_path / "sdk" / ".git"
+    _write(git / "HEAD", "ref: refs/heads/release\n")
+    _write(git / "packed-refs", "malformed packed ref\n")
+    with pytest.raises(RuntimeAttestationError, match="packed Git references are malformed"):
+        attestor.artifact_manifest()
+
+    _write(git / "packed-refs", f"{REVISION} refs/heads/other\n^short\n")
+    with pytest.raises(RuntimeAttestationError, match="packed Git references are malformed"):
+        attestor.artifact_manifest()
+
+    _write(
+        git / "packed-refs",
+        f"{REVISION} refs/heads/release\n{'b' * 40} refs/heads/release\n",
+    )
+    with pytest.raises(RuntimeAttestationError, match="revision is ambiguous"):
+        attestor.artifact_manifest()
+
+
 def test_runtime_attestation_rejects_empty_package_and_missing_git_directory(
     tmp_path: Path,
 ) -> None:

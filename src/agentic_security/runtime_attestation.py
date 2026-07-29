@@ -322,35 +322,115 @@ def _read_bounded(path: Path, maximum_bytes: int) -> str:
 
 
 def _git_revision(sdk_root: Path) -> str:
-    git = sdk_root / ".git"
-    if git.is_symlink() or not git.is_dir():
-        raise RuntimeAttestationError("SDK checkout has no measurable Git directory")
+    git, common = _git_directories(sdk_root)
     head = _read_bounded(git / "HEAD", 512).strip()
     if _REVISION.fullmatch(head):
         return head
     if not head.startswith("ref: ") or not _REF.fullmatch(head[5:]):
         raise RuntimeAttestationError("SDK Git revision is malformed")
-    reference = (git / head[5:]).resolve()
-    try:
-        reference.relative_to(git.resolve())
-    except ValueError as exc:
-        raise RuntimeAttestationError("SDK Git revision escaped the metadata root") from exc
-    revision = _read_bounded(reference, 512).strip()
-    if not _REVISION.fullmatch(revision):
-        raise RuntimeAttestationError("SDK Git revision is not a full commit SHA")
-    return revision
+    reference_name = head[5:]
+    for root in dict.fromkeys((git, common)):
+        revision = _read_optional_bounded(root / reference_name, 512)
+        if revision is not None:
+            value = revision.strip()
+            if not _REVISION.fullmatch(value):
+                raise RuntimeAttestationError("SDK Git revision is not a full commit SHA")
+            return value
+    packed = _read_optional_bounded(common / "packed-refs", 4_000_000)
+    if packed is not None:
+        match: str | None = None
+        for line in packed.splitlines():
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("^"):
+                if not _REVISION.fullmatch(line[1:]):
+                    raise RuntimeAttestationError("SDK packed Git references are malformed")
+                continue
+            parts = line.split(" ", 1)
+            if len(parts) != 2 or not _REVISION.fullmatch(parts[0]) or not _REF.fullmatch(parts[1]):
+                raise RuntimeAttestationError("SDK packed Git references are malformed")
+            if parts[1] == reference_name:
+                if match is not None:
+                    raise RuntimeAttestationError("SDK Git revision is ambiguous")
+                match = parts[0]
+        if match is not None:
+            return match
+    raise RuntimeAttestationError("SDK Git revision is unavailable")
 
 
 def _source_origin_digest(sdk_root: Path) -> str:
+    _, common = _git_directories(sdk_root)
     parser = configparser.ConfigParser(interpolation=None)
     try:
-        parser.read_string(_read_bounded(sdk_root / ".git" / "config", 64_000))
+        parser.read_string(_read_bounded(common / "config", 64_000))
         origin = parser.get('remote "origin"', "url")
     except (configparser.Error, KeyError, ValueError) as exc:
         raise RuntimeAttestationError("SDK origin cannot be resolved") from exc
     if not origin or len(origin) > 512 or any(character.isspace() for character in origin):
         raise RuntimeAttestationError("SDK origin is malformed")
     return hashlib.sha256(origin.encode("utf-8")).hexdigest()
+
+
+def _git_directories(sdk_root: Path) -> tuple[Path, Path]:
+    """Resolve bounded Git metadata for a checkout or linked worktree.
+
+    Git worktrees use a small ``.git`` pointer file and keep shared refs and
+    configuration in a common metadata directory. The pointer is local trusted
+    deployment configuration, but every referenced metadata file is still read
+    with ``O_NOFOLLOW`` and strict allocation bounds.
+    """
+    marker = sdk_root / ".git"
+    if marker.is_symlink():
+        raise RuntimeAttestationError("SDK checkout Git metadata is unsafe")
+    if marker.is_dir():
+        git = marker.resolve()
+    elif marker.is_file():
+        value = _read_bounded(marker, 4_096).strip()
+        if (
+            not value.startswith("gitdir: ")
+            or not value[8:]
+            or any(character in value[8:] for character in "\x00\r\n")
+        ):
+            raise RuntimeAttestationError("SDK checkout Git pointer is malformed")
+        candidate = Path(value[8:])
+        if not candidate.is_absolute():
+            candidate = sdk_root / candidate
+        try:
+            git = candidate.resolve(strict=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise RuntimeAttestationError("SDK checkout Git pointer is unavailable") from exc
+        if not git.is_dir():
+            raise RuntimeAttestationError("SDK checkout Git pointer is not a directory")
+    else:
+        raise RuntimeAttestationError("SDK checkout has no measurable Git directory")
+
+    common = git
+    common_pointer = _read_optional_bounded(git / "commondir", 4_096)
+    if common_pointer is not None:
+        value = common_pointer.strip()
+        if not value or any(character in value for character in "\x00\r\n"):
+            raise RuntimeAttestationError("SDK common Git pointer is malformed")
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = git / candidate
+        try:
+            common = candidate.resolve(strict=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise RuntimeAttestationError("SDK common Git metadata is unavailable") from exc
+        if not common.is_dir():
+            raise RuntimeAttestationError("SDK common Git metadata is not a directory")
+    return git, common
+
+
+def _read_optional_bounded(path: Path, maximum_bytes: int) -> str | None:
+    """Read an optional metadata file while preserving no-follow semantics."""
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RuntimeAttestationError("Git provenance metadata is unavailable") from exc
+    return _read_bounded(path, maximum_bytes)
 
 
 def _camel_case(value: dict[str, object]) -> dict[str, object]:

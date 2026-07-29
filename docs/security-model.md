@@ -280,6 +280,14 @@ metadata and measurement races fail closed on the host.
 An empty approved-manifest bundle is an explicit `not_configured` state, not a
 successful attestation. It preserves development compatibility but fails the
 operator verification check and must not be accepted for production rollout.
+Non-empty manifests require a separate provenance record that binds the exact
+bundle bytes to the release tag, revision, repository identity, host set and
+verified release-evidence checksum. The generator refuses a dirty checkout and
+executes only fixed, non-shell `git`, release-verifier and `gh attestation`
+argument vectors. Repository-local Git configuration and the authenticated
+GitHub CLI are therefore deployment-workstation trust boundaries; generation
+must run on a controlled release host. CDK and Lambda independently reject a
+missing, stale, malformed, ambiguous or incomplete approval record.
 Software measurement cannot defeat an administrator/root attacker able to
 replace the attestor or process memory. Hardware-backed endpoint/workload
 identity and endpoint management remain outside this SDK boundary and are

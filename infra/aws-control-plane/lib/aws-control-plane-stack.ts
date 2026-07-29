@@ -77,6 +77,89 @@ function validateRuntimeManifests(raw: string): void {
   }
 }
 
+/** Bind the deployable manifest bytes to a separately reviewed release approval record. */
+function validateRuntimeManifestApprovals(raw: string, manifestBundle: string): void {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error("runtime-manifests.provenance.json must contain valid JSON");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("runtime manifest approval bundle must be an object");
+  }
+  const approval = value as Record<string, unknown>;
+  if (
+    Object.keys(approval).sort().join(",") !== "approvals,manifestBundleSha256,schemaVersion"
+    || approval.schemaVersion !== 1
+    || !Array.isArray(approval.approvals)
+    || approval.approvals.length > 32
+    || approval.manifestBundleSha256 !== createHash("sha256").update(manifestBundle).digest("hex")
+  ) {
+    throw new Error("runtime manifest approval bundle is invalid or stale");
+  }
+  const manifests = JSON.parse(manifestBundle) as Array<Record<string, unknown>>;
+  const approvalFields = new Set([
+    "hosts",
+    "releaseEvidenceSha256",
+    "releaseTag",
+    "sdkRevision",
+    "sdkVersion",
+    "sourceOriginDigest",
+  ]);
+  const approved = new Map<string, Record<string, unknown>>();
+  for (const candidate of approval.approvals) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new Error("runtime manifest approval entry must be an object");
+    }
+    const entry = candidate as Record<string, unknown>;
+    const keys = Object.keys(entry);
+    if (keys.length !== approvalFields.size || keys.some((key) => !approvalFields.has(key))) {
+      throw new Error("runtime manifest approval entry schema is invalid");
+    }
+    const hosts = entry.hosts;
+    if (
+      !Array.isArray(hosts)
+      || hosts.length < 1
+      || hosts.length !== new Set(hosts).size
+      || hosts.some((host) => host !== "claude-code" && host !== "codex-cli")
+      || typeof entry.sdkVersion !== "string"
+      || entry.sdkVersion.length < 1
+      || entry.sdkVersion.length > 64
+      || typeof entry.releaseTag !== "string"
+      || !/^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$/.test(entry.releaseTag)
+      || typeof entry.sdkRevision !== "string"
+      || !/^[0-9a-f]{40}$/.test(entry.sdkRevision)
+      || typeof entry.sourceOriginDigest !== "string"
+      || !/^[0-9a-f]{64}$/.test(entry.sourceOriginDigest)
+      || typeof entry.releaseEvidenceSha256 !== "string"
+      || !/^[0-9a-f]{64}$/.test(entry.releaseEvidenceSha256)
+    ) {
+      throw new Error("runtime manifest approval identity is invalid");
+    }
+    for (const host of hosts) {
+      const identity = `${host}:${entry.sdkVersion}`;
+      if (approved.has(identity)) {
+        throw new Error("runtime manifest approval identity is ambiguous");
+      }
+      approved.set(identity, entry);
+    }
+  }
+  if (approved.size !== manifests.length) {
+    throw new Error("runtime manifest approvals must exactly cover configured manifests");
+  }
+  for (const manifest of manifests) {
+    const entry = approved.get(`${manifest.host}:${manifest.sdkVersion}`);
+    if (
+      !entry
+      || entry.sdkRevision !== manifest.sdkRevision
+      || entry.sourceOriginDigest !== manifest.sourceOriginDigest
+    ) {
+      throw new Error("runtime manifest approval identity does not match its manifest");
+    }
+  }
+}
+
 /** Initial production-shaped AWS boundary for the fleet management UI. */
 export class AwsControlPlaneStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -90,8 +173,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
     const runtimeManifestPath = path.join(__dirname, "../lambda/runtime-manifests.json");
     const runtimeManifestBundle = fs.readFileSync(runtimeManifestPath, "utf8");
     validateRuntimeManifests(runtimeManifestBundle);
+    const runtimeApprovalPath = path.join(
+      __dirname,
+      "../lambda/runtime-manifests.provenance.json",
+    );
+    const runtimeApprovalBundle = fs.readFileSync(runtimeApprovalPath, "utf8");
+    validateRuntimeManifestApprovals(runtimeApprovalBundle, runtimeManifestBundle);
     const runtimeManifestCount = (JSON.parse(runtimeManifestBundle) as unknown[]).length;
     const runtimeManifestDigest = createHash("sha256").update(runtimeManifestBundle).digest("hex");
+    const runtimeApprovalDigest = createHash("sha256").update(runtimeApprovalBundle).digest("hex");
     const entraInputs = [entraTenantId, entraClientId, entraClientSecretName, entraAaiTenantId];
     if (entraInputs.some(Boolean) && !entraInputs.every(Boolean)) {
       throw new Error(
@@ -406,6 +496,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
         SCIM_TABLE: scim.tableName,
         SPLUNK_STUB_ENABLED: "true",
         RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
+        RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
       },
       tracing: lambda.Tracing.PASS_THROUGH,
     });
