@@ -24,6 +24,7 @@ from agentic_security import (
     EnterpriseFleetStore,
     FleetAuthorizationError,
     FleetConfigurationError,
+    FleetConflictError,
     FleetIdentity,
     FleetNotFoundError,
     FleetSecretReference,
@@ -151,7 +152,7 @@ def test_reference_persistence_is_explicitly_rejected_for_ha_requirements(tmp_pa
     assert store.persistence_capabilities() == {
         "adapter": "sqlite-reference",
         "highAvailability": False,
-        "schemaVersion": 6,
+        "schemaVersion": 7,
     }
     store.close()
     with pytest.raises(FleetConfigurationError):
@@ -237,9 +238,48 @@ def test_postgres_adapter_connection_failure_is_normalized(
         PostgresFleetPersistenceAdapter().connect("postgresql://unavailable", 5000)
 
 
-def identity(organization_id: str, *, projects: frozenset[str] = frozenset()) -> FleetIdentity:
+def identity(
+    organization_id: str,
+    *,
+    subject: str = "operator-1",
+    projects: frozenset[str] = frozenset(),
+) -> FleetIdentity:
     """Build a synthetic tenant identity."""
-    return FleetIdentity("operator-1", organization_id, frozenset({"admin"}), projects)
+    return FleetIdentity(subject, organization_id, frozenset({"admin"}), projects)
+
+
+def create_active_policy(
+    store: EnterpriseFleetStore,
+    operator: FleetIdentity,
+    *,
+    policy_id: str,
+    name: str,
+    configuration: dict[str, Any],
+) -> dict[str, Any]:
+    """Complete the governed lifecycle with a distinct synthetic reviewer."""
+    created = store.create_policy(
+        operator,
+        policy_id=policy_id,
+        name=name,
+        configuration=configuration,
+    )
+    version = int(created["latestVersion"])
+    store.submit_policy_version(operator, policy_id, version)
+    reviewer = identity(operator.organization_id, subject="reviewer-2")
+    store.decide_policy_version(
+        reviewer,
+        policy_id,
+        version,
+        decision="approved",
+        reason="Synthetic independent review",
+    )
+    store.stage_policy_version(reviewer, policy_id, version)
+    return store.activate_policy_version(
+        reviewer,
+        policy_id,
+        version,
+        expected_active_version=int(created["version"]),
+    )
 
 
 def seed(store: EnterpriseFleetStore) -> None:
@@ -373,6 +413,31 @@ def test_migrates_legacy_deployments_with_team_dimension(tmp_path: Path) -> None
     items = store.list_inventory(identity("org-a"), "deployments").items
 
     assert items[0]["team"] == ""
+
+
+def test_migrates_existing_active_policy_into_immutable_version_ledger(tmp_path: Path) -> None:
+    """A schema upgrade preserves active fleet authority and creates review history."""
+    database = tmp_path / "policy-v6.sqlite"
+    store = EnterpriseFleetStore(database)
+    store.create_organization("org-a", "Alpha")
+    canonical = store._configuration_json({"policy": {"denyByDefault": True}})
+    store._connection.execute(
+        "INSERT INTO policies(id,organization_id,name,configuration,version,created_at,created_by) "
+        "VALUES(?,?,?,?,?,?,?)",
+        ("policy-existing", "org-a", "Existing", canonical, 3, 10.0, "legacy-author"),
+    )
+    store._connection.execute("DELETE FROM policy_versions WHERE policy_id=?", ("policy-existing",))
+    store._connection.execute("DELETE FROM schema_migrations WHERE version=7")
+    store._connection.commit()
+    store.close()
+
+    migrated = EnterpriseFleetStore(database)
+    policy = migrated.list_policies(identity("org-a")).items[0]
+    version = migrated.policy_version(identity("org-a"), "policy-existing", 3)
+    assert policy["activeVersion"] == 3 and policy["governanceState"] == "active"
+    assert version["state"] == "active"
+    assert version["author"] == "legacy-author"
+    assert version["contentHash"] == hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def test_fleet_validation_and_roles_fail_closed() -> None:
@@ -1410,9 +1475,15 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
     """Operators can assign policies to groups and manage membership without exposing sessions."""
     store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
     token = "fleet-admin-token-1234"  # noqa: S105 - synthetic test credential
+    reviewer_token = "fleet-reviewer-token-1234"  # noqa: S105 - synthetic test credential
     app = EnterpriseFleetApplication(
         store,
-        authenticator=StaticFleetAuthenticator({token: identity("org-a")}),
+        authenticator=StaticFleetAuthenticator(
+            {
+                token: identity("org-a"),
+                reviewer_token: identity("org-a", subject="reviewer-2"),
+            }
+        ),
     )
     assert call_api(
         app, "POST", "/api/enterprise/organizations", {"organizationId": "org-a", "name": "Alpha"}
@@ -1458,8 +1529,50 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
         },
     )
     assert status.startswith("201") and policy["id"] == "policy-safe"
+    assert policy["activeVersion"] is None and policy["governanceState"] == "draft"
     status, policies = call_api(app, "GET", "/api/enterprise/policies")
     assert status.startswith("200") and policies["items"][0]["id"] == "policy-safe"
+    status, inactive_group = call_api(
+        app,
+        "POST",
+        "/api/enterprise/groups",
+        {"groupId": "group-too-early", "name": "Too early", "policyId": "policy-safe"},
+    )
+    assert status.startswith("409") and "active governed version" in inactive_group["error"]
+    status, versions = call_api(app, "GET", "/api/enterprise/policies/policy-safe/versions")
+    assert status.startswith("200") and versions["items"][0]["state"] == "draft"
+    assert call_api(app, "POST", "/api/enterprise/policies/policy-safe/versions/1/submit", {})[
+        0
+    ].startswith("200")
+    status, self_approval = call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions/1/decision",
+        {"decision": "approved", "reason": "I wrote it"},
+    )
+    assert status.startswith("403") and "cannot approve" in self_approval["error"]
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions/1/decision",
+        {"decision": "approved", "reason": "Independent review complete"},
+        token=reviewer_token,
+    )[0].startswith("200")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions/1/stage",
+        {},
+        token=reviewer_token,
+    )[0].startswith("200")
+    status, activated_policy = call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions/1/activate",
+        {"expectedActiveVersion": 0},
+        token=reviewer_token,
+    )
+    assert status.startswith("200") and activated_policy["version"] == 1
     status, updated_policy = call_api(
         app,
         "POST",
@@ -1471,6 +1584,30 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
     )
     assert status.startswith("200") and updated_policy["version"] == 2
     assert updated_policy["author"] == "operator-1"
+    assert call_api(app, "POST", "/api/enterprise/policies/policy-safe/versions/2/submit", {})[
+        0
+    ].startswith("200")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions/2/decision",
+        {"decision": "approved", "reason": "Limits independently reviewed"},
+        token=reviewer_token,
+    )[0].startswith("200")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions/2/stage",
+        {},
+        token=reviewer_token,
+    )[0].startswith("200")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions/2/activate",
+        {"expectedActiveVersion": 1},
+        token=reviewer_token,
+    )[0].startswith("200")
     status, skill = call_api(
         app,
         "POST",
@@ -1636,6 +1773,30 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
         },
     )
     assert status.startswith("200") and selected_version["version"] == 3
+    assert call_api(app, "POST", "/api/enterprise/policies/policy-safe/versions/3/submit", {})[
+        0
+    ].startswith("200")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions/3/decision",
+        {"decision": "approved", "reason": "Managed resources independently reviewed"},
+        token=reviewer_token,
+    )[0].startswith("200")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions/3/stage",
+        {},
+        token=reviewer_token,
+    )[0].startswith("200")
+    assert call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-safe/versions/3/activate",
+        {"expectedActiveVersion": 2},
+        token=reviewer_token,
+    )[0].startswith("200")
     status, effective = call_api(
         app, "GET", "/api/enterprise/agents/deploy-a/claude-a/effective-policy"
     )
@@ -1698,6 +1859,249 @@ def test_policies_groups_and_agent_membership_are_tenant_scoped(tmp_path: Path) 
     assert status.startswith("404") and duplicate["error"] == "agent group membership not found"
 
 
+def test_policy_lifecycle_is_immutable_two_person_and_fail_closed(tmp_path: Path) -> None:
+    """Draft authority cannot bypass review, ordering, tenancy, or active-version CAS."""
+    audit = InMemoryAuditSink()
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite", audit=audit)
+    seed(store)
+    author = identity("org-a", subject="author-1")
+    reviewer = identity("org-a", subject="reviewer-2")
+    outsider = identity("org-b", subject="reviewer-b")
+    created = store.create_policy(
+        author,
+        policy_id="policy-governed",
+        name="Governed",
+        configuration={"tools": {"allowed": ["read_repository"]}},
+    )
+    assert created["version"] == 0
+    assert created["activeVersion"] is None
+    assert created["pendingVersion"] == 1
+    with pytest.raises(FleetConflictError, match="pending"):
+        store.update_policy(
+            author,
+            policy_id="policy-governed",
+            name="Bypass",
+            configuration={"tools": {"allowed": ["write_repository"]}},
+        )
+    with pytest.raises(FleetConflictError, match="not approved"):
+        store.stage_policy_version(reviewer, "policy-governed", 1)
+    submitted = store.submit_policy_version(author, "policy-governed", 1)
+    assert submitted["state"] == "review"
+    with pytest.raises(FleetAuthorizationError, match="cannot approve"):
+        store.decide_policy_version(
+            author,
+            "policy-governed",
+            1,
+            decision="approved",
+            reason="self approval",
+        )
+    with pytest.raises(FleetAuthorizationError, match="organization scope"):
+        store.decide_policy_version(
+            outsider,
+            "policy-governed",
+            1,
+            decision="approved",
+            reason="wrong tenant",
+        )
+    approved = store.decide_policy_version(
+        reviewer,
+        "policy-governed",
+        1,
+        decision="approved",
+        reason="Independent change review",
+    )
+    assert approved["approvedBy"] == "reviewer-2"
+    with pytest.raises(FleetConflictError, match="awaiting review"):
+        store.decide_policy_version(
+            reviewer,
+            "policy-governed",
+            1,
+            decision="approved",
+            reason="replay",
+        )
+    store.stage_policy_version(reviewer, "policy-governed", 1)
+    active = store.activate_policy_version(
+        reviewer,
+        "policy-governed",
+        1,
+        expected_active_version=0,
+    )
+    assert active["version"] == 1 and active["governanceState"] == "active"
+    with pytest.raises(FleetConflictError, match="not staged"):
+        store.activate_policy_version(
+            reviewer,
+            "policy-governed",
+            1,
+            expected_active_version=0,
+        )
+    draft = store.update_policy(
+        author,
+        policy_id="policy-governed",
+        name="Governed v2",
+        configuration={"tools": {"allowed": ["read_repository", "run_tests"]}},
+    )
+    assert draft["version"] == 2 and draft["baseVersion"] == 1
+    assert store.list_policies(author).items[0]["version"] == 1
+    assert store.policy_version(author, "policy-governed", 1)["configuration"] == {
+        "tools": {"allowed": ["read_repository"]}
+    }
+    assert {event.event_type for event in audit.events()} >= {
+        "fleet_policy_draft_created",
+        "fleet_policy_submitted",
+        "fleet_policy_decided",
+        "fleet_policy_staged",
+        "fleet_policy_activated",
+    }
+
+
+def test_policy_governance_rejects_invalid_versions_states_and_cross_tenant_access(
+    tmp_path: Path,
+) -> None:
+    """Governance validation rejects malformed, stale, and cross-tenant operations."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    author = identity("org-a", subject="author-1")
+    reviewer = identity("org-a", subject="reviewer-2")
+    outsider = identity("org-b", subject="reviewer-b")
+    store.create_policy(
+        author,
+        policy_id="policy-validation",
+        name="Validation",
+        configuration={"tools": {"allowed": ["read_repository"]}},
+    )
+
+    for invalid_version in (True, 0, -1):
+        with pytest.raises(FleetConfigurationError, match="positive integer"):
+            store.policy_version(author, "policy-validation", invalid_version)
+    with pytest.raises(FleetNotFoundError, match="version not found"):
+        store.policy_version(author, "policy-validation", 99)
+    with pytest.raises(FleetAuthorizationError, match="organization scope"):
+        store.list_policy_versions(outsider, "policy-validation")
+    with pytest.raises(FleetAuthorizationError, match="organization scope"):
+        store.policy_version(outsider, "policy-validation", 1)
+    with pytest.raises(FleetAuthorizationError, match="organization scope"):
+        store.update_policy(
+            outsider,
+            policy_id="policy-validation",
+            name="Cross tenant",
+            configuration={},
+        )
+
+    store.submit_policy_version(author, "policy-validation", 1)
+    with pytest.raises(FleetConfigurationError, match="approved or rejected"):
+        store.decide_policy_version(
+            reviewer,
+            "policy-validation",
+            1,
+            decision="maybe",
+            reason="invalid decision",
+        )
+    rejected = store.decide_policy_version(
+        reviewer,
+        "policy-validation",
+        1,
+        decision="rejected",
+        reason="Needs tighter limits",
+    )
+    assert rejected["state"] == "rejected" and rejected["decisionReason"] == "Needs tighter limits"
+    with pytest.raises(FleetConflictError, match="must be draft"):
+        store.submit_policy_version(author, "policy-validation", 1)
+    with pytest.raises(FleetConflictError, match="not approved"):
+        store.stage_policy_version(reviewer, "policy-validation", 1)
+    with pytest.raises(FleetConfigurationError, match="must be an integer"):
+        store.activate_policy_version(
+            reviewer,
+            "policy-validation",
+            1,
+            expected_active_version=True,
+        )
+    with pytest.raises(FleetConfigurationError, match="cannot be negative"):
+        store.activate_policy_version(reviewer, "policy-validation", 1, expected_active_version=-1)
+
+    draft = store.update_policy(
+        author,
+        policy_id="policy-validation",
+        name="Validation v2",
+        configuration={"tools": {"allowed": ["read_repository", "run_tests"]}},
+    )
+    page = store.list_policy_versions(author, "policy-validation", limit=1)
+    assert [item["version"] for item in page.items] == [draft["version"]]
+    assert page.next_cursor is not None
+    with pytest.raises(FleetAuthorizationError, match="organization scope"):
+        store._transition_policy_version(
+            outsider,
+            "policy-validation",
+            2,
+            expected_state="draft",
+            next_state="review",
+            fields={"submitted_by": outsider.subject, "submitted_at": 1.0},
+            event="synthetic",
+        )
+    with pytest.raises(FleetConfigurationError, match="transition is invalid"):
+        store._transition_policy_version(
+            author,
+            "policy-validation",
+            2,
+            expected_state="unknown",
+            next_state="review",
+            fields={"submitted_by": author.subject, "submitted_at": 1.0},
+            event="synthetic",
+        )
+    with pytest.raises(FleetConfigurationError, match="metadata is invalid"):
+        store._transition_policy_version(
+            author,
+            "policy-validation",
+            2,
+            expected_state="draft",
+            next_state="review",
+            fields={"unexpected": "value"},
+            event="synthetic",
+        )
+    with pytest.raises(FleetConfigurationError, match="state is invalid"):
+        store._insert_policy_version(
+            policy_id="policy-validation",
+            organization_id="org-a",
+            version=3,
+            base_version=0,
+            name="Invalid",
+            configuration_json="{}",
+            state="unknown",
+            author=author.subject,
+            created_at=1.0,
+        )
+
+
+def test_policy_governance_http_routes_fail_closed_on_malformed_transitions(
+    tmp_path: Path,
+) -> None:
+    """HTTP lifecycle routes normalize malformed versions, actions, and activation CAS input."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    token = "fleet-policy-admin-token-1234"  # noqa: S105 - synthetic test credential
+    operator = identity("org-a", subject="author-1")
+    app = EnterpriseFleetApplication(
+        store,
+        authenticator=StaticFleetAuthenticator({token: operator}),
+    )
+    store.create_policy(
+        operator,
+        policy_id="policy-http-validation",
+        name="HTTP validation",
+        configuration={},
+    )
+
+    malformed_routes: tuple[tuple[str, str, dict[str, Any]], ...] = (
+        ("GET", "/api/enterprise/policies/policy-http-validation/versions/not-a-number", {}),
+        ("GET", "/api/enterprise/policies/policy-http-validation/versions/1/extra", {}),
+        ("POST", "/api/enterprise/policies/policy-http-validation/versions/nope/submit", {}),
+        ("POST", "/api/enterprise/policies/policy-http-validation/versions/1/unknown", {}),
+        ("POST", "/api/enterprise/policies/policy-http-validation/versions/1/activate", {}),
+    )
+    for method, path, body in malformed_routes:
+        status, response = call_api(app, method, path, body, token=token)
+        assert status.startswith("400"), response
+
+
 def test_effective_policy_requires_one_unambiguous_group_assignment(tmp_path: Path) -> None:
     """An enrolled agent receives only its tenant-scoped, unambiguous policy."""
     store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
@@ -1710,7 +2114,8 @@ def test_effective_policy_requires_one_unambiguous_group_assignment(tmp_path: Pa
         host="claude-code",
         project_root="/workspace/payments",
     )
-    store.create_policy(
+    create_active_policy(
+        store,
         operator,
         policy_id="policy-safe",
         name="Safe",
@@ -1741,7 +2146,8 @@ def test_effective_policy_requires_one_unambiguous_group_assignment(tmp_path: Pa
         operator, group_id="group-same-policy", deployment_id="deploy-a", agent_id="claude-a"
     )
 
-    store.create_policy(
+    create_active_policy(
+        store,
         operator,
         policy_id="policy-restricted",
         name="Restricted",
@@ -1776,7 +2182,8 @@ def test_effective_policy_http_route_is_agent_scoped(tmp_path: Path) -> None:
         host="claude-code",
         project_root="/workspace/payments",
     )
-    store.create_policy(
+    create_active_policy(
+        store,
         operator,
         policy_id="policy-safe",
         name="Safe",
@@ -1811,7 +2218,8 @@ def test_incident_stops_cover_agent_group_and_deployment_scopes(tmp_path: Path) 
         host="claude-code",
         project_root="/workspace/payments",
     )
-    store.create_policy(
+    create_active_policy(
+        store,
         operator,
         policy_id="policy-safe",
         name="Safe",
@@ -1866,7 +2274,8 @@ def test_agent_verification_reports_each_enrollment_prerequisite(tmp_path: Path)
         host="claude-code",
         project_root="/workspace/payments",
     )
-    store.create_policy(
+    create_active_policy(
+        store,
         operator,
         policy_id="policy-safe",
         name="Safe",

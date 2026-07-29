@@ -334,6 +334,13 @@ authorization.
 
 ## Unreleased
 
+- Added the provider-neutral governed policy-version foundation: new policy
+  content remains inactive until a distinct authenticated subject approves it,
+  lifecycle transitions are ordered and audited, activation uses active-version
+  compare-and-swap semantics, and groups reject policies without an active
+  governed version. The AWS adapter and management UI remain separate rollout
+  work and are not claimed by this foundation.
+
 - Fixed the release gates for core-only environments: optional AWS/PostgreSQL
   imports now type-check without forcing provider dependencies, mutation tests
   include the AWS Lambda contract fixture, and local Docker isolation evidence
