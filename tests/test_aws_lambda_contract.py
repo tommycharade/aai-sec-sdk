@@ -1799,6 +1799,21 @@ def test_aws_managed_configuration_posture_rejects_drift_and_staleness(
     with pytest.raises(ValueError, match="SHA-256"):
         module._managed_host({**desired, "bundleHash": "not-a-digest"})
 
+    dynamodb_report = module._managed_host(
+        {
+            **desired,
+            "policyVersion": Decimal("3"),
+            "source": "codex-system",
+            "verifiedAt": Decimal("90"),
+            "expiresAt": Decimal("200"),
+        },
+        report=True,
+    )
+    assert dynamodb_report["policyVersion"] == 3
+    assert dynamodb_report["verifiedAt"] == 90
+    with pytest.raises(ValueError, match="policyVersion"):
+        module._managed_host({**desired, "policyVersion": Decimal("3.5")})
+
 
 def test_list_reads_every_dynamodb_page_before_policy_verification(monkeypatch: Any) -> None:
     module, _table = _load_handler(monkeypatch)
