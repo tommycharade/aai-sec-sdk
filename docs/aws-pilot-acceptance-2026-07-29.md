@@ -13,9 +13,9 @@ Codex has loaded and enforced it.
 | CloudFormation stack | `AaiSecControlPlane` — `UPDATE_COMPLETE` |
 | Hosted UI | `https://d2ir54klde64bd.cloudfront.net` |
 | API | `https://lwg33pxwk8.execute-api.eu-west-2.amazonaws.com` |
-| SDK deployed merge | `f3ff32b8f41ad7b6b4002476f978d323a5c2243b` |
-| UI deployed merge | `0dd6cfdd4e642e9330476e8e0618cf3bd283c49c` |
-| Deployed UI JavaScript | `assets/index-B0EySmng.js` |
+| SDK deployed merge | `6bead88002e436071b5a6dd3d66c13c38a212f92` |
+| UI deployed merge | `9311a52f53914e70f2bb82f905f791701658d2c1` |
+| Deployed UI JavaScript | `assets/index-BgcTctCD.js` |
 
 The deployed CloudFront index referenced the exact JavaScript and CSS build
 assets, both assets returned HTTP 200, and the deployment invalidation reached
@@ -47,6 +47,37 @@ zero remaining DynamoDB records and zero remaining S3 objects. This proves the
 deployed software boundary, including live revocation. It does not substitute
 for the outstanding real Entra/SCIM and independent multi-business-unit
 exercise.
+
+## Agent identity lifecycle
+
+The deployed control-plane harness created one unique synthetic deployment and
+agent, enrolled it, established a live session and assigned the safe policy
+group. It then exercised the merged lifecycle boundary against API Gateway,
+Lambda and DynamoDB:
+
+| Assertion | Result |
+| --- | --- |
+| Issue an unused predecessor bootstrap token | HTTP 201 |
+| Atomically replace the active identity | HTTP 201; predecessor `revoked`, successor `active` |
+| Reuse the predecessor session after replacement | HTTP 403 |
+| Consume the predecessor's unused bootstrap token | HTTP 403 |
+| Issue fresh bootstrap material for the successor | HTTP 201 |
+| Enrol the successor with fresh material | HTTP 201 |
+| Offboard the revoked predecessor | HTTP 200; lifecycle `deleted` |
+| Remove the predecessor's local project path | Empty path with retained SHA-256 digest |
+
+The same run also passed project-scope binding, managed-configuration
+missing/conflict enforcement, approval replay denial, emergency-stop recovery,
+multi-process idempotency, WORM audit retention and SNS/SQS alert delivery.
+Exact synthetic agent, session, bootstrap, membership, deployment, template,
+configuration, approval and idempotency records were removed afterward;
+content-minimised immutable lifecycle audit records remain as intended.
+
+Runtime attestation was the sole failed positive-verification check and the
+deployed API explicitly returned `not_configured`. The harness continued only
+under its named pilot flag and printed that this did not prove release
+provenance or full agent verification. This is a lifecycle acceptance pass, not
+a P0-05 attestation pass.
 
 ## Governed policy ledger
 

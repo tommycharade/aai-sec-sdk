@@ -132,6 +132,14 @@ def main() -> int:
     parser.add_argument("--region", default=None, help="AWS region for the boto3 session")
     parser.add_argument("--profile", default=None, help="AWS profile for the boto3 session")
     parser.add_argument("--tenant", default="tenant-demo", help="Provisioned synthetic test tenant")
+    parser.add_argument(
+        "--allow-unconfigured-runtime-attestation",
+        action="store_true",
+        help=(
+            "Continue only when runtime attestation is the sole failed verification check "
+            "and the deployed control plane explicitly reports not_configured"
+        ),
+    )
     arguments = parser.parse_args()
 
     import boto3
@@ -150,6 +158,10 @@ def main() -> int:
     agent_key = f"{deployment_id}:{agent_id}"
     approval_id = f"aws-smoke-approval-{suffix}"
     session_token = ""
+    replacement_session_token = ""
+    unused_bootstrap_token = ""
+    replacement_bootstrap_token = ""
+    replacement_agent_id = f"{agent_id}-replacement"
     group_assigned = False
     operation_key = f"aws-smoke-operation-{suffix}"
     try:
@@ -255,6 +267,12 @@ def main() -> int:
                     "agentId": agent_id,
                     "host": "claude-code",
                     "projectRoot": "/synthetic/project",
+                    "ownership": {
+                        "ownerId": "aws-control-plane-smoke",
+                        "ownerName": "Synthetic acceptance owner",
+                        "businessContact": "acceptance@example.invalid",
+                        "criticality": "low",
+                    },
                 },
                 arguments.tenant,
             ),
@@ -431,10 +449,23 @@ def main() -> int:
             ),
         )
         connected_verification_body = json.loads(connected_verification["body"])
-        if connected_verification_body.get("verified") is not True:
-            raise RuntimeError(
-                f"verification rejected a connected, assigned agent: {connected_verification}"
+        runtime_attestation_proven = connected_verification_body.get("verified") is True
+        if not runtime_attestation_proven:
+            failed_checks = sorted(
+                key
+                for key, check in connected_verification_body.get("checks", {}).items()
+                if check.get("passed") is not True
             )
+            explicitly_unconfigured = (
+                arguments.allow_unconfigured_runtime_attestation
+                and failed_checks == ["runtimeAttestation"]
+                and connected_verification_body.get("attestation", {}).get("status")
+                == "not_configured"
+            )
+            if not explicitly_unconfigured:
+                raise RuntimeError(
+                    f"verification rejected a connected, assigned agent: {connected_verification}"
+                )
 
         conflicting_evidence = ManagedConfigurationEvidence(
             host=managed_bundle.host,
@@ -534,7 +565,17 @@ def main() -> int:
             ),
         )
         recovered_verification_body = json.loads(recovered_verification["body"])
-        if recovered_verification_body.get("verified") is not True:
+        recovered_failed_checks = sorted(
+            key
+            for key, check in recovered_verification_body.get("checks", {}).items()
+            if check.get("passed") is not True
+        )
+        recovered_as_expected = recovered_verification_body.get("verified") is True or (
+            arguments.allow_unconfigured_runtime_attestation
+            and recovered_failed_checks == ["runtimeAttestation"]
+            and recovered_verification_body.get("attestation", {}).get("status") == "not_configured"
+        )
+        if not recovered_as_expected:
             raise RuntimeError(
                 f"verification rejected an emergency-stop-recovered agent: {recovered_verification}"
             )
@@ -739,13 +780,123 @@ def main() -> int:
         if alert_message is None:
             raise RuntimeError("security alert was not delivered to the durable SQS queue")
         sqs_client.delete_message(QueueUrl=queue_url, ReceiptHandle=alert_message["ReceiptHandle"])
+
+        unused_bootstrap = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/agents/bootstrap",
+                "POST",
+                {"deploymentId": deployment_id, "agentId": agent_id},
+                arguments.tenant,
+            ),
+        )
+        if unused_bootstrap["statusCode"] != 201:
+            raise RuntimeError(f"pre-replacement bootstrap issuance failed: {unused_bootstrap}")
+        unused_bootstrap_token = json.loads(unused_bootstrap["body"])["bootstrapToken"]
+        replacement = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                f"/enterprise/agents/{deployment_id}/{agent_id}/replace",
+                "POST",
+                {
+                    "expectedLifecycleRevision": 1,
+                    "replacementAgentId": replacement_agent_id,
+                    "reason": "Synthetic managed device replacement acceptance exercise.",
+                },
+                arguments.tenant,
+            ),
+        )
+        if replacement["statusCode"] != 201:
+            raise RuntimeError(f"agent replacement failed: {replacement}")
+        replacement_body = json.loads(replacement["body"])
+        if (
+            replacement_body.get("predecessor", {}).get("lifecycle_state") != "revoked"
+            or replacement_body.get("replacement", {}).get("lifecycle_state") != "active"
+            or replacement_body.get("requiresBootstrap") is not True
+        ):
+            raise RuntimeError(f"replacement lifecycle contract failed: {replacement_body}")
+        denied_old_session, _ = _request(
+            f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/heartbeat",
+            "POST",
+            body={},
+            token=session_token,
+            project_root_digest=project_root_digest,
+        )
+        denied_old_bootstrap, _ = _request(
+            f"{arguments.api_url.rstrip('/')}/agent/enroll",
+            "POST",
+            body={
+                "bootstrapToken": unused_bootstrap_token,
+                "projectRoot": "/synthetic/project",
+            },
+        )
+        if denied_old_session != 403 or denied_old_bootstrap != 403:
+            raise RuntimeError(
+                "replacement did not immediately deny predecessor capabilities: "
+                f"session={denied_old_session}, bootstrap={denied_old_bootstrap}"
+            )
+        replacement_bootstrap = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/agents/bootstrap",
+                "POST",
+                {"deploymentId": deployment_id, "agentId": replacement_agent_id},
+                arguments.tenant,
+            ),
+        )
+        if replacement_bootstrap["statusCode"] != 201:
+            raise RuntimeError(f"replacement bootstrap issuance failed: {replacement_bootstrap}")
+        replacement_bootstrap_token = json.loads(replacement_bootstrap["body"])["bootstrapToken"]
+        replacement_enrollment_status, replacement_enrollment = _request(
+            f"{arguments.api_url.rstrip('/')}/agent/enroll",
+            "POST",
+            body={
+                "bootstrapToken": replacement_bootstrap_token,
+                "projectRoot": "/synthetic/project",
+            },
+        )
+        if replacement_enrollment_status != 201:
+            raise RuntimeError(
+                "replacement did not require and accept fresh enrollment: "
+                f"{replacement_enrollment_status} {replacement_enrollment}"
+            )
+        replacement_session_token = replacement_enrollment["accessToken"]
+        offboarded = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                f"/enterprise/agents/{deployment_id}/{agent_id}/offboard",
+                "POST",
+                {
+                    "expectedLifecycleRevision": 2,
+                    "reason": "Synthetic evidence-retaining offboarding acceptance exercise.",
+                },
+                arguments.tenant,
+            ),
+        )
+        offboarded_body = json.loads(offboarded["body"])
+        if (
+            offboarded["statusCode"] != 200
+            or offboarded_body.get("lifecycle_state") != "deleted"
+            or offboarded_body.get("project_root") != ""
+            or not offboarded_body.get("project_root_hash")
+        ):
+            raise RuntimeError(f"evidence-retaining offboarding failed: {offboarded}")
         print(
             "AWS control-plane smoke passed: auth, enrollment, heartbeat, managed-host "
             "missing/conflict enforcement, policy, agent verification, "
             "approval replay, emergency-stop enforcement/recovery, and "
             "multi-process/runtime-connected durable idempotency, and WORM audit "
-            "retention, and SNS/SQS alert delivery"
+            "retention, SNS/SQS alert delivery, and irreversible replacement/offboarding"
         )
+        if not runtime_attestation_proven:
+            print(
+                "Runtime attestation remains explicitly not configured; this acceptance did not "
+                "claim release provenance or full agent verification."
+            )
         return 0
     finally:
         if session_token:
@@ -755,6 +906,27 @@ def main() -> int:
                     "sk": "SESSION",
                 }
             )
+        if replacement_session_token:
+            control_table.delete_item(
+                Key={
+                    "pk": (
+                        "AGENT_SESSION#"
+                        f"{hashlib.sha256(replacement_session_token.encode()).hexdigest()}"
+                    ),
+                    "sk": "SESSION",
+                }
+            )
+        for bootstrap_token in (unused_bootstrap_token, replacement_bootstrap_token):
+            if bootstrap_token:
+                control_table.delete_item(
+                    Key={
+                        "pk": (
+                            "AGENT_BOOTSTRAP#"
+                            f"{hashlib.sha256(bootstrap_token.encode()).hexdigest()}"
+                        ),
+                        "sk": "TOKEN",
+                    }
+                )
         if group_assigned:
             _invoke(
                 lambda_client,
@@ -766,8 +938,27 @@ def main() -> int:
                     arguments.tenant,
                 ),
             )
+            _invoke(
+                lambda_client,
+                arguments.function_name,
+                _event(
+                    (
+                        "/enterprise/groups/group-platform/agents/"
+                        f"{deployment_id}/{replacement_agent_id}"
+                    ),
+                    "DELETE",
+                    {},
+                    arguments.tenant,
+                ),
+            )
         control_table.delete_item(
             Key={"pk": f"TENANT#{arguments.tenant}", "sk": f"AGENT#{agent_key}"}
+        )
+        control_table.delete_item(
+            Key={
+                "pk": f"TENANT#{arguments.tenant}",
+                "sk": f"AGENT#{deployment_id}:{replacement_agent_id}",
+            }
         )
         control_table.delete_item(
             Key={"pk": f"TENANT#{arguments.tenant}", "sk": f"APPROVAL#{approval_id}"}

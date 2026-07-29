@@ -1,5 +1,18 @@
 # Changelog
 
+- Added accountable agent ownership governance to the AWS control plane and
+  enterprise UI. New identities require an owner ID, owner name, monitored
+  business contact and typed criticality; team and environment are copied from
+  server-owned deployment lineage. Reviews expire after 90 days, use
+  optimistic concurrency, and commit durable evidence with the agent update.
+  Missing or stale ownership blocks positive agent verification and is visible
+  in fleet, group, deployment and action-center posture.
+- Extended the deployed AWS acceptance harness to prove atomic agent
+  replacement, immediate predecessor session/bootstrap denial, fresh successor
+  enrollment and evidence-retaining offboarding. An explicit pilot flag permits
+  the harness to continue only when runtime attestation is the sole failed
+  control and is reported as `not_configured`; it never upgrades that state to
+  a pass.
 - Added irreversible agent lifecycle governance to the AWS control plane and
   enterprise UI. Revocation immediately denies every existing session and
   unused bootstrap token through the live agent record; replacement atomically

@@ -548,8 +548,15 @@ SDK action binding.
 First-run project and deployment registration is also an authority boundary.
 The browser may propose bounded names and stable identifiers, but the API
 requires each parent organization/project to exist in the authenticated tenant.
-Agent registration requires an existing deployment and copies ownership,
-environment, and region from that server-owned record rather than request JSON.
+Agent registration requires an existing deployment and copies organization,
+project, team, environment, and region from that server-owned record rather
+than request JSON. A new identity must also name an accountable owner, monitored
+business contact and typed criticality. Entra-enabled tenants validate the
+owner against live SCIM state. The server, not the browser, derives whether the
+90-day review is current, stale or missing. Ownership renewal compares the
+expected ownership revision and active lifecycle state in the same transaction
+that writes durable evidence; a stale writer cannot silently transfer
+accountability. Missing or expired ownership prevents positive verification.
 Neither agent registration nor bootstrap exchange is accepted as liveness:
 presence remains offline until the deployment-bound session sends a successful
 heartbeat. Duplicate project, deployment, group, and agent identifiers are

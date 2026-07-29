@@ -97,6 +97,12 @@ _AGENT_TELEMETRY_INTEGER_FIELDS = _AGENT_TELEMETRY_FIELDS - {
 _AGENT_LIFECYCLE_STATES = frozenset({"active", "revoked", "deleted"})
 _AGENT_REPLACEMENT_GROUP_LIMIT = 97
 
+# Ownership is operational authority metadata, not a browser label. New
+# identities must carry a reviewed accountable owner and all reviews expire on
+# a fixed bounded cadence so abandoned agents cannot remain silently trusted.
+_AGENT_CRITICALITIES = frozenset({"low", "medium", "high", "critical"})
+_AGENT_OWNERSHIP_REVIEW_SECONDS = 90 * 24 * 60 * 60
+
 # Agent decision evidence is operationally useful but never authoritative.
 # The authenticated host may report only this fixed, content-free vocabulary;
 # tenant, agent, deployment, policy and timestamps are derived server-side.
@@ -3028,6 +3034,123 @@ def _agent_host(value):
     return host
 
 
+def _business_contact(value):
+    """Validate one accountable business mailbox without accepting display syntax."""
+    contact = _bounded_text(value, "businessContact", 254).lower()
+    if not re.fullmatch(
+        r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", contact
+    ):
+        raise ValueError("businessContact must be a valid email address")
+    return contact
+
+
+def _agent_ownership_revision(value, *, allow_zero=False):
+    """Normalize an ownership compare-and-swap revision from JSON or DynamoDB."""
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        raise ValueError("expectedOwnershipRevision must be an integer")
+    if isinstance(value, Decimal) and value != value.to_integral_value():
+        raise ValueError("expectedOwnershipRevision must be an integer")
+    revision = int(value)
+    minimum = 0 if allow_zero else 1
+    if revision < minimum:
+        raise ValueError(f"expectedOwnershipRevision must be at least {minimum}")
+    return revision
+
+
+def _validate_accountable_owner(tenant, owner_id):
+    """Require an active Entra owner when this tenant has SCIM enforcement."""
+    owner_id = _bounded_identifier(owner_id, "ownerId")
+    if (
+        os.environ.get("SCIM_ENABLED") == "true"
+        and SCIM is not None
+        and os.environ.get("ENTRA_AAI_TENANT_ID") == tenant
+    ):
+        try:
+            owner_id = str(uuid.UUID(owner_id))
+        except ValueError as error:
+            raise ValueError("ownerId must be an Entra object UUID") from error
+        owner = SCIM.get_item(
+            Key={"pk": f"TENANT#{tenant}", "sk": f"USER#{owner_id}"},
+            ConsistentRead=True,
+        ).get("Item")
+        if not owner or owner.get("active") is not True:
+            raise ValueError("ownerId is not an actively provisioned Entra user")
+    return owner_id
+
+
+def _new_agent_ownership(tenant, value, deployment, actor, *, now):
+    """Build reviewed ownership fields from operator input and trusted deployment state."""
+    required = {"ownerId", "ownerName", "businessContact", "criticality"}
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError(
+            "ownership must contain ownerId, ownerName, businessContact and criticality"
+        )
+    criticality = value.get("criticality")
+    if criticality not in _AGENT_CRITICALITIES:
+        raise ValueError("criticality must be low, medium, high or critical")
+    # Team and environment are inventory lineage, so they are copied from the
+    # server-owned deployment rather than accepted from a browser request.
+    return {
+        "owner_id": _validate_accountable_owner(tenant, value.get("ownerId")),
+        "owner_name": _bounded_text(value.get("ownerName"), "ownerName", 128),
+        "business_contact": _business_contact(value.get("businessContact")),
+        "team": _bounded_text(deployment.get("team"), "deployment team", 128),
+        "environment": _bounded_identifier(deployment.get("environment"), "deployment environment"),
+        "ownership_criticality": criticality,
+        "ownership_reviewed_at": now,
+        "ownership_review_due_at": now + _AGENT_OWNERSHIP_REVIEW_SECONDS,
+        "ownership_reviewed_by": actor,
+    }
+
+
+def _agent_ownership_view(agent, *, now=None):
+    """Derive a secret-free current, stale or missing ownership posture."""
+    current = int(time.time()) if now is None else int(now)
+    required_text = (
+        "owner_id",
+        "owner_name",
+        "business_contact",
+        "team",
+        "environment",
+        "ownership_reviewed_by",
+    )
+    missing = [
+        field
+        for field in required_text
+        if not isinstance(agent.get(field), str) or not agent.get(field)
+    ]
+    try:
+        revision = _agent_ownership_revision(agent.get("ownership_revision"))
+        reviewed_at = _agent_ownership_revision(agent.get("ownership_reviewed_at"))
+        review_due_at = _agent_ownership_revision(agent.get("ownership_review_due_at"))
+        _business_contact(agent.get("business_contact"))
+    except ValueError:
+        revision = 0
+        reviewed_at = 0
+        review_due_at = 0
+        missing.append("ownership_review")
+    criticality = agent.get("ownership_criticality")
+    if criticality not in _AGENT_CRITICALITIES:
+        missing.append("criticality")
+    status = "missing" if missing else ("stale" if review_due_at <= current else "current")
+    return {
+        "status": status,
+        "revision": revision,
+        "ownerId": agent.get("owner_id", ""),
+        "ownerName": agent.get("owner_name", ""),
+        "team": agent.get("team", ""),
+        "businessContact": agent.get("business_contact", ""),
+        "environment": agent.get("environment", ""),
+        "criticality": criticality if criticality in _AGENT_CRITICALITIES else None,
+        "reviewedAt": reviewed_at,
+        "reviewDueAt": review_due_at,
+        "reviewedBy": agent.get("ownership_reviewed_by", ""),
+        "reasonCodes": sorted(set(missing))
+        if missing
+        else (["review_expired"] if status == "stale" else []),
+    }
+
+
 def _create_item(tenant, kind, identifier, item):
     """Create one tenant-scoped record without allowing identity replacement."""
     record = {**_item_key(tenant, kind, identifier), **item, "tenant_id": tenant}
@@ -3561,6 +3684,15 @@ def _seed(tenant):
             "emergencyStop": False,
             "lifecycle_state": "active",
             "lifecycle_revision": 1,
+            "owner_id": "system-owner",
+            "owner_name": "Platform owner",
+            "business_contact": "platform@example.invalid",
+            "team": "Platform",
+            "ownership_criticality": "medium",
+            "ownership_reviewed_at": now,
+            "ownership_review_due_at": now + _AGENT_OWNERSHIP_REVIEW_SECONDS,
+            "ownership_reviewed_by": "system",
+            "ownership_revision": 1,
             "created_at": now,
         },
     )
@@ -3580,6 +3712,7 @@ def _all_agents(tenant):
         elif agent.get("expires_at", 0) < now and agent.get("status") != "offline":
             agent["status"] = "offline"
         agent["managed_configuration"] = _managed_configuration_posture(tenant, agent, now=now)
+        agent["ownership"] = _agent_ownership_view(agent, now=now)
     return agents
 
 
@@ -3703,6 +3836,8 @@ def _verify_agent(tenant, deployment_id, agent_id):
     managed_configuration_current = bool(
         managed_configuration and managed_configuration.get("status") == "enforced"
     )
+    ownership = _agent_ownership_view(agent, now=checked_at) if agent else None
+    ownership_current = bool(ownership and ownership.get("status") == "current")
     if not agent:
         heartbeat_detail = "Agent is not registered to this deployment."
     elif agent.get("status") != "connected":
@@ -3758,6 +3893,18 @@ def _verify_agent(tenant, deployment_id, agent_id):
                 else "Managed host configuration is not freshly proven."
             ),
         },
+        "ownership": {
+            "passed": ownership_current,
+            "detail": (
+                "Accountable ownership has a current review."
+                if ownership_current
+                else (
+                    "Agent ownership review is stale."
+                    if ownership and ownership.get("status") == "stale"
+                    else "Accountable agent ownership is missing or malformed."
+                )
+            ),
+        },
         "policyAssignment": {
             "passed": policy_assigned,
             "detail": policy_detail,
@@ -3796,6 +3943,7 @@ def _verify_agent(tenant, deployment_id, agent_id):
             "sdkRevision": agent.get("attestation_sdk_revision") if agent else None,
         },
         "managedConfiguration": managed_configuration,
+        "ownership": ownership,
     }
 
 
@@ -3984,6 +4132,78 @@ def _agent_lifecycle_condition(record, expected_revision, expected_state):
     )
 
 
+def _update_agent_ownership(tenant, deployment_id, agent_id, body, actor):
+    """Review accountable ownership with optimistic concurrency and durable evidence."""
+    if not isinstance(body, dict) or set(body) != {
+        "expectedOwnershipRevision",
+        "ownership",
+        "reason",
+    }:
+        raise ValueError("agent ownership review request schema is invalid")
+    expected = _agent_ownership_revision(body.get("expectedOwnershipRevision"), allow_zero=True)
+    reason = _agent_lifecycle_reason(body.get("reason"))
+    agent = _explicit_agent_lifecycle(tenant, deployment_id, agent_id)
+    if not agent:
+        return None
+    if _agent_lifecycle_state(agent) != "active":
+        raise PolicyConflict("only an active agent can receive an ownership review")
+    current_revision = agent.get("ownership_revision")
+    if current_revision is None:
+        if expected != 0:
+            raise PolicyConflict("agent ownership revision is stale")
+    elif _agent_ownership_revision(current_revision) != expected:
+        raise PolicyConflict("agent ownership revision is stale")
+    deployment = TABLE.get_item(
+        Key=_item_key(tenant, "DEPLOYMENT", deployment_id),
+        ConsistentRead=True,
+    ).get("Item")
+    if (
+        not deployment
+        or deployment.get("organization_id") != agent.get("organization_id")
+        or deployment.get("project_id") != agent.get("project_id")
+    ):
+        raise PolicyConflict("agent deployment ownership lineage is invalid")
+    now = int(time.time())
+    ownership = _new_agent_ownership(tenant, body.get("ownership"), deployment, actor, now=now)
+    updated = {
+        **agent,
+        **ownership,
+        "ownership_revision": expected + 1,
+    }
+    if expected == 0:
+        condition = "#lifecycle_state = :active AND attribute_not_exists(ownership_revision)"
+        values = {":active": "active"}
+    else:
+        condition = "#lifecycle_state = :active AND ownership_revision = :ownership_revision"
+        values = {":active": "active", ":ownership_revision": expected}
+    payload = {
+        "deployment_id": deployment_id,
+        "agent_id": agent_id,
+        "owner_id": ownership["owner_id"],
+        "team": ownership["team"],
+        "criticality": ownership["ownership_criticality"],
+        "ownership_revision": expected + 1,
+        "review_due_at": ownership["ownership_review_due_at"],
+        "reason": reason,
+    }
+    audit = _agent_lifecycle_audit_record(
+        tenant, "agent_ownership_reviewed", actor, payload, now=now
+    )
+    _transact_agent_lifecycle(
+        [
+            _transaction_put(
+                updated,
+                condition=condition,
+                names={"#lifecycle_state": "lifecycle_state"},
+                values=values,
+            ),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_agent_lifecycle_audit(tenant, "agent_ownership_reviewed", actor, payload)
+    return {**updated, "ownership": _agent_ownership_view(updated, now=now)}
+
+
 def _revoke_agent(tenant, deployment_id, agent_id, body, actor):
     """Irreversibly revoke one identity and every old session/bootstrap token."""
     if not isinstance(body, dict) or set(body) != {"expectedLifecycleRevision", "reason"}:
@@ -4071,6 +4291,17 @@ def _offboard_agent(tenant, deployment_id, agent_id, body, actor):
         "deletion_reason": reason,
         "replacement_agent_id": agent.get("replacement_agent_id", ""),
         "successor_of": agent.get("successor_of", ""),
+        "owner_id": agent.get("owner_id", ""),
+        "team": agent.get("team", ""),
+        "ownership_criticality": agent.get("ownership_criticality", ""),
+        "ownership_reviewed_at": int(agent.get("ownership_reviewed_at", 0)),
+        "ownership_review_due_at": int(agent.get("ownership_review_due_at", 0)),
+        "ownership_revision": int(agent.get("ownership_revision", 0)),
+        "business_contact_hash": (
+            hashlib.sha256(str(agent.get("business_contact", "")).encode()).hexdigest()
+            if agent.get("business_contact")
+            else ""
+        ),
     }
     payload = {
         "deployment_id": deployment_id,
@@ -4155,6 +4386,15 @@ def _replace_agent(tenant, deployment_id, agent_id, body, actor):
         "lifecycle_state": "active",
         "lifecycle_revision": 1,
         "successor_of": agent_id,
+        "owner_id": agent.get("owner_id", ""),
+        "owner_name": agent.get("owner_name", ""),
+        "business_contact": agent.get("business_contact", ""),
+        "team": agent.get("team", ""),
+        "ownership_criticality": agent.get("ownership_criticality", ""),
+        "ownership_reviewed_at": agent.get("ownership_reviewed_at", 0),
+        "ownership_review_due_at": agent.get("ownership_review_due_at", 0),
+        "ownership_reviewed_by": agent.get("ownership_reviewed_by", ""),
+        "ownership_revision": agent.get("ownership_revision", 0),
     }
     payload = {
         "deployment_id": deployment_id,
@@ -5574,7 +5814,13 @@ def handler(event, context):
                             return _response(
                                 409, {"error": "agent project scope is immutable after enrollment"}
                             )
-                        return _response(200, existing)
+                        return _response(
+                            200,
+                            {
+                                **existing,
+                                "ownership": _agent_ownership_view(existing),
+                            },
+                        )
                     # Legacy records could omit scope. Permit only the one-way
                     # transition from empty to a bounded root; later scope
                     # changes require a new agent identity and enrollment.
@@ -5604,7 +5850,13 @@ def handler(event, context):
                             ConsistentRead=True,
                         ).get("Item")
                         if current and current.get("project_root") == project_root:
-                            return _response(200, current)
+                            return _response(
+                                200,
+                                {
+                                    **current,
+                                    "ownership": _agent_ownership_view(current),
+                                },
+                            )
                         return _response(
                             409, {"error": "agent project scope is immutable after enrollment"}
                         )
@@ -5615,8 +5867,21 @@ def handler(event, context):
                         actor,
                         {"deployment_id": deployment_id, "agent_id": agent_id},
                     )
-                    return _response(200, repaired)
+                    return _response(
+                        200,
+                        {
+                            **repaired,
+                            "ownership": _agent_ownership_view(repaired),
+                        },
+                    )
                 now = int(time.time())
+                ownership = _new_agent_ownership(
+                    tenant,
+                    body.get("ownership"),
+                    deployment,
+                    actor,
+                    now=now,
+                )
                 try:
                     item = _create_item(
                         tenant,
@@ -5640,6 +5905,8 @@ def handler(event, context):
                             "created_at": now,
                             "lifecycle_state": "active",
                             "lifecycle_revision": 1,
+                            **ownership,
+                            "ownership_revision": 1,
                         },
                     )
                 except Exception as error:
@@ -5652,7 +5919,31 @@ def handler(event, context):
                     actor,
                     {"deployment_id": deployment_id, "agent_id": agent_id},
                 )
-                return _response(201, item)
+                return _response(
+                    201,
+                    {
+                        **item,
+                        "ownership": _agent_ownership_view(item, now=now),
+                    },
+                )
+            if (
+                method == "PUT"
+                and len(parts) == 4
+                and parts[0] == "agents"
+                and parts[3] == "ownership"
+            ):
+                deployment_id = _bounded_identifier(parts[1], "deploymentId")
+                agent_id = _bounded_identifier(parts[2], "agentId")
+                result = _update_agent_ownership(
+                    tenant,
+                    deployment_id,
+                    agent_id,
+                    _body(event),
+                    actor,
+                )
+                if result is None:
+                    return _response(404, {"error": "agent not found"})
+                return _response(200, result)
             if (
                 method == "POST"
                 and len(parts) == 4

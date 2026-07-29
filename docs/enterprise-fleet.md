@@ -71,6 +71,7 @@ The reference WSGI application exposes these authenticated endpoints:
 | `POST /api/enterprise/agents/{deployment}/{agent}/revoke` | Irreversibly revoke one identity using its expected lifecycle revision |
 | `POST /api/enterprise/agents/{deployment}/{agent}/replace` | Atomically revoke a predecessor, create a new offline successor and inherit group assignment |
 | `POST /api/enterprise/agents/{deployment}/{agent}/offboard` | Remove operational data from a revoked identity while retaining a lifecycle tombstone |
+| `PUT /api/enterprise/agents/{deployment}/{agent}/ownership` | Review accountable ownership using its expected ownership revision |
 | `POST /api/enterprise/agents/{deployment}/{agent}/heartbeat` | Refresh presence and optionally publish bounded aggregate SDK telemetry plus managed-host evidence |
 | `POST /api/enterprise/agents/{deployment}/{agent}/disconnect` | Mark offline |
 | `POST /api/agent/{deployment}/{agent}/decisions` | Record one authenticated, content-minimised host decision as operational evidence |
@@ -151,6 +152,32 @@ a tombstone: tenant lineage, host, lifecycle actors/reasons, timestamps,
 replacement relationship and a project-root digest remain, while the local
 path, telemetry and managed-host observations are removed. Agent IDs are never
 reusable.
+
+### Accountable agent ownership
+
+New agent registration requires an `ownership` object containing a stable
+`ownerId`, human-readable `ownerName`, monitored `businessContact` mailbox and
+one of `low`, `medium`, `high` or `critical`. The API does not accept team or
+environment from that object: it copies both from the existing tenant-owned
+deployment so a browser cannot rewrite business lineage. When Microsoft Entra
+SCIM is configured for the tenant, `ownerId` must be an active provisioned
+Entra object UUID.
+
+Ownership reviews are valid for 90 days. The server returns `current`, `stale`
+or `missing` plus review timestamps and reason codes; it never accepts the
+status from a client. Missing, malformed or expired ownership prevents the
+agent verification endpoint from returning `verified=true`. Legacy identities
+remain visible as missing until a fleet operator completes a review.
+
+`PUT /enterprise/agents/{deployment}/{agent}/ownership` requires the exact
+`expectedOwnershipRevision`, a complete replacement ownership object and a
+reason of at least 20 characters. Revision zero is valid only for an agent that
+has never had ownership metadata. The control plane compares lifecycle and
+ownership state in one DynamoDB transaction and writes immutable, content-
+minimised evidence in that same transaction. The S3 audit copy is secondary.
+Replacement identities inherit the predecessor's current ownership review;
+offboarding retains owner ID, team, criticality, review timing and a hash of the
+business contact while removing the contact value and local project path.
 
 ### Central action approvals
 
