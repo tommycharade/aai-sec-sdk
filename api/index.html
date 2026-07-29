@@ -775,6 +775,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../entra-scim-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Entra SCIM lifecycle runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-operations-readiness/" class="md-nav__link">
         
   
@@ -21424,7 +21451,75 @@ process from a missing policy or an intentionally stopped agent.</p>
 <span class="normal">3476</span>
 <span class="normal">3477</span>
 <span class="normal">3478</span>
-<span class="normal">3479</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EnterpriseFleetApplication</span><span class="p">:</span>
+<span class="normal">3479</span>
+<span class="normal">3480</span>
+<span class="normal">3481</span>
+<span class="normal">3482</span>
+<span class="normal">3483</span>
+<span class="normal">3484</span>
+<span class="normal">3485</span>
+<span class="normal">3486</span>
+<span class="normal">3487</span>
+<span class="normal">3488</span>
+<span class="normal">3489</span>
+<span class="normal">3490</span>
+<span class="normal">3491</span>
+<span class="normal">3492</span>
+<span class="normal">3493</span>
+<span class="normal">3494</span>
+<span class="normal">3495</span>
+<span class="normal">3496</span>
+<span class="normal">3497</span>
+<span class="normal">3498</span>
+<span class="normal">3499</span>
+<span class="normal">3500</span>
+<span class="normal">3501</span>
+<span class="normal">3502</span>
+<span class="normal">3503</span>
+<span class="normal">3504</span>
+<span class="normal">3505</span>
+<span class="normal">3506</span>
+<span class="normal">3507</span>
+<span class="normal">3508</span>
+<span class="normal">3509</span>
+<span class="normal">3510</span>
+<span class="normal">3511</span>
+<span class="normal">3512</span>
+<span class="normal">3513</span>
+<span class="normal">3514</span>
+<span class="normal">3515</span>
+<span class="normal">3516</span>
+<span class="normal">3517</span>
+<span class="normal">3518</span>
+<span class="normal">3519</span>
+<span class="normal">3520</span>
+<span class="normal">3521</span>
+<span class="normal">3522</span>
+<span class="normal">3523</span>
+<span class="normal">3524</span>
+<span class="normal">3525</span>
+<span class="normal">3526</span>
+<span class="normal">3527</span>
+<span class="normal">3528</span>
+<span class="normal">3529</span>
+<span class="normal">3530</span>
+<span class="normal">3531</span>
+<span class="normal">3532</span>
+<span class="normal">3533</span>
+<span class="normal">3534</span>
+<span class="normal">3535</span>
+<span class="normal">3536</span>
+<span class="normal">3537</span>
+<span class="normal">3538</span>
+<span class="normal">3539</span>
+<span class="normal">3540</span>
+<span class="normal">3541</span>
+<span class="normal">3542</span>
+<span class="normal">3543</span>
+<span class="normal">3544</span>
+<span class="normal">3545</span>
+<span class="normal">3546</span>
+<span class="normal">3547</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EnterpriseFleetApplication</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Authenticated WSGI API for enterprise fleet inventory and agent presence.&quot;&quot;&quot;</span>
 
     <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
@@ -21459,6 +21554,14 @@ process from a missing policy or an intentionally stopped agent.</p>
             <span class="k">if</span> <span class="n">method</span> <span class="o">==</span> <span class="s2">&quot;GET&quot;</span> <span class="ow">and</span> <span class="n">path</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">inventory_prefix</span><span class="p">):</span>
                 <span class="n">resource</span> <span class="o">=</span> <span class="n">path</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">inventory_prefix</span><span class="p">)</span> <span class="p">:]</span>
                 <span class="n">effective_prefix</span> <span class="o">=</span> <span class="s2">&quot;/api/enterprise/agents/&quot;</span>
+                <span class="k">if</span> <span class="n">resource</span> <span class="o">==</span> <span class="s2">&quot;identity&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_authorize</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="s2">&quot;read&quot;</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_respond</span><span class="p">(</span>
+                        <span class="n">start_response</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_development_identity_access</span><span class="p">(</span><span class="n">identity</span><span class="p">)</span>
+                    <span class="p">)</span>
+                <span class="k">if</span> <span class="n">resource</span> <span class="o">==</span> <span class="s2">&quot;integrations&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_authorize</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="s2">&quot;read&quot;</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_respond</span><span class="p">(</span><span class="n">start_response</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_development_integrations</span><span class="p">())</span>
                 <span class="k">if</span> <span class="n">resource</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;agents/&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">resource</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;/verify&quot;</span><span class="p">):</span>
                     <span class="bp">self</span><span class="o">.</span><span class="n">_authorize</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="s2">&quot;read&quot;</span><span class="p">)</span>
                     <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_agent_route</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">effective_prefix</span><span class="p">,</span> <span class="s2">&quot;/verify&quot;</span><span class="p">)</span>
@@ -21954,6 +22057,66 @@ process from a missing policy or an intentionally stopped agent.</p>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Require the injected authenticator to approve an operation.&quot;&quot;&quot;</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">authenticator</span><span class="o">.</span><span class="n">authorize</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">action</span><span class="p">):</span>
             <span class="k">raise</span> <span class="n">FleetAuthorizationError</span><span class="p">(</span><span class="s2">&quot;forbidden&quot;</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_development_identity_access</span><span class="p">(</span><span class="n">identity</span><span class="p">:</span> <span class="n">FleetIdentity</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Describe local authentication without pretending it is enterprise SSO.&quot;&quot;&quot;</span>
+        <span class="n">role_mapping</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;admin&quot;</span><span class="p">:</span> <span class="s2">&quot;platform-admin&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;operator&quot;</span><span class="p">:</span> <span class="s2">&quot;fleet-operator&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;viewer&quot;</span><span class="p">:</span> <span class="s2">&quot;auditor&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;incident_commander&quot;</span><span class="p">:</span> <span class="s2">&quot;incident-responder&quot;</span><span class="p">,</span>
+        <span class="p">}</span>
+        <span class="n">capabilities</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;platform-admin&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;*&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;security-operator&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;approval_decision&quot;</span><span class="p">,</span> <span class="s2">&quot;incident_response&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;policy-author&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;policy_write&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;policy-approver&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;approval_decision&quot;</span><span class="p">,</span> <span class="s2">&quot;policy_approval&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;fleet-operator&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;fleet_write&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;incident-responder&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;incident_response&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;auditor&quot;</span><span class="p">:</span> <span class="p">[],</span>
+        <span class="p">}</span>
+        <span class="n">active_roles</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span>
+            <span class="p">{</span><span class="n">role_mapping</span><span class="p">[</span><span class="n">role</span><span class="p">]</span> <span class="k">for</span> <span class="n">role</span> <span class="ow">in</span> <span class="n">identity</span><span class="o">.</span><span class="n">roles</span> <span class="k">if</span> <span class="n">role</span> <span class="ow">in</span> <span class="n">role_mapping</span><span class="p">}</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;provider&quot;</span><span class="p">:</span> <span class="s2">&quot;development_static&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;providerLabel&quot;</span><span class="p">:</span> <span class="s2">&quot;Development static bearer&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;protocol&quot;</span><span class="p">:</span> <span class="s2">&quot;static_bearer&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;development_only&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;tenantHint&quot;</span><span class="p">:</span> <span class="n">identity</span><span class="o">.</span><span class="n">organization_id</span><span class="p">,</span>
+            <span class="s2">&quot;tenantBinding&quot;</span><span class="p">:</span> <span class="s2">&quot;server_owned&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;roleSource&quot;</span><span class="p">:</span> <span class="s2">&quot;deployment_authenticator&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;scimStatus&quot;</span><span class="p">:</span> <span class="s2">&quot;not_configured&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;scim&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;not_configured&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;lifecycleEnforced&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+                <span class="s2">&quot;users&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;total&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;active&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;disabled&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">},</span>
+                <span class="s2">&quot;groups&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;total&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;mapped&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;unmapped&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">},</span>
+                <span class="s2">&quot;groupMappings&quot;</span><span class="p">:</span> <span class="p">[],</span>
+                <span class="s2">&quot;lastProvisionedAt&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;activeRoles&quot;</span><span class="p">:</span> <span class="n">active_roles</span><span class="p">,</span>
+            <span class="s2">&quot;roleMatrix&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="p">{</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="n">role</span><span class="p">,</span> <span class="s2">&quot;capabilities&quot;</span><span class="p">:</span> <span class="n">role_capabilities</span><span class="p">}</span>
+                <span class="k">for</span> <span class="n">role</span><span class="p">,</span> <span class="n">role_capabilities</span> <span class="ow">in</span> <span class="n">capabilities</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+            <span class="p">],</span>
+        <span class="p">}</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_development_integrations</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Report the Splunk placeholder without claiming local delivery.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;splunk&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;provider&quot;</span><span class="p">:</span> <span class="s2">&quot;splunk_hec&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;stub&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;deliveryVerified&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+                <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="p">(</span>
+                    <span class="s2">&quot;Schema and operator workflow placeholder only; &quot;</span>
+                    <span class="s2">&quot;no event delivery is configured.&quot;</span>
+                <span class="p">),</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">_authorize_any</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">identity</span><span class="p">:</span> <span class="n">FleetIdentity</span><span class="p">,</span> <span class="n">actions</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Permit one of several explicit role actions without broadening scope.&quot;&quot;&quot;</span>
@@ -22553,7 +22716,15 @@ process from a missing policy or an intentionally stopped agent.</p>
 <span class="normal">3410</span>
 <span class="normal">3411</span>
 <span class="normal">3412</span>
-<span class="normal">3413</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">environ</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> <span class="n">start_response</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">bytes</span><span class="p">]:</span>
+<span class="normal">3413</span>
+<span class="normal">3414</span>
+<span class="normal">3415</span>
+<span class="normal">3416</span>
+<span class="normal">3417</span>
+<span class="normal">3418</span>
+<span class="normal">3419</span>
+<span class="normal">3420</span>
+<span class="normal">3421</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">environ</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> <span class="n">start_response</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">bytes</span><span class="p">]:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Handle one bounded JSON request and return a JSON response.&quot;&quot;&quot;</span>
     <span class="n">method</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;REQUEST_METHOD&quot;</span><span class="p">,</span> <span class="s2">&quot;GET&quot;</span><span class="p">))</span>
     <span class="n">path</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;PATH_INFO&quot;</span><span class="p">,</span> <span class="s2">&quot;/&quot;</span><span class="p">))</span>
@@ -22570,6 +22741,14 @@ process from a missing policy or an intentionally stopped agent.</p>
         <span class="k">if</span> <span class="n">method</span> <span class="o">==</span> <span class="s2">&quot;GET&quot;</span> <span class="ow">and</span> <span class="n">path</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">inventory_prefix</span><span class="p">):</span>
             <span class="n">resource</span> <span class="o">=</span> <span class="n">path</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">inventory_prefix</span><span class="p">)</span> <span class="p">:]</span>
             <span class="n">effective_prefix</span> <span class="o">=</span> <span class="s2">&quot;/api/enterprise/agents/&quot;</span>
+            <span class="k">if</span> <span class="n">resource</span> <span class="o">==</span> <span class="s2">&quot;identity&quot;</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_authorize</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="s2">&quot;read&quot;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_respond</span><span class="p">(</span>
+                    <span class="n">start_response</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_development_identity_access</span><span class="p">(</span><span class="n">identity</span><span class="p">)</span>
+                <span class="p">)</span>
+            <span class="k">if</span> <span class="n">resource</span> <span class="o">==</span> <span class="s2">&quot;integrations&quot;</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_authorize</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="s2">&quot;read&quot;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_respond</span><span class="p">(</span><span class="n">start_response</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_development_integrations</span><span class="p">())</span>
             <span class="k">if</span> <span class="n">resource</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;agents/&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">resource</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;/verify&quot;</span><span class="p">):</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">_authorize</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="s2">&quot;read&quot;</span><span class="p">)</span>
                 <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_agent_route</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">effective_prefix</span><span class="p">,</span> <span class="s2">&quot;/verify&quot;</span><span class="p">)</span>

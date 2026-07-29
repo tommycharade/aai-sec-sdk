@@ -16,7 +16,7 @@
         <link rel="prev" href="../enterprise-rollout-p0-p1-requirements/">
       
       
-        <link rel="next" href="../enterprise-operations-readiness/">
+        <link rel="next" href="../entra-scim-runbook/">
       
       
         
@@ -866,6 +866,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../entra-scim-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Entra SCIM lifecycle runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-operations-readiness/" class="md-nav__link">
         
   
@@ -1474,8 +1501,8 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.</p>
 <td>P0-06</td>
 <td>Entra SSO, SCIM and granular RBAC</td>
 <td>Partial</td>
-<td>Tenant-specific Entra OIDC CDK adapter, server-owned tenant binding, seven capability roles, adversarial tests and Identity &amp; Trust UI</td>
-<td>SCIM, automatic Entra app-role/group mapping, access certification and live federated acceptance</td>
+<td>Tenant-specific Entra OIDC, tenant-bound SCIM users/groups/memberships, admin-controlled canonical-role mapping, five-minute token reconciliation, adversarial contracts and Identity &amp; Trust UI</td>
+<td>Live Entra joiner/mover/leaver acceptance, break glass, access certification and delegated scopes</td>
 </tr>
 <tr>
 <td>P0-07</td>
@@ -1571,11 +1598,19 @@ with Microsoft Entra ID as the first adapter:</p>
 <li>The API independently binds that directory to one provisioned AAI tenant.</li>
 <li>Mutating routes require an explicit capability from one of seven canonical
    roles; malformed and lookalike roles fail closed.</li>
-<li>The UI reports active roles, tenant provenance, SCIM status and Splunk
-   delivery status without treating setup as proof.</li>
+<li>A separate bearer-protected SCIM endpoint provisions tenant-bound users,
+   groups and memberships using immutable Entra object UUIDs.</li>
+<li>Only a platform administrator maps exact active groups to canonical roles;
+   token issuance reconciles live lifecycle state and fails closed.</li>
+<li>Access and ID tokens expire after five minutes, bounding mover/leaver
+   convergence when refresh repeats the lifecycle lookup.</li>
+<li>The UI reports lifecycle counts, sync posture and role mappings while
+   preserving honest degraded and not-configured states. Splunk remains a
+   non-delivering stub.</li>
 </ol>
-<p>This closes a foundation, not P0-06 itself. SCIM and automatic Entra group/app
-role reconciliation remain the next identity deliverable.</p>
+<p>This advances but does not close P0-06. The next identity acceptance slice is
+a live Entra joiner/mover/leaver exercise, followed by break glass, quarterly
+access certification and delegated administrative scopes.</p>
 
 
 

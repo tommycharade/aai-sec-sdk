@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/enterprise-ui/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/entra-scim-runbook/">
       
       
-        <link rel="prev" href="../claude-managed-resources/">
+        <link rel="prev" href="../p0-p1-implementation-status/">
       
       
-        <link rel="next" href="../enterprise-integration-design/">
+        <link rel="next" href="../enterprise-operations-readiness/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Wider enterprise UI - Agentic AI Security SDK</title>
+        <title>Microsoft Entra SCIM lifecycle runbook - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#wider-enterprise-ui" class="md-skip">
+        <a href="#microsoft-entra-scim-lifecycle-runbook" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Wider enterprise UI
+              Microsoft Entra SCIM lifecycle runbook
             
           </span>
         </div>
@@ -637,37 +637,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Wider enterprise UI
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../enterprise-ui/" class="md-nav__link">
         
   
   
@@ -683,70 +656,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#enterprise-navigation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Enterprise navigation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#enterprise-managed-features" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Enterprise-managed features
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#group-and-policy-relationship" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Group and policy relationship
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#operational-safeguards" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operational safeguards
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -863,10 +772,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../entra-scim-runbook/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Entra SCIM lifecycle runbook
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -882,6 +818,131 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#security-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entra-enterprise-application-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entra enterprise application setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acceptance-procedure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance procedure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Acceptance procedure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#joiner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Joiner
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mover
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#leaver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Leaver
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operations-and-incident-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operations and incident response
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1372,10 +1433,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#enterprise-navigation" class="md-nav__link">
+  <a href="#security-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Enterprise navigation
+        Security boundary
       
     </span>
   </a>
@@ -1383,10 +1444,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#enterprise-managed-features" class="md-nav__link">
+  <a href="#deployment" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Enterprise-managed features
+        Deployment
       
     </span>
   </a>
@@ -1394,10 +1455,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#group-and-policy-relationship" class="md-nav__link">
+  <a href="#entra-enterprise-application-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Group and policy relationship
+        Entra enterprise application setup
       
     </span>
   </a>
@@ -1405,10 +1466,71 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#operational-safeguards" class="md-nav__link">
+  <a href="#acceptance-procedure" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Operational safeguards
+        Acceptance procedure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Acceptance procedure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#joiner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Joiner
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mover
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#leaver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Leaver
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operations-and-incident-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operations and incident response
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current limitations
       
     </span>
   </a>
@@ -1435,213 +1557,115 @@
   
 
 
-<h1 id="wider-enterprise-ui">Wider enterprise UI</h1>
-<p>The wider enterprise UI manages deployments of the SDK, integrations,
-providers, groups, agents, operational health and configuration lifecycle. It
-does not replace the Policy editor. Policies define authority; the enterprise
-UI determines where and to whom those policies are deployed.</p>
-<p>See <a href="../enterprise-integration-design/">Enterprise integration design</a> for the
-host contracts and <a href="../enterprise-user-journeys/">Enterprise user journeys</a> for
-the central team's operating workflows.</p>
-<h2 id="enterprise-navigation">Enterprise navigation</h2>
-<p>The recommended navigation is:</p>
+<h1 id="microsoft-entra-scim-lifecycle-runbook">Microsoft Entra SCIM lifecycle runbook</h1>
+<p>This runbook connects Microsoft Entra automatic provisioning to the hosted
+control plane. It covers operator joiner, mover and leaver actions. It does not
+provision Claude Code or Codex agents; agent enrollment remains a separate
+fleet workflow.</p>
+<h2 id="security-boundary">Security boundary</h2>
 <ul>
-<li>Dashboard</li>
-<li>Policies</li>
-<li>Groups</li>
-<li>Agents</li>
-<li>Deployments</li>
-<li>Integrations</li>
-<li>Approvals</li>
-<li>Audit and evidence</li>
-<li>Credentials</li>
-<li>Isolation</li>
-<li>Configuration history</li>
-<li>Emergency controls</li>
-<li>Settings</li>
+<li>The SCIM endpoint is public at the network layer because Microsoft Entra must
+  call it. Every request requires a tenant-specific bearer resolved from AWS
+  Secrets Manager and compared in constant time.</li>
+<li>The request cannot choose an AAI tenant. One deployed endpoint is bound to
+  the configured <code>ENTRA_AAI_TENANT_ID</code>.</li>
+<li>Entra <code>externalId</code> and the signed OIDC <code>oid</code> claim must contain the same
+  directory object UUID. Email addresses and display names are never identity
+  keys.</li>
+<li>SCIM users and groups grant no authority by themselves. A platform
+  administrator must map an exact provisioned group to one canonical role in
+  <strong>Identity &amp; trust</strong>. An unmapped or inactive group grants no access.</li>
+<li>Cognito access and ID tokens live for five minutes. Every refresh reruns the
+  pre-token lifecycle lookup. A deactivated, unprovisioned or roleless Entra
+  identity cannot obtain another token.</li>
+<li>The OIDC client secret and SCIM bearer are distinct secrets. Neither is
+  returned by the API, embedded in the UI, or accepted from browser state.</li>
 </ul>
-<h2 id="enterprise-managed-features">Enterprise-managed features</h2>
-<table>
-<thead>
-<tr>
-<th>Feature</th>
-<th>What the wider UI should provide</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>GuardedRuntime</td>
-<td>Deployment configuration, runtime version and health.</td>
-</tr>
-<tr>
-<td>OPA/Cedar provider</td>
-<td>Provider selection, endpoint, authentication reference and health.</td>
-</tr>
-<tr>
-<td>HTTP approvals</td>
-<td>Approval-service endpoint, authentication reference and health.</td>
-</tr>
-<tr>
-<td>Emergency stop</td>
-<td>Global, group and deployment stop controls with explicit confirmation and audit.</td>
-</tr>
-<tr>
-<td>Idempotency store</td>
-<td>Adapter, storage location, TTL, garbage-collection status and health.</td>
-</tr>
-<tr>
-<td>Credential broker</td>
-<td>Broker selection, endpoint, enablement and health.</td>
-</tr>
-<tr>
-<td>Token credential broker</td>
-<td>Token-service/provider configuration and scope evidence.</td>
-</tr>
-<tr>
-<td>Credential TTL and revocation</td>
-<td>Rotation, revocation and broker operational status.</td>
-</tr>
-<tr>
-<td>Isolation verifier</td>
-<td>Verifier selection, endpoint and health.</td>
-</tr>
-<tr>
-<td>Deployment-attested isolation</td>
-<td>Attestation provider, deployment evidence and verification status.</td>
-</tr>
-<tr>
-<td>Audit sinks</td>
-<td>Memory, JSONL, replicated and OpenTelemetry destinations.</td>
-</tr>
-<tr>
-<td>Audit path and endpoint</td>
-<td>Storage location, endpoint, retention and delivery status.</td>
-</tr>
-<tr>
-<td>Telemetry</td>
-<td>Exporter enablement and destination.</td>
-</tr>
-<tr>
-<td>Audit replication</td>
-<td>Delivery failures, retries and evidence-loss alerts.</td>
-</tr>
-<tr>
-<td>MCP gateway</td>
-<td>Gateway command, server name, deployment status and version.</td>
-</tr>
-<tr>
-<td>MCP HTTP application</td>
-<td>Host, port, authentication and bounded request/response settings.</td>
-</tr>
-<tr>
-<td>MCP session store</td>
-<td>Session expiry, revocation and storage health.</td>
-</tr>
-<tr>
-<td>Claude Code integration</td>
-<td>Project onboarding, MCP registration and PreToolUse hook setup.</td>
-</tr>
-<tr>
-<td>OpenCode profile</td>
-<td>Guided MCP configuration and connection verification.</td>
-</tr>
-<tr>
-<td>OpenHands profile</td>
-<td>Guided self-hosted MCP configuration and connection verification.</td>
-</tr>
-<tr>
-<td>Cline profile</td>
-<td>Guided MCP configuration and connection verification.</td>
-</tr>
-<tr>
-<td>Gemini CLI profile</td>
-<td>Guided extension/MCP configuration and connection verification.</td>
-</tr>
-<tr>
-<td>GitHub Copilot profile</td>
-<td>Guided CLI/cloud-agent MCP configuration and connection verification.</td>
-</tr>
-<tr>
-<td>Codex CLI profile</td>
-<td>Guided MCP configuration and connection verification.</td>
-</tr>
-<tr>
-<td>Custom host integration</td>
-<td>Integration status and documentation; implementation remains developer-owned.</td>
-</tr>
-<tr>
-<td>Agent registration</td>
-<td>Register, replace, revoke and inspect enrolled agents.</td>
-</tr>
-<tr>
-<td>Agent heartbeat</td>
-<td>Heartbeat interval, expiry threshold and health view.</td>
-</tr>
-<tr>
-<td>Disconnect detection</td>
-<td>Offline state, expiry status and operator alerts.</td>
-</tr>
-<tr>
-<td>Project metadata</td>
-<td>Host, project root, identity, last heartbeat and expiry.</td>
-</tr>
-<tr>
-<td>Lifecycle auditing</td>
-<td>Registration, replacement, expiry and disconnect history.</td>
-</tr>
-<tr>
-<td>Configuration persistence</td>
-<td>Save validated configuration and show activation state.</td>
-</tr>
-<tr>
-<td>Configuration history</td>
-<td>Compare versions, approve rollback and restore a prior version.</td>
-</tr>
-<tr>
-<td>Live runtime activation</td>
-<td>Stage, activate and verify configuration changes.</td>
-</tr>
-<tr>
-<td>Configuration validation</td>
-<td>Show validation results before activation.</td>
-</tr>
-<tr>
-<td>UI authentication</td>
-<td>Operators, roles, bearer tokens and enterprise SSO integration.</td>
-</tr>
-<tr>
-<td>CORS/origin restriction</td>
-<td>Allowed browser origins and deployment environment.</td>
-</tr>
-<tr>
-<td>Agent groups</td>
-<td>Create groups, select a policy, view members and add/remove agents.</td>
-</tr>
-<tr>
-<td>Claude onboarding script</td>
-<td>Display or generate the exact onboarding command for a project.</td>
-</tr>
-<tr>
-<td>Configuration backups</td>
-<td>Show backup status and provide controlled restore operations.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="group-and-policy-relationship">Group and policy relationship</h2>
-<p>A group is the deployment-management boundary. Each group selects one policy
-version and contains zero or more enrolled agents. The UI should show the
-effective relationship clearly:</p>
-<pre><code class="language-text">Policy -&gt; Group -&gt; Agent deployments -&gt; Agent projects
+<h2 id="deployment">Deployment</h2>
+<p>Create a random SCIM bearer of at least 32 characters and store it as either a
+raw Secrets Manager <code>SecretString</code> or JSON with one <code>token</code> field. Restrict
+read access to the generated SCIM Lambda role.</p>
+<p>Deploy all OIDC variables plus the SCIM secret name:</p>
+<pre><code class="language-bash">ENTRA_TENANT_ID=&lt;entra-directory-uuid&gt; \
+ENTRA_CLIENT_ID=&lt;entra-application-client-id&gt; \
+ENTRA_CLIENT_SECRET_NAME=&lt;oidc-secret-name&gt; \
+ENTRA_AAI_TENANT_ID=&lt;provisioned-aai-tenant-id&gt; \
+ENTRA_SCIM_TOKEN_SECRET_NAME=&lt;scim-bearer-secret-name&gt; \
+AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 </code></pre>
-<p>Changing group membership must not silently mutate an active session. The
-runtime must re-evaluate live actions using the currently active authority,
-and policy changes should expose rollout state and affected agents.</p>
-<h2 id="operational-safeguards">Operational safeguards</h2>
-<p>Enterprise actions should require role-based authorization, use explicit
-confirmation for emergency operations, produce audit events, and expose
-health/error state rather than silently accepting configuration. Secrets should
-be stored as references to an enterprise secret/IAM system, never displayed or
-persisted in browser state.</p>
+<p>Record the <code>MicrosoftEntraScimEndpoint</code> stack output. The stack rejects a SCIM
+secret configured without the complete Entra OIDC binding.</p>
+<h2 id="entra-enterprise-application-setup">Entra enterprise application setup</h2>
+<ol>
+<li>Use a single-tenant enterprise application and the Cognito callback ending
+   in <code>/oauth2/idpresponse</code> for sign-in.</li>
+<li>Include the Entra object ID as the OIDC <code>oid</code> claim. Cognito maps it to the
+   non-writable browser attribute <code>custom:entra_object_id</code>.</li>
+<li>Open <strong>Provisioning</strong>, select automatic provisioning and enter the SCIM
+   endpoint as the tenant URL.</li>
+<li>Enter the dedicated SCIM bearer. Do not reuse the OIDC client secret.</li>
+<li>Scope provisioning to assigned users and groups. Ensure the user object ID
+   is sent as <code>externalId</code>, <code>userName</code> is populated, and group object IDs are
+   sent as <code>externalId</code>.</li>
+<li>Test the connection, run on-demand provisioning for a synthetic pilot user
+   and group, then start the provisioning job.</li>
+<li>Open <strong>Identity &amp; trust</strong>. Confirm the user/group counts and sync age, then
+   map the pilot group to the least-privilege canonical role.</li>
+</ol>
+<p>Microsoft Entra supports creating, updating and deactivating users and groups,
+and adding or removing group membership through SCIM. The adapter deliberately
+rejects unsupported filters, unknown users, malformed UUIDs, more than 20
+operations per request and inventories beyond its bounded response limit.</p>
+<h2 id="acceptance-procedure">Acceptance procedure</h2>
+<p>Use synthetic identities and retain redaction-safe timestamps and result IDs.</p>
+<h3 id="joiner">Joiner</h3>
+<ol>
+<li>Assign a new pilot operator and mapped group to the Entra application.</li>
+<li>Run on-demand provisioning and confirm the UI active-user count changes.</li>
+<li>Sign in as the operator.</li>
+<li>Verify the token receives only the mapped canonical role.</li>
+<li>Call one permitted API and one API belonging to another role; retain the
+   success and HTTP 403 evidence.</li>
+</ol>
+<h3 id="mover">Mover</h3>
+<ol>
+<li>Move the operator from the original Entra group to a different mapped
+   group.</li>
+<li>Confirm SCIM removes and adds the exact memberships.</li>
+<li>Wait for the current token to expire or sign out and back in.</li>
+<li>Prove the old capability is denied and the new capability is permitted.</li>
+</ol>
+<h3 id="leaver">Leaver</h3>
+<ol>
+<li>Disable or unassign the operator in Entra and run provisioning.</li>
+<li>Confirm the UI disabled-user count changes.</li>
+<li>Attempt token refresh and a new login; both must fail.</li>
+<li>Verify any already-issued operator token stops working within five minutes.</li>
+<li>Retain the lifecycle audit record and the denied authentication evidence.</li>
+</ol>
+<h2 id="operations-and-incident-response">Operations and incident response</h2>
+<ul>
+<li><strong>Provisioning failure:</strong> do not create a local Cognito group workaround.
+  Keep the user unprivileged, inspect Entra provisioning logs and the SCIM
+  Lambda error alarm, then retry the idempotent operation.</li>
+<li><strong>Inventory degraded:</strong> the UI refuses to display a partial inventory after
+  the bounded limit. Reduce assignment scope or use a future paginated
+  administration API; do not assign roles from partial data.</li>
+<li><strong>Suspected SCIM bearer exposure:</strong> rotate the Secrets Manager value, wait up
+  to five minutes for the Lambda cache to expire, update Entra and verify the
+  old bearer receives HTTP 401. If immediate invalidation is required, publish
+  a new Lambda version or force cold starts while updating Entra.</li>
+<li><strong>Incorrect group mapping:</strong> unmap the group in <strong>Identity &amp; trust</strong>. New
+  tokens receive no role from it; current tokens expire within five minutes.</li>
+<li><strong>Emergency access:</strong> SCIM does not implement break glass. Use the separate,
+  time-bound break-glass process once implemented and retain independent
+  evidence.</li>
+</ul>
+<h2 id="current-limitations">Current limitations</h2>
+<p>This implementation advances P0-06 but does not complete it. Live Entra
+acceptance, configurable provisioning SLO alarms, immediate global token
+revocation, break-glass workflow, quarterly access certification and delegated
+administrative scopes remain outstanding. Splunk remains a non-delivering stub.</p>
 
 
 
