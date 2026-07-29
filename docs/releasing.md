@@ -13,7 +13,9 @@ latest supported release line.
       proves >=80% overall, >=75% per component, 100% critical mutants, and
       zero timeout/suspicious/skipped/not-checked results; retain the artifact.
 - [ ] `make package-check` builds and validates wheel and source distributions.
-- [ ] `make security-check` reports no known dependency vulnerabilities.
+- [ ] `make security-check` reports no unaccepted dependency vulnerabilities;
+      any build-only exception has a named owner, compensating controls,
+      automated upstream monitoring and an unexpired review date.
 - [ ] `requirements-ci.txt` and `requirements-docs.txt` are reviewed when
       direct toolchain versions change; direct inputs are exact-pinned.
 - [ ] `requirements-build.txt` matches the exact PEP 517 build requirements.
@@ -46,6 +48,15 @@ committed because the supported Python matrix selects different transitive
 wheels; artifact SBOMs, checksums, and provenance are the release evidence.
 PyPI publication, if enabled, must use repository trusted publishing and never
 a developer workstation token.
+
+Infrastructure tooling is a separate build-time boundary. AWS CDK, its
+construct library and `constructs` are exact-pinned development dependencies
+and are excluded from deployed SDK, UI and Lambda artifacts. A scanner finding
+in bundled CDK tooling may be accepted only through a dated, owner-approved
+risk record that documents exploitability, preserves full-audit visibility,
+monitors upstream daily and causes CI to fail when the exception expires. The
+current record is [Temporary risk acceptance: AWS CDK bundled
+brace-expansion](risk-acceptance-cdk-brace-expansion-2026-07-29.md).
 
 The build job adds the raw mutation evidence to `dist/` before creating
 checksums with `scripts/write_checksums.py`, excluding only the checksum file

@@ -9,13 +9,11 @@
     "deploy:replica": "npm run build && cdk --app 'npx ts-node --prefer-ts-exts bin/audit-replica.ts' deploy AaiSecAuditReplica --require-approval never",
     "destroy": "npm run build && cdk destroy --force"
   },
-  "dependencies": {
-    "aws-cdk-lib": "^2.248.0",
-    "constructs": "^10.4.2"
-  },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "aws-cdk": "^2.248.0",
+    "aws-cdk": "2.1133.0",
+    "aws-cdk-lib": "2.262.2",
+    "constructs": "10.7.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.0"
   }

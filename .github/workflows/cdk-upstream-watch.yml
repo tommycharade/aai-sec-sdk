@@ -1,0 +1,48 @@
+name: cdk-upstream-watch
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  inspect-bundled-dependency:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect latest published AWS CDK bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest="$(npm view aws-cdk-lib version)"
+          mkdir -p "$RUNNER_TEMP/cdk-package"
+          npm --loglevel=error pack "aws-cdk-lib@$latest" \
+            --pack-destination "$RUNNER_TEMP/cdk-package" >/dev/null
+          archive="$(find "$RUNNER_TEMP/cdk-package" -type f -name '*.tgz' -print -quit)"
+          test -n "$archive"
+          bundled="$(
+            tar -xOf "$archive" \
+              package/node_modules/brace-expansion/package.json \
+              | node -e 'let data=""; process.stdin.on("data", chunk => data += chunk); process.stdin.on("end", () => console.log(JSON.parse(data).version));'
+          )"
+          {
+            echo "## AWS CDK bundled dependency watch"
+            echo
+            echo "- Latest aws-cdk-lib: $latest"
+            echo "- Bundled brace-expansion: $bundled"
+            echo "- Required fixed version: 5.0.8 or later"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if node -e '
+            const current = process.argv[1].split(".").map(Number);
+            const fixed = [5, 0, 8];
+            const comparable = current.every(Number.isInteger) && current.length === 3;
+            if (!comparable) process.exit(2);
+            for (let index = 0; index < fixed.length; index += 1) {
+              if (current[index] > fixed[index]) process.exit(0);
+              if (current[index] < fixed[index]) process.exit(1);
+            }
+            process.exit(0);
+          ' "$bundled"; then
+            echo "::error::AWS CDK now contains the patched dependency. Upgrade the exact pin and close the temporary exception."
+            exit 1
+          fi
+          echo "AWS CDK is still vulnerable upstream; the dated build-time exception remains active."
