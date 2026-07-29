@@ -910,6 +910,19 @@ _MANAGED_SOURCES = {
 }
 
 
+def _managed_integer(value, name, *, positive=False):
+    """Normalize exact DynamoDB integers without accepting booleans or fractions."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be {'positive' if positive else 'non-negative'}")
+    if isinstance(value, Decimal):
+        if value != value.to_integral_value():
+            raise ValueError(f"{name} must be {'positive' if positive else 'non-negative'}")
+        value = int(value)
+    if not isinstance(value, int) or value < (1 if positive else 0):
+        raise ValueError(f"{name} must be {'positive' if positive else 'non-negative'}")
+    return value
+
+
 def _managed_host(value, *, report=False):
     """Validate desired or endpoint-observed managed host configuration."""
     expected = _MANAGED_REPORT_FIELDS if report else _MANAGED_HOST_FIELDS
@@ -918,17 +931,13 @@ def _managed_host(value, *, report=False):
     host = _agent_host(value.get("host"))
     platform = _bounded_text(value.get("platform"), "platform", 16)
     bundle_hash = _bounded_text(value.get("bundleHash"), "bundleHash", 64)
-    policy_version = value.get("policyVersion")
+    policy_version = _managed_integer(
+        value.get("policyVersion"), "managed host policyVersion", positive=True
+    )
     if platform not in {"macos", "linux", "windows"}:
         raise ValueError("managed host platform is unsupported")
     if not re.fullmatch(r"[0-9a-f]{64}", bundle_hash):
         raise ValueError("managed host bundleHash must be lowercase SHA-256")
-    if (
-        isinstance(policy_version, bool)
-        or not isinstance(policy_version, int)
-        or policy_version <= 0
-    ):
-        raise ValueError("managed host policyVersion must be positive")
     result = {
         "host": host,
         "hostVersion": _bounded_text(value.get("hostVersion"), "hostVersion", 64),
@@ -939,16 +948,16 @@ def _managed_host(value, *, report=False):
     }
     if report:
         source = _bounded_text(value.get("source"), "source", 64)
-        verified_at, expires_at = value.get("verifiedAt"), value.get("expiresAt")
+        verified_at = _managed_integer(
+            value.get("verifiedAt"), "managed configuration verifiedAt"
+        )
+        expires_at = _managed_integer(
+            value.get("expiresAt"), "managed configuration expiresAt"
+        )
         if source not in _MANAGED_SOURCES:
             raise ValueError("managed configuration source is unsupported")
         if (
-            isinstance(verified_at, bool)
-            or not isinstance(verified_at, int)
-            or isinstance(expires_at, bool)
-            or not isinstance(expires_at, int)
-            or verified_at < 0
-            or expires_at <= verified_at
+            expires_at <= verified_at
         ):
             raise ValueError("managed configuration timestamps are invalid")
         result.update({"source": source, "verifiedAt": verified_at, "expiresAt": expires_at})
