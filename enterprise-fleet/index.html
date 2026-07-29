@@ -680,6 +680,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#managed-package-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managed package distribution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#reference-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -963,6 +974,17 @@
     <span class="md-ellipsis">
       
         add_agent_to_group
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.agent_managed_deployment_package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent_managed_deployment_package
       
     </span>
   </a>
@@ -1267,10 +1289,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.managed_deployment_package_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        managed_deployment_package_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.persistence_capabilities" class="md-nav__link">
     <span class="md-ellipsis">
       
         persistence_capabilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.publish_managed_deployment_package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        publish_managed_deployment_package
       
     </span>
   </a>
@@ -1962,6 +2006,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../managed-package-distribution-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed package distribution design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -2610,6 +2681,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#managed-package-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managed package distribution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#reference-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2893,6 +2975,17 @@
     <span class="md-ellipsis">
       
         add_agent_to_group
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.agent_managed_deployment_package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent_managed_deployment_package
       
     </span>
   </a>
@@ -3197,10 +3290,32 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.managed_deployment_package_metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        managed_deployment_package_metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.persistence_capabilities" class="md-nav__link">
     <span class="md-ellipsis">
       
         persistence_capabilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.publish_managed_deployment_package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        publish_managed_deployment_package
       
     </span>
   </a>
@@ -4107,6 +4222,22 @@ for an enterprise webhook gateway; endpoint material must be injected from a
 secret manager and is never persisted by the fleet store.
 Delivery failures are reported as failures and do not clear, hide, or mutate
 the underlying alert condition.</p>
+<h2 id="managed-package-distribution">Managed package distribution</h2>
+<p>A platform administrator can publish one exact canonical Claude Code or Codex
+package for a deployment with <code>PUT
+/api/enterprise/deployments/{deploymentId}/managed-package</code>. Publication uses
+an expected revision, validates the SHA-256 and canonical SDK schema, and
+requires the package target to match current server-owned desired state.
+Operator <code>GET</code> on the same route returns metadata only.</p>
+<p>An enrolled endpoint retrieves package bytes through <code>GET
+/agent/{deploymentId}/{agentId}/managed-package</code>. The route is tenant-,
+project-, agent-, attestation-, rollout- and emergency-stop-bound. It remains
+available when managed configuration is missing or conflicting so a managed
+endpoint can repair itself. The SDK client verifies the response and package
+again before returning a typed object. Publication or download is never
+reported as installation or enforcement evidence; a subsequent protected-file
+measurement and live host acceptance remain necessary. See
+<a href="../managed-package-distribution-design/">Managed package distribution</a>.</p>
 <h2 id="reference-setup">Reference setup</h2>
 <p>The local UI example multiplexes the original runtime API with the enterprise
 API. Start it with a UI token and open <a href="../ui/">the management UI</a>:</p>
@@ -4738,6 +4869,28 @@ portable boundary for a PostgreSQL or managed database adapter.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.agent_managed_deployment_package" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">agent_managed_deployment_package</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">agent_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return an exact package to its authenticated rollout-selected agent.</p>
+<p>Missing or conflicting managed-configuration evidence does not block
+this repair route. Agent identity, project scope, emergency-stop state,
+desired state, package integrity and deterministic rollout selection
+are still checked on every request.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.alerts" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">alerts</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
 
@@ -5235,6 +5388,24 @@ responsible for translating it into its typed policy and adapters.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.managed_deployment_package_metadata" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">managed_deployment_package_metadata</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return browser-safe package metadata without embedded configuration.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.persistence_capabilities" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">persistence_capabilities</span><span class="p">()</span></code>
 
@@ -5244,6 +5415,28 @@ responsible for translating it into its typed policy and adapters.</p>
     <div class="doc doc-contents ">
 
         <p>Return safe adapter metadata so deployment checks can prove HA selection.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.publish_managed_deployment_package" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">publish_managed_deployment_package</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">encoded</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">expected_package_sha256</span><span class="p">,</span> <span class="n">expected_revision</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Publish one canonical package bound to current deployment desired state.</p>
+<p>Publication stores credential-free configuration bytes only. The caller
+must provide the package digest and current revision; package parsing,
+desired-state binding and compare-and-swap happen before the new
+revision becomes visible. No endpoint is changed by this method.</p>
 
 
     </div>

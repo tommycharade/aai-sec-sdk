@@ -775,6 +775,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../managed-package-distribution-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed package distribution design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -1569,15 +1596,15 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.</p>
 <td>P0-01</td>
 <td>Enterprise-enforced Claude configuration</td>
 <td>Partial</td>
-<td>Typed endpoint-managed settings and exclusive MCP compilation; canonical digest-bound package; root installer preflight/rollback; desired/observed source, version, digest and freshness posture</td>
-<td>Connect package distribution to the control plane/MDM, run real root-owned install/deletion/weakening acceptance and prove approved launch profiles</td>
+<td>Typed endpoint-managed settings and exclusive MCP compilation; canonical digest-bound package; root installer preflight/rollback; tenant-scoped control-plane publication and attested agent retrieval; desired/observed source, version, digest and freshness posture</td>
+<td>Connect the authenticated package channel to MDM, run real root-owned install/deletion/weakening acceptance and prove approved launch profiles</td>
 </tr>
 <tr>
 <td>P0-02</td>
 <td>Codex managed requirements</td>
 <td>Partial</td>
-<td>Typed system <code>requirements.toml</code> compilation for profiles, hooks, restrictive command rules, MCP identity, deny-read and network controls; canonical package and POSIX installer transaction</td>
-<td>Connect package distribution to control plane/MDM, deploy to a real managed Codex host, enforce the launcher and run malformed/upgrade/bypass acceptance</td>
+<td>Typed system <code>requirements.toml</code> compilation for profiles, hooks, restrictive command rules, MCP identity, deny-read and network controls; canonical package, POSIX installer transaction and authenticated distribution</td>
+<td>Connect the package channel to MDM, deploy to a real managed Codex host, enforce the launcher and run malformed/upgrade/bypass acceptance</td>
 </tr>
 <tr>
 <td>P0-03</td>
@@ -1677,6 +1704,14 @@ When a managed bundle is assigned, missing, stale or conflicting evidence
 blocks governed agent routes instead of merely lowering a dashboard score.
 This is still software evidence and does not replace the outstanding live host
 execution and MDM acceptance.</p>
+<p>The package distribution slice now gives a platform administrator an
+optimistic-concurrency publication route and gives the exact enrolled agent an
+authenticated retrieval route. Every publication is reparsed from canonical
+bytes and must exactly match current server-owned desired state. Downloads are
+rollout-, attestation- and emergency-stop-gated, and remain possible while
+managed configuration is missing so an endpoint can repair itself. Operator
+reads expose metadata only. This closes control-plane distribution, not MDM
+installation or live host-load acceptance.</p>
 <h2 id="p1-ledger">P1 ledger</h2>
 <table>
 <thead>

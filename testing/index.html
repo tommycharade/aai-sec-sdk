@@ -855,6 +855,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../managed-package-distribution-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed package distribution design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -1624,6 +1651,13 @@ evidence against the current commit, <code>pyproject.toml</code>, the baseline t
 and the results-file hash. It fails closed for missing, stale, cross-commit,
 scope-mismatched, malformed, or tampered evidence.</p>
 <h2 id="adapter-contracts">Adapter contracts</h2>
+<p>Managed package distribution contracts cover canonical publication and exact
+typed client verification, tenant/deployment/agent separation, stale revision
+conflicts, desired-state changes, inactive rollouts, emergency stops, missing
+managed-configuration repair, altered response digests and metadata mismatch.
+The standalone AWS Lambda validator is checked against real SDK-generated
+packages. These are protocol tests, not evidence that MDM installed the package
+or that a live Claude Code or Codex process loaded it.</p>
 <p>The local contract suite uses synthetic fakes for OPA, Cedar, approval, IAM,
 idempotency, remote audit, and isolation boundaries. These tests verify request
 shape, binding, malformed-response handling, and fail-closed behavior. They do

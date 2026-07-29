@@ -16,7 +16,7 @@
         <link rel="prev" href="../managed-host-configuration/">
       
       
-        <link rel="next" href="../enterprise-user-journeys/">
+        <link rel="next" href="../managed-package-distribution-design/">
       
       
         
@@ -877,6 +877,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../managed-package-distribution-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed package distribution design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -1648,9 +1675,11 @@ duplicate keys, traversal, cross-target substitution, missing or changed
 executables, symlink targets, non-administrator calls, restrictive installed
 modes and complete rollback after a synthetic second-file failure.</p>
 <p>This closes the repository's package/install transaction gap but does not
-complete P0-01 through P0-03. Remaining acceptance requires:</p>
+complete P0-01 through P0-03. Authenticated package publication and enrolled
+agent retrieval are now provided by the
+<a href="../managed-package-distribution-design/">managed package distribution</a>
+contract. Remaining acceptance requires:</p>
 <ul>
-<li>control-plane package storage, authenticated download and digest delivery;</li>
 <li>MDM deployment of the SDK wheel, gateway, native hook and package;</li>
 <li>approved-launch enforcement, including Codex flag restrictions;</li>
 <li>real root-owned macOS/Linux installation and host restart evidence;</li>
