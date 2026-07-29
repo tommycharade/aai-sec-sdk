@@ -138,6 +138,11 @@ _DISCOVERY_OBSERVATION_KINDS = {
     "source_control": frozenset({"repository"}),
 }
 _DISCOVERY_SNAPSHOT_LIMIT = 100
+_DISCOVERY_GENERATION_PAGE_LIMIT = 100
+# The reconciler loads committed pages synchronously. Twenty pages cap one
+# request at 2,000 observations and 20 strong reads, keeping Lambda work and
+# response construction bounded until pages move to dedicated object storage.
+_DISCOVERY_GENERATION_MAX_PAGES = 20
 _DISCOVERY_EXPECTED_HOST_LIMIT = 2
 _DISCOVERY_MAX_VALIDITY_SECONDS = 24 * 60 * 60
 
@@ -3410,6 +3415,345 @@ def _publish_discovery_snapshot(tenant, source_id, value, actor):
     return {key: item for key, item in record.items() if key not in {"pk", "sk", "observations"}}
 
 
+def _rotate_discovery_connector(tenant, source_id, value, actor):
+    """Issue one source-scoped connector secret and persist only its digest.
+
+    The plaintext credential is returned once to an authenticated platform
+    administrator. It cannot grant operator or agent authority and is accepted
+    only on the matching tenant/source ingestion route.
+    """
+    if not isinstance(value, dict) or set(value) != {"sourceKind", "expectedRevision"}:
+        raise ValueError("discovery connector credential has an invalid schema")
+    source_id = _bounded_identifier(source_id, "sourceId")
+    source_kind = value.get("sourceKind")
+    if source_kind not in _DISCOVERY_SOURCE_KINDS:
+        raise ValueError("sourceKind is unsupported")
+    expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision")
+    key = _item_key(tenant, "DISCOVERY_CONNECTOR", source_id)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    revision = int(existing.get("revision", 0)) if existing else 0
+    if revision != expected:
+        raise PolicyConflict("discovery connector revision changed")
+    if existing and existing.get("sourceKind") != source_kind:
+        # Rotation may replace secret material, never the semantic class whose
+        # schema and coverage role were assigned to this stable source ID.
+        raise PolicyConflict("discovery connector sourceKind is immutable")
+    token = secrets.token_urlsafe(32)
+    record = {
+        **key,
+        "tenant_id": tenant,
+        "sourceId": source_id,
+        "sourceKind": source_kind,
+        "tokenHash": hashlib.sha256(token.encode()).hexdigest(),
+        "revision": expected + 1,
+        "status": "active",
+        "rotatedAt": int(time.time()),
+        "rotatedBy": actor,
+    }
+    arguments = {"Item": record}
+    if expected == 0:
+        arguments["ConditionExpression"] = "attribute_not_exists(pk)"
+    else:
+        arguments.update(
+            {
+                "ConditionExpression": "revision = :expected_revision",
+                "ExpressionAttributeValues": {":expected_revision": expected},
+            }
+        )
+    try:
+        TABLE.put_item(**arguments)
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("discovery connector revision changed") from error
+        raise
+    _audit(
+        tenant,
+        "discovery_connector_rotated",
+        actor,
+        {"source_id": source_id, "source_kind": source_kind, "revision": expected + 1},
+    )
+    return {
+        "sourceId": source_id,
+        "sourceKind": source_kind,
+        "revision": expected + 1,
+        "token": token,
+    }
+
+
+def _revoke_discovery_connector(tenant, source_id, actor):
+    """Revoke a connector immediately without changing committed evidence."""
+    source_id = _bounded_identifier(source_id, "sourceId")
+    key = _item_key(tenant, "DISCOVERY_CONNECTOR", source_id)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if not existing:
+        raise LookupError("discovery connector not found")
+    existing.update(
+        {
+            "status": "revoked",
+            "revision": int(existing.get("revision", 0)) + 1,
+            "revokedAt": int(time.time()),
+            "revokedBy": actor,
+        }
+    )
+    TABLE.put_item(Item=existing)
+    _audit(tenant, "discovery_connector_revoked", actor, {"source_id": source_id})
+    return {"sourceId": source_id, "status": "revoked", "revision": existing["revision"]}
+
+
+def _discovery_connector_identity(event, tenant, source_id):
+    """Authenticate one live bearer against its exact tenant and source record."""
+    tenant = _bounded_identifier(tenant, "tenantId")
+    source_id = _bounded_identifier(source_id, "sourceId")
+    connector = TABLE.get_item(
+        Key=_item_key(tenant, "DISCOVERY_CONNECTOR", source_id), ConsistentRead=True
+    ).get("Item")
+    token = _bearer(event)
+    supplied = hashlib.sha256(token.encode()).hexdigest() if token else ""
+    if (
+        not connector
+        or connector.get("status") != "active"
+        or not isinstance(connector.get("tokenHash"), str)
+        or not secrets.compare_digest(supplied, connector["tokenHash"])
+    ):
+        raise PermissionError("active discovery connector credential is required")
+    return tenant, source_id, connector
+
+
+def _begin_discovery_generation(tenant, source_id, connector, value):
+    """Create immutable metadata for one bounded, not-yet-visible generation."""
+    required = {
+        "generation",
+        "expectedRevision",
+        "observedAt",
+        "expiresAt",
+        "pageCount",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError("discovery generation has an invalid schema")
+    generation = _bounded_identifier(value.get("generation"), "generation")
+    expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision")
+    observed_at = _discovery_integer(value.get("observedAt"), "observedAt", minimum=1)
+    expires_at = _discovery_integer(value.get("expiresAt"), "expiresAt", minimum=1)
+    page_count = _discovery_integer(value.get("pageCount"), "pageCount", minimum=1)
+    now = int(time.time())
+    if page_count > _DISCOVERY_GENERATION_MAX_PAGES:
+        raise ValueError("pageCount exceeds the bounded generation limit")
+    if observed_at > now + 300 or expires_at <= now:
+        raise ValueError("discovery generation must be current")
+    if expires_at <= observed_at or expires_at - observed_at > _DISCOVERY_MAX_VALIDITY_SECONDS:
+        raise ValueError("discovery generation validity is unsafe")
+    source = TABLE.get_item(
+        Key=_item_key(tenant, "DISCOVERY_SOURCE", source_id), ConsistentRead=True
+    ).get("Item")
+    revision = int(source.get("revision", 0)) if source else 0
+    if revision != expected:
+        raise PolicyConflict("discovery source revision changed")
+    record = {
+        **_item_key(tenant, "DISCOVERY_GENERATION", f"{source_id}:{generation}"),
+        "tenant_id": tenant,
+        "sourceId": source_id,
+        "sourceKind": connector["sourceKind"],
+        "generation": generation,
+        "expectedRevision": expected,
+        "observedAt": observed_at,
+        "expiresAt": expires_at,
+        "pageCount": page_count,
+        "state": "uploading",
+        "createdAt": now,
+    }
+    TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+    return {key: value for key, value in record.items() if key not in {"pk", "sk", "tenant_id"}}
+
+
+def _put_discovery_generation_page(tenant, source_id, generation, page_number, value):
+    """Store one normalized immutable page; duplicate uploads fail closed."""
+    generation = _bounded_identifier(generation, "generation")
+    page_number = _discovery_integer(page_number, "pageNumber")
+    generation_record = TABLE.get_item(
+        Key=_item_key(tenant, "DISCOVERY_GENERATION", f"{source_id}:{generation}"),
+        ConsistentRead=True,
+    ).get("Item")
+    if not generation_record or generation_record.get("state") != "uploading":
+        raise LookupError("uploading discovery generation not found")
+    if page_number >= int(generation_record["pageCount"]):
+        raise ValueError("pageNumber is outside the declared generation")
+    if not isinstance(value, dict) or set(value) != {"observations"}:
+        raise ValueError("discovery generation page has an invalid schema")
+    observations = value.get("observations")
+    if (
+        not isinstance(observations, list)
+        or not 1 <= len(observations) <= _DISCOVERY_GENERATION_PAGE_LIMIT
+    ):
+        raise ValueError("discovery generation page must contain 1 to 100 observations")
+    normalized = [
+        _discovery_observation(item, generation_record["sourceKind"]) for item in observations
+    ]
+    identities = [(item["kind"], item["id"]) for item in normalized]
+    if len(set(identities)) != len(identities):
+        raise ValueError("discovery observations must be unique within a page")
+    normalized.sort(key=lambda item: (item["kind"], item["id"]))
+    page_hash = hashlib.sha256(
+        json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    record = {
+        **_item_key(
+            tenant,
+            "DISCOVERY_PAGE",
+            f"{source_id}:{generation}:{page_number:05d}",
+        ),
+        "tenant_id": tenant,
+        "sourceId": source_id,
+        "generation": generation,
+        "pageNumber": page_number,
+        "pageHash": page_hash,
+        "observations": normalized,
+    }
+    TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+    return {"pageNumber": page_number, "pageHash": page_hash, "observationCount": len(normalized)}
+
+
+def _commit_discovery_generation(tenant, source_id, generation, value, actor):
+    """Atomically make a complete, hash-bound generation current for its source."""
+    if not isinstance(value, dict) or set(value) != {"pageHashes"}:
+        raise ValueError("discovery generation commit has an invalid schema")
+    generation = _bounded_identifier(generation, "generation")
+    generation_key = _item_key(tenant, "DISCOVERY_GENERATION", f"{source_id}:{generation}")
+    staged = TABLE.get_item(Key=generation_key, ConsistentRead=True).get("Item")
+    if not staged or staged.get("state") != "uploading":
+        raise LookupError("uploading discovery generation not found")
+    page_hashes = value.get("pageHashes")
+    if (
+        not isinstance(page_hashes, list)
+        or len(page_hashes) != int(staged["pageCount"])
+        or any(
+            not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item)
+            for item in page_hashes
+        )
+    ):
+        raise ValueError("pageHashes must exactly describe every declared page")
+    pages = []
+    observations = []
+    for page_number, expected_hash in enumerate(page_hashes):
+        page = TABLE.get_item(
+            Key=_item_key(tenant, "DISCOVERY_PAGE", f"{source_id}:{generation}:{page_number:05d}"),
+            ConsistentRead=True,
+        ).get("Item")
+        if not page or not secrets.compare_digest(str(page.get("pageHash", "")), expected_hash):
+            raise ValueError("generation page is missing or its hash does not match")
+        pages.append(page)
+        observations.extend(page.get("observations", []))
+    identities = [(item["kind"], item["id"]) for item in observations]
+    if len(set(identities)) != len(identities):
+        raise ValueError("discovery observations must be unique across the generation")
+    # DynamoDB deserializes numbers as Decimal. Normalize the exact integer
+    # metadata before canonical JSON hashing so deployed behavior matches the
+    # in-memory contract and never depends on boto3 representation details.
+    observed_at = _discovery_integer(staged["observedAt"], "observedAt", minimum=1)
+    expires_at = _discovery_integer(staged["expiresAt"], "expiresAt", minimum=1)
+    page_count = _discovery_integer(staged["pageCount"], "pageCount", minimum=1)
+    content_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "sourceId": source_id,
+                "sourceKind": staged["sourceKind"],
+                "generation": generation,
+                "observedAt": observed_at,
+                "expiresAt": expires_at,
+                "pageHashes": page_hashes,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    now = int(time.time())
+    expected = int(staged["expectedRevision"])
+    source_record = {
+        **_item_key(tenant, "DISCOVERY_SOURCE", source_id),
+        "tenant_id": tenant,
+        "sourceId": source_id,
+        "sourceKind": staged["sourceKind"],
+        "generation": generation,
+        "observedAt": observed_at,
+        "expiresAt": expires_at,
+        "complete": True,
+        "pageCount": page_count,
+        "observationCount": len(observations),
+        "contentHash": content_hash,
+        "revision": expected + 1,
+        "publishedAt": now,
+        "publishedBy": actor,
+    }
+    committed = {
+        **staged,
+        "state": "committed",
+        "committedAt": now,
+        "contentHash": content_hash,
+        "observationCount": len(observations),
+    }
+    source_condition = "attribute_not_exists(pk)" if expected == 0 else "revision = :revision"
+    source_values = None if expected == 0 else {":revision": expected}
+    try:
+        DYNAMODB.transact_write_items(
+            TransactItems=[
+                _transaction_put(source_record, condition=source_condition, values=source_values),
+                _transaction_put(
+                    committed,
+                    condition="#state = :uploading",
+                    names={"#state": "state"},
+                    values={":uploading": "uploading"},
+                ),
+            ]
+        )
+    except Exception as error:
+        if getattr(error, "response", {}).get("Error", {}).get("Code") in {
+            "ConditionalCheckFailedException",
+            "TransactionCanceledException",
+        }:
+            raise PolicyConflict("discovery source or generation changed") from error
+        raise
+    _audit(
+        tenant,
+        "discovery_generation_committed",
+        actor,
+        {
+            "source_id": source_id,
+            "source_kind": staged["sourceKind"],
+            "generation": generation,
+            "revision": expected + 1,
+            "page_count": len(pages),
+            "observation_count": len(observations),
+            "content_hash": content_hash,
+        },
+    )
+    return {
+        key: item for key, item in source_record.items() if key not in {"pk", "sk", "tenant_id"}
+    }
+
+
+def _discovery_generation_observations(tenant, source):
+    """Load only pages named by an atomically committed source generation."""
+    if "observations" in source:
+        return source.get("observations") if isinstance(source.get("observations"), list) else []
+    generation = source.get("generation")
+    page_count = source.get("pageCount")
+    if not isinstance(generation, str) or not isinstance(page_count, (int, Decimal)):
+        return []
+    observations = []
+    for page_number in range(int(page_count)):
+        page = TABLE.get_item(
+            Key=_item_key(
+                tenant,
+                "DISCOVERY_PAGE",
+                f"{source.get('sourceId')}:{generation}:{page_number:05d}",
+            ),
+            ConsistentRead=True,
+        ).get("Item")
+        if not page:
+            return []
+        observations.extend(page.get("observations", []))
+    return observations
+
+
 def _create_item(tenant, kind, identifier, item):
     """Create one tenant-scoped record without allowing identity replacement."""
     record = {**_item_key(tenant, kind, identifier), **item, "tenant_id": tenant}
@@ -4720,7 +5064,7 @@ def _discovery_report(tenant, *, now=None):
     for source in sorted(source_records, key=lambda item: str(item.get("sourceId", ""))):
         complete = source.get("complete") is True
         fresh = int(source.get("expiresAt", 0)) > current_time
-        observations = source.get("observations", [])
+        observations = _discovery_generation_observations(tenant, source)
         has_observations = isinstance(observations, list) and bool(observations)
         status = (
             "current"
@@ -4764,7 +5108,7 @@ def _discovery_report(tenant, *, now=None):
     observations = [
         observation
         for source in current_sources
-        for observation in source.get("observations", [])
+        for observation in _discovery_generation_observations(tenant, source)
         if isinstance(observation, dict)
     ]
     identities = {
@@ -5888,6 +6232,39 @@ def handler(event, context):
             if method != "POST":
                 return _response(405, {"error": "method not allowed"})
             return _response(201, _enroll_agent(event))
+        if path.startswith("/discovery-ingest/") or path.startswith("/api/discovery-ingest/"):
+            normalized = path.removeprefix("/api")
+            parts = [
+                part for part in normalized.removeprefix("/discovery-ingest/").split("/") if part
+            ]
+            if len(parts) < 3 or parts[2] != "generations":
+                return _response(404, {"error": "discovery ingestion route not found"})
+            tenant, source_id, connector = _discovery_connector_identity(event, parts[0], parts[1])
+            actor = f"connector:{source_id}:revision:{connector['revision']}"
+            if method == "POST" and len(parts) == 3:
+                return _response(
+                    201,
+                    _begin_discovery_generation(tenant, source_id, connector, _body(event)),
+                )
+            if method == "PUT" and len(parts) == 6 and parts[4] == "pages":
+                if not re.fullmatch(r"0|[1-9][0-9]*", parts[5]):
+                    raise ValueError("pageNumber must be a non-negative integer")
+                return _response(
+                    201,
+                    _put_discovery_generation_page(
+                        tenant,
+                        source_id,
+                        parts[3],
+                        int(parts[5]),
+                        _body(event),
+                    ),
+                )
+            if method == "POST" and len(parts) == 5 and parts[4] == "commit":
+                return _response(
+                    200,
+                    _commit_discovery_generation(tenant, source_id, parts[3], _body(event), actor),
+                )
+            return _response(404, {"error": "discovery ingestion route not found"})
         if path.startswith("/agent/") or path.startswith("/api/agent/"):
             # Agent routes are not operator JWT routes.  The session token is
             # resolved here and the URL identity is checked against it.
@@ -6274,6 +6651,18 @@ def handler(event, context):
                     201,
                     _publish_discovery_snapshot(tenant, parts[2], _body(event), actor),
                 )
+            if (
+                len(parts) == 4
+                and parts[:2] == ["discovery", "sources"]
+                and parts[3] == "connector-credential"
+            ):
+                if method == "POST":
+                    return _response(
+                        201,
+                        _rotate_discovery_connector(tenant, parts[2], _body(event), actor),
+                    )
+                if method == "DELETE":
+                    return _response(200, _revoke_discovery_connector(tenant, parts[2], actor))
             if method == "GET" and parts == ["identity"]:
                 return _response(200, _identity_access(tenant, event))
             if method == "GET" and parts == ["identity", "break-glass", "requests"]:

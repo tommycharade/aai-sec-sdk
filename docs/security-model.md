@@ -671,3 +671,13 @@ project paths, credentials, prompts, commands, and tool content are excluded;
 project scope uses SHA-256 digests. Publication is revision-bound, bounded, and
 audited by source metadata and hash rather than observation content. See
 [Agent population discovery](agent-discovery-design.md).
+
+Large snapshots use immutable bounded pages and an atomic generation commit.
+Uncommitted pages are never included in reconciliation. A connector bearer is
+stored only as a digest and bound to one tenant/source/class; it cannot enter
+operator or agent routes. Rotation and revocation are live server-owned state
+checked on every ingestion call. This prevents browser identity, URL fields,
+partial uploads, stale writers, or connector output from becoming authority.
+Application bearer theft remains a deployment risk, so production deployments
+must deliver it through a secret manager, rotate it, restrict connector egress,
+and may add cloud workload identity at the API gateway.

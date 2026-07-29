@@ -471,6 +471,14 @@ reconciling the expected Claude Code and Codex population with enrolled agents:
   complete, expiring, revision-bound identity, endpoint, or source-control
   snapshot. It requires `discovery_write`, currently limited to platform
   administrators.
+- `POST` and `DELETE`
+  `/api/enterprise/discovery/sources/{sourceId}/connector-credential` rotate or
+  revoke a one-time-returned, digest-at-rest service credential scoped to that
+  tenant and source.
+- `/api/discovery-ingest/{tenantId}/{sourceId}/generations/...` lets that
+  connector declare a bounded generation, upload immutable hash-addressed pages
+  and atomically commit the complete generation. Partial uploads never affect
+  the report.
 - `GET /api/enterprise/discovery` returns current source confidence, the
   expected-instance denominator, findings, and business-unit/repository/device
   breakdowns.
@@ -479,4 +487,7 @@ reconciling the expected Claude Code and Codex population with enrolled agents:
 
 Percentages are `null` unless every required source class is complete and
 current. See [Agent population discovery](agent-discovery-design.md) for exact
-schemas, limits, semantics, and trust boundaries.
+schemas, limits, credential handling, commit semantics, and trust boundaries.
+The repository's `collect_discovery_inventory.py` reference adapters normalize
+Entra Graph, deployment-owned endpoint exports, and GitHub repository inventory;
+`publish_discovery_generation.py` performs the bounded three-phase upload.
