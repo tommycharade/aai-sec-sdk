@@ -1,5 +1,21 @@
 # Changelog
 
+- Corrected Codex CLI onboarding order so engineers establish project trust
+  before attempting MCP or hook verification. The installer now explains that
+  Codex skips the entire project security layer while untrusted, prints the
+  exact fallback trust block, and still leaves the user-wide trust decision to
+  the operator.
+- Updated the deployed AWS acceptance harness for project-bound agent
+  sessions. It now proves that missing and mismatched project-root digests are
+  denied before confirming that the enrolled digest can heartbeat, retrieve
+  effective policy, and consume an approval.
+- Fixed Claude Code checkout upgrades so repeat onboarding replaces legacy SDK
+  hook commands instead of accumulating contradictory enforcement processes;
+  unrelated hooks remain intact even when they share the managed matcher.
+- Aligned AWS demo and trial safe-default policies with the documented native
+  contract: exact `pwd`, `ls`, and narrowly enumerated read-only Git forms now
+  work for first-run Claude Code and Codex CLI agents while every other native
+  command remains fail-closed.
 - Added fail-closed Codex CLI native-tool enforcement using the documented
   `PreToolUse` hook. Project onboarding now installs a required SDK MCP gateway
   and a secret-free native hook; Bash, `apply_patch`, MCP and unknown-tool

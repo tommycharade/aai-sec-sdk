@@ -136,6 +136,9 @@ missing or unprovisioned.
 The first-run console then prepares a pilot foundation before offering any host
 installer. It creates a project under the provisioned organization, a bounded
 deployment under that project, and a policy group bound to the safe default.
+That default permits project-confined reads plus exact `pwd`, `ls`, `git
+status`, `git status --short`, `git diff --stat`, and `git log --oneline`
+commands; all other native commands remain denied unless explicitly governed.
 `POST /api/enterprise/projects` and `POST /api/enterprise/deployments` reject
 unknown or mismatched parents and duplicate identifiers. Agent registration
 requires an existing deployment and derives organization, project,
@@ -192,10 +195,11 @@ AWS_PROFILE=p1 AWS_REGION=eu-west-2 python scripts/test_aws_control_plane.py \
 ```
 
 The test prints one passing result only after it has checked unauthenticated
-401 handling, synthetic agent registration and one-time enrollment, heartbeat,
-agent emergency-stop enforcement and recovery, exact approval consumption and
-replay refusal, a two-process DynamoDB claim race, restart replay, terminal
-write, and a `GuardedRuntime` execution that replays the typed
+401 handling, synthetic agent registration and one-time enrollment, denial of
+heartbeats with a missing or mismatched project-root digest, acceptance of the
+enrolled digest, agent emergency-stop enforcement and recovery, exact approval
+consumption and replay refusal, a two-process DynamoDB claim race, restart
+replay, terminal write, and a `GuardedRuntime` execution that replays the typed
 `ExecutionResult` without invoking the synthetic side effect twice. It also
 checks the deployed audit bucket's compliance retention, versioning, and
 inability to delete a retained object version, and publishes a synthetic alert

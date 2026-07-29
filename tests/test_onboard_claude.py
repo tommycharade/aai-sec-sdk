@@ -100,6 +100,50 @@ def test_onboard_preserves_existing_configuration_and_is_idempotent(tmp_path: Pa
     assert len(list(tmp_path.glob(".mcp.json.bak.*"))) == 2
 
 
+def test_onboard_replaces_legacy_checkout_hook_without_removing_user_hooks(tmp_path: Path) -> None:
+    """An SDK checkout upgrade leaves one authoritative hook and keeps user automation."""
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    legacy = {
+        "type": "command",
+        "command": "python3 /previous/sdk/examples/claude_code_hook.py",
+        "timeout": 10,
+    }
+    user_hook = {"type": "command", "command": "python3 ./tools/custom_hook.py", "timeout": 5}
+    malformed_user_hook = {
+        "type": "command",
+        "command": "python3 'unterminated",
+        "timeout": 5,
+    }
+    (claude_dir / "settings.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash|Read|Edit|Write|Glob|Grep",
+                            "hooks": [legacy, user_hook],
+                        },
+                        {"matcher": "Read", "hooks": [malformed_user_hook]},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    onboard(tmp_path, Path.cwd(), python="python3", dry_run=False)
+
+    settings = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
+    entries = settings["hooks"]["PreToolUse"]
+    commands = [hook["command"] for entry in entries for hook in entry["hooks"]]
+    managed = [command for command in commands if "claude_code_hook.py" in command]
+    assert len(managed) == 1
+    assert str(Path.cwd() / "examples/claude_code_hook.py") in managed[0]
+    assert user_hook["command"] in commands
+    assert malformed_user_hook["command"] in commands
+
+
 def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path) -> None:
     """Enterprise onboarding writes routing metadata but never an agent secret."""
     onboard(
@@ -180,6 +224,7 @@ def test_onboard_secures_ui_session_outside_project_configuration(
 def test_repeat_enterprise_onboarding_stays_aws_and_replaces_managed_hook(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Clearing the one-time token cannot downgrade or duplicate enforcement."""
     user_home = tmp_path / "home"
@@ -201,8 +246,10 @@ def test_repeat_enterprise_onboarding_stays_aws_and_replaces_managed_hook(
         )
 
     run_onboarding()
+    capsys.readouterr()
     monkeypatch.delenv("AAI_SEC_AGENT_TOKEN")
     run_onboarding()
+    output = capsys.readouterr().out
 
     settings = json.loads((project / ".claude/settings.json").read_text(encoding="utf-8"))
     managed = settings["hooks"]["PreToolUse"]
@@ -210,6 +257,8 @@ def test_repeat_enterprise_onboarding_stays_aws_and_replaces_managed_hook(
     assert "AAI_SEC_AGENT_SESSION_MODE=aws" in managed[0]["hooks"][0]["command"]
     mcp = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
     assert mcp["mcpServers"]["agentic-security"]["env"]["AAI_SEC_AGENT_SESSION_MODE"] == "aws"
+    assert "short-lived session is secured" in output
+    assert "Export AAI_SEC_AGENT_TOKEN" not in output
 
 
 def test_enterprise_onboarding_validates_scope_before_writing_project(

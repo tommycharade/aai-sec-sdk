@@ -1,4 +1,4 @@
-"""Prepare one trusted project for the SDK's Codex CLI integration.
+"""Prepare one project for the SDK's Codex CLI integration.
 
 The script writes a project-scoped ``.codex/config.toml`` entry that starts the
 SDK MCP gateway. A short-lived bearer supplied during onboarding is placed in
@@ -227,8 +227,17 @@ def onboard(
         print("You can unset AAI_SEC_AGENT_TOKEN before starting Codex.")
     else:
         print("No agent token was written to project configuration.")
-    print("Verify with: codex mcp get agentic-security --json")
-    print("Then start Codex, review the project hook trust prompt, and inspect /hooks.")
+    print("Next steps:")
+    print(f"1. Start Codex from this project: cd {_toml_string(str(project_root))} && codex")
+    print("2. Approve the project trust prompt. Codex ignores project MCP and hook")
+    print("   configuration until the project is trusted.")
+    print("3. Restart Codex, then verify in another terminal:")
+    print("   codex mcp get agentic-security --json")
+    print("4. In Codex, open /hooks and approve the reviewed AAI Security hook hash.")
+    print("If Codex does not offer the trust prompt, add this exact block to")
+    print("~/.codex/config.toml, restart Codex, and repeat steps 3-4:")
+    print(f"[projects.{_toml_string(str(project_root))}]")
+    print('trust_level = "trusted"')
     print("Approval-required native commands are denied; run them through the governed MCP path.")
     return config_path
 

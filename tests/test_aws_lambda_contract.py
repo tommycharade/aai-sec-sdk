@@ -1756,4 +1756,29 @@ def test_trial_provisioner_builds_restrictive_credential_free_records(monkeypatc
     assert policy["configuration"]["policy"]["denyByDefault"] is True
     assert policy["configuration"]["runtime"]["maxActions"] == 25
     assert policy["configuration"]["audit"]["captureToolContent"] is False
+    assert policy["configuration"]["claudeCode"]["allowedCommandPatterns"] == [
+        r"^pwd$",
+        r"^ls$",
+        r"^git[ \t]+status$",
+        r"^git[ \t]+status[ \t]+--short$",
+        r"^git[ \t]+diff[ \t]+--stat$",
+        r"^git[ \t]+log[ \t]+--oneline$",
+    ]
     assert all("credential" not in str(item).lower() for item in records)
+
+
+def test_demo_seed_uses_the_same_narrow_native_read_commands(monkeypatch: Any) -> None:
+    """Demo and trial tenants must start with one documented native-safe contract."""
+    module, table = _load_handler(monkeypatch)
+
+    module._seed("tenant-new")
+
+    policy = table.items[("TENANT#tenant-new", "POLICY#policy-safe-default")]
+    assert policy["configuration"]["claudeCode"]["allowedCommandPatterns"] == [
+        r"^pwd$",
+        r"^ls$",
+        r"^git[ \t]+status$",
+        r"^git[ \t]+status[ \t]+--short$",
+        r"^git[ \t]+diff[ \t]+--stat$",
+        r"^git[ \t]+log[ \t]+--oneline$",
+    ]

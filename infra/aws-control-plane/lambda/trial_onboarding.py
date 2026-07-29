@@ -34,6 +34,14 @@ def build_trial_records(subject: str, email: str, *, now: int | None = None, tri
             "fileTools": ["Read", "Glob", "Grep"],
             "deniedCommandPatterns": [r"rm\s+-rf"],
             "approvalCommandPatterns": [r"git\s+push"],
+            "allowedCommandPatterns": [
+                r"^pwd$",
+                r"^ls$",
+                r"^git[ \t]+status$",
+                r"^git[ \t]+status[ \t]+--short$",
+                r"^git[ \t]+diff[ \t]+--stat$",
+                r"^git[ \t]+log[ \t]+--oneline$",
+            ],
         },
     }
     base = {"tenant_id": tenant, "trial": True, "trial_expires_at": expires}

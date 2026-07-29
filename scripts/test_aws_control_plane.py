@@ -83,13 +83,21 @@ def _request(
     method: str,
     body: Mapping[str, Any] | None = None,
     token: str | None = None,
+    project_root_digest: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Make one JSON request and return status plus decoded response."""
+    """Make one JSON request and return status plus decoded response.
+
+    ``project_root_digest`` is supplied explicitly so the live acceptance test
+    can prove that AWS agent sessions fail closed when this host-bound claim is
+    missing or does not match the enrolled project root.
+    """
     if urlparse(url).scheme != "https":
         raise ValueError("AWS control-plane smoke tests require an HTTPS endpoint")
     headers = {"content-type": "application/json"}
     if token:
         headers["authorization"] = f"Bearer {token}"
+    if project_root_digest:
+        headers["X-AAI-Project-Root-Digest"] = project_root_digest
     request = urllib.request.Request(  # noqa: S310 - HTTPS enforced above
         url,
         data=None if body is None else json.dumps(body).encode(),
@@ -222,6 +230,7 @@ def main() -> int:
         if enrolled_status != 201:
             raise RuntimeError(f"agent enrollment failed: {enrolled_status} {enrolled}")
         session_token = enrolled["accessToken"]
+        project_root_digest = hashlib.sha256(b"/synthetic/project").hexdigest()
         from agentic_security import ControlPlaneAgentClient
 
         agent_client = ControlPlaneAgentClient(
@@ -239,13 +248,37 @@ def main() -> int:
             raise RuntimeError("AWS agent client did not receive the assigned policy")
         if agent_client.heartbeat(session_token).get("status") != "connected":
             raise RuntimeError("AWS agent client heartbeat failed")
-        heartbeat_status, _ = _request(
+        missing_root_status, _ = _request(
             f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/heartbeat",
             "POST",
             token=session_token,
         )
+        if missing_root_status != 403:
+            raise RuntimeError(
+                "heartbeat without the enrolled project-root digest did not fail closed: "
+                f"{missing_root_status}"
+            )
+        mismatched_root_status, _ = _request(
+            f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/heartbeat",
+            "POST",
+            token=session_token,
+            project_root_digest="0" * 64,
+        )
+        if mismatched_root_status != 403:
+            raise RuntimeError(
+                "heartbeat with a mismatched project-root digest did not fail closed: "
+                f"{mismatched_root_status}"
+            )
+        heartbeat_status, _ = _request(
+            f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/heartbeat",
+            "POST",
+            token=session_token,
+            project_root_digest=project_root_digest,
+        )
         if heartbeat_status != 200:
-            raise RuntimeError(f"heartbeat failed: {heartbeat_status}")
+            raise RuntimeError(
+                f"heartbeat with the enrolled project-root digest failed: {heartbeat_status}"
+            )
         connected_verification = _invoke(
             lambda_client,
             arguments.function_name,
@@ -278,6 +311,7 @@ def main() -> int:
             f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/effective-policy",
             "GET",
             token=session_token,
+            project_root_digest=project_root_digest,
         )
         if stopped_policy_status != 409 or stopped_policy.get("emergencyStop") is not True:
             raise RuntimeError(
@@ -358,14 +392,16 @@ def main() -> int:
         first_status, first = _request(
             f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/approvals/consume",
             "POST",
-            consume,
-            session_token,
+            body=consume,
+            token=session_token,
+            project_root_digest=project_root_digest,
         )
         replay_status, replay = _request(
             f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/approvals/consume",
             "POST",
-            consume,
-            session_token,
+            body=consume,
+            token=session_token,
+            project_root_digest=project_root_digest,
         )
         if (
             first_status != 200
