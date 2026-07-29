@@ -202,6 +202,16 @@ tombstone. Lifecycle authority and immutable DynamoDB evidence commit in one
 transaction; S3 audit is a secondary best-effort replica of that already
 durable event.
 
+New registrations also require accountable ownership. The operator supplies a
+stable owner identity, display name, monitored business mailbox and typed
+criticality; the Lambda derives team and environment from the deployment.
+When Entra SCIM is enabled, the owner must be an active directory object.
+Ownership reviews expire after 90 days and are renewed through
+`PUT /enterprise/agents/{deployment}/{agent}/ownership` with an expected
+ownership revision and retained rationale. Missing or stale ownership is shown
+in inventory and prevents positive enrollment verification; it is not inferred
+from heartbeat presence.
+
 Heartbeats can also report the exact managed-host bundle loaded by Claude Code
 or Codex. A deployment configuration must first contain a complete
 `managedHost` desired identity (host/client version, platform, policy ID and

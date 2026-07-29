@@ -54,6 +54,15 @@ class FakeTable:
             elif condition == "#state = :expected":
                 if self.items.get(key, {}).get("state") != values.get(":expected"):
                     raise ConditionalFailure()
+            elif "ownership_revision" in condition:
+                current = self.items.get(key, {})
+                if current.get("lifecycle_state") != values.get(":active"):
+                    raise ConditionalFailure()
+                if "attribute_not_exists(ownership_revision)" in condition:
+                    if "ownership_revision" in current:
+                        raise ConditionalFailure()
+                elif current.get("ownership_revision") != values.get(":ownership_revision"):
+                    raise ConditionalFailure()
             elif "lifecycle_state = :active" in condition:
                 current = self.items.get(key, {})
                 if current.get("lifecycle_state") != values.get(":active") or current.get(
@@ -221,6 +230,10 @@ class FakeDynamoClient:
                     permitted = existing is not None
                     current = existing or {}
                     for clause in condition.split(" AND "):
+                        if clause.startswith("attribute_not_exists("):
+                            field = clause.removeprefix("attribute_not_exists(").removesuffix(")")
+                            permitted = permitted and field not in current
+                            continue
                         if " <> " in clause:
                             field_name, expected_name = clause.split(" <> ")
                             comparison = "not_equal"
@@ -332,6 +345,34 @@ def _event(
 def _invoke(module: Any, event: dict[str, Any]) -> dict[str, Any]:
     """Invoke the Lambda with the context value unused by this handler."""
     return cast(dict[str, Any], module.handler(event, None))
+
+
+def _ownership(**changes: Any) -> dict[str, Any]:
+    """Return complete synthetic accountable ownership for registration tests."""
+    return {
+        "ownerId": "owner-platform",
+        "ownerName": "Platform owner",
+        "businessContact": "platform@example.invalid",
+        "criticality": "high",
+        **changes,
+    }
+
+
+def _ownership_record(now: int, **changes: Any) -> dict[str, Any]:
+    """Return stored ownership fields whose review is currently valid."""
+    return {
+        "owner_id": "owner-platform",
+        "owner_name": "Platform owner",
+        "business_contact": "platform@example.invalid",
+        "team": "Platform",
+        "environment": "prod",
+        "ownership_criticality": "high",
+        "ownership_reviewed_at": now,
+        "ownership_review_due_at": now + 90 * 24 * 60 * 60,
+        "ownership_reviewed_by": "synthetic-reviewer",
+        "ownership_revision": 1,
+        **changes,
+    }
 
 
 def _runtime_manifest(host: str = "claude-code") -> dict[str, Any]:
@@ -2049,6 +2090,23 @@ def test_trial_foundation_creation_is_tenant_scoped_and_agent_identity_is_derive
     assert group["statusCode"] == 201
     assert json.loads(group["body"])["organizationId"] == "org-trial"
 
+    missing_ownership = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/register",
+            "POST",
+            body={
+                "deploymentId": "deployment-pilot",
+                "agentId": "unowned-agent",
+                "host": "claude-code",
+                "projectRoot": "/synthetic/unowned",
+            },
+            claims=claims,
+        ),
+    )
+    assert missing_ownership["statusCode"] == 400
+    assert "ownership must contain" in json.loads(missing_ownership["body"])["error"]
+
     registered = _invoke(
         module,
         _event(
@@ -2063,6 +2121,7 @@ def test_trial_foundation_creation_is_tenant_scoped_and_agent_identity_is_derive
                 "projectId": "project-forged",
                 "environment": "prod",
                 "region": "us-east-1",
+                "ownership": _ownership(),
             },
             claims=claims,
         ),
@@ -2075,6 +2134,10 @@ def test_trial_foundation_creation_is_tenant_scoped_and_agent_identity_is_derive
     assert stored["region"] == "eu-west-2"
     assert stored["status"] == "offline"
     assert stored["last_heartbeat"] == 0
+    assert stored["team"] == "Platform"
+    assert stored["owner_id"] == "owner-platform"
+    assert stored["ownership_criticality"] == "high"
+    assert json.loads(registered["body"])["ownership"]["status"] == "current"
     immutable_scope = _invoke(
         module,
         _event(
@@ -2393,6 +2456,7 @@ def test_runtime_attestation_binds_heartbeat_and_quarantines_tampering(
         "status": "offline",
         "expires_at": 0,
         "emergencyStop": False,
+        **_ownership_record(now),
     }
     table.put_item(Item=agent)
     table.put_item(
@@ -3095,6 +3159,202 @@ def test_agent_revocation_immediately_denies_sessions_bootstrap_and_identity_reu
     assert len([key for key in table.items if key[1].startswith("AGENT_LIFECYCLE_AUDIT#")]) == 1
 
 
+def test_agent_ownership_review_is_cas_audited_and_expires(monkeypatch: Any) -> None:
+    """Ownership review is server-derived, durable, concurrent-safe and time bounded."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-agent-ownership"
+    now = 1_900_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-owner-reviewer",
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant, "status": "active"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {
+            "id": "dep-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "environment": "prod",
+            "region": "eu-west-2",
+            "team": "Payments platform",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "project_root": "/synthetic/project",
+            "environment": "prod",
+            "region": "eu-west-2",
+            "status": "offline",
+            "last_heartbeat": 0,
+            "expires_at": 0,
+            "emergencyStop": False,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+    reviewed = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/ownership",
+            "PUT",
+            body={
+                "expectedOwnershipRevision": 0,
+                "ownership": _ownership(criticality="critical"),
+                "reason": "Quarterly accountable ownership review was approved.",
+            },
+            claims=claims,
+        ),
+    )
+    assert reviewed["statusCode"] == 200
+    payload = json.loads(reviewed["body"])
+    assert payload["ownership"] == {
+        "status": "current",
+        "revision": 1,
+        "ownerId": "owner-platform",
+        "ownerName": "Platform owner",
+        "team": "Payments platform",
+        "businessContact": "platform@example.invalid",
+        "environment": "prod",
+        "criticality": "critical",
+        "reviewedAt": now,
+        "reviewDueAt": now + module._AGENT_OWNERSHIP_REVIEW_SECONDS,
+        "reviewedBy": "fleet-owner-reviewer",
+        "reasonCodes": [],
+    }
+    assert len([key for key in table.items if key[1].startswith("AGENT_LIFECYCLE_AUDIT#")]) == 1
+    stale_write = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/ownership",
+            "PUT",
+            body={
+                "expectedOwnershipRevision": 0,
+                "ownership": _ownership(),
+                "reason": "A concurrent stale review must not overwrite authority.",
+            },
+            claims=claims,
+        ),
+    )
+    assert stale_write["statusCode"] == 409
+    monkeypatch.setattr(
+        module.time,
+        "time",
+        lambda: now + module._AGENT_OWNERSHIP_REVIEW_SECONDS + 1,
+    )
+    verification = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/enterprise/agents/dep-a/agent-a/verify",
+                "GET",
+                claims=claims,
+            ),
+        )["body"]
+    )
+    assert verification["verified"] is False
+    assert verification["ownership"]["status"] == "stale"
+    assert verification["checks"]["ownership"] == {
+        "passed": False,
+        "detail": "Agent ownership review is stale.",
+    }
+
+
+def test_agent_ownership_rejects_invalid_and_inactive_entra_owners(monkeypatch: Any) -> None:
+    """Malformed contacts and disabled directory identities cannot own an agent."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-entra-owner"
+    owner_id = "0d0f80b7-7890-4ed4-b2bf-cb7fb4e40c14"
+    monkeypatch.setattr(module, "SCIM", table)
+    monkeypatch.setenv("SCIM_ENABLED", "true")
+    monkeypatch.setenv("ENTRA_AAI_TENANT_ID", tenant)
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant, "status": "active"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {
+            "id": "dep-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "environment": "prod",
+            "region": "eu-west-2",
+            "team": "Platform",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "dep-a",
+            "host": "codex-cli",
+            "project_root": "/synthetic/project",
+            "environment": "prod",
+            "region": "eu-west-2",
+            "status": "offline",
+            "emergencyStop": False,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "owner-reviewer",
+    }
+    request = {
+        "expectedOwnershipRevision": 0,
+        "ownership": _ownership(ownerId=owner_id),
+        "reason": "Directory-backed owner review for production service.",
+    }
+    inactive = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/ownership",
+            "PUT",
+            body=request,
+            claims=claims,
+        ),
+    )
+    assert inactive["statusCode"] == 400
+    assert "actively provisioned" in json.loads(inactive["body"])["error"]
+    table.put_item(
+        Item={
+            "pk": f"TENANT#{tenant}",
+            "sk": f"USER#{owner_id}",
+            "id": owner_id,
+            "active": True,
+        }
+    )
+    invalid_contact = {
+        **request,
+        "ownership": _ownership(ownerId=owner_id, businessContact="not-an-email"),
+    }
+    denied = _invoke(
+        module,
+        _event(
+            "/enterprise/agents/dep-a/agent-a/ownership",
+            "PUT",
+            body=invalid_contact,
+            claims=claims,
+        ),
+    )
+    assert denied["statusCode"] == 400
+    assert "valid email" in json.loads(denied["body"])["error"]
+
+
 def test_concurrent_heartbeat_cannot_overwrite_agent_revocation(monkeypatch: Any) -> None:
     """A stale whole-record heartbeat write is lifecycle-revision guarded."""
     module, table = _load_handler(monkeypatch)
@@ -3481,6 +3741,7 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
                 "verifiedAt": now,
                 "expiresAt": now + 300,
             },
+            **_ownership_record(now),
         }
     )
     table.put_item(

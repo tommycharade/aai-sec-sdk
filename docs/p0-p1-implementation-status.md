@@ -77,7 +77,7 @@ installation or live host-load acceptance.
 
 | Workstream | Status | Implemented foundation | Major remaining work |
 | --- | --- | --- | --- |
-| Fleet lifecycle | Partial | Enrollment, groups, assignment, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement and evidence-retaining offboarding | Bulk operations, dynamic groups, accountable/stale ownership, managed upgrades, exception expiry and automatic orphan/leaver detection |
+| Fleet lifecycle | Partial | Enrollment, groups, assignment, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, required accountable ownership and 90-day stale-review reporting | Bulk operations, dynamic groups, managed upgrades, exception expiry and automatic orphan/leaver detection |
 | Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, self-approval denial, staging, atomic activation, assignment impact and rollback | Historical simulation, richer semantic diff, signed bundles, scheduling, inheritance, expiring exceptions and measured endpoint convergence |
 | Security operations | Partial | Alerts, approvals, audit timeline and emergency stops | Cases, quarantine, automatic containment, credential revocation, detections, anomaly controls and workflow integrations |
 | Reporting and administration | Partial | Fleet posture, health, SLO and compliance evidence summaries | Coverage denominator, executive/auditor reports, delegated scopes, service identities, Terraform, CMK/residency and private access |
