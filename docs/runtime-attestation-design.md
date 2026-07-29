@@ -88,3 +88,47 @@ The current automated contracts prove comparison, replay, freshness, baseline,
 quarantine and session-revocation behavior. Live release-manifest, five-minute
 detection and host-identity acceptance remain required before P0-05 can be
 marked complete.
+
+## Generating an approved release bundle
+
+Do not hand-author artifact hashes. From a new clean checkout of the exact
+release tag, download the published release evidence outside the checkout and
+run the generator. The command independently runs the checked-in evidence
+verifier and GitHub's provenance verifier for both the wheel and source
+archive before measuring either host:
+
+```bash
+export AAI_SDK_ROOT="$PWD"
+export AAI_RELEASE_TAG="v1.1.0"
+export AAI_RELEASE_COMMIT="replace-with-the-tag-commit-sha"
+export AAI_RELEASE_EVIDENCE="/absolute/path/to/downloaded-release-evidence"
+
+PYTHONPATH="$AAI_SDK_ROOT/src" python \
+  scripts/generate_runtime_manifests.py \
+  --sdk-root "$AAI_SDK_ROOT" \
+  --sdk-version "1.1.0" \
+  --expected-revision "$AAI_RELEASE_COMMIT" \
+  --expected-origin-digest \
+    c6cbebffe32d553b4dc08a611c4d0aacaeae195585edac442aa8ef10eb6e2c85 \
+  --release-tag "$AAI_RELEASE_TAG" \
+  --release-evidence "$AAI_RELEASE_EVIDENCE"
+```
+
+That origin digest is the SHA-256 identifier of the official HTTPS clone URL,
+`https://github.com/tommycharade/aai-sec-sdk.git`. The runtime checkout must use
+that exact origin identity. A different transport or mirror is a separate
+deployment approval, not an automatic equivalent.
+
+The generator refuses dirty, staged or untracked checkout state; mismatched
+version, revision or origin; missing release subjects; failed GitHub
+attestations; duplicate hosts; unsafe symlinks; and stale output. It writes:
+
+- `runtime-manifests.json`, containing only runtime comparison values; and
+- `runtime-manifests.provenance.json`, binding the exact manifest bytes to the
+  verified release checksum bundle and approval identity.
+
+Both files are review artifacts. CDK checks their binding during synthesis and
+the Lambda revalidates it at startup. Commit them through normal review, deploy
+the changed Lambda, and enroll pilots only after the stack output changes from
+`not-configured`. The generator does not create or sign a release and cannot
+turn an unsigned development commit into an approved production artifact.

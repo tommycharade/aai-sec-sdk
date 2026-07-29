@@ -25,6 +25,22 @@ python -m pytest -q tests/test_enterprise_postgres_integration.py
 
 Without a DSN the test skips; the CI service job always supplies one.
 
+Runtime-manifest assurance is split across three boundaries:
+
+- `tests/test_runtime_attestation.py` covers content-minimised measurement,
+  linked worktrees, packed refs, symlink/race bounds and changed artifacts;
+- `tests/test_runtime_manifest_generator.py` covers clean-checkout enforcement,
+  release identity, deterministic Claude/Codex manifests, GitHub provenance
+  invocation and safe output handling; and
+- `tests/test_aws_lambda_contract.py` proves exact manifest/provenance binding,
+  challenge freshness, mismatch quarantine, session revocation and governed
+  route denial.
+
+`npm run build && npm run synth` in `infra/aws-control-plane` additionally
+proves that CDK accepts the checked-in empty development pair and will reject a
+stale pair before deployment. Live modified-host acceptance remains required
+before P0-05 is complete.
+
 ## Deterministic property/fuzz coverage
 
 `tests/test_assurance.py` runs a finite checked-in corpus from

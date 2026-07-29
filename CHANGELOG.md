@@ -1,5 +1,13 @@
 # Changelog
 
+- Added fail-closed runtime-manifest generation for Claude Code and Codex.
+  Operators must use a clean exact-tag checkout, a complete release-evidence
+  bundle and successful GitHub provenance verification for both published
+  artifacts. A separate approval record binds the exact deployment manifest
+  bytes to release revision, repository identity, version and host set; CDK and
+  Lambda reject stale, missing, ambiguous or incomplete approval evidence.
+- Extended runtime provenance measurement to support standard linked Git
+  worktrees and packed refs while preserving bounded, no-follow metadata reads.
 - Added content-minimised runtime attestation for Claude Code and Codex CLI.
   Authenticated heartbeats now use one-time challenges and can prove approved
   SDK, gateway, native-hook and source artifacts while binding project config,

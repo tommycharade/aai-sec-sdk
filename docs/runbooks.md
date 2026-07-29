@@ -187,6 +187,32 @@ and run a synthetic restricted workload.
 
 **Escalate:** platform security owner for any forged or downgraded evidence.
 
+## Runtime-manifest or host-attestation failure
+
+**Detect:** stack synthesis rejects the manifest/provenance pair; the runtime
+reports `not_configured`, `expired` or `quarantined`; or reason codes identify
+package, gateway, hook, source, configuration, executable, launch-context or
+enrollment-baseline drift.
+
+**Safe actions:** stop rollout; preserve the manifest pair, release evidence,
+agent audit history and reason codes; confirm the deployment SDK version; and
+restore the exact approved checkout before re-enrollment. Treat an expired or
+quarantined runtime as unable to receive effective policy or submit governed
+actions.
+
+**Unsafe actions:** copying hashes from the affected endpoint, hand-editing the
+manifest or provenance record, disabling the challenge, clearing audit history,
+or approving an unsigned development commit to regain connectivity.
+
+**Recover:** independently download and verify the published release evidence,
+regenerate manifests from a clean exact-tag checkout, review and deploy the
+pair, restore the approved endpoint artifacts, then re-enroll. Verify a fresh
+nonce-bound proof and confirm the old session remains revoked.
+
+**Escalate:** supply-chain security for failed artifact provenance; endpoint
+engineering for host drift; and incident response for unexplained or repeated
+tampering.
+
 ## Rotation and evidence preservation
 
 Rotate signing keys, IAM credentials, policy versions, and audit destinations

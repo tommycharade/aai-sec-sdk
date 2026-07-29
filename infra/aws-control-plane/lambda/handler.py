@@ -54,6 +54,16 @@ _ATTESTATION_EVIDENCE_FIELDS = _ATTESTATION_MANIFEST_FIELDS | {
     "observedAt",
     "nonce",
 }
+_ATTESTATION_APPROVAL_FIELDS = frozenset(
+    {
+        "hosts",
+        "releaseEvidenceSha256",
+        "releaseTag",
+        "sdkRevision",
+        "sdkVersion",
+        "sourceOriginDigest",
+    }
+)
 
 _AGENT_TELEMETRY_FIELDS = frozenset(
     {
@@ -141,7 +151,14 @@ _ROLE_CAPABILITIES = {
 def _runtime_manifests():
     """Return bounded deployment-owned artifact manifests or fail closed."""
     raw = os.environ.get("RUNTIME_ATTESTATION_MANIFESTS", "")
-    if not raw:
+    encoded = raw.encode("utf-8")
+    if raw:
+        expected_digest = os.environ.get("RUNTIME_ATTESTATION_MANIFESTS_SHA256", "")
+        if not expected_digest or not secrets.compare_digest(
+            hashlib.sha256(encoded).hexdigest(), expected_digest
+        ):
+            raise RuntimeError("runtime attestation manifest environment integrity failed")
+    else:
         manifest_file = Path(__file__).with_name("runtime-manifests.json")
         try:
             encoded = manifest_file.read_bytes()
@@ -195,7 +212,97 @@ def _runtime_manifests():
             raise RuntimeError("runtime attestation manifest identity is ambiguous")
         seen.add(identity)
         manifests.append(manifest)
+    _validate_runtime_manifest_approvals(encoded, manifests)
     return manifests
+
+
+def _validate_runtime_manifest_approvals(manifest_bundle, manifests):
+    """Require every approved host/version to bind verified release evidence."""
+    raw = os.environ.get("RUNTIME_ATTESTATION_APPROVALS", "")
+    encoded = raw.encode("utf-8")
+    if raw:
+        expected_digest = os.environ.get("RUNTIME_ATTESTATION_APPROVALS_SHA256", "")
+        if not expected_digest or not secrets.compare_digest(
+            hashlib.sha256(encoded).hexdigest(), expected_digest
+        ):
+            raise RuntimeError("runtime attestation approval environment integrity failed")
+    else:
+        approval_file = Path(__file__).with_name("runtime-manifests.provenance.json")
+        try:
+            encoded = approval_file.read_bytes()
+        except OSError as error:
+            raise RuntimeError("runtime attestation approvals are unavailable") from error
+        expected_digest = os.environ.get("RUNTIME_ATTESTATION_APPROVALS_SHA256", "")
+        if expected_digest and not secrets.compare_digest(
+            hashlib.sha256(encoded).hexdigest(), expected_digest
+        ):
+            raise RuntimeError("runtime attestation approval bundle integrity failed")
+        try:
+            raw = encoded.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise RuntimeError("runtime attestation approvals are malformed") from error
+    if len(raw) > 65_536:
+        raise RuntimeError("runtime attestation approvals exceed the safe bound")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("runtime attestation approvals are malformed") from error
+    if not isinstance(value, dict) or set(value) != {
+        "schemaVersion",
+        "manifestBundleSha256",
+        "approvals",
+    }:
+        raise RuntimeError("runtime attestation approval schema is invalid")
+    if value.get("schemaVersion") != 1:
+        raise RuntimeError("runtime attestation approval version is unsupported")
+    expected_bundle_digest = value.get("manifestBundleSha256")
+    if not isinstance(expected_bundle_digest, str) or not secrets.compare_digest(
+        expected_bundle_digest, hashlib.sha256(manifest_bundle).hexdigest()
+    ):
+        raise RuntimeError("runtime attestation approval does not bind the manifest bundle")
+    approvals = value.get("approvals")
+    if not isinstance(approvals, list) or len(approvals) > 32:
+        raise RuntimeError("runtime attestation approvals must contain at most 32 entries")
+    approved = {}
+    for approval in approvals:
+        if not isinstance(approval, dict) or set(approval) != _ATTESTATION_APPROVAL_FIELDS:
+            raise RuntimeError("runtime attestation approval entry schema is invalid")
+        hosts = approval.get("hosts")
+        if (
+            not isinstance(hosts, list)
+            or not hosts
+            or len(hosts) != len(set(hosts))
+            or any(host not in {"claude-code", "codex-cli"} for host in hosts)
+        ):
+            raise RuntimeError("runtime attestation approval hosts are invalid")
+        if not re.fullmatch(
+            r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", str(approval.get("releaseTag", ""))
+        ):
+            raise RuntimeError("runtime attestation approval release tag is invalid")
+        if (
+            not isinstance(approval.get("sdkVersion"), str)
+            or not 1 <= len(approval["sdkVersion"]) <= 64
+            or not re.fullmatch(r"[0-9a-f]{40}", str(approval.get("sdkRevision", "")))
+            or not re.fullmatch(r"[0-9a-f]{64}", str(approval.get("sourceOriginDigest", "")))
+            or not re.fullmatch(r"[0-9a-f]{64}", str(approval.get("releaseEvidenceSha256", "")))
+        ):
+            raise RuntimeError("runtime attestation approval identity is invalid")
+        for host in hosts:
+            identity = (host, approval["sdkVersion"])
+            if identity in approved:
+                raise RuntimeError("runtime attestation approval identity is ambiguous")
+            approved[identity] = approval
+    expected = {(manifest["host"], manifest["sdkVersion"]): manifest for manifest in manifests}
+    if set(approved) != set(expected):
+        raise RuntimeError("runtime attestation approvals do not cover the manifest bundle")
+    for identity, manifest in expected.items():
+        approval = approved[identity]
+        if not secrets.compare_digest(manifest["sdkRevision"], approval["sdkRevision"]):
+            raise RuntimeError("runtime attestation approval revision does not match manifest")
+        if not secrets.compare_digest(
+            manifest["sourceOriginDigest"], approval["sourceOriginDigest"]
+        ):
+            raise RuntimeError("runtime attestation approval origin does not match manifest")
 
 
 def _runtime_manifest(tenant, deployment_id, host, manifests=None):

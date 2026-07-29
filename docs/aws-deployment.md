@@ -220,22 +220,28 @@ offline. Only an authenticated runtime heartbeat marks the agent connected.
 ### Runtime attestation manifests
 
 The control-plane Lambda packages
-`infra/aws-control-plane/lambda/runtime-manifests.json` and CDK pins its
-SHA-256 digest into the function environment. CDK rejects malformed, duplicate
-or unsupported manifest entries during synthesis, and Lambda revalidates the
-bundle and digest at startup. The checked-in bundle is deliberately empty, so
-a fresh development deployment reports runtime attestation as
-`not_configured`; this is not production-ready posture.
+`infra/aws-control-plane/lambda/runtime-manifests.json` and its paired
+`runtime-manifests.provenance.json`. CDK pins both SHA-256 digests into the
+function environment. CDK rejects malformed, duplicate, unsupported or stale
+bundle/approval pairs during synthesis, and Lambda revalidates both exact files
+at startup. The checked-in manifest bundle is deliberately empty, with an
+empty approval record bound to those exact bytes, so a fresh development
+deployment reports runtime attestation as `not_configured`; this is not
+production-ready posture.
 
 Before production enrollment, independently verify the intended release and
 populate one exact manifest for each approved `claude-code` or `codex-cli` SDK
 version. Each object must use the schema documented in
 [Runtime attestation design](runtime-attestation-design.md) and contain the
 release SDK revision plus SHA-256 identifiers for source origin, installed
-package, MCP gateway and native hook. Generate and review these values from a
-clean, provenance-verified checkout and installation; do not copy values from
-an enrolled endpoint. Commit the reviewed bundle, run `make check`, synthesize
-CDK and deploy the changed Lambda before onboarding that release.
+package, MCP gateway and native hook. Use
+`scripts/generate_runtime_manifests.py` from a clean tag checkout; it validates
+the published evidence bundle and both GitHub artifact attestations before
+writing the exact manifest and provenance pair. Do not copy values from an
+enrolled endpoint or hand-edit either file. Commit the reviewed pair, run
+`make check`, synthesize CDK and deploy the changed Lambda before onboarding
+that release. The complete command and trust assumptions are in
+[Runtime attestation design](runtime-attestation-design.md).
 
 After configuration, each heartbeat obtains a 60-second one-time challenge.
 Evidence is accepted only inside a 90-second observation window and compliant

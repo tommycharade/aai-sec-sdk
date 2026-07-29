@@ -235,6 +235,36 @@ def _runtime_manifest(host: str = "claude-code") -> dict[str, Any]:
     }
 
 
+def _set_runtime_manifests(monkeypatch: Any, manifests: list[dict[str, Any]]) -> None:
+    """Install synthetic manifests with an exact release-approval binding."""
+    raw = json.dumps(manifests)
+    first = manifests[0]
+    approval = {
+        "schemaVersion": 1,
+        "manifestBundleSha256": hashlib.sha256(raw.encode()).hexdigest(),
+        "approvals": [
+            {
+                "hosts": [manifest["host"] for manifest in manifests],
+                "releaseEvidenceSha256": "9" * 64,
+                "releaseTag": "v1.1.0",
+                "sdkRevision": first["sdkRevision"],
+                "sdkVersion": first["sdkVersion"],
+                "sourceOriginDigest": first["sourceOriginDigest"],
+            }
+        ],
+    }
+    monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", raw)
+    approval_raw = json.dumps(approval)
+    monkeypatch.setenv(
+        "RUNTIME_ATTESTATION_MANIFESTS_SHA256", hashlib.sha256(raw.encode()).hexdigest()
+    )
+    monkeypatch.setenv("RUNTIME_ATTESTATION_APPROVALS", approval_raw)
+    monkeypatch.setenv(
+        "RUNTIME_ATTESTATION_APPROVALS_SHA256",
+        hashlib.sha256(approval_raw.encode()).hexdigest(),
+    )
+
+
 def _runtime_evidence(
     nonce: str,
     *,
@@ -976,10 +1006,7 @@ def test_runtime_attestation_binds_heartbeat_and_quarantines_tampering(
     module, table = _load_handler(monkeypatch)
     now = 1_900_000_000
     monkeypatch.setattr(module.time, "time", lambda: now)
-    monkeypatch.setenv(
-        "RUNTIME_ATTESTATION_MANIFESTS",
-        json.dumps([_runtime_manifest()]),
-    )
+    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
     tenant = "tenant-attestation"
     token = "synthetic-attested-agent-session-123456"  # noqa: S105
     project_digest = hashlib.sha256(b"/synthetic/project").hexdigest()
@@ -1131,7 +1158,7 @@ def test_runtime_attestation_rejects_missing_stale_replayed_and_modified_evidenc
     module, table = _load_handler(monkeypatch)
     now = 1_900_000_000
     monkeypatch.setattr(module.time, "time", lambda: now)
-    monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", json.dumps([_runtime_manifest()]))
+    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
     tenant = "tenant-negative-attestation"
     token = "synthetic-negative-attestation-token-123456"  # noqa: S105
     table.put_item(
@@ -1193,7 +1220,7 @@ def test_runtime_attestation_rejects_host_version_missing_from_configured_bundle
     module, table = _load_handler(monkeypatch)
     now = 1_900_000_000
     monkeypatch.setattr(module.time, "time", lambda: now)
-    monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", json.dumps([_runtime_manifest()]))
+    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
     tenant = "tenant-unapproved-version"
     token = "synthetic-unapproved-attestation-token-123456"  # noqa: S105
     table.put_item(
@@ -1243,6 +1270,81 @@ def test_runtime_attestation_rejects_host_version_missing_from_configured_bundle
     assert heartbeat["statusCode"] == 403
     assert "approved_manifest_missing" in json.loads(heartbeat["body"])["error"]
     assert table.items[(f"TENANT#{tenant}", "AGENT#dep-a:agent-a")]["status"] == ("quarantined")
+
+
+def test_runtime_manifest_approvals_fail_closed_for_unbound_release_evidence(
+    monkeypatch: Any,
+) -> None:
+    """A manifest cannot become trusted without exact independently reviewed provenance."""
+    module, _ = _load_handler(monkeypatch)
+    manifests = [_runtime_manifest("claude-code"), _runtime_manifest("codex-cli")]
+    raw = json.dumps(manifests)
+    entry: dict[str, Any] = {
+        "hosts": ["claude-code", "codex-cli"],
+        "releaseEvidenceSha256": "9" * 64,
+        "releaseTag": "v1.1.0",
+        "sdkRevision": "a" * 40,
+        "sdkVersion": "1.1.0",
+        "sourceOriginDigest": "b" * 64,
+    }
+    base: dict[str, Any] = {
+        "schemaVersion": 1,
+        "manifestBundleSha256": hashlib.sha256(raw.encode()).hexdigest(),
+        "approvals": [entry],
+    }
+    monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", raw)
+    monkeypatch.setenv(
+        "RUNTIME_ATTESTATION_MANIFESTS_SHA256", hashlib.sha256(raw.encode()).hexdigest()
+    )
+
+    def set_approval(value: dict[str, Any]) -> None:
+        """Bind each synthetic mutation so structural validation is reached."""
+        encoded = json.dumps(value)
+        monkeypatch.setenv("RUNTIME_ATTESTATION_APPROVALS", encoded)
+        monkeypatch.setenv(
+            "RUNTIME_ATTESTATION_APPROVALS_SHA256", hashlib.sha256(encoded.encode()).hexdigest()
+        )
+
+    set_approval(base)
+    assert len(module._runtime_manifests()) == 2
+
+    invalid = dict(base)
+    invalid["manifestBundleSha256"] = "0" * 64
+    set_approval(invalid)
+    with pytest.raises(RuntimeError, match="does not bind the manifest bundle"):
+        module._runtime_manifests()
+
+    invalid = {**base, "approvals": [{**entry, "hosts": ["claude-code"]}]}
+    set_approval(invalid)
+    with pytest.raises(RuntimeError, match="do not cover"):
+        module._runtime_manifests()
+
+    invalid = {
+        **base,
+        "approvals": [{**entry, "sdkRevision": "c" * 40}],
+    }
+    set_approval(invalid)
+    with pytest.raises(RuntimeError, match="revision does not match"):
+        module._runtime_manifests()
+
+
+def test_checked_in_empty_runtime_bundle_is_bound_but_not_configured(monkeypatch: Any) -> None:
+    """Development remains honest: exact empty approval evidence is not compliance."""
+    module, _ = _load_handler(monkeypatch)
+    monkeypatch.delenv("RUNTIME_ATTESTATION_MANIFESTS", raising=False)
+    monkeypatch.delenv("RUNTIME_ATTESTATION_APPROVALS", raising=False)
+
+    assert module._runtime_manifests() == []
+
+
+def test_runtime_manifest_environment_override_requires_pinned_digest(monkeypatch: Any) -> None:
+    """An environment injection cannot bypass the CDK-pinned bundle identity."""
+    module, _ = _load_handler(monkeypatch)
+    monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", "[]")
+    monkeypatch.delenv("RUNTIME_ATTESTATION_MANIFESTS_SHA256", raising=False)
+
+    with pytest.raises(RuntimeError, match="manifest environment integrity failed"):
+        module._runtime_manifests()
 
 
 def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visible(
@@ -1472,7 +1574,7 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
     module, table = _load_handler(monkeypatch)
     tenant = "tenant-verify"
     now = int(time.time())
-    monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", json.dumps([_runtime_manifest()]))
+    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
     table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
     table.put_item(
         Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
