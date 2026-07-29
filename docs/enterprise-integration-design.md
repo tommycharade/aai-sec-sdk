@@ -30,8 +30,12 @@ requester can request only their own subject and exact capabilities, a
 different recent-MFA identity administrator decides it, and the control plane
 rechecks the maximum-60-minute grant on every mutation. Auditors can export a
 content-addressed complete SCIM, role and emergency-access review artifact.
-Live Entra acceptance and delegated administration remain required before
-enterprise-wide rollout.
+Tenant identity administrators can additionally issue expiring non-admin roles
+for one existing organization, project or deployment. These grants remain in
+server state, are checked against live resource lineage on every mutation and
+are included in access certification; they are never copied into tenant-wide
+Cognito groups. Live Entra and multi-business-unit delegated-scope acceptance
+remain required before enterprise-wide rollout.
 
 SIEM adapters use the same honest-capability rule. The initial Splunk surface
 is a schema and workflow stub and must report `deliveryVerified: false`; it

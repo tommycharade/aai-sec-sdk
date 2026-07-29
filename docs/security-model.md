@@ -80,14 +80,36 @@ grant; those lifecycle controls require normal directory-derived authority.
 
 The auditor-only access-certification API exports a bounded complete view of
 SCIM operators, memberships, group-to-role mappings, canonical capabilities
-and break-glass history with a stable SHA-256 content digest. It refuses a
+break-glass history and delegated grants with a stable SHA-256 content digest.
+It refuses a
 partial oversized inventory and marks an export incomplete when SCIM is not
 configured. The digest is integrity evidence, not a signature, human review,
-or compliance certification. Live Entra acceptance and delegated
-administration remain open in the
+or compliance certification. Live Entra and multi-business-unit delegated
+administration acceptance remain open in the
 [P0/P1 implementation status](p0-p1-implementation-status.md). A configured
 identity provider or synthetic contract test is not production joiner, mover
 and leaver evidence.
+
+Delegated administration is server-owned authority rather than a browser or
+token role claim. A normal tenant identity administrator may assign one
+non-admin canonical role to another exact signed principal for an existing
+organization, project or deployment and a maximum of 366 days. The API
+resolves resource lineage from tenant-owned records, checks the live grant on
+every scoped mutation and filters delegated-only inventory reads. Organization
+scope contains projects and deployments; project scope contains deployments;
+deployment scope is exact. A missing target, unknown route, failed lookup,
+expired grant, revoked grant, forged informational claim or sibling resource
+denies authority. Batch operations require every target to be covered.
+
+Delegation cannot create `platform-admin`, identity administration, emergency
+grant governance or another delegation. Self-delegation is denied. Create and
+revoke transitions atomically commit the authority record and immutable audit
+item. When SCIM is configured, the target must be an actively provisioned
+Entra object. The pre-token trigger permits a delegated-only operator to sign
+in but does not copy the delegated role into tenant-wide Cognito groups; the
+API remains the live resource-authorization boundary. Tenant-wide directory
+roles still take precedence, so removing an operator's broader Entra group is
+a separate prerequisite when converting that operator to scoped access.
 
 ## Guarantees and non-guarantees
 

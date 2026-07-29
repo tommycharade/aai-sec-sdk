@@ -86,6 +86,8 @@ in **Identity & trust**. The tenant-scoped artifact contains:
   directory object ID;
 - current group membership and exact group-to-role mappings;
 - the canonical role-to-capability matrix;
+- every delegated role, organization/project/deployment scope, expiry and
+  revocation state;
 - pending, active, expired, denied and revoked break-glass records;
 - generation time and a SHA-256 digest of the complete review payload.
 
@@ -100,6 +102,22 @@ The digest detects accidental or unrecorded content change; it is not a digital
 signature, immutable storage guarantee, or proof that a human completed the
 review.
 
+## Delegated operator access
+
+Use **Identity & trust → Delegated operator access** for normal least-privilege
+operations, not break glass. The target must be an active SCIM operator when
+SCIM is configured. Select one non-admin canonical role, an organization,
+project or deployment, an expiry no longer than 366 days, and a reviewable
+business rationale. The API rejects self-delegation and never allows
+`platform-admin` or identity governance to be delegated.
+
+After creating the grant, remove any broader Entra group membership that would
+still assign a tenant-wide role. Verify the operator can manage one in-scope
+synthetic resource and receives HTTP 403 for a sibling resource. Revoke the
+grant and repeat the in-scope action to prove immediate denial. The complete
+procedure and API contract are in
+[Delegated administration](delegated-administration.md).
+
 ## Acceptance evidence
 
 Before enterprise rollout, retain synthetic evidence that proves:
@@ -113,9 +131,11 @@ Before enterprise rollout, retain synthetic evidence that proves:
 5. granted authority cannot perform an unrequested capability;
 6. expiry and revocation remove authority on the next API request;
 7. a cross-tenant subject receives no grant;
-8. the certification export is complete, digest-verifiable and auditor-only;
+8. delegated authority permits one descendant resource, denies a sibling,
+   expires automatically and is denied immediately after revocation;
+9. the certification export is complete, digest-verifiable and auditor-only;
    and
-9. every lifecycle transition has content-minimised durable audit evidence.
+10. every lifecycle transition has content-minimised durable audit evidence.
 
 Source-level contract tests provide repeatable adversarial evidence. They do
 not replace a deployed Entra MFA, API Gateway claim-projection and two-person

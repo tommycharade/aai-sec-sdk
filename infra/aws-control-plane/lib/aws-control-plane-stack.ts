@@ -431,11 +431,13 @@ export class AwsControlPlaneStack extends cdk.Stack {
           ENTRA_TENANT_ID: entraTenantId,
           SCIM_ENABLED: entraScimTokenSecretName ? "true" : "false",
           SCIM_TABLE: scim.tableName,
+          CONTROL_TABLE: table.tableName,
           SCIM_AAI_TENANT_ID: entraAaiTenantId,
           ENTRA_STRONG_AUTH_ENFORCED: entraStrongAuthEnforced ? "true" : "false",
         },
       });
       scim.grantReadData(entraClaims);
+      table.grantReadData(entraClaims);
       // V2 can add independently verified provider provenance to both ID and
       // access tokens. The API still resolves application tenant and roles
       // from server-owned configuration; these claims are not authorization.
