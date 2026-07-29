@@ -484,7 +484,7 @@ def main() -> int:
             or stored_operation.get("response", {}).get("counts", {}).get("applied") != 1
         ):
             raise RuntimeError("durable bulk assignment idempotency evidence is missing")
-        from boto3.dynamodb.conditions import Key  # type: ignore[import-untyped]
+        from boto3.dynamodb.conditions import Key
 
         membership_audits = control_table.query(
             KeyConditionExpression=(
