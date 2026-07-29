@@ -20,6 +20,12 @@ It does **not** install privileged files or prove that a host loaded them.
 Endpoint management, MDM, or a separately authenticated host service must
 deploy the artifacts atomically and protect them from modification.
 
+The optional [managed endpoint deployment](managed-endpoint-deployment-design.md)
+package binds those artifacts to exact administrator-installed executables and
+provides preflight, restrictive atomic replacement and complete rollback. The
+package is authoritative only when its expected digest, bundle, host and
+platform arrive through authenticated endpoint management.
+
 `reconcile_effective_authority` accepts endpoint-owned evidence only. Missing,
 expired, future-dated, wrong-host, or mismatched evidence produces no effective
 allows. Duplicate action expressions resolve in this order:
@@ -184,7 +190,9 @@ For each managed endpoint:
 
 The SDK supplies compilation, protected-file measurement, authenticated
 heartbeat ingestion and desired-versus-observed reconciliation. It does not
-write privileged files or control host launch. When a managed bundle is
+write privileged files or control host launch. The separate operator CLI can
+perform an explicit root installation after deployment-owned digest and hook
+verification; it is not invoked by the SDK or agent. When a managed bundle is
 assigned, the control plane blocks effective-policy and other governed agent
 routes until exact fresh evidence arrives. The UI must continue to label the
 deployment blocked until live action probes additionally prove that the host

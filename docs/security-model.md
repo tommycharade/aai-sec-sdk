@@ -512,6 +512,23 @@ serialization. MCP identities use HTTPS or absolute local executables and do
 not carry environment values. Endpoint management must independently protect
 the files, executable, launch profile, OS identity, and credential sources.
 
+Managed deployment packages are untrusted until a deployment-owned expected
+package digest, desired bundle digest, host and platform all match. Canonical
+schema validation rejects duplicate keys, unknown fields, incomplete file
+sets, traversal and content substitution. The package carries only executable
+paths and digests, never executable bytes; the endpoint installer verifies the
+already-installed administrator-owned hook before any configuration write.
+Delivering both package and expected digest through one unauthenticated channel
+does not provide integrity and is explicitly outside the guarantee.
+
+The optional POSIX installer is a separate privileged deployment boundary, not
+a model or runtime capability. It validates every source and target before the
+first write, stages restrictive regular files on the target filesystem and
+rolls back all earlier replacements if a later artifact fails. Windows fails
+closed pending ACL verification. Installation proves protected bytes on disk,
+not that a host process loaded them; heartbeat measurement and live action
+probes remain independent requirements.
+
 Host limitations remain visible as coverage rather than being silently
 promoted to enforcement. Claude command/path behavior routed through the AAI
 hook is labelled SDK-enforced; Codex experimental network controls require a

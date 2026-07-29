@@ -133,6 +133,18 @@ endpoint evidence matches the complete desired bundle.
 
 ::: agentic_security.managed_configuration.reconcile_effective_authority
 
+## Managed endpoint deployment packages
+
+Packages are canonical, credential-free and digest-bound, but they are not
+self-authorizing. Endpoint management must supply the expected package digest,
+bundle digest, host and platform through an authenticated channel. The optional
+privileged installer is documented in
+[Managed endpoint deployment](managed-endpoint-deployment-design.md).
+
+::: agentic_security.managed_deployment.ManagedDeploymentPackage
+
+::: agentic_security.managed_deployment.ManagedExecutableRequirement
+
 Applications normally continue to use `GuardedRuntime`; these contracts are
 provided for integrations and contract tests. Do not construct a permit from
 model output or bypass the runtime lifecycle.

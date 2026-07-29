@@ -1,0 +1,366 @@
+"""Create and validate digest-bound managed-host deployment packages.
+
+The compiler remains pure and this module remains side-effect free.  It binds
+compiled Claude Code or Codex configuration to the exact administrator-owned
+executables that endpoint management must install first.  A deployment adapter
+must obtain the expected package digest through an authenticated channel and
+perform privileged writes; package bytes are never authority by themselves.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from dataclasses import dataclass
+from typing import Any, Final
+
+from .errors import SecurityConfigurationError
+from .integrations import AgentHost
+from .managed_configuration import (
+    ManagedArtifact,
+    ManagedConfigurationBundle,
+    ManagedPlatform,
+)
+
+_SHA256: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
+_VERSION: Final[re.Pattern[str]] = re.compile(r"^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$")
+_IDENTIFIER: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_MAX_PACKAGE_BYTES: Final[int] = 3_000_000
+_MAX_ARTIFACT_BYTES: Final[int] = 1_000_000
+_MAX_EXECUTABLES: Final[int] = 8
+
+
+def _duplicate_rejector(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build a JSON object while rejecting authority-confusing duplicate keys."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise SecurityConfigurationError("managed deployment package contains duplicate keys")
+        result[key] = value
+    return result
+
+
+def _required_text(value: object, label: str, maximum: int = 256) -> str:
+    """Return one bounded non-empty string or reject malformed package input."""
+    if not isinstance(value, str) or not value or len(value) > maximum:
+        raise SecurityConfigurationError(f"{label} must be a bounded non-empty string")
+    return value
+
+
+def _required_sha256(value: object, label: str) -> str:
+    """Return one lowercase SHA-256 identifier or reject it."""
+    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+        raise SecurityConfigurationError(f"{label} must be SHA-256")
+    return value
+
+
+def _expected_artifact_paths(host: AgentHost, platform: ManagedPlatform) -> tuple[str, ...]:
+    """Return the complete documented managed-file set for one host platform."""
+    if host is AgentHost.CLAUDE_CODE:
+        root = {
+            ManagedPlatform.MACOS: "/Library/Application Support/ClaudeCode",
+            ManagedPlatform.LINUX: "/etc/claude-code",
+            ManagedPlatform.WINDOWS: r"C:\Program Files\ClaudeCode",
+        }[platform]
+        return (
+            f"{root}/managed-settings.json",
+            f"{root}/managed-mcp.json",
+        )
+    if host is AgentHost.CODEX_CLI:
+        return (
+            r"C:\ProgramData\OpenAI\Codex\requirements.toml"
+            if platform is ManagedPlatform.WINDOWS
+            else "/etc/codex/requirements.toml",
+        )
+    raise SecurityConfigurationError("managed deployment host is unsupported")
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedExecutableRequirement:
+    """Digest and path of one administrator-installed runtime prerequisite.
+
+    The package does not contain or execute this file. Endpoint management must
+    install it independently and the privileged installer verifies its regular
+    file type, ownership, mode, executable bit and exact digest before changing
+    host configuration.
+    """
+
+    path: str
+    sha256: str
+
+    def __post_init__(self) -> None:
+        """Reject non-system paths and malformed executable identities."""
+        _required_text(self.path, "managed executable path", 512)
+        _required_sha256(self.sha256, "managed executable digest")
+        allowed = self.path.startswith("/opt/aai-security/") or self.path.startswith(
+            "C:\\Program Files\\AAI Security\\"
+        )
+        if not allowed or ".." in re.split(r"[/\\]", self.path):
+            raise SecurityConfigurationError(
+                "managed executable must use the administrator-owned AAI Security directory"
+            )
+
+    def to_wire(self) -> dict[str, str]:
+        """Return the credential-free package representation."""
+        return {"path": self.path, "sha256": self.sha256}
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedDeploymentPackage:
+    """Canonical configuration package bound to desired state and prerequisites.
+
+    The object is not self-authorizing. Callers must compare ``package_sha256``
+    with a digest obtained through an authenticated control-plane or endpoint-
+    management channel before installation.
+    """
+
+    host: AgentHost
+    host_version: str
+    platform: ManagedPlatform
+    policy_id: str
+    policy_version: int
+    bundle_hash: str
+    artifacts: tuple[ManagedArtifact, ...]
+    required_executables: tuple[ManagedExecutableRequirement, ...]
+
+    def __post_init__(self) -> None:
+        """Require a complete exact host package with no ambiguous paths."""
+        if not isinstance(self.host, AgentHost) or self.host not in {
+            AgentHost.CLAUDE_CODE,
+            AgentHost.CODEX_CLI,
+        }:
+            raise SecurityConfigurationError("managed deployment host is unsupported")
+        if not isinstance(self.platform, ManagedPlatform):
+            raise SecurityConfigurationError("managed deployment platform must be typed")
+        if not isinstance(self.host_version, str) or _VERSION.fullmatch(self.host_version) is None:
+            raise SecurityConfigurationError("managed deployment host version is invalid")
+        if not isinstance(self.policy_id, str) or _IDENTIFIER.fullmatch(self.policy_id) is None:
+            raise SecurityConfigurationError("managed deployment policy ID is invalid")
+        if (
+            isinstance(self.policy_version, bool)
+            or not isinstance(self.policy_version, int)
+            or self.policy_version <= 0
+        ):
+            raise SecurityConfigurationError("managed deployment policy version must be positive")
+        _required_sha256(self.bundle_hash, "managed deployment bundle hash")
+        if (
+            not isinstance(self.artifacts, tuple)
+            or not self.artifacts
+            or not all(isinstance(artifact, ManagedArtifact) for artifact in self.artifacts)
+        ):
+            raise SecurityConfigurationError("managed deployment artifacts must be typed")
+        expected_paths = _expected_artifact_paths(self.host, self.platform)
+        actual_paths = tuple(artifact.path for artifact in self.artifacts)
+        if actual_paths != expected_paths:
+            raise SecurityConfigurationError(
+                "managed deployment package must contain the complete ordered host file set"
+            )
+        for artifact in self.artifacts:
+            encoded = artifact.content.encode("utf-8")
+            if len(encoded) > _MAX_ARTIFACT_BYTES:
+                raise SecurityConfigurationError("managed deployment artifact exceeds safe size")
+            if not isinstance(artifact.media_type, str) or artifact.media_type not in {
+                "application/json",
+                "application/toml",
+            }:
+                raise SecurityConfigurationError(
+                    "managed deployment artifact media type is invalid"
+                )
+            if (
+                _required_sha256(artifact.sha256, "managed artifact digest")
+                != hashlib.sha256(encoded).hexdigest()
+            ):
+                raise SecurityConfigurationError("managed deployment artifact digest is invalid")
+        if (
+            not isinstance(self.required_executables, tuple)
+            or not 1 <= len(self.required_executables) <= _MAX_EXECUTABLES
+            or not all(
+                isinstance(item, ManagedExecutableRequirement) for item in self.required_executables
+            )
+        ):
+            raise SecurityConfigurationError(
+                "managed deployment requires one to eight typed executables"
+            )
+        executable_paths = [item.path for item in self.required_executables]
+        if len(executable_paths) != len(set(executable_paths)):
+            raise SecurityConfigurationError("managed deployment executable paths must be unique")
+        expected_prefix = (
+            "C:\\Program Files\\AAI Security\\"
+            if self.platform is ManagedPlatform.WINDOWS
+            else "/opt/aai-security/"
+        )
+        if any(not path.startswith(expected_prefix) for path in executable_paths):
+            raise SecurityConfigurationError(
+                "managed executable platform does not match the deployment package"
+            )
+
+    @classmethod
+    def from_bundle(
+        cls,
+        bundle: ManagedConfigurationBundle,
+        *,
+        required_executables: tuple[ManagedExecutableRequirement, ...],
+    ) -> ManagedDeploymentPackage:
+        """Bind a compiled bundle to exact endpoint-installed prerequisites."""
+        if not isinstance(bundle, ManagedConfigurationBundle):
+            raise SecurityConfigurationError("managed deployment requires a compiled bundle")
+        return cls(
+            host=bundle.host,
+            host_version=bundle.host_version,
+            platform=bundle.platform,
+            policy_id=bundle.policy_id,
+            policy_version=bundle.policy_version,
+            bundle_hash=bundle.bundle_hash,
+            artifacts=bundle.artifacts,
+            required_executables=required_executables,
+        )
+
+    @classmethod
+    def from_json(
+        cls,
+        encoded: bytes,
+        *,
+        expected_package_sha256: str,
+    ) -> ManagedDeploymentPackage:
+        """Parse canonical bytes only after checking an out-of-band digest."""
+        expected = _required_sha256(expected_package_sha256, "expected package digest")
+        if not isinstance(encoded, bytes) or not encoded or len(encoded) > _MAX_PACKAGE_BYTES:
+            raise SecurityConfigurationError("managed deployment package exceeds safe size")
+        if hashlib.sha256(encoded).hexdigest() != expected:
+            raise SecurityConfigurationError("managed deployment package digest does not match")
+        try:
+            value = json.loads(encoded.decode("utf-8"), object_pairs_hook=_duplicate_rejector)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise SecurityConfigurationError("managed deployment package is malformed") from error
+        package = cls._from_wire(value)
+        if package.to_json() != encoded:
+            raise SecurityConfigurationError("managed deployment package is not canonical")
+        return package
+
+    @classmethod
+    def _from_wire(cls, value: object) -> ManagedDeploymentPackage:
+        """Build a typed package from one exact schema-1 mapping."""
+        fields = {
+            "schemaVersion",
+            "host",
+            "hostVersion",
+            "platform",
+            "policyId",
+            "policyVersion",
+            "bundleHash",
+            "artifacts",
+            "requiredExecutables",
+        }
+        if not isinstance(value, dict) or set(value) != fields or value.get("schemaVersion") != 1:
+            raise SecurityConfigurationError("managed deployment package schema is invalid")
+        try:
+            host = AgentHost(value["host"])
+            platform = ManagedPlatform(value["platform"])
+        except (TypeError, ValueError) as error:
+            raise SecurityConfigurationError("managed deployment target is invalid") from error
+        raw_artifacts = value.get("artifacts")
+        raw_executables = value.get("requiredExecutables")
+        policy_version = value.get("policyVersion")
+        if (
+            isinstance(policy_version, bool)
+            or not isinstance(policy_version, int)
+            or policy_version <= 0
+        ):
+            raise SecurityConfigurationError("managed deployment policy version must be positive")
+        if not isinstance(raw_artifacts, list) or not isinstance(raw_executables, list):
+            raise SecurityConfigurationError("managed deployment package lists are invalid")
+        artifacts: list[ManagedArtifact] = []
+        for item in raw_artifacts:
+            if not isinstance(item, dict) or set(item) != {
+                "path",
+                "mediaType",
+                "content",
+                "sha256",
+            }:
+                raise SecurityConfigurationError("managed deployment artifact schema is invalid")
+            artifacts.append(
+                ManagedArtifact(
+                    _required_text(item.get("path"), "managed artifact path", 512),
+                    _required_text(item.get("mediaType"), "managed artifact media type", 64),
+                    _required_text(
+                        item.get("content"), "managed artifact content", _MAX_ARTIFACT_BYTES
+                    ),
+                    _required_sha256(item.get("sha256"), "managed artifact digest"),
+                )
+            )
+        executables: list[ManagedExecutableRequirement] = []
+        for item in raw_executables:
+            if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+                raise SecurityConfigurationError("managed executable schema is invalid")
+            executables.append(
+                ManagedExecutableRequirement(
+                    _required_text(item.get("path"), "managed executable path", 512),
+                    _required_sha256(item.get("sha256"), "managed executable digest"),
+                )
+            )
+        return cls(
+            host=host,
+            host_version=_required_text(value.get("hostVersion"), "host version", 64),
+            platform=platform,
+            policy_id=_required_text(value.get("policyId"), "policy ID", 128),
+            policy_version=policy_version,
+            bundle_hash=_required_sha256(value.get("bundleHash"), "bundle hash"),
+            artifacts=tuple(artifacts),
+            required_executables=tuple(executables),
+        )
+
+    def to_wire(self) -> dict[str, object]:
+        """Return the exact credential-free schema-1 package object."""
+        return {
+            "schemaVersion": 1,
+            "host": self.host.value,
+            "hostVersion": self.host_version,
+            "platform": self.platform.value,
+            "policyId": self.policy_id,
+            "policyVersion": self.policy_version,
+            "bundleHash": self.bundle_hash,
+            "artifacts": [
+                {
+                    "path": artifact.path,
+                    "mediaType": artifact.media_type,
+                    "content": artifact.content,
+                    "sha256": artifact.sha256,
+                }
+                for artifact in self.artifacts
+            ],
+            "requiredExecutables": [item.to_wire() for item in self.required_executables],
+        }
+
+    def to_json(self) -> bytes:
+        """Return deterministic canonical UTF-8 bytes used for digest pinning."""
+        encoded = json.dumps(
+            self.to_wire(), ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+        if len(encoded) > _MAX_PACKAGE_BYTES:
+            raise SecurityConfigurationError("managed deployment package exceeds safe size")
+        return encoded
+
+    @property
+    def package_sha256(self) -> str:
+        """Return the digest endpoint management must deliver out of band."""
+        return hashlib.sha256(self.to_json()).hexdigest()
+
+    def require_target(
+        self,
+        *,
+        host: AgentHost,
+        platform: ManagedPlatform,
+        bundle_hash: str,
+    ) -> None:
+        """Reject cross-host, cross-platform or stale desired-state packages."""
+        if not isinstance(host, AgentHost) or not isinstance(platform, ManagedPlatform):
+            raise SecurityConfigurationError("managed deployment target must be typed")
+        expected_bundle = _required_sha256(bundle_hash, "expected bundle hash")
+        if self.host is not host or self.platform is not platform:
+            raise SecurityConfigurationError("managed deployment package targets another host")
+        if self.bundle_hash != expected_bundle:
+            raise SecurityConfigurationError("managed deployment package is not desired state")
+
+
+__all__ = ["ManagedDeploymentPackage", "ManagedExecutableRequirement"]
