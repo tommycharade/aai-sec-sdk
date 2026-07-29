@@ -25204,7 +25204,8 @@ process from a missing policy or an intentionally stopped agent.</p>
 <span class="normal">4534</span>
 <span class="normal">4535</span>
 <span class="normal">4536</span>
-<span class="normal">4537</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EnterpriseFleetApplication</span><span class="p">:</span>
+<span class="normal">4537</span>
+<span class="normal">4538</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EnterpriseFleetApplication</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Authenticated WSGI API for enterprise fleet inventory and agent presence.&quot;&quot;&quot;</span>
 
     <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
@@ -25919,6 +25920,7 @@ process from a missing policy or an intentionally stopped agent.</p>
             <span class="s2">&quot;tenantHint&quot;</span><span class="p">:</span> <span class="n">identity</span><span class="o">.</span><span class="n">organization_id</span><span class="p">,</span>
             <span class="s2">&quot;tenantBinding&quot;</span><span class="p">:</span> <span class="s2">&quot;server_owned&quot;</span><span class="p">,</span>
             <span class="s2">&quot;roleSource&quot;</span><span class="p">:</span> <span class="s2">&quot;deployment_authenticator&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;subject&quot;</span><span class="p">:</span> <span class="n">identity</span><span class="o">.</span><span class="n">subject</span><span class="p">,</span>
             <span class="s2">&quot;scimStatus&quot;</span><span class="p">:</span> <span class="s2">&quot;not_configured&quot;</span><span class="p">,</span>
             <span class="s2">&quot;scim&quot;</span><span class="p">:</span> <span class="p">{</span>
                 <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;not_configured&quot;</span><span class="p">,</span>

@@ -4141,7 +4141,35 @@ failures are errors rather than empty or synthetic credentials.</p>
 </tr>
 <tr>
 <td><code>POST /api/enterprise/policies</code></td>
-<td>Create a configuration policy</td>
+<td>Create an inactive policy and version-one draft</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/policies/{policy}/versions</code></td>
+<td>Create the next draft without changing active authority</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/policies/{policy}/versions</code></td>
+<td>List the immutable policy version ledger and review metadata</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/policies/{policy}/versions/{version}</code></td>
+<td>Read one exact immutable policy version</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/policies/{policy}/versions/{version}/submit</code></td>
+<td>Freeze a draft and submit it for independent review</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/policies/{policy}/versions/{version}/decision</code></td>
+<td>Approve or reject with a rationale; authors cannot self-approve</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/policies/{policy}/versions/{version}/stage</code></td>
+<td>Stage an independently approved version against its active base</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/policies/{policy}/versions/{version}/activate</code></td>
+<td>Atomically activate using <code>expectedActiveVersion</code></td>
 </tr>
 <tr>
 <td><code>POST /api/enterprise/groups</code></td>
