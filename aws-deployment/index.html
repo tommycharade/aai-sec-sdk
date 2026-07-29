@@ -1548,6 +1548,9 @@ missing or unprovisioned.</p>
 <p>The first-run console then prepares a pilot foundation before offering any host
 installer. It creates a project under the provisioned organization, a bounded
 deployment under that project, and a policy group bound to the safe default.
+That default permits project-confined reads plus exact <code>pwd</code>, <code>ls</code>, <code>git
+status</code>, <code>git status --short</code>, <code>git diff --stat</code>, and <code>git log --oneline</code>
+commands; all other native commands remain denied unless explicitly governed.
 <code>POST /api/enterprise/projects</code> and <code>POST /api/enterprise/deployments</code> reject
 unknown or mismatched parents and duplicate identifiers. Agent registration
 requires an existing deployment and derives organization, project,
@@ -1593,10 +1596,11 @@ removes synthetic records and must be run against a non-production tenant:</p>
   --region eu-west-2 --profile p1
 </code></pre>
 <p>The test prints one passing result only after it has checked unauthenticated
-401 handling, synthetic agent registration and one-time enrollment, heartbeat,
-agent emergency-stop enforcement and recovery, exact approval consumption and
-replay refusal, a two-process DynamoDB claim race, restart replay, terminal
-write, and a <code>GuardedRuntime</code> execution that replays the typed
+401 handling, synthetic agent registration and one-time enrollment, denial of
+heartbeats with a missing or mismatched project-root digest, acceptance of the
+enrolled digest, agent emergency-stop enforcement and recovery, exact approval
+consumption and replay refusal, a two-process DynamoDB claim race, restart
+replay, terminal write, and a <code>GuardedRuntime</code> execution that replays the typed
 <code>ExecutionResult</code> without invoking the synthetic side effect twice. It also
 checks the deployed audit bucket's compliance retention, versioning, and
 inability to delete a retained object version, and publishes a synthetic alert

@@ -1821,6 +1821,9 @@ file. It also installs <code>.claude/aai-sec-config.json</code>, the checked-in 
 default policy used by the example hook. Preview the changes first with
 <code>--dry-run</code>. It does not invoke Claude or silently replace an existing
 configuration or policy.</p>
+<p>Repeating onboarding from a newer SDK checkout replaces every legacy
+<code>claude_code_hook.py</code> command with one authoritative SDK hook while preserving
+unrelated commands, including commands that share the same Claude matcher.</p>
 <p>The default policy is intentionally narrow: <code>Read</code>, <code>Glob</code>, and <code>Grep</code> are the
 only explicitly allowed native tools; read-only/status/test commands are
 allowed; publishing, commits, pushes, and deployments require approval; and

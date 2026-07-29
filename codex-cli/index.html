@@ -1396,10 +1396,27 @@ registered root, so a cache copied from another checkout fails closed.
 Existing TOML outside the marked block is preserved.
 Invalid TOML, ambiguous ownership, unsafe identifiers, unsafe cache state and
 configuration symlinks fail closed.</p>
-<p>Run <code>codex mcp get agentic-security --json</code>, start <code>codex</code>, review the project
-hook trust prompt, and inspect <code>/hooks</code>. The project <code>.codex</code> layer must be
-trusted before a project hook runs. This is appropriate for a pilot, but it is
-not an immutable enterprise control.</p>
+<p>Codex ignores the complete project <code>.codex</code> layer—including the security MCP
+and hook—until the project is trusted. After onboarding:</p>
+<ol>
+<li>start <code>codex</code> from the project root and approve its project trust prompt;</li>
+<li>restart Codex;</li>
+<li>run <code>codex mcp get agentic-security --json</code> in another terminal and confirm
+   the server is enabled with <code>stdio</code> transport;</li>
+<li>open <code>/hooks</code> in Codex and approve the reviewed AAI Security hook hash.</li>
+</ol>
+<p>If Codex does not offer the project prompt, add the following exact block to
+the user configuration at <code>~/.codex/config.toml</code>, then restart Codex. Replace
+the example path with the canonical absolute project root printed by the
+installer:</p>
+<pre><code class="language-toml">[projects.&quot;/absolute/path/to/project&quot;]
+trust_level = &quot;trusted&quot;
+</code></pre>
+<p>Do not treat a generated <code>.codex/config.toml</code> as successful enrollment until
+the MCP query and <code>/hooks</code> checks both pass. Project trust is appropriate for a
+pilot, but it trusts the project's full Codex configuration and is not an
+immutable enterprise control. The installer therefore explains this decision
+but never silently edits the user-wide trust store.</p>
 <h2 id="what-the-native-hook-enforces">What the native hook enforces</h2>
 <p><code>examples/codex_cli_hook.py</code> fetches the authenticated agent's effective group
 policy for every process invocation. It then applies ordered rules:</p>
