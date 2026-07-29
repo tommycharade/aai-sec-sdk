@@ -4444,6 +4444,7 @@ class EnterpriseFleetApplication:
             "tenantHint": identity.organization_id,
             "tenantBinding": "server_owned",
             "roleSource": "deployment_authenticator",
+            "subject": identity.subject,
             "scimStatus": "not_configured",
             "scim": {
                 "status": "not_configured",

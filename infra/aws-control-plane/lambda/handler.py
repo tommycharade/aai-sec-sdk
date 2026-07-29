@@ -874,6 +874,7 @@ def _identity_access(tenant, event):
         "tenantHint": f"{entra_tenant[:8]}…" if configured else None,
         "tenantBinding": "server_owned",
         "roleSource": "cognito_managed_groups",
+        "subject": _bounded_text(_claims(event).get("sub"), "subject", 256),
         "scimStatus": scim["status"],
         "scim": scim,
         "activeRoles": sorted(_operator_roles(event)),

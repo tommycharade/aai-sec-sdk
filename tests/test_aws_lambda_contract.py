@@ -509,6 +509,7 @@ def test_identity_and_splunk_stub_report_truthful_enterprise_posture(monkeypatch
     assert payload["tenantHint"] == "11111111…"
     assert payload["tenantBinding"] == "server_owned"
     assert payload["activeRoles"] == ["auditor", "incident-responder"]
+    assert payload["subject"] == "operator-a"
     assert "ENTRA_CLIENT_SECRET" not in json.dumps(payload)
 
     integrations = _invoke(module, _event("/enterprise/integrations", "GET", claims=claims))
