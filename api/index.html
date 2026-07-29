@@ -964,6 +964,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../access-governance-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Emergency access and access certification runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-operations-readiness/" class="md-nav__link">
         
   
@@ -25232,7 +25259,11 @@ process from a missing policy or an intentionally stopped agent.</p>
 <span class="normal">4535</span>
 <span class="normal">4536</span>
 <span class="normal">4537</span>
-<span class="normal">4538</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EnterpriseFleetApplication</span><span class="p">:</span>
+<span class="normal">4538</span>
+<span class="normal">4539</span>
+<span class="normal">4540</span>
+<span class="normal">4541</span>
+<span class="normal">4542</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EnterpriseFleetApplication</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Authenticated WSGI API for enterprise fleet inventory and agent presence.&quot;&quot;&quot;</span>
 
     <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
@@ -25934,7 +25965,7 @@ process from a missing policy or an intentionally stopped agent.</p>
             <span class="s2">&quot;policy-approver&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;approval_decision&quot;</span><span class="p">,</span> <span class="s2">&quot;policy_approval&quot;</span><span class="p">],</span>
             <span class="s2">&quot;fleet-operator&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;fleet_write&quot;</span><span class="p">],</span>
             <span class="s2">&quot;incident-responder&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;incident_response&quot;</span><span class="p">],</span>
-            <span class="s2">&quot;auditor&quot;</span><span class="p">:</span> <span class="p">[],</span>
+            <span class="s2">&quot;auditor&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;access_certification_read&quot;</span><span class="p">],</span>
         <span class="p">}</span>
         <span class="n">active_roles</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span>
             <span class="p">{</span><span class="n">role_mapping</span><span class="p">[</span><span class="n">role</span><span class="p">]</span> <span class="k">for</span> <span class="n">role</span> <span class="ow">in</span> <span class="n">identity</span><span class="o">.</span><span class="n">roles</span> <span class="k">if</span> <span class="n">role</span> <span class="ow">in</span> <span class="n">role_mapping</span><span class="p">}</span>
@@ -25947,6 +25978,10 @@ process from a missing policy or an intentionally stopped agent.</p>
             <span class="s2">&quot;tenantHint&quot;</span><span class="p">:</span> <span class="n">identity</span><span class="o">.</span><span class="n">organization_id</span><span class="p">,</span>
             <span class="s2">&quot;tenantBinding&quot;</span><span class="p">:</span> <span class="s2">&quot;server_owned&quot;</span><span class="p">,</span>
             <span class="s2">&quot;roleSource&quot;</span><span class="p">:</span> <span class="s2">&quot;deployment_authenticator&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;strongAuthentication&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;not_configured&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;maxAuthenticationAgeSeconds&quot;</span><span class="p">:</span> <span class="mi">600</span><span class="p">,</span>
+            <span class="p">},</span>
             <span class="s2">&quot;subject&quot;</span><span class="p">:</span> <span class="n">identity</span><span class="o">.</span><span class="n">subject</span><span class="p">,</span>
             <span class="s2">&quot;scimStatus&quot;</span><span class="p">:</span> <span class="s2">&quot;not_configured&quot;</span><span class="p">,</span>
             <span class="s2">&quot;scim&quot;</span><span class="p">:</span> <span class="p">{</span>

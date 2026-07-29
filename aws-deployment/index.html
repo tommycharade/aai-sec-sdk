@@ -964,6 +964,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../access-governance-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Emergency access and access certification runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-operations-readiness/" class="md-nav__link">
         
   
@@ -1782,7 +1809,8 @@ not prove the deployed claim projection.</p>
 <p>Mutating routes are classified into <code>runtime_admin</code>, <code>policy_write</code>,
 <code>policy_approval</code>, <code>fleet_write</code>, <code>approval_decision</code>, or
 <code>incident_response</code>; identity lifecycle changes additionally require
-<code>identity_admin</code>. A role must grant the exact capability. Entra proves the
+<code>identity_admin</code>; access-certification export requires
+<code>access_certification_read</code>. A role must grant the exact capability. Entra proves the
 operator identity but does not select the AAI tenant or grant a product role:
 the deployment maps the configured Entra tenant to one provisioned AAI tenant,
 and Cognito-managed groups remain the authorization source. This separation
@@ -1792,19 +1820,29 @@ authority.</p>
 <p>Create a single-tenant Microsoft Entra application registration. Configure its
 web redirect URI as the Cognito domain followed by <code>/oauth2/idpresponse</code>. Store
 the client secret in AWS Secrets Manager. To enable lifecycle provisioning,
-create a different 32-character-or-longer SCIM bearer secret and deploy with
-all five variables:</p>
+create a different 32-character-or-longer SCIM bearer secret, enforce MFA for
+the enterprise application with Conditional Access, and deploy with all six
+variables:</p>
 <pre><code class="language-bash">ENTRA_TENANT_ID=&lt;entra-directory-uuid&gt; \
 ENTRA_CLIENT_ID=&lt;entra-application-client-id&gt; \
 ENTRA_CLIENT_SECRET_NAME=&lt;secrets-manager-secret-name&gt; \
 ENTRA_AAI_TENANT_ID=&lt;provisioned-aai-tenant-id&gt; \
 ENTRA_SCIM_TOKEN_SECRET_NAME=&lt;scim-bearer-secret-name&gt; \
+ENTRA_STRONG_AUTH_ENFORCED=true \
 AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 </code></pre>
 <p>The deployment fails if only some values are present or if the Entra tenant is
 not a tenant-specific UUID. The generated OIDC provider requests only
 <code>openid</code>, <code>email</code>, and <code>profile</code>; its secret is a CloudFormation dynamic
 reference and is not copied to Lambda or output values.</p>
+<p>The pre-token trigger emits a server-owned strong-authentication assertion
+only when <code>ENTRA_STRONG_AUTH_ENFORCED=true</code> and the exact configured Entra
+provider authenticated the operator. No mutable user attribute or browser
+value can create it. Break-glass request and decision routes require that
+assertion plus <code>auth_time</code> no older than 10 minutes. Set the deployment flag
+only after enforcing MFA for these operators with Entra Conditional Access;
+retain the policy and sign-in evidence and prove the deployed API Gateway claim
+projection before pilot use.</p>
 <p>A Cognito pre-token trigger inspects the server-owned federated identity and
 adds provider provenance to ID and access tokens. The API compares the Entra
 tenant claim to the deployment configuration before resolving the mapped AAI
@@ -1851,7 +1889,7 @@ Follow the <a href="../entra-scim-runbook/">Entra SCIM lifecycle runbook</a>.</p
 </tr>
 <tr>
 <td><code>auditor</code></td>
-<td>Read-only evidence</td>
+<td>Read-only evidence and access-certification export</td>
 </tr>
 </tbody>
 </table>
@@ -1868,6 +1906,13 @@ provider status, tenant hint, active roles and the enforced role matrix. It
 never returns the OIDC client ID or secret. <code>GET /enterprise/integrations</code>
 currently reports Splunk as a stub with <code>deliveryVerified: false</code>; no Splunk
 event delivery is implemented or claimed.</p>
+<p><code>POST /enterprise/identity/break-glass/requests</code> creates a self-targeted,
+exact-capability request lasting 5–60 minutes. A different platform
+administrator uses the request-specific <code>approve</code>, <code>deny</code>, or <code>revoke</code> route;
+the server conditionally enforces state, MFA freshness, requester separation
+and expiry. <code>GET /enterprise/identity/access-certification</code> is auditor-only and
+returns a digest-bound review artifact. Follow the
+<a href="../access-governance-runbook/">emergency access and access certification runbook</a>.</p>
 <p>The control plane also exposes a separate agent boundary. An operator creates a
 short-lived bootstrap secret for a registered agent; the agent exchanges it
 once at <code>POST /agent/enroll</code> and receives a 15-minute bearer session. The

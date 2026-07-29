@@ -16,7 +16,7 @@
         <link rel="prev" href="../aws-pilot-acceptance-2026-07-29/">
       
       
-        <link rel="next" href="../enterprise-operations-readiness/">
+        <link rel="next" href="../access-governance-runbook/">
       
       
         
@@ -1116,6 +1116,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../access-governance-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Emergency access and access certification runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-operations-readiness/" class="md-nav__link">
         
   
@@ -1753,6 +1780,7 @@ ENTRA_CLIENT_ID=&lt;entra-application-client-id&gt; \
 ENTRA_CLIENT_SECRET_NAME=&lt;oidc-secret-name&gt; \
 ENTRA_AAI_TENANT_ID=&lt;provisioned-aai-tenant-id&gt; \
 ENTRA_SCIM_TOKEN_SECRET_NAME=&lt;scim-bearer-secret-name&gt; \
+ENTRA_STRONG_AUTH_ENFORCED=true \
 AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 </code></pre>
 <p>Record the <code>MicrosoftEntraScimEndpoint</code> stack output. The stack rejects a SCIM
@@ -1763,6 +1791,10 @@ secret configured without the complete Entra OIDC binding.</p>
    in <code>/oauth2/idpresponse</code> for sign-in.</li>
 <li>Include the Entra object ID as the OIDC <code>oid</code> claim. Cognito maps it to the
    non-writable browser attribute <code>custom:entra_object_id</code>.</li>
+<li>Bind the enterprise application to a Conditional Access policy requiring
+   MFA for emergency-access requesters and approvers. After live verification,
+   deploy with <code>ENTRA_STRONG_AUTH_ENFORCED=true</code>; the pre-token trigger emits
+   the server-owned assertion without using a mutable user attribute.</li>
 <li>Open <strong>Provisioning</strong>, select automatic provisioning and enter the SCIM
    endpoint as the tenant URL.</li>
 <li>Enter the dedicated SCIM bearer. Do not reuse the OIDC client secret.</li>
@@ -1836,17 +1868,21 @@ content-minimised lifecycle audit records are intentionally retained.</p>
   a new Lambda version or force cold starts while updating Entra.</li>
 <li><strong>Incorrect group mapping:</strong> unmap the group in <strong>Identity &amp; trust</strong>. New
   tokens receive no role from it; current tokens expire within five minutes.</li>
-<li><strong>Emergency access:</strong> SCIM does not implement break glass. Use the separate,
-  time-bound break-glass process once implemented and retain independent
-  evidence.</li>
+<li><strong>Emergency access:</strong> use the separate, time-bound, recent-MFA break-glass
+  workflow in <strong>Identity &amp; trust</strong>. SCIM remains normal lifecycle authority;
+  emergency grants are exact server-owned capabilities and never directory
+  group workarounds. Follow the
+  <a href="../access-governance-runbook/">access-governance runbook</a>.</li>
 </ul>
 <h2 id="current-limitations">Current limitations</h2>
 <p>This implementation advances P0-06 but does not complete it. The automated
 command proves the deployed SCIM protocol once configured; real Entra OIDC
 sign-in and joiner/mover/leaver acceptance, configurable provisioning SLO
 alarms, immediate global token
-revocation, break-glass workflow, quarterly access certification and delegated
-administrative scopes remain outstanding. Splunk remains a non-delivering stub.</p>
+revocation and delegated administrative scopes remain outstanding. The
+break-glass and access-certification contracts are implemented but still need
+the deployed two-person Entra MFA acceptance exercise. Splunk remains a
+non-delivering stub.</p>
 
 
 
