@@ -123,6 +123,10 @@ endpoint evidence matches the complete desired bundle.
 
 ::: agentic_security.managed_configuration.ManagedConfigurationBundle
 
+::: agentic_security.managed_configuration.ManagedConfigurationEvidence
+
+::: agentic_security.managed_configuration.measure_managed_configuration
+
 ::: agentic_security.managed_configuration.ObservedManagedConfiguration
 
 ::: agentic_security.managed_configuration.EffectiveAuthority
@@ -337,6 +341,13 @@ store adapter. Reads use a no-follow descriptor, revalidate its metadata, and
 are bounded to 4096 bytes before decoding.
 
 ::: agentic_security.ControlPlaneAgentClient
+
+Pass a deployment-owned `managed_configuration_provider` when an enrolled AWS
+agent has an assigned managed-host bundle. The callback must re-measure the
+administrator-owned files and return `ManagedConfigurationEvidence`; the
+client invokes it for every heartbeat and rejects mappings or evidence for a
+different host. Never construct this evidence from model output, project
+configuration, or the desired policy returned by the server.
 
 `ControlPlaneAgentClient.report_decision` is available only for an enrolled AWS
 agent session. It submits a SHA-256 event digest plus fixed, content-minimised

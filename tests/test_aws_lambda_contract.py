@@ -1760,6 +1760,8 @@ def test_aws_managed_configuration_posture_rejects_drift_and_staleness(
         | {"desiredConfiguration": {"managedHost": desired}}
     )
     assert module._managed_configuration_posture(tenant, agent, now=100)["status"] == "missing"
+    with pytest.raises(PermissionError, match="not freshly enforced"):
+        module._require_current_managed_configuration(tenant, agent)
 
     enforced_report: dict[str, object] = {
         **desired,
@@ -1769,6 +1771,8 @@ def test_aws_managed_configuration_posture_rejects_drift_and_staleness(
     }
     agent["managed_configuration_report"] = enforced_report
     assert module._managed_configuration_posture(tenant, agent, now=100)["status"] == "enforced"
+    monkeypatch.setattr(module.time, "time", lambda: 100)
+    module._require_current_managed_configuration(tenant, agent)
     agent["managed_configuration_report"] = {
         **enforced_report,
         "bundleHash": "c" * 64,

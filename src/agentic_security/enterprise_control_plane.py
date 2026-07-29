@@ -1433,6 +1433,12 @@ class EnterpriseFleetStore:
             agent = self._agent(deployment_id, agent_id)
             self._assert_identity_scope(identity, agent["organizationId"], agent["projectId"])
             self._assert_agent_identity(identity, agent_id)
+            managed_configuration = agent["managed_configuration"]
+            if (
+                managed_configuration["desired"] is not None
+                and managed_configuration["status"] != "enforced"
+            ):
+                raise FleetConfigurationError("managed host configuration is not freshly enforced")
             rows = self._connection.execute(
                 "SELECT g.id,g.name,g.policy_id FROM agent_group_members m "
                 "JOIN agent_groups g ON g.id=m.group_id "

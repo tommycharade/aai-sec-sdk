@@ -153,6 +153,7 @@ from .managed_configuration import (
     ManagedCommandRule,
     ManagedConfigurationBundle,
     ManagedConfigurationCompiler,
+    ManagedConfigurationEvidence,
     ManagedConfigurationSource,
     ManagedMcpServer,
     ManagedPlatform,
@@ -160,6 +161,7 @@ from .managed_configuration import (
     NativeActionDecision,
     NativeActionRule,
     ObservedManagedConfiguration,
+    measure_managed_configuration,
     reconcile_effective_authority,
 )
 from .policies import AllowListPolicy, PolicyDecision, PolicyEngine, PolicyResult
@@ -291,6 +293,7 @@ __all__ = [
     "EnforcementState",
     "ManagedArtifact",
     "ManagedCommandRule",
+    "ManagedConfigurationEvidence",
     "ManagedConfigurationSource",
     "ManagedConfigurationBundle",
     "ManagedConfigurationCompiler",
@@ -300,6 +303,7 @@ __all__ = [
     "NativeActionDecision",
     "NativeActionRule",
     "ObservedManagedConfiguration",
+    "measure_managed_configuration",
     "reconcile_effective_authority",
     "ControlPlaneApplication",
     "AgentPresence",

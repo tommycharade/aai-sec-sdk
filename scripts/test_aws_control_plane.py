@@ -15,6 +15,7 @@ import hashlib
 import json
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -143,7 +144,8 @@ def main() -> int:
     control_table = session.resource("dynamodb").Table(arguments.control_table)
     idempotency_table = session.resource("dynamodb").Table(arguments.idempotency_table)
     suffix = uuid.uuid4().hex[:12]
-    deployment_id = "deployment-claude-local"
+    deployment_id = f"aws-smoke-deployment-{suffix}"
+    template_id = f"aws-smoke-template-{suffix}"
     agent_id = f"aws-smoke-{suffix}"
     agent_key = f"{deployment_id}:{agent_id}"
     approval_id = f"aws-smoke-approval-{suffix}"
@@ -155,6 +157,93 @@ def main() -> int:
         if unauthenticated != 401:
             raise RuntimeError(f"expected unauthenticated API 401, received {unauthenticated}")
 
+        from agentic_security import (
+            AgentHost,
+            ManagedConfigurationCompiler,
+            ManagedConfigurationEvidence,
+            ManagedConfigurationSource,
+            ManagedPlatform,
+            ManagedPolicyIntent,
+            NativeActionDecision,
+            NativeActionRule,
+        )
+
+        managed_bundle = ManagedConfigurationCompiler().compile(
+            ManagedPolicyIntent(
+                policy_id="policy-safe-default",
+                policy_version=1,
+                action_rules=(
+                    NativeActionRule("Read", NativeActionDecision.ALLOW, "synthetic read"),
+                    NativeActionRule(
+                        "Bash(git push *)",
+                        NativeActionDecision.APPROVAL_REQUIRED,
+                        "synthetic publish review",
+                    ),
+                ),
+            ),
+            host=AgentHost.CLAUDE_CODE,
+            host_version="2.1.220",
+            platform=ManagedPlatform.LINUX,
+            hook_command="/opt/aai-security/hooks/claude-policy",
+        )
+        managed_desired = {
+            "host": managed_bundle.host.value,
+            "hostVersion": managed_bundle.host_version,
+            "platform": managed_bundle.platform.value,
+            "bundleHash": managed_bundle.bundle_hash,
+            "policyId": managed_bundle.policy_id,
+            "policyVersion": managed_bundle.policy_version,
+        }
+        deployment = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/deployments",
+                "POST",
+                {
+                    "organizationId": "org-demo",
+                    "projectId": "project-demo",
+                    "deploymentId": deployment_id,
+                    "name": f"AWS smoke {suffix}",
+                    "environment": "synthetic",
+                    "region": arguments.region or "eu-west-2",
+                    "team": "automated-acceptance",
+                    "sdkVersion": "1.1.0",
+                },
+                arguments.tenant,
+            ),
+        )
+        if deployment["statusCode"] != 201:
+            raise RuntimeError(f"synthetic deployment creation failed: {deployment}")
+        template = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/templates",
+                "POST",
+                {
+                    "templateId": template_id,
+                    "name": f"AWS managed-host smoke {suffix}",
+                    "configuration": {"managedHost": managed_desired},
+                },
+                arguments.tenant,
+            ),
+        )
+        if template["statusCode"] != 201:
+            raise RuntimeError(f"managed template creation failed: {template}")
+        staged = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/deployment-config",
+                "POST",
+                {"deploymentId": deployment_id, "templateId": template_id},
+                arguments.tenant,
+            ),
+        )
+        if staged["statusCode"] != 201:
+            raise RuntimeError(f"managed deployment staging failed: {staged}")
+
         registered = _invoke(
             lambda_client,
             arguments.function_name,
@@ -164,7 +253,7 @@ def main() -> int:
                 {
                     "deploymentId": deployment_id,
                     "agentId": agent_id,
-                    "host": "AWS control-plane smoke",
+                    "host": "claude-code",
                     "projectRoot": "/synthetic/project",
                 },
                 arguments.tenant,
@@ -224,7 +313,7 @@ def main() -> int:
             {
                 "bootstrapToken": bootstrap_token,
                 "projectRoot": "/synthetic/project",
-                "host": "AWS control-plane smoke",
+                "host": "claude-code",
             },
         )
         if enrolled_status != 201:
@@ -243,11 +332,37 @@ def main() -> int:
         )
         if agent_client.register() != session_token:
             raise RuntimeError("AWS agent client attempted an unexpected enrollment")
-        effective = agent_client.effective_policy()
-        if effective.get("policy", {}).get("id") != "policy-safe-default":
-            raise RuntimeError("AWS agent client did not receive the assigned policy")
-        if agent_client.heartbeat(session_token).get("status") != "connected":
-            raise RuntimeError("AWS agent client heartbeat failed")
+        missing_managed_verification = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                f"/enterprise/agents/{deployment_id}/{agent_id}/verify",
+                "GET",
+                {},
+                arguments.tenant,
+            ),
+        )
+        missing_managed_body = json.loads(missing_managed_verification["body"])
+        if (
+            missing_managed_body.get("verified") is not False
+            or missing_managed_body.get("checks", {}).get("managedConfiguration", {}).get("passed")
+            is not False
+        ):
+            raise RuntimeError(
+                "verification accepted missing managed-host evidence: "
+                f"{missing_managed_verification}"
+            )
+        blocked_policy_status, _ = _request(
+            f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/effective-policy",
+            "GET",
+            token=session_token,
+            project_root_digest=project_root_digest,
+        )
+        if blocked_policy_status != 403:
+            raise RuntimeError(
+                "effective policy was returned without managed-host evidence: "
+                f"{blocked_policy_status}"
+            )
         missing_root_status, _ = _request(
             f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/heartbeat",
             "POST",
@@ -279,6 +394,32 @@ def main() -> int:
             raise RuntimeError(
                 f"heartbeat with the enrolled project-root digest failed: {heartbeat_status}"
             )
+        observed_at = int(time.time())
+        managed_evidence = ManagedConfigurationEvidence(
+            host=managed_bundle.host,
+            host_version=managed_bundle.host_version,
+            platform=managed_bundle.platform,
+            bundle_hash=managed_bundle.bundle_hash,
+            policy_id=managed_bundle.policy_id,
+            policy_version=managed_bundle.policy_version,
+            source=ManagedConfigurationSource.ENDPOINT_MANAGED_FILE,
+            verified_at=observed_at,
+            expires_at=observed_at + 300,
+        )
+        managed_client = ControlPlaneAgentClient(
+            arguments.api_url,
+            session_token,
+            agent_id=agent_id,
+            project_root="/synthetic/project",
+            deployment_id=deployment_id,
+            aws_agent_session=True,
+            managed_configuration_provider=lambda: managed_evidence,
+        )
+        if managed_client.heartbeat(session_token).get("status") != "connected":
+            raise RuntimeError("AWS managed-host evidence heartbeat failed")
+        effective = managed_client.effective_policy()
+        if effective.get("policy", {}).get("id") != "policy-safe-default":
+            raise RuntimeError("AWS agent client did not receive the assigned policy")
         connected_verification = _invoke(
             lambda_client,
             arguments.function_name,
@@ -294,6 +435,39 @@ def main() -> int:
             raise RuntimeError(
                 f"verification rejected a connected, assigned agent: {connected_verification}"
             )
+
+        conflicting_evidence = ManagedConfigurationEvidence(
+            host=managed_bundle.host,
+            host_version=managed_bundle.host_version,
+            platform=managed_bundle.platform,
+            bundle_hash="f" * 64,
+            policy_id=managed_bundle.policy_id,
+            policy_version=managed_bundle.policy_version,
+            source=ManagedConfigurationSource.ENDPOINT_MANAGED_FILE,
+            verified_at=observed_at,
+            expires_at=observed_at + 300,
+        )
+        conflicting_client = ControlPlaneAgentClient(
+            arguments.api_url,
+            session_token,
+            agent_id=agent_id,
+            project_root="/synthetic/project",
+            deployment_id=deployment_id,
+            aws_agent_session=True,
+            managed_configuration_provider=lambda: conflicting_evidence,
+        )
+        conflicting_client.heartbeat(session_token)
+        conflict_status, _ = _request(
+            f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/effective-policy",
+            "GET",
+            token=session_token,
+            project_root_digest=project_root_digest,
+        )
+        if conflict_status != 403:
+            raise RuntimeError(
+                f"effective policy was returned for a conflicting host bundle: {conflict_status}"
+            )
+        managed_client.heartbeat(session_token)
 
         stopped = _invoke(
             lambda_client,
@@ -566,8 +740,8 @@ def main() -> int:
             raise RuntimeError("security alert was not delivered to the durable SQS queue")
         sqs_client.delete_message(QueueUrl=queue_url, ReceiptHandle=alert_message["ReceiptHandle"])
         print(
-            "AWS control-plane smoke passed: auth, enrollment, heartbeat, policy, "
-            "agent verification, "
+            "AWS control-plane smoke passed: auth, enrollment, heartbeat, managed-host "
+            "missing/conflict enforcement, policy, agent verification, "
             "approval replay, emergency-stop enforcement/recovery, and "
             "multi-process/runtime-connected durable idempotency, and WORM audit "
             "retention, and SNS/SQS alert delivery"
@@ -581,12 +755,6 @@ def main() -> int:
                     "sk": "SESSION",
                 }
             )
-        control_table.delete_item(
-            Key={"pk": f"TENANT#{arguments.tenant}", "sk": f"AGENT#{agent_key}"}
-        )
-        control_table.delete_item(
-            Key={"pk": f"TENANT#{arguments.tenant}", "sk": f"APPROVAL#{approval_id}"}
-        )
         if group_assigned:
             _invoke(
                 lambda_client,
@@ -597,6 +765,20 @@ def main() -> int:
                     {},
                     arguments.tenant,
                 ),
+            )
+        control_table.delete_item(
+            Key={"pk": f"TENANT#{arguments.tenant}", "sk": f"AGENT#{agent_key}"}
+        )
+        control_table.delete_item(
+            Key={"pk": f"TENANT#{arguments.tenant}", "sk": f"APPROVAL#{approval_id}"}
+        )
+        for kind, item_id in (
+            ("CONFIGURATION", deployment_id),
+            ("TEMPLATE", template_id),
+            ("DEPLOYMENT", deployment_id),
+        ):
+            control_table.delete_item(
+                Key={"pk": f"TENANT#{arguments.tenant}", "sk": f"{kind}#{item_id}"}
             )
         idempotency_table.delete_item(Key={"pk": operation_key})
         idempotency_table.delete_item(Key={"pk": f"aws-smoke-runtime-operation-{suffix}"})

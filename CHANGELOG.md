@@ -1,5 +1,12 @@
 # Changelog
 
+- Added read-only managed-host measurement and authenticated heartbeat evidence.
+  The SDK opens administrator-owned files without following symlinks, verifies
+  root ownership, restrictive modes, bounded exact bytes and host/source
+  identity, and re-measures through a deployment-owned callback on every AWS
+  agent heartbeat. Governed agent routes now fail closed whenever an assigned
+  managed bundle is missing, stale or conflicting; desired state alone cannot
+  unlock effective policy.
 - Added typed, deterministic managed-configuration compilation for Claude Code
   and Codex. Generated endpoint artifacts bind complete policy intent, target
   host/version, paths and content hashes without carrying credentials. A new

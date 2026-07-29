@@ -44,6 +44,7 @@ from ._command_patterns import compile_command_patterns
 from .agent_sessions import AgentSessionCredential, AgentSessionStore
 from .audit import AuditEvent, AuditSink
 from .integrations import AgentHost
+from .managed_configuration import ManagedConfigurationEvidence
 from .runtime_attestation import RuntimeAttestor
 
 try:  # pragma: no cover - platform branch; control-plane reference targets Unix hosts.
@@ -455,6 +456,7 @@ class ControlPlaneAgentClient:
         aws_agent_session: bool = False,
         session_store: AgentSessionStore | None = None,
         attestor: RuntimeAttestor | None = None,
+        managed_configuration_provider: Callable[[], ManagedConfigurationEvidence] | None = None,
         host: AgentHost | str = AgentHost.CLAUDE_CODE,
         timeout_seconds: float = 5,
     ) -> None:
@@ -465,6 +467,9 @@ class ControlPlaneAgentClient:
         supplies identity or authority and performs no I/O in this constructor.
         ``attestor`` measures the live host only after an authenticated AWS
         session obtains a one-time challenge; it makes no network call itself.
+        ``managed_configuration_provider`` must be a deployment-owned callback
+        that re-measures administrator-owned host files for every heartbeat.
+        The client accepts only typed evidence for its bound host identity.
         """
         parsed = urlsplit(base_url.rstrip("/"))
         local_http = parsed.scheme == "http" and parsed.hostname in {
@@ -502,6 +507,8 @@ class ControlPlaneAgentClient:
             raise ValueError("agent session store identity must match the AWS agent client")
         if attestor is not None and not aws_agent_session:
             raise ValueError("runtime attestation requires an AWS agent session")
+        if managed_configuration_provider is not None and not aws_agent_session:
+            raise ValueError("managed configuration evidence requires an AWS agent session")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.agent_id = agent_id
@@ -511,6 +518,7 @@ class ControlPlaneAgentClient:
         self.aws_agent_session = aws_agent_session
         self.session_store = session_store
         self.attestor = attestor
+        self.managed_configuration_provider = managed_configuration_provider
         self.timeout_seconds = timeout_seconds
 
     def register(self) -> str:
@@ -551,6 +559,17 @@ class ControlPlaneAgentClient:
         body: JsonObject = {"sessionId": session_id}
         if telemetry is not None:
             body["telemetry"] = _bounded_agent_telemetry(telemetry)
+        if self.managed_configuration_provider is not None:
+            evidence = self.managed_configuration_provider()
+            if not isinstance(evidence, ManagedConfigurationEvidence):
+                raise ControlPlaneConfigurationError(
+                    "managed configuration provider returned invalid evidence"
+                )
+            if evidence.host is not self.host:
+                raise ControlPlaneConfigurationError(
+                    "managed configuration evidence does not match the agent host"
+                )
+            body["managedConfiguration"] = evidence.to_wire()
         if self.attestor is not None:
             challenge = self._request(self._agent_path("attestation/challenge"), {})
             nonce = challenge.get("nonce")
