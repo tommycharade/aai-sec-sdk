@@ -16,7 +16,7 @@
         <link rel="prev" href="../enterprise-rollout-p0-p1-requirements/">
       
       
-        <link rel="next" href="../aws-pilot-acceptance-2026-07-29/">
+        <link rel="next" href="../needed-from-from/">
       
       
         
@@ -586,6 +586,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../dynamic-groups-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic policy groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../policy-editor/" class="md-nav__link">
         
   
@@ -998,6 +1025,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#p1-flt-02-acceptance-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1-FLT-02 acceptance evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1029,6 +1067,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../needed-from-from/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inputs needed from the product owner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1682,6 +1747,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#p1-flt-02-acceptance-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1-FLT-02 acceptance evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1890,8 +1966,8 @@ installation or live host-load acceptance.</p>
 <tr>
 <td>Fleet lifecycle</td>
 <td>Partial</td>
-<td>Enrollment, groups, revision-bound bulk assignment with preview/partial outcomes/idempotency/audit, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, required accountable ownership and 90-day stale-review reporting</td>
-<td>Bulk enrollment import, dynamic groups, managed upgrades, exception expiry and automatic orphan/leaver detection</td>
+<td>Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and deterministic reevaluation, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, required accountable ownership and 90-day stale-review reporting</td>
+<td>Bulk enrollment import, scheduled dynamic reevaluation, managed upgrades, exception expiry and automatic orphan/leaver detection</td>
 </tr>
 <tr>
 <td>Policy governance</td>
@@ -1927,6 +2003,16 @@ denial, transaction rollback, duplicate/oversized rejection, sole-group
 enforcement, and revisioned removal. UI tests prove preview precedes apply and
 that the same request ID is reused. CSV/file import is a future convenience,
 not required because P1-FLT-01 explicitly accepts either import <strong>or</strong> selection.</p>
+<h3 id="p1-flt-02-acceptance-evidence">P1-FLT-02 acceptance evidence</h3>
+<p>The bounded dynamic-group slice evaluates only strongly read server inventory,
+previews without writes, blocks policy-group overlap, and atomically stores
+materialized membership, canonical rule, optimistic revision, idempotency
+result and primary audit evidence. Contract tests cover trusted-attribute
+changes, deterministic removal, unsupported fields, stale revisions, overlap,
+manual-route bypass and transaction races. UI tests prove typed authoring,
+preview-before-apply and exact request-ID reuse. Scheduled service-driven
+reevaluation and endpoint posture attributes remain outstanding and are not
+claimed.</p>
 <h2 id="current-delivery-slice-entra-identity-and-trust">Current delivery slice — Entra identity and trust</h2>
 <p>The active implementation establishes the provider-neutral identity boundary
 with Microsoft Entra ID as the first adapter:</p>

@@ -586,6 +586,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../dynamic-groups-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic policy groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../policy-editor/" class="md-nav__link">
         
   
@@ -1149,6 +1176,33 @@
     
   
     Enterprise P0 and P1 implementation status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../needed-from-from/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inputs needed from the product owner
   
 
     
@@ -2062,6 +2116,14 @@ endpoint. The endpoint fails closed when the agent has no policy group or when
 multiple assigned groups resolve to different policies. The response contains
 configuration data only; the deployment must translate it into typed SDK
 objects and keep immutable SDK safeguards in force.</p>
+<p>Group assignment has two explicit operating models. Manual groups use a
+revision-bound preview/apply batch. Dynamic groups use a typed conjunction over
+trusted deployment and agent inventory: an operator previews the exact
+authority change, resolves overlap, and applies the same request. The control
+plane materializes membership, so Claude Code and Codex retrieve one ordinary
+effective policy; host integrations do not evaluate browser rules and cannot
+nominate their own attributes. See
+<a href="../dynamic-groups-design/">Dynamic policy groups</a>.</p>
 <h2 id="claude-code">Claude Code</h2>
 <h3 id="enforcement-surfaces">Enforcement surfaces</h3>
 <p>Claude Code needs two coordinated surfaces:</p>

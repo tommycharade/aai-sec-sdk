@@ -586,6 +586,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../dynamic-groups-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic policy groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../policy-editor/" class="md-nav__link">
         
   
@@ -982,6 +1009,33 @@
     
   
     Enterprise P0 and P1 implementation status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../needed-from-from/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inputs needed from the product owner
   
 
     
@@ -1831,7 +1885,7 @@ the central team's operating workflows.</p>
 </tr>
 <tr>
 <td>Agent groups</td>
-<td>Create groups, select a policy, preview/apply up to 100 assignments, inspect partial outcomes and remove agents.</td>
+<td>Create groups, select a policy, use manual batch assignment or trusted dynamic rules, inspect outcomes and manage agents.</td>
 </tr>
 <tr>
 <td>Claude onboarding script</td>
@@ -1860,6 +1914,13 @@ enabled. Apply is bound to the displayed membership revision and request ID;
 stale revisions require a new preview. Partial success remains visible per
 agent and never appears as an all-success toast. The completion view shows the
 new revision and the exact applied/unchanged/rejected counts.</p>
+<p>Operators can instead select <strong>Automate membership</strong>. A typed rule builder
+offers only trusted inventory fields and exact include/exclude values. It
+explains every field with contextual help, requires a business reason, and
+shows matched, added, removed, unchanged and overlapping agents before apply.
+Overlap blocks apply. Once enabled, the group is labelled <strong>Dynamic</strong>, manual
+assignment/removal controls disappear, and <strong>Review rule</strong> opens the current
+human-readable rule for deterministic reevaluation.</p>
 <h2 id="operational-safeguards">Operational safeguards</h2>
 <p>Enterprise actions should require role-based authorization, use explicit
 confirmation for emergency operations, produce audit events, and expose

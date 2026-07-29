@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/policy-editor/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/dynamic-groups-design/">
       
       
-        <link rel="prev" href="../dynamic-groups-design/">
+        <link rel="prev" href="../enterprise-fleet/">
       
       
-        <link rel="next" href="../policy-governance-design/">
+        <link rel="next" href="../policy-editor/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Policy editor - Agentic AI Security SDK</title>
+        <title>Dynamic policy groups - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#policy-editor" class="md-skip">
+        <a href="#dynamic-policy-groups" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Policy editor
+              Dynamic policy groups
             
           </span>
         </div>
@@ -583,33 +583,6 @@
       
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../dynamic-groups-design/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Dynamic policy groups
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
     
   
   
@@ -629,7 +602,7 @@
   <span class="md-ellipsis">
     
   
-    Policy editor
+    Dynamic policy groups
   
 
     
@@ -647,7 +620,7 @@
   <span class="md-ellipsis">
     
   
-    Policy editor
+    Dynamic policy groups
   
 
     
@@ -673,10 +646,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#design-rules" class="md-nav__link">
+  <a href="#operator-journey" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Design rules
+        Operator journey
       
     </span>
   </a>
@@ -684,10 +657,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#policy-fields" class="md-nav__link">
+  <a href="#api-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Policy fields
+        API contract
       
     </span>
   </a>
@@ -695,54 +668,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#provider-references-versus-policy-decisions" class="md-nav__link">
+  <a href="#security-invariants" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Provider references versus policy decisions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#policy-inventory-detail-and-activation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Policy inventory, detail and activation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#review-and-activation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Review and activation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#out-of-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Out of scope
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#advanced-json" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Advanced JSON
+        Security invariants
       
     </span>
   </a>
@@ -753,6 +682,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-editor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1675,10 +1631,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#design-rules" class="md-nav__link">
+  <a href="#operator-journey" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Design rules
+        Operator journey
       
     </span>
   </a>
@@ -1686,10 +1642,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#policy-fields" class="md-nav__link">
+  <a href="#api-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Policy fields
+        API contract
       
     </span>
   </a>
@@ -1697,54 +1653,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#provider-references-versus-policy-decisions" class="md-nav__link">
+  <a href="#security-invariants" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Provider references versus policy decisions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#policy-inventory-detail-and-activation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Policy inventory, detail and activation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#review-and-activation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Review and activation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#out-of-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Out of scope
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#advanced-json" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Advanced JSON
+        Security invariants
       
     </span>
   </a>
@@ -1771,192 +1683,61 @@
   
 
 
-<h1 id="policy-editor">Policy editor</h1>
-<p>The Policy editor is a UI-first editor for what an agent is allowed to do. A
-policy is a versioned, validated, tenant-scoped declaration that can be
-assigned to one or more enterprise groups. The runtime remains the authority: the model cannot
-change a policy, approval, identity, credential, or isolation decision.</p>
-<h2 id="design-rules">Design rules</h2>
-<ul>
-<li>Use typed form sections and validated fields; arbitrary JSON is an expert
-  workflow, not the primary user experience.</li>
-<li>Deny by default and require explicit allow-lists.</li>
-<li>Evaluate policy with the live action, resource, principal, purpose and policy
-  version on every consequential action.</li>
-<li>Show a complete effective-policy preview before saving or activating.</li>
-<li>Version every change, retain an audit record, and support comparison and
-  rollback through the enterprise control plane.</li>
-<li>Policy values may narrow authority but must never disable SDK invariants such
-  as fail-closed authorization, approval replay protection or redaction.</li>
-</ul>
-<h2 id="policy-fields">Policy fields</h2>
-<p>The editor presents these sections as typed form groups:</p>
+<h1 id="dynamic-policy-groups">Dynamic policy groups</h1>
+<p>Dynamic groups automate which enrolled agents receive a policy without making
+the browser, agent, or model an authority source. They are a materialized,
+reviewed assignment mechanism: the control plane evaluates a bounded rule over
+its own inventory, shows the exact effect, and applies that result only after an
+operator confirms it.</p>
+<h2 id="operator-journey">Operator journey</h2>
 <ol>
-<li>Identity and scope</li>
-<li>Tool permissions</li>
-<li>Claude native-tool controls</li>
-<li>Command rules</li>
-<li>Approval rules</li>
-<li>Resource limits</li>
-<li>Credential requirements</li>
-<li>Isolation requirements</li>
-<li>Data capture and redaction</li>
-<li>Review, validation and versioning</li>
+<li>Open a group and select <strong>Automate membership</strong>.</li>
+<li>Add one or more typed conditions. All conditions must match.</li>
+<li>Enter an auditable business reason and select <strong>Preview rule</strong>.</li>
+<li>Review matched, added, removed, unchanged and conflicting agents.</li>
+<li>Resolve any overlap with another policy group.</li>
+<li>Apply the exact preview. The group becomes rule-managed and manual add or
+   remove operations are disabled.</li>
+<li>Select <strong>Review rule</strong> after trusted inventory changes to preview and apply
+   deterministic reevaluation.</li>
 </ol>
-<table>
-<thead>
-<tr>
-<th>Feature</th>
-<th>What the editor should configure</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Local allow-list policy</td>
-<td>Allowed tools, principals and resources.</td>
-</tr>
-<tr>
-<td>OPA policy adapter</td>
-<td>A policy-provider reference; endpoint and credentials belong in the wider UI.</td>
-</tr>
-<tr>
-<td>Cedar policy adapter</td>
-<td>A policy-provider reference; endpoint and credentials belong in the wider UI.</td>
-</tr>
-<tr>
-<td>Allowed tools</td>
-<td>Explicit registered-tool allow-list. Unknown tools remain denied.</td>
-</tr>
-<tr>
-<td>Allowed principals</td>
-<td>Identities that may perform actions under this policy.</td>
-</tr>
-<tr>
-<td>Approval requirements</td>
-<td>Which tools, resources, risk classes or command patterns require approval.</td>
-</tr>
-<tr>
-<td>Scoped approval grants</td>
-<td>Required binding to action, resource, principal, purpose and policy context.</td>
-</tr>
-<tr>
-<td>Approval expiry</td>
-<td>Maximum approval time-to-live.</td>
-</tr>
-<tr>
-<td>Claude command rules</td>
-<td>Command patterns that are allowed, denied or approval-required.</td>
-</tr>
-<tr>
-<td>Claude built-in tool allow-list</td>
-<td>Native Claude tools such as Read, Glob, Grep, Bash, Edit and Write.</td>
-</tr>
-<tr>
-<td>Action budget</td>
-<td>Maximum actions per task or session.</td>
-</tr>
-<tr>
-<td>Concurrency limit</td>
-<td>Maximum simultaneous actions.</td>
-</tr>
-<tr>
-<td>Fan-out limit</td>
-<td>Maximum delegated or parallel branches.</td>
-</tr>
-<tr>
-<td>Cost budget</td>
-<td>Maximum model or tool cost units.</td>
-</tr>
-<tr>
-<td>Delegation depth</td>
-<td>Maximum recursive delegation depth.</td>
-</tr>
-<tr>
-<td>Rate limit</td>
-<td>Maximum actions per second.</td>
-</tr>
-<tr>
-<td>Execution timeout</td>
-<td>Maximum operation duration.</td>
-</tr>
-<tr>
-<td>Timed-out worker limit</td>
-<td>Maximum timed-out workers before further work is denied.</td>
-</tr>
-<tr>
-<td>Credential scope enforcement</td>
-<td>Required action, resource, principal and purpose scope.</td>
-</tr>
-<tr>
-<td>Credential TTL</td>
-<td>Maximum permitted credential lifetime for actions under this policy.</td>
-</tr>
-<tr>
-<td>High-risk isolation requirement</td>
-<td>Whether high-risk actions require verified isolation evidence.</td>
-</tr>
-<tr>
-<td>Sensitive-data redaction</td>
-<td>Mandatory redaction profile and protected fields.</td>
-</tr>
-<tr>
-<td>Tool-content capture</td>
-<td>Disabled, metadata-only or bounded content capture. Default: restrictive.</td>
-</tr>
-<tr>
-<td>Safe default configuration</td>
-<td>A restrictive starting template for new policies.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="provider-references-versus-policy-decisions">Provider references versus policy decisions</h2>
-<p>The editor may select a provider or reference an external policy, but it must
-not contain provider secrets or pretend to own an external policy engine. The
-wider UI owns provider endpoints, authentication, health and deployment
-configuration. The runtime consumes the resulting policy decision and fails
-closed when the provider is unavailable or returns an invalid result.</p>
-<h2 id="policy-inventory-detail-and-activation">Policy inventory, detail and activation</h2>
-<p>The Policy page opens on the current-policy inventory. Each row shows the
-policy name and identifier, current version, author, date written, number of
-groups and number of enrolled agents receiving it. Select a row to open the
-policy detail view.</p>
-<p>The detail view shows the stored configuration as a human-readable summary
-grouped into policy sections, along with the groups assigned to it and the
-total affected-agent count. Choose <strong>View JSON</strong> when raw configuration
-inspection is needed, or <strong>Edit policy</strong> to open the typed form.
-When the review is complete, choose <strong>Apply changes</strong>. The control plane
-validates the configuration, records an audit event, increments the policy
-version and makes that version effective for the groups already assigned to
-the policy. A cancel action leaves the current version unchanged.</p>
-<h2 id="review-and-activation">Review and activation</h2>
-<p>The editor shows an effective-policy preview before saving. The preview must
-include allowed actions, denied actions, approval-required actions, maximum
-limits, credential and isolation requirements, redaction/capture behaviour, and
-the groups and agents affected by the policy.</p>
-<p>Before activation, display:</p>
+<p>No JSON or expression language is required. The supported server-owned fields
+are agent host, project ID, deployment ID, deployment team, environment,
+region and reviewed agent criticality. Conditions support exact inclusion or
+exclusion of up to 20 values. Wildcards, regular expressions, volatile
+heartbeat state and browser-supplied risk values are not accepted.</p>
+<h2 id="api-contract">API contract</h2>
+<p><code>POST /api/enterprise/groups/{group}/dynamic-membership</code> accepts a closed
+schema with <code>mode</code>, <code>requestId</code>, <code>expectedMembershipRevision</code>, <code>reason</code> and a
+rule. A rule has <code>match: all</code> and one to seven unique conditions.</p>
+<p>Preview performs strongly consistent inventory reads and writes nothing. Its
+typed response includes the canonical rule and hash, current/resulting
+revision, additions, removals, unchanged agents, overlaps and summary counts.
+<code>canApply</code> is true only when a real change exists and no overlap is present.</p>
+<p>Apply repeats the evaluation. A stale revision or overlapping group returns
+HTTP 409 with no partial authority change. A successful change atomically
+stores the materialized membership, canonical rule, next membership revision,
+request-bound idempotency result and immutable primary audit record. Reusing a
+request ID with different semantics fails closed. The S3 audit export is a
+best-effort secondary copy after the DynamoDB transaction.</p>
+<h2 id="security-invariants">Security invariants</h2>
 <ul>
-<li>tools and principals allowed;</li>
-<li>tools, commands and resources denied;</li>
-<li>approval-required actions;</li>
-<li>action, time, cost, concurrency, rate and delegation limits;</li>
-<li>credential and isolation requirements;</li>
-<li>redaction and content-capture behaviour;</li>
-<li>groups and agents affected by the policy.</li>
+<li>An agent can belong to at most one policy group.</li>
+<li>Only active agents in the group's server-resolved organization are eligible.</li>
+<li>Deployment lineage and reviewed criticality come from control-plane records,
+  never request JSON or model output.</li>
+<li>Missing attributes do not match.</li>
+<li>Candidate size is bounded to 500 agents.</li>
+<li>Dynamic groups reject manual single and bulk membership mutations.</li>
+<li>Inventory, groups and the target revision are re-read before every preview
+  and apply; optimistic concurrency rejects races.</li>
+<li>Audit payloads contain counts, identifiers and hashes, not prompts, tool
+  arguments, credentials or full membership lists.</li>
 </ul>
-<p>Saving a policy is not the same as activating it. Activation should be an
-explicit, audited operation with validation, version selection and a clear
-rollback path.</p>
-<h2 id="out-of-scope">Out of scope</h2>
-<p>The editor must not expose switches for security invariants such as dynamic
-tool lookup, bypassing the runtime, trusting model-supplied identity,
-disabling approval replay protection or disabling mandatory redaction.</p>
-<h2 id="advanced-json">Advanced JSON</h2>
-<p>Expert users may inspect and edit the generated JSON representation. Applying
-advanced JSON first parses the document, validates the closed policy schema and
-maps it back into the typed editor. Unknown sections, unknown fields, invalid
-budget values, <code>denyByDefault: false</code>, attempts to disable redaction and
-immutable safeguard fields are rejected before submission. The backend repeats
-its own validation; browser validation is only an early usability check.</p>
+<p>This first contract intentionally requires an operator to apply reevaluation.
+Scheduled automatic reevaluation will require a separate service identity,
+failure policy, change notification and rollout design before it can safely
+change policy authority without a human confirmation.</p>
 
 
 

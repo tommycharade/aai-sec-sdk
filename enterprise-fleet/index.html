@@ -16,7 +16,7 @@
         <link rel="prev" href="../ui/">
       
       
-        <link rel="next" href="../policy-editor/">
+        <link rel="next" href="../dynamic-groups-design/">
       
       
         
@@ -646,6 +646,17 @@
     <span class="md-ellipsis">
       
         Bulk group assignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dynamic-group-membership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic group membership
       
     </span>
   </a>
@@ -1916,6 +1927,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../dynamic-groups-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic policy groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../policy-editor/" class="md-nav__link">
         
   
@@ -2221,6 +2259,33 @@
     
   
     Enterprise P0 and P1 implementation status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../needed-from-from/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inputs needed from the product owner
   
 
     
@@ -2854,6 +2919,17 @@
     <span class="md-ellipsis">
       
         Bulk group assignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dynamic-group-membership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic group membership
       
     </span>
   </a>
@@ -4351,6 +4427,10 @@ failures are errors rather than empty or synthetic credentials.</p>
 <td>Preview or apply one revision-bound batch of up to 100 assignments</td>
 </tr>
 <tr>
+<td><code>POST /api/enterprise/groups/{group}/dynamic-membership</code></td>
+<td>Preview or apply a deterministic rule over trusted inventory</td>
+</tr>
+<tr>
 <td><code>DELETE /api/enterprise/groups/{group}/agents/{deployment}/{agent}</code></td>
 <td>Remove an agent from a group</td>
 </tr>
@@ -4453,6 +4533,17 @@ rejected agents remain unchanged and retain explicit outcomes. Replaying the
 same request ID and exact semantic request returns the stored result without a
 second authority or audit change; reuse with different content is rejected.
 S3 receives a best-effort secondary copy after the primary transaction.</p>
+<h3 id="dynamic-group-membership">Dynamic group membership</h3>
+<p>Dynamic groups materialize a bounded rule over strongly read, server-owned
+agent and deployment attributes. The operator uses a typed editor, supplies an
+auditable reason and previews additions, removals, unchanged agents and policy
+group overlaps before apply. Overlap, stale revision, malformed lineage,
+unsupported fields and transaction races fail closed without a partial update.</p>
+<p>After apply, the group stores its canonical rule, rule hash, evaluation actor
+and time. Manual single-agent and bulk membership routes reject changes to a
+dynamic group; future changes use another preview and rule reevaluation. See
+<a href="../dynamic-groups-design/">Dynamic policy groups</a> for the complete contract and
+security invariants.</p>
 <p>The UI follows a three-step <strong>Select → Preview → Apply</strong> journey. It lists only
 currently active, unassigned agents from the browser snapshot, requires a
 rationale, displays server-authoritative counts and per-agent outcomes, and
