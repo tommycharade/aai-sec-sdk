@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import threading
 from collections.abc import Mapping
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ from agentic_security import (
     InMemoryAuditSink,
     Principal,
     ReplicatedAuditSink,
+    RuntimeAttestor,
     ToolDefinition,
     ToolRegistry,
     integration_for,
@@ -156,6 +158,16 @@ if __name__ == "__main__":
                 deployment_id=deployment_id,
                 aws_agent_session=aws_session,
                 session_store=session_store,
+                attestor=(
+                    RuntimeAttestor(
+                        sdk_root=Path(__file__).resolve().parents[1],
+                        project_root=project_root,
+                        host=agent_host.value,
+                        sdk_version=version("agentic-security-sdk"),
+                    )
+                    if aws_session
+                    else None
+                ),
                 host=agent_host,
             )
             session_state = {"token": agent_client.register()}

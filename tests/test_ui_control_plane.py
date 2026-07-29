@@ -925,6 +925,64 @@ def test_agent_client_adopts_rotated_session_from_heartbeat(
     assert seen_authorizations == [f"Bearer {TOKEN}", "Bearer new-session-token-123456"]
 
 
+def test_agent_client_sends_fresh_challenge_bound_runtime_attestation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AWS heartbeats measure the host only after receiving a server nonce."""
+    import agentic_security.ui_control_plane as control_plane
+
+    requests: list[tuple[str, dict[str, object]]] = []
+    nonce = "synthetic-runtime-attestation-challenge-123456"
+
+    class Evidence:
+        def to_wire(self) -> dict[str, object]:
+            return {"schemaVersion": 1, "nonce": nonce, "packageDigest": "a" * 64}
+
+    class Attestor:
+        def attest(self, supplied: str) -> Evidence:
+            assert supplied == nonce
+            return Evidence()
+
+    class Response:
+        def __init__(self, value: dict[str, object]) -> None:
+            self.value = value
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(self.value).encode()
+
+    def fake_urlopen(request: Any, **_kwargs: Any) -> Response:
+        body = json.loads(request.data)
+        requests.append((request.full_url, body))
+        if request.full_url.endswith("/attestation/challenge"):
+            return Response({"nonce": nonce, "expiresAt": 1_900_000_060})
+        return Response({"status": "connected", "expiresAt": 1_900_000_900})
+
+    monkeypatch.setattr(control_plane, "urlopen", fake_urlopen)
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-code-local",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+        attestor=Attestor(),  # type: ignore[arg-type]
+    )
+
+    assert client.heartbeat(TOKEN)["status"] == "connected"
+    assert requests[0][0].endswith("/attestation/challenge")
+    assert requests[1][1]["attestation"] == {
+        "schemaVersion": 1,
+        "nonce": nonce,
+        "packageDigest": "a" * 64,
+    }
+
+
 def test_agent_client_secures_rotation_for_native_hook_processes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

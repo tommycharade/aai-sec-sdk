@@ -217,6 +217,35 @@ environment, and region from that server-owned record; browser-supplied values
 cannot change ownership. Registration and bootstrap exchange leave presence
 offline. Only an authenticated runtime heartbeat marks the agent connected.
 
+### Runtime attestation manifests
+
+The control-plane Lambda packages
+`infra/aws-control-plane/lambda/runtime-manifests.json` and CDK pins its
+SHA-256 digest into the function environment. CDK rejects malformed, duplicate
+or unsupported manifest entries during synthesis, and Lambda revalidates the
+bundle and digest at startup. The checked-in bundle is deliberately empty, so
+a fresh development deployment reports runtime attestation as
+`not_configured`; this is not production-ready posture.
+
+Before production enrollment, independently verify the intended release and
+populate one exact manifest for each approved `claude-code` or `codex-cli` SDK
+version. Each object must use the schema documented in
+[Runtime attestation design](runtime-attestation-design.md) and contain the
+release SDK revision plus SHA-256 identifiers for source origin, installed
+package, MCP gateway and native hook. Generate and review these values from a
+clean, provenance-verified checkout and installation; do not copy values from
+an enrolled endpoint. Commit the reviewed bundle, run `make check`, synthesize
+CDK and deploy the changed Lambda before onboarding that release.
+
+After configuration, each heartbeat obtains a 60-second one-time challenge.
+Evidence is accepted only inside a 90-second observation window and compliant
+posture expires after five minutes. A mismatch quarantines the agent, removes
+its live session and denies effective-policy, decision and approval calls. The
+operator verification endpoint exposes status, freshness, SDK version,
+revision and bounded reason codes without returning local paths or file
+content. Recovery requires restoring approved artifacts and re-enrolling; do
+not clear the retained audit history.
+
 The stack selects Cognito Managed Login version 2 and declares the AAI Security
 branding style in CloudFormation, including the dark/teal form treatment and
 logo asset. This keeps the authentication handoff visually consistent with the

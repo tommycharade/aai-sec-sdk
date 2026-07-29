@@ -44,6 +44,7 @@ from ._command_patterns import compile_command_patterns
 from .agent_sessions import AgentSessionCredential, AgentSessionStore
 from .audit import AuditEvent, AuditSink
 from .integrations import AgentHost
+from .runtime_attestation import RuntimeAttestor
 
 try:  # pragma: no cover - platform branch; control-plane reference targets Unix hosts.
     import fcntl
@@ -453,6 +454,7 @@ class ControlPlaneAgentClient:
         deployment_id: str | None = None,
         aws_agent_session: bool = False,
         session_store: AgentSessionStore | None = None,
+        attestor: RuntimeAttestor | None = None,
         host: AgentHost | str = AgentHost.CLAUDE_CODE,
         timeout_seconds: float = 5,
     ) -> None:
@@ -461,6 +463,8 @@ class ControlPlaneAgentClient:
         ``session_store`` is an optional user-private host cache used to share
         heartbeat rotations with short-lived native hook processes. It never
         supplies identity or authority and performs no I/O in this constructor.
+        ``attestor`` measures the live host only after an authenticated AWS
+        session obtains a one-time challenge; it makes no network call itself.
         """
         parsed = urlsplit(base_url.rstrip("/"))
         local_http = parsed.scheme == "http" and parsed.hostname in {
@@ -496,6 +500,8 @@ class ControlPlaneAgentClient:
             or session_store.project_root != normalized_project_root
         ):
             raise ValueError("agent session store identity must match the AWS agent client")
+        if attestor is not None and not aws_agent_session:
+            raise ValueError("runtime attestation requires an AWS agent session")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.agent_id = agent_id
@@ -504,6 +510,7 @@ class ControlPlaneAgentClient:
         self.deployment_id = deployment_id
         self.aws_agent_session = aws_agent_session
         self.session_store = session_store
+        self.attestor = attestor
         self.timeout_seconds = timeout_seconds
 
     def register(self) -> str:
@@ -544,6 +551,14 @@ class ControlPlaneAgentClient:
         body: JsonObject = {"sessionId": session_id}
         if telemetry is not None:
             body["telemetry"] = _bounded_agent_telemetry(telemetry)
+        if self.attestor is not None:
+            challenge = self._request(self._agent_path("attestation/challenge"), {})
+            nonce = challenge.get("nonce")
+            if not isinstance(nonce, str) or not 32 <= len(nonce) <= 256:
+                raise ControlPlaneDependencyError(
+                    "control plane returned no valid runtime attestation challenge"
+                )
+            body["attestation"] = self.attestor.attest(nonce).to_wire()
         response = self._request(self._agent_path("heartbeat"), body)
         refreshed = response.get("accessToken")
         if isinstance(refreshed, str) and len(refreshed) >= 16:

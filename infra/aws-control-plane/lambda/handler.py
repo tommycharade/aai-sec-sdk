@@ -14,6 +14,7 @@ import secrets
 import time
 import uuid
 from decimal import Decimal
+from pathlib import Path
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -33,6 +34,26 @@ _MAX_LIST_PAGES = 8
 _MAX_LIST_ITEMS = 2_000
 _DECISION_WINDOW_LIMIT = 250
 _DECISION_TIMELINE_INDEX = "DecisionTimeline"
+_ATTESTATION_MANIFEST_FIELDS = frozenset(
+    {
+        "schemaVersion",
+        "sdkVersion",
+        "sdkRevision",
+        "sourceOriginDigest",
+        "packageDigest",
+        "gatewayDigest",
+        "hookDigest",
+        "host",
+    }
+)
+_ATTESTATION_EVIDENCE_FIELDS = _ATTESTATION_MANIFEST_FIELDS | {
+    "configurationDigest",
+    "executableDigest",
+    "launchContextDigest",
+    "projectRootDigest",
+    "observedAt",
+    "nonce",
+}
 
 _AGENT_TELEMETRY_FIELDS = frozenset(
     {
@@ -115,6 +136,259 @@ _ROLE_CAPABILITIES = {
     "incident-responder": frozenset({"incident_response"}),
     "auditor": frozenset(),
 }
+
+
+def _runtime_manifests():
+    """Return bounded deployment-owned artifact manifests or fail closed."""
+    raw = os.environ.get("RUNTIME_ATTESTATION_MANIFESTS", "")
+    if not raw:
+        manifest_file = Path(__file__).with_name("runtime-manifests.json")
+        try:
+            encoded = manifest_file.read_bytes()
+        except OSError as error:
+            raise RuntimeError("runtime attestation manifest bundle is unavailable") from error
+        expected_digest = os.environ.get("RUNTIME_ATTESTATION_MANIFESTS_SHA256", "")
+        if expected_digest and not secrets.compare_digest(
+            hashlib.sha256(encoded).hexdigest(), expected_digest
+        ):
+            raise RuntimeError("runtime attestation manifest bundle integrity failed")
+        try:
+            raw = encoded.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise RuntimeError("runtime attestation manifest bundle is malformed") from error
+    if not raw:
+        return []
+    if len(raw) > 65_536:
+        raise RuntimeError("runtime attestation manifests exceed the safe bound")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("runtime attestation manifests are malformed") from error
+    if not isinstance(value, list) or len(value) > 32:
+        raise RuntimeError("runtime attestation manifests must contain at most 32 entries")
+    seen = set()
+    manifests = []
+    for manifest in value:
+        if not isinstance(manifest, dict) or set(manifest) != _ATTESTATION_MANIFEST_FIELDS:
+            raise RuntimeError("runtime attestation manifest schema is invalid")
+        if manifest.get("schemaVersion") != 1:
+            raise RuntimeError("runtime attestation manifest version is unsupported")
+        if manifest.get("host") not in {"claude-code", "codex-cli"}:
+            raise RuntimeError("runtime attestation manifest host is unsupported")
+        if (
+            not isinstance(manifest.get("sdkVersion"), str)
+            or not 1 <= len(manifest["sdkVersion"]) <= 64
+        ):
+            raise RuntimeError("runtime attestation manifest SDK version is invalid")
+        if not re.fullmatch(r"[0-9a-f]{40}", str(manifest.get("sdkRevision", ""))):
+            raise RuntimeError("runtime attestation manifest revision is invalid")
+        for field in (
+            "sourceOriginDigest",
+            "packageDigest",
+            "gatewayDigest",
+            "hookDigest",
+        ):
+            if not re.fullmatch(r"[0-9a-f]{64}", str(manifest.get(field, ""))):
+                raise RuntimeError("runtime attestation manifest digest is invalid")
+        identity = (manifest["host"], manifest["sdkVersion"])
+        if identity in seen:
+            raise RuntimeError("runtime attestation manifest identity is ambiguous")
+        seen.add(identity)
+        manifests.append(manifest)
+    return manifests
+
+
+def _runtime_manifest(tenant, deployment_id, host, manifests=None):
+    """Select one immutable manifest from deployment version and host identity."""
+    manifests = _runtime_manifests() if manifests is None else manifests
+    if not manifests:
+        return None
+    deployment = TABLE.get_item(
+        Key=_item_key(tenant, "DEPLOYMENT", deployment_id), ConsistentRead=True
+    ).get("Item")
+    if not deployment:
+        raise PermissionError("runtime attestation deployment is unavailable")
+    expected_version = deployment.get("sdk_version")
+    matches = [
+        manifest
+        for manifest in manifests
+        if manifest["host"] == host and manifest["sdkVersion"] == expected_version
+    ]
+    if len(matches) > 1:
+        raise PermissionError("runtime attestation manifest is ambiguous")
+    return matches[0] if matches else None
+
+
+def _issue_attestation_challenge(tenant, session, token):
+    """Issue one short-lived nonce bound to the exact authenticated session."""
+    now = int(time.time())
+    nonce = secrets.token_urlsafe(32)
+    expires_at = now + 60
+    TABLE.update_item(
+        Key={"pk": _token_key("AGENT_SESSION", token), "sk": "SESSION"},
+        UpdateExpression="SET attestation_nonce = :nonce, attestation_nonce_expires_at = :expires",
+        ConditionExpression="attribute_exists(pk) AND expires_at > :now",
+        ExpressionAttributeValues={":nonce": nonce, ":expires": expires_at, ":now": now},
+    )
+    manifests = _runtime_manifests()
+    return {
+        "nonce": nonce,
+        "expiresAt": expires_at,
+        # Once any approved bundle is installed, an unlisted host/version is a
+        # trust failure rather than a development compatibility state.
+        "required": bool(manifests),
+    }
+
+
+def _attestation_baseline(evidence):
+    """Hash project-specific evidence fields without retaining local values."""
+    selected = {
+        key: evidence[key]
+        for key in ("configurationDigest", "executableDigest", "launchContextDigest")
+    }
+    return hashlib.sha256(
+        json.dumps(selected, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+
+
+def _quarantine_attestation(tenant, agent, token, reasons):
+    """Revoke the live session and retain only bounded reason-code evidence."""
+    now = int(time.time())
+    agent.update(
+        {
+            "status": "quarantined",
+            "expires_at": 0,
+            "attestation_status": "quarantined",
+            "attestation_reason_codes": sorted(set(reasons))[:16],
+            "attestation_observed_at": now,
+            "attestation_expires_at": now,
+        }
+    )
+    TABLE.put_item(Item=agent)
+    TABLE.delete_item(Key={"pk": _token_key("AGENT_SESSION", token), "sk": "SESSION"})
+    _audit(
+        tenant,
+        "runtime_attestation_quarantined",
+        f"agent:{agent['deployment_id']}:{agent['id']}",
+        {
+            "deployment_id": agent["deployment_id"],
+            "agent_id": agent["id"],
+            "reason_codes": agent["attestation_reason_codes"],
+        },
+    )
+    raise PermissionError(
+        "runtime attestation failed: " + ",".join(agent["attestation_reason_codes"])
+    )
+
+
+def _validate_runtime_attestation(tenant, deployment_id, agent, session, token, value):
+    """Consume one challenge and compare fresh evidence to manifest and baseline."""
+    manifests = _runtime_manifests()
+    manifest = _runtime_manifest(tenant, deployment_id, agent.get("host", ""), manifests)
+    if manifest is None:
+        if manifests:
+            _quarantine_attestation(tenant, agent, token, ["approved_manifest_missing"])
+        agent.update(
+            {
+                "attestation_status": "not_configured",
+                "attestation_reason_codes": ["approved_manifest_missing"],
+                "attestation_observed_at": int(time.time()),
+                "attestation_expires_at": 0,
+            }
+        )
+        return
+    reasons = []
+    now = int(time.time())
+    if not isinstance(value, dict) or set(value) != _ATTESTATION_EVIDENCE_FIELDS:
+        _quarantine_attestation(tenant, agent, token, ["evidence_schema_invalid"])
+    if value.get("schemaVersion") != 1:
+        reasons.append("schema_version_mismatch")
+    observed_at = value.get("observedAt")
+    if (
+        isinstance(observed_at, bool)
+        or not isinstance(observed_at, int)
+        or abs(now - observed_at) > 90
+    ):
+        reasons.append("evidence_stale")
+    nonce = value.get("nonce")
+    expected_nonce = session.get("attestation_nonce")
+    if (
+        not isinstance(nonce, str)
+        or not isinstance(expected_nonce, str)
+        or int(session.get("attestation_nonce_expires_at", 0)) <= now
+        or not secrets.compare_digest(nonce, expected_nonce)
+    ):
+        reasons.append("challenge_invalid")
+    if value.get("projectRootDigest") != session.get("project_root_hash"):
+        reasons.append("project_scope_mismatch")
+    for field in _ATTESTATION_MANIFEST_FIELDS - {"schemaVersion"}:
+        supplied = value.get(field)
+        expected = manifest.get(field)
+        if not isinstance(supplied, str) or not isinstance(expected, str):
+            reasons.append(f"{field}_invalid")
+        elif not secrets.compare_digest(supplied, expected):
+            reasons.append(f"{field}_mismatch")
+    for field in ("configurationDigest", "executableDigest", "launchContextDigest"):
+        if not re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))):
+            reasons.append(f"{field}_invalid")
+    if reasons:
+        _quarantine_attestation(tenant, agent, token, reasons)
+    baseline = _attestation_baseline(value)
+    existing_baseline = agent.get("attestation_baseline_digest")
+    if isinstance(existing_baseline, str) and not secrets.compare_digest(
+        existing_baseline, baseline
+    ):
+        _quarantine_attestation(tenant, agent, token, ["enrollment_baseline_mismatch"])
+    try:
+        TABLE.update_item(
+            Key={"pk": _token_key("AGENT_SESSION", token), "sk": "SESSION"},
+            UpdateExpression="REMOVE attestation_nonce, attestation_nonce_expires_at",
+            ConditionExpression=(
+                "attestation_nonce = :nonce AND attestation_nonce_expires_at > :now"
+            ),
+            ExpressionAttributeValues={":nonce": nonce, ":now": now},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            _quarantine_attestation(tenant, agent, token, ["challenge_replayed"])
+        raise
+    agent.update(
+        {
+            "attestation_status": "compliant",
+            "attestation_reason_codes": [],
+            "attestation_observed_at": observed_at,
+            "attestation_expires_at": now + 300,
+            "attestation_baseline_digest": existing_baseline or baseline,
+            "attestation_sdk_version": value["sdkVersion"],
+            "attestation_sdk_revision": value["sdkRevision"],
+        }
+    )
+    _audit(
+        tenant,
+        "runtime_attestation_verified",
+        f"agent:{deployment_id}:{agent['id']}",
+        {
+            "deployment_id": deployment_id,
+            "agent_id": agent["id"],
+            "sdk_version": value["sdkVersion"],
+            "sdk_revision": value["sdkRevision"],
+            "expires_at": now + 300,
+        },
+    )
+
+
+def _require_current_attestation(tenant, deployment_id, agent):
+    """Deny governed agent routes when configured attestation is not current."""
+    manifests = _runtime_manifests()
+    if not manifests:
+        return
+    manifest = _runtime_manifest(tenant, deployment_id, agent.get("host", ""), manifests)
+    if manifest is None:
+        raise PermissionError("runtime attestation has no approved host/version manifest")
+    if agent.get("attestation_status") != "compliant" or int(
+        agent.get("attestation_expires_at", 0)
+    ) <= int(time.time()):
+        raise PermissionError("runtime attestation is missing, expired, or non-compliant")
 
 
 def _json_default(value):
@@ -559,6 +833,14 @@ def _project_root(value):
     ):
         raise ValueError("projectRoot must be a canonical absolute project path")
     return normalized
+
+
+def _agent_host(value):
+    """Require a host with an implemented runtime-attestation profile."""
+    host = _bounded_text(value, "host", 64)
+    if host not in {"claude-code", "codex-cli"}:
+        raise ValueError("host must be claude-code or codex-cli")
+    return host
 
 
 def _create_item(tenant, kind, identifier, item):
@@ -1078,7 +1360,7 @@ def _seed(tenant):
             "organization_id": "org-demo",
             "project_id": "project-demo",
             "deployment_id": "deployment-claude-local",
-            "host": "Claude Code",
+            "host": "claude-code",
             "project_root": "/Users/example/project",
             "environment": "dev",
             "region": os.environ.get("AWS_REGION", "eu-west-2"),
@@ -1187,6 +1469,15 @@ def _verify_agent(tenant, deployment_id, agent_id):
         and agent.get("status") == "connected"
         and int(agent.get("expires_at", 0)) > checked_at
     )
+    attestation_manifest = (
+        _runtime_manifest(tenant, deployment_id, agent.get("host", "")) if agent else None
+    )
+    attestation_current = bool(
+        agent
+        and attestation_manifest
+        and agent.get("attestation_status") == "compliant"
+        and int(agent.get("attestation_expires_at", 0)) > checked_at
+    )
     if not agent:
         heartbeat_detail = "Agent is not registered to this deployment."
     elif agent.get("status") != "connected":
@@ -1213,6 +1504,18 @@ def _verify_agent(tenant, deployment_id, agent_id):
         "heartbeat": {
             "passed": heartbeat_current,
             "detail": heartbeat_detail,
+        },
+        "runtimeAttestation": {
+            "passed": attestation_current,
+            "detail": (
+                "Runtime artifacts match the approved manifest and enrollment baseline."
+                if attestation_current
+                else (
+                    "No deployment-owned runtime manifest matches this host and SDK version."
+                    if agent and not attestation_manifest
+                    else "Runtime attestation is missing, expired, or non-compliant."
+                )
+            ),
         },
         "policyAssignment": {
             "passed": policy_assigned,
@@ -1243,6 +1546,14 @@ def _verify_agent(tenant, deployment_id, agent_id):
         "groups": [group["id"] for group in groups],
         "policyId": policy.get("id") if policy else None,
         "policyVersion": int(policy.get("version", 0)) if policy else None,
+        "attestation": {
+            "status": agent.get("attestation_status", "pending") if agent else "missing",
+            "observedAt": int(agent.get("attestation_observed_at", 0)) if agent else 0,
+            "expiresAt": int(agent.get("attestation_expires_at", 0)) if agent else 0,
+            "reasonCodes": list(agent.get("attestation_reason_codes", [])) if agent else [],
+            "sdkVersion": agent.get("attestation_sdk_version") if agent else None,
+            "sdkRevision": agent.get("attestation_sdk_revision") if agent else None,
+        },
     }
 
 
@@ -1511,11 +1822,27 @@ def handler(event, context):
             tenant = session["tenant_id"]
             _seed(tenant)
             agent_key = f"{deployment_id}:{agent_id}"
+            if method == "POST" and action == ["attestation", "challenge"]:
+                return _response(
+                    200,
+                    _issue_attestation_challenge(tenant, session, _bearer(event)),
+                )
             if method == "POST" and action == ["heartbeat"]:
-                item = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key)).get("Item")
+                item = TABLE.get_item(
+                    Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True
+                ).get("Item")
                 if not item:
                     return _response(404, {"error": "agent not found"})
-                telemetry = _agent_telemetry(_body(event).get("telemetry"))
+                body = _body(event)
+                _validate_runtime_attestation(
+                    tenant,
+                    deployment_id,
+                    item,
+                    session,
+                    _bearer(event),
+                    body.get("attestation"),
+                )
+                telemetry = _agent_telemetry(body.get("telemetry"))
                 if telemetry is not None:
                     item["telemetry"] = telemetry
                 item.update(
@@ -1529,13 +1856,17 @@ def handler(event, context):
                 return _response(
                     200, {**item, **_renew_agent_session(tenant, session, _bearer(event))}
                 )
+            governed_agent = TABLE.get_item(
+                Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True
+            ).get("Item")
+            if not governed_agent:
+                return _response(404, {"error": "agent not found"})
+            _require_current_attestation(tenant, deployment_id, governed_agent)
             if method == "POST" and action == ["decisions"]:
                 recorded = _record_agent_decision(tenant, deployment_id, agent_id, _body(event))
                 return _response(409 if recorded.get("conflict") else 202, recorded)
             if method == "GET" and action == ["effective-policy"]:
-                agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key)).get("Item")
-                if not agent:
-                    return _response(404, {"error": "agent not found"})
+                agent = governed_agent
                 if _fleet_emergency_stop_active(tenant):
                     return _response(
                         409,
@@ -1586,11 +1917,6 @@ def handler(event, context):
                 )
             if method == "POST" and action == ["approvals", "request"]:
                 body = _body(event)
-                if not TABLE.get_item(
-                    Key=_item_key(tenant, "AGENT", agent_key),
-                    ConsistentRead=True,
-                ).get("Item"):
-                    return _response(404, {"error": "agent not found"})
                 approval_id = _approval_text(body.get("approval_id"), "approval_id")
                 now = int(time.time())
                 review_ttl = min(max(int(body.get("review_ttl_seconds", 900)), 60), 3600)
@@ -2494,7 +2820,7 @@ def handler(event, context):
                             "organization_id": deployment["organization_id"],
                             "project_id": deployment["project_id"],
                             "deployment_id": deployment_id,
-                            "host": _bounded_text(body.get("host", "agent"), "host", 64),
+                            "host": _agent_host(body.get("host")),
                             "project_root": project_root,
                             "environment": deployment["environment"],
                             "region": deployment["region"],
@@ -2516,26 +2842,6 @@ def handler(event, context):
                     {"deployment_id": deployment_id, "agent_id": agent_id},
                 )
                 return _response(201, item)
-            if (
-                method == "POST"
-                and len(parts) == 4
-                and parts[0] == "agents"
-                and parts[3] == "heartbeat"
-            ):
-                item = TABLE.get_item(Key=_item_key(tenant, "AGENT", f"{parts[1]}:{parts[2]}")).get(
-                    "Item"
-                )
-                if not item:
-                    return _response(404, {"error": "agent not found"})
-                item.update(
-                    {
-                        "status": "connected",
-                        "last_heartbeat": int(time.time()),
-                        "expires_at": int(time.time()) + 300,
-                    }
-                )
-                TABLE.put_item(Item=item)
-                return _response(200, item)
             if (
                 method == "GET"
                 and len(parts) == 4
