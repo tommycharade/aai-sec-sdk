@@ -2140,6 +2140,25 @@ audit durability, and isolation remain independent requirements. The client
 uses HTTPS outside explicitly permitted localhost development URLs and bounds
 responses; deployments must still provide TLS termination, token rotation,
 network policy, and monitoring.</p>
+<p>Hosted agent identity lifecycle is forward-only and server-owned. Presence can
+move between connected and offline, but authority can move only from active to
+revoked to deleted. Every agent-authenticated request strongly reads the agent
+record after resolving the hashed session token. Unknown, malformed, revoked
+or deleted lifecycle state denies before policy, telemetry, approval or
+execution-adjacent behavior. Bootstrap exchange performs the same check before
+consuming enrollment material, and registration cannot reuse a retained ID.
+Heartbeat and emergency-stop writes compare the current lifecycle revision so
+a stale concurrent write cannot overwrite revocation.</p>
+<p>Lifecycle transitions and immutable content-minimised evidence are committed
+in one DynamoDB transaction. Replacement also conditionally updates inherited
+group membership and creates a distinct offline successor; any concurrent
+membership or lifecycle change rolls back the whole operation. Historical
+group references are evidence, not authority, because only an active identity
+can enroll, join a group or use an agent route. Offboarding hashes and removes
+the project path and discards operational telemetry while retaining lineage,
+actors, reasons, timestamps and replacement relationships. This does not
+detect a departed employee or archived repository by itself; those external
+signals and the offboarding SLO remain a P1 integration requirement.</p>
 <p>When a deployment-owned approved runtime manifest is configured, every
 heartbeat consumes a one-time control-plane challenge and carries fresh,
 content-minimised hashes for the SDK package, gateway, native hook, project

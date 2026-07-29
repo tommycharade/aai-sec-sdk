@@ -642,6 +642,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#agent-identity-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent identity lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#central-action-approvals" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2817,6 +2828,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#agent-identity-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent identity lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#central-action-approvals" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4197,6 +4219,18 @@ failures are errors rather than empty or synthetic credentials.</p>
 <td>Register an authenticated agent</td>
 </tr>
 <tr>
+<td><code>POST /api/enterprise/agents/{deployment}/{agent}/revoke</code></td>
+<td>Irreversibly revoke one identity using its expected lifecycle revision</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/agents/{deployment}/{agent}/replace</code></td>
+<td>Atomically revoke a predecessor, create a new offline successor and inherit group assignment</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/agents/{deployment}/{agent}/offboard</code></td>
+<td>Remove operational data from a revoked identity while retaining a lifecycle tombstone</td>
+</tr>
+<tr>
 <td><code>POST /api/enterprise/agents/{deployment}/{agent}/heartbeat</code></td>
 <td>Refresh presence and optionally publish bounded aggregate SDK telemetry plus managed-host evidence</td>
 </tr>
@@ -4341,6 +4375,35 @@ and affected-agent count in the redacted audit trail.</p>
 read <code>policyId</code>/<code>policyVersion</code> alongside liveness and stop checks. Missing or
 conflicting policy state returns null policy identity and cannot verify. A UI
 must compare this complete tuple with its selected activation scope.</p>
+<h3 id="agent-identity-lifecycle">Agent identity lifecycle</h3>
+<p>Presence and identity lifecycle are deliberately separate. <code>connected</code> and
+<code>offline</code> are reversible presence states. <code>active → revoked → deleted</code> is a
+server-owned, forward-only authority transition. Legacy records are migrated
+once to explicit lifecycle revision 1 using a conditional update; malformed or
+partially migrated lifecycle state fails closed.</p>
+<p>Revoke, replace and offboard requests require an exact
+<code>expectedLifecycleRevision</code> and an operator reason of at least 20 characters.
+The hosted adapter uses one DynamoDB transaction to compare-and-swap the agent
+record and create immutable <code>AGENT_LIFECYCLE_AUDIT</code> evidence. Replacement also
+creates a distinct successor and updates every inherited group membership in
+that transaction. A changed lifecycle revision, occupied successor ID, changed
+group membership or oversized replacement fan-out rolls back the entire
+operation.</p>
+<p>Revocation does not enumerate bearer records. Instead, every agent route and
+bootstrap exchange strongly reads the live agent record and requires
+<code>lifecycle_state=active</code>. This immediately denies old sessions and unused
+bootstrap tokens even if their TTL has not expired. Heartbeat writes and
+operator emergency-stop changes compare the same lifecycle revision so a
+concurrent stale write cannot reactivate or overwrite revocation.</p>
+<p>Replacement keeps the predecessor in its historical groups and adds the new
+offline identity to the same groups. The predecessor cannot exercise policy
+authority because its lifecycle is revoked; retaining the relationship makes
+assignment evidence reviewable. The successor must receive and consume fresh
+enrollment material. Offboarding is permitted only after revocation and stores
+a tombstone: tenant lineage, host, lifecycle actors/reasons, timestamps,
+replacement relationship and a project-root digest remain, while the local
+path, telemetry and managed-host observations are removed. Agent IDs are never
+reusable.</p>
 <h3 id="central-action-approvals">Central action approvals</h3>
 <p>An enrolled agent submits a held action through its deployment/agent-bound
 session. The server derives <code>agentKey</code> from that session and accepts only the

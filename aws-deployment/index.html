@@ -1977,6 +1977,18 @@ cache. Claude hooks and Codex/MCP processes can therefore adopt the current
 bearer without writing credentials into project configuration. Missed
 heartbeats, failed renewal, an unsafe cache, and emergency stops remain
 fail-closed.</p>
+<p>Agent identity lifecycle is independent from presence and emergency stop. A
+fleet operator can call <code>POST /enterprise/agents/{deployment}/{agent}/revoke</code>
+with <code>expectedLifecycleRevision</code> and a bounded reason. The transition is
+irreversible: every agent route and bootstrap exchange checks the live agent
+record, so existing sessions and unused bootstrap material fail immediately
+without waiting for their TTL. <code>replace</code> atomically creates a distinct offline
+successor and inherits group membership while revoking the predecessor;
+operators must enroll the successor with fresh material. <code>offboard</code> is allowed
+only after revocation and replaces operational fields with a content-minimised
+tombstone. Lifecycle authority and immutable DynamoDB evidence commit in one
+transaction; S3 audit is a secondary best-effort replica of that already
+durable event.</p>
 <p>Heartbeats can also report the exact managed-host bundle loaded by Claude Code
 or Codex. A deployment configuration must first contain a complete
 <code>managedHost</code> desired identity (host/client version, platform, policy ID and
