@@ -1812,21 +1812,27 @@ cannot change ownership. Registration and bootstrap exchange leave presence
 offline. Only an authenticated runtime heartbeat marks the agent connected.</p>
 <h3 id="runtime-attestation-manifests">Runtime attestation manifests</h3>
 <p>The control-plane Lambda packages
-<code>infra/aws-control-plane/lambda/runtime-manifests.json</code> and CDK pins its
-SHA-256 digest into the function environment. CDK rejects malformed, duplicate
-or unsupported manifest entries during synthesis, and Lambda revalidates the
-bundle and digest at startup. The checked-in bundle is deliberately empty, so
-a fresh development deployment reports runtime attestation as
-<code>not_configured</code>; this is not production-ready posture.</p>
+<code>infra/aws-control-plane/lambda/runtime-manifests.json</code> and its paired
+<code>runtime-manifests.provenance.json</code>. CDK pins both SHA-256 digests into the
+function environment. CDK rejects malformed, duplicate, unsupported or stale
+bundle/approval pairs during synthesis, and Lambda revalidates both exact files
+at startup. The checked-in manifest bundle is deliberately empty, with an
+empty approval record bound to those exact bytes, so a fresh development
+deployment reports runtime attestation as <code>not_configured</code>; this is not
+production-ready posture.</p>
 <p>Before production enrollment, independently verify the intended release and
 populate one exact manifest for each approved <code>claude-code</code> or <code>codex-cli</code> SDK
 version. Each object must use the schema documented in
 <a href="../runtime-attestation-design/">Runtime attestation design</a> and contain the
 release SDK revision plus SHA-256 identifiers for source origin, installed
-package, MCP gateway and native hook. Generate and review these values from a
-clean, provenance-verified checkout and installation; do not copy values from
-an enrolled endpoint. Commit the reviewed bundle, run <code>make check</code>, synthesize
-CDK and deploy the changed Lambda before onboarding that release.</p>
+package, MCP gateway and native hook. Use
+<code>scripts/generate_runtime_manifests.py</code> from a clean tag checkout; it validates
+the published evidence bundle and both GitHub artifact attestations before
+writing the exact manifest and provenance pair. Do not copy values from an
+enrolled endpoint or hand-edit either file. Commit the reviewed pair, run
+<code>make check</code>, synthesize CDK and deploy the changed Lambda before onboarding
+that release. The complete command and trust assumptions are in
+<a href="../runtime-attestation-design/">Runtime attestation design</a>.</p>
 <p>After configuration, each heartbeat obtains a 60-second one-time challenge.
 Evidence is accepted only inside a 90-second observation window and compliant
 posture expires after five minutes. A mismatch quarantines the agent, removes

@@ -1461,6 +1461,21 @@ GitHub Actions job. Locally, install <code>.[postgres]</code>, set
 <pre><code class="language-bash">python -m pytest -q tests/test_enterprise_postgres_integration.py
 </code></pre>
 <p>Without a DSN the test skips; the CI service job always supplies one.</p>
+<p>Runtime-manifest assurance is split across three boundaries:</p>
+<ul>
+<li><code>tests/test_runtime_attestation.py</code> covers content-minimised measurement,
+  linked worktrees, packed refs, symlink/race bounds and changed artifacts;</li>
+<li><code>tests/test_runtime_manifest_generator.py</code> covers clean-checkout enforcement,
+  release identity, deterministic Claude/Codex manifests, GitHub provenance
+  invocation and safe output handling; and</li>
+<li><code>tests/test_aws_lambda_contract.py</code> proves exact manifest/provenance binding,
+  challenge freshness, mismatch quarantine, session revocation and governed
+  route denial.</li>
+</ul>
+<p><code>npm run build &amp;&amp; npm run synth</code> in <code>infra/aws-control-plane</code> additionally
+proves that CDK accepts the checked-in empty development pair and will reject a
+stale pair before deployment. Live modified-host acceptance remains required
+before P0-05 is complete.</p>
 <h2 id="deterministic-propertyfuzz-coverage">Deterministic property/fuzz coverage</h2>
 <p><code>tests/test_assurance.py</code> runs a finite checked-in corpus from
 <code>tests/corpus/malformed_inputs.json</code>. It exercises proposal construction,

@@ -797,6 +797,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#generating-an-approved-release-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating an approved release bundle
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1442,6 +1453,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#generating-an-approved-release-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating an approved release bundle
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1569,6 +1591,44 @@ attestation.</p>
 quarantine and session-revocation behavior. Live release-manifest, five-minute
 detection and host-identity acceptance remain required before P0-05 can be
 marked complete.</p>
+<h2 id="generating-an-approved-release-bundle">Generating an approved release bundle</h2>
+<p>Do not hand-author artifact hashes. From a new clean checkout of the exact
+release tag, download the published release evidence outside the checkout and
+run the generator. The command independently runs the checked-in evidence
+verifier and GitHub's provenance verifier for both the wheel and source
+archive before measuring either host:</p>
+<pre><code class="language-bash">export AAI_SDK_ROOT=&quot;$PWD&quot;
+export AAI_RELEASE_TAG=&quot;v1.1.0&quot;
+export AAI_RELEASE_COMMIT=&quot;replace-with-the-tag-commit-sha&quot;
+export AAI_RELEASE_EVIDENCE=&quot;/absolute/path/to/downloaded-release-evidence&quot;
+
+PYTHONPATH=&quot;$AAI_SDK_ROOT/src&quot; python \
+  scripts/generate_runtime_manifests.py \
+  --sdk-root &quot;$AAI_SDK_ROOT&quot; \
+  --sdk-version &quot;1.1.0&quot; \
+  --expected-revision &quot;$AAI_RELEASE_COMMIT&quot; \
+  --expected-origin-digest \
+    c6cbebffe32d553b4dc08a611c4d0aacaeae195585edac442aa8ef10eb6e2c85 \
+  --release-tag &quot;$AAI_RELEASE_TAG&quot; \
+  --release-evidence &quot;$AAI_RELEASE_EVIDENCE&quot;
+</code></pre>
+<p>That origin digest is the SHA-256 identifier of the official HTTPS clone URL,
+<code>https://github.com/tommycharade/aai-sec-sdk.git</code>. The runtime checkout must use
+that exact origin identity. A different transport or mirror is a separate
+deployment approval, not an automatic equivalent.</p>
+<p>The generator refuses dirty, staged or untracked checkout state; mismatched
+version, revision or origin; missing release subjects; failed GitHub
+attestations; duplicate hosts; unsafe symlinks; and stale output. It writes:</p>
+<ul>
+<li><code>runtime-manifests.json</code>, containing only runtime comparison values; and</li>
+<li><code>runtime-manifests.provenance.json</code>, binding the exact manifest bytes to the
+  verified release checksum bundle and approval identity.</li>
+</ul>
+<p>Both files are review artifacts. CDK checks their binding during synthesis and
+the Lambda revalidates it at startup. Commit them through normal review, deploy
+the changed Lambda, and enroll pilots only after the stack output changes from
+<code>not-configured</code>. The generator does not create or sign a release and cannot
+turn an unsigned development commit into an approved production artifact.</p>
 
 
 
