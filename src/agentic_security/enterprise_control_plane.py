@@ -150,6 +150,10 @@ _MANAGED_SOURCES = frozenset(
     }
 )
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+_POLICY_VERSION_STATES = frozenset(
+    {"draft", "review", "approved", "staged", "active", "rejected", "retired"}
+)
+_POLICY_PENDING_STATES = frozenset({"draft", "review", "approved", "staged"})
 
 
 class FleetConfigurationError(ValueError):
@@ -162,6 +166,10 @@ class FleetAuthorizationError(PermissionError):
 
 class FleetNotFoundError(LookupError):
     """Raised when a requested organization, project, deployment, or agent is absent."""
+
+
+class FleetConflictError(RuntimeError):
+    """Raised when live fleet state no longer matches an expected revision."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,6 +494,8 @@ class StaticFleetAuthenticator:
             return bool(identity.roles & {"viewer", "operator", "admin", "incident_commander"})
         if action in {"manage_inventory", "manage_configuration"}:
             return bool(identity.roles & {"operator", "admin"})
+        if action == "approve_configuration":
+            return "admin" in identity.roles
         if action == "agent_presence":
             return bool(identity.roles & {"agent", "admin"})
         if action == "emergency_stop":
@@ -566,6 +576,13 @@ def _optional_text(value: object, name: str) -> str | None:
     if value is None or value == "":
         return None
     return _text(value, name)
+
+
+def _positive_version(value: object) -> int:
+    """Validate an externally supplied positive policy version number."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise FleetConfigurationError("policy version must be a positive integer")
+    return value
 
 
 def _json_object(value: Mapping[str, Any] | None, name: str) -> str:
@@ -797,7 +814,7 @@ class EnterpriseFleetStore:
         return {
             "adapter": self.persistence.name,
             "highAvailability": self.persistence.supports_high_availability,
-            "schemaVersion": 6,
+            "schemaVersion": 7,
         }
 
     def close(self) -> None:
@@ -1211,9 +1228,14 @@ class EnterpriseFleetStore:
         name: str,
         configuration: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Create a tenant-scoped configuration policy for group assignment."""
+        """Create a tenant-scoped policy and its first non-active draft.
+
+        New policy content cannot become group authority until another subject
+        approves it and the version completes staging and activation.
+        """
         policy_id, name = _text(policy_id, "policyId"), _text(name, "name")
         configuration_json = self._configuration_json(configuration)
+        now = self._now()
         with self._lock:
             self._assert_identity_org(identity, identity.organization_id)
             try:
@@ -1225,17 +1247,34 @@ class EnterpriseFleetStore:
                         policy_id,
                         identity.organization_id,
                         name,
-                        configuration_json,
-                        1,
-                        self._now(),
+                        "{}",
+                        0,
+                        now,
                         identity.subject,
                     ),
                 )
+                self._insert_policy_version(
+                    policy_id=policy_id,
+                    organization_id=identity.organization_id,
+                    version=1,
+                    base_version=0,
+                    name=name,
+                    configuration_json=configuration_json,
+                    state="draft",
+                    author=identity.subject,
+                    created_at=now,
+                )
                 self._connection.commit()
             except sqlite3.IntegrityError as exc:
+                self._connection.rollback()
                 raise FleetConfigurationError("policy already exists") from exc
         result = self._policy(policy_id)
-        self._audit("fleet_policy_created", identity.subject, result, identity.organization_id)
+        self._audit(
+            "fleet_policy_draft_created",
+            identity.subject,
+            self._policy_version(policy_id, 1),
+            identity.organization_id,
+        )
         return result
 
     def update_policy(
@@ -1246,7 +1285,7 @@ class EnterpriseFleetStore:
         name: str,
         configuration: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Apply a validated policy change as the next version of a policy."""
+        """Create an immutable-numbered draft from the current active policy."""
         policy_id, name = _text(policy_id, "policyId"), _text(name, "name")
         configuration_json = self._configuration_json(configuration)
         with self._lock:
@@ -1254,13 +1293,209 @@ class EnterpriseFleetStore:
             if current["organizationId"] != identity.organization_id:
                 raise FleetAuthorizationError("organization scope is not permitted")
             self._assert_identity_org(identity, identity.organization_id)
-            self._connection.execute(
-                "UPDATE policies SET name=?,configuration=?,version=version+1 WHERE id=?",
-                (name, configuration_json, policy_id),
+            pending = self._connection.execute(
+                "SELECT version FROM policy_versions WHERE policy_id=? AND state IN "
+                "('draft','review','approved','staged') ORDER BY version DESC LIMIT 1",
+                (policy_id,),
+            ).fetchone()
+            if pending is not None:
+                raise FleetConflictError("policy already has a pending governed version")
+            row = self._connection.execute(
+                "SELECT COALESCE(MAX(version),0) AS latest FROM policy_versions WHERE policy_id=?",
+                (policy_id,),
+            ).fetchone()
+            version = int(row["latest"]) + 1
+            self._insert_policy_version(
+                policy_id=policy_id,
+                organization_id=identity.organization_id,
+                version=version,
+                base_version=int(current["version"]),
+                name=name,
+                configuration_json=configuration_json,
+                state="draft",
+                author=identity.subject,
+                created_at=self._now(),
             )
             self._connection.commit()
-        result = self._policy(policy_id)
-        self._audit("fleet_policy_updated", identity.subject, result, identity.organization_id)
+        result = self._policy_version(policy_id, version)
+        self._audit(
+            "fleet_policy_draft_created", identity.subject, result, identity.organization_id
+        )
+        return result
+
+    def list_policy_versions(
+        self,
+        identity: FleetIdentity,
+        policy_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int = 200,
+    ) -> FleetPage:
+        """Return the tenant-scoped immutable version ledger for one policy."""
+        policy_id = _text(policy_id, "policyId")
+        with self._lock:
+            policy = self._policy(policy_id)
+            if policy["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            rows = self._connection.execute(
+                "SELECT version FROM policy_versions WHERE policy_id=? ORDER BY version DESC",
+                (policy_id,),
+            ).fetchall()
+            items = tuple(self._policy_version(policy_id, int(row["version"])) for row in rows)
+        return _paginate(items, cursor, limit)
+
+    def policy_version(
+        self, identity: FleetIdentity, policy_id: str, version: int
+    ) -> dict[str, Any]:
+        """Return one exact policy version after tenant and version validation."""
+        policy_id, version = _text(policy_id, "policyId"), _positive_version(version)
+        with self._lock:
+            result = self._policy_version(policy_id, version)
+            if result["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            return result
+
+    def submit_policy_version(
+        self, identity: FleetIdentity, policy_id: str, version: int
+    ) -> dict[str, Any]:
+        """Freeze a draft and submit it for independent review."""
+        return self._transition_policy_version(
+            identity,
+            policy_id,
+            version,
+            expected_state="draft",
+            next_state="review",
+            fields={"submitted_by": identity.subject, "submitted_at": self._now()},
+            event="fleet_policy_submitted",
+        )
+
+    def decide_policy_version(
+        self,
+        identity: FleetIdentity,
+        policy_id: str,
+        version: int,
+        *,
+        decision: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Approve or reject a review while enforcing two-subject separation."""
+        decision, reason = _text(decision, "decision"), _text(reason, "reason")
+        if decision not in {"approved", "rejected"}:
+            raise FleetConfigurationError("policy decision must be approved or rejected")
+        policy_id, version = _text(policy_id, "policyId"), _positive_version(version)
+        with self._lock:
+            current = self._policy_version(policy_id, version)
+            if current["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            if current["state"] != "review":
+                raise FleetConflictError("policy version is not awaiting review")
+            if decision == "approved" and hmac.compare_digest(current["author"], identity.subject):
+                raise FleetAuthorizationError("policy authors cannot approve their own version")
+            now = self._now()
+            changed = self._connection.execute(
+                "UPDATE policy_versions SET state=?,decided_by=?,decided_at=?,decision_reason=? "
+                "WHERE policy_id=? AND version=? AND state='review'",
+                (decision, identity.subject, now, reason, policy_id, version),
+            )
+            if changed.rowcount != 1:
+                self._connection.rollback()
+                raise FleetConflictError("policy decision was already recorded")
+            self._connection.commit()
+            result = self._policy_version(policy_id, version)
+        self._audit("fleet_policy_decided", identity.subject, result, identity.organization_id)
+        return result
+
+    def stage_policy_version(
+        self, identity: FleetIdentity, policy_id: str, version: int
+    ) -> dict[str, Any]:
+        """Stage an independently approved version against its exact active base."""
+        policy_id, version = _text(policy_id, "policyId"), _positive_version(version)
+        with self._lock:
+            current = self._policy_version(policy_id, version)
+            policy = self._policy(policy_id)
+            if current["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            if current["state"] != "approved":
+                raise FleetConflictError("policy version is not approved")
+            if current["approvedBy"] == current["author"] or current["approvedBy"] is None:
+                raise FleetAuthorizationError("policy version lacks independent approval")
+            if current["baseVersion"] != policy["version"]:
+                raise FleetConflictError("policy active version changed before staging")
+        return self._transition_policy_version(
+            identity,
+            policy_id,
+            version,
+            expected_state="approved",
+            next_state="staged",
+            fields={"staged_by": identity.subject, "staged_at": self._now()},
+            event="fleet_policy_staged",
+        )
+
+    def activate_policy_version(
+        self,
+        identity: FleetIdentity,
+        policy_id: str,
+        version: int,
+        *,
+        expected_active_version: int,
+    ) -> dict[str, Any]:
+        """Atomically promote a staged version and retire prior active authority."""
+        policy_id, version = _text(policy_id, "policyId"), _positive_version(version)
+        if isinstance(expected_active_version, bool) or not isinstance(
+            expected_active_version, int
+        ):
+            raise FleetConfigurationError("expectedActiveVersion must be an integer")
+        if expected_active_version < 0:
+            raise FleetConfigurationError("expectedActiveVersion cannot be negative")
+        with self._lock:
+            candidate = self._policy_version(policy_id, version)
+            policy = self._policy(policy_id)
+            if candidate["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            if candidate["state"] != "staged":
+                raise FleetConflictError("policy version is not staged")
+            if candidate["approvedBy"] in {None, candidate["author"]}:
+                raise FleetAuthorizationError("policy version lacks independent approval")
+            if (
+                policy["version"] != expected_active_version
+                or candidate["baseVersion"] != expected_active_version
+            ):
+                raise FleetConflictError("policy active version changed before activation")
+            now = self._now()
+            try:
+                changed = self._connection.execute(
+                    "UPDATE policy_versions SET state='active',activated_by=?,activated_at=? "
+                    "WHERE policy_id=? AND version=? AND state='staged'",
+                    (identity.subject, now, policy_id, version),
+                )
+                if changed.rowcount != 1:
+                    raise FleetConflictError("policy version activation was already attempted")
+                if expected_active_version > 0:
+                    self._connection.execute(
+                        "UPDATE policy_versions SET state='retired' WHERE policy_id=? "
+                        "AND version=? AND state='active'",
+                        (policy_id, expected_active_version),
+                    )
+                updated = self._connection.execute(
+                    "UPDATE policies SET name=?,configuration=?,version=? WHERE id=? AND version=?",
+                    (
+                        candidate["name"],
+                        json.dumps(
+                            candidate["configuration"], sort_keys=True, separators=(",", ":")
+                        ),
+                        version,
+                        policy_id,
+                        expected_active_version,
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise FleetConflictError("policy active version changed before activation")
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
+            result = self._policy(policy_id)
+        self._audit("fleet_policy_activated", identity.subject, result, identity.organization_id)
         return result
 
     def list_policies(
@@ -1293,6 +1528,8 @@ class EnterpriseFleetStore:
             policy = self._policy(policy_id)
             if policy["organizationId"] != identity.organization_id:
                 raise FleetAuthorizationError("organization scope is not permitted")
+            if policy["activeVersion"] is None:
+                raise FleetConflictError("group policies must have an active governed version")
             self._assert_identity_org(identity, identity.organization_id)
             try:
                 self._connection.execute(
@@ -1336,6 +1573,8 @@ class EnterpriseFleetStore:
                 raise FleetAuthorizationError("organization scope is not permitted")
             if policy["organizationId"] != identity.organization_id:
                 raise FleetAuthorizationError("organization scope is not permitted")
+            if policy["activeVersion"] is None:
+                raise FleetConflictError("group policies must have an active governed version")
             self._assert_identity_org(identity, identity.organization_id)
             self._connection.execute(
                 "UPDATE agent_groups SET policy_id=? WHERE id=?",
@@ -2654,6 +2893,20 @@ class EnterpriseFleetStore:
                     name TEXT NOT NULL, configuration TEXT NOT NULL, version INTEGER NOT NULL,
                     created_at REAL NOT NULL, created_by TEXT NOT NULL DEFAULT 'system',
                     UNIQUE(organization_id,name));
+                CREATE TABLE IF NOT EXISTS policy_versions(
+                    policy_id TEXT NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    version INTEGER NOT NULL, base_version INTEGER NOT NULL,
+                    name TEXT NOT NULL, configuration TEXT NOT NULL,
+                    content_hash TEXT NOT NULL, state TEXT NOT NULL,
+                    author TEXT NOT NULL, created_at REAL NOT NULL,
+                    submitted_by TEXT, submitted_at REAL,
+                    decided_by TEXT, decided_at REAL, decision_reason TEXT,
+                    staged_by TEXT, staged_at REAL,
+                    activated_by TEXT, activated_at REAL,
+                    PRIMARY KEY(policy_id,version));
+                CREATE INDEX IF NOT EXISTS idx_policy_versions_org_state
+                    ON policy_versions(organization_id,state,created_at);
                 CREATE TABLE IF NOT EXISTS skills(
                     id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
                     name TEXT NOT NULL, description TEXT NOT NULL, version TEXT NOT NULL,
@@ -2734,6 +2987,7 @@ class EnterpriseFleetStore:
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(1);
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(5);
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(6);
+                INSERT OR IGNORE INTO schema_migrations(version) VALUES(7);
                 """
             )
             deployment_columns = {
@@ -2749,6 +3003,31 @@ class EnterpriseFleetStore:
             if "created_by" not in policy_columns:
                 self._connection.execute(
                     "ALTER TABLE policies ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'"
+                )
+            existing_policies = self._connection.execute(
+                "SELECT id,organization_id,name,configuration,version,created_at,created_by "
+                "FROM policies WHERE version > 0"
+            ).fetchall()
+            for policy in existing_policies:
+                configuration_json = policy["configuration"]
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO policy_versions(policy_id,organization_id,version,"
+                    "base_version,name,configuration,content_hash,state,author,created_at,"
+                    "activated_by,activated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        policy["id"],
+                        policy["organization_id"],
+                        policy["version"],
+                        max(0, int(policy["version"]) - 1),
+                        policy["name"],
+                        configuration_json,
+                        hashlib.sha256(configuration_json.encode()).hexdigest(),
+                        "active",
+                        policy["created_by"],
+                        policy["created_at"],
+                        policy["created_by"],
+                        policy["created_at"],
+                    ),
                 )
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(2)")
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(3)")
@@ -2822,6 +3101,141 @@ class EnterpriseFleetStore:
             "createdAt": row["created_at"],
         }
 
+    def _insert_policy_version(
+        self,
+        *,
+        policy_id: str,
+        organization_id: str,
+        version: int,
+        base_version: int,
+        name: str,
+        configuration_json: str,
+        state: str,
+        author: str,
+        created_at: float,
+    ) -> None:
+        """Insert one content-hashed policy ledger entry inside the caller's transaction."""
+        if state not in _POLICY_VERSION_STATES:
+            raise FleetConfigurationError("policy version state is invalid")
+        self._connection.execute(
+            "INSERT INTO policy_versions(policy_id,organization_id,version,base_version,name,"
+            "configuration,content_hash,state,author,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                policy_id,
+                organization_id,
+                version,
+                base_version,
+                name,
+                configuration_json,
+                hashlib.sha256(configuration_json.encode()).hexdigest(),
+                state,
+                author,
+                created_at,
+            ),
+        )
+
+    def _transition_policy_version(
+        self,
+        identity: FleetIdentity,
+        policy_id: str,
+        version: int,
+        *,
+        expected_state: str,
+        next_state: str,
+        fields: Mapping[str, Any],
+        event: str,
+    ) -> dict[str, Any]:
+        """Apply one compare-and-swap lifecycle transition and audit its actor."""
+        policy_id, version = _text(policy_id, "policyId"), _positive_version(version)
+        if expected_state not in _POLICY_VERSION_STATES or next_state not in _POLICY_VERSION_STATES:
+            raise FleetConfigurationError("policy transition is invalid")
+        # Keep transition SQL static. Even though callers are internal, lifecycle
+        # metadata must never be able to influence SQL syntax at this trust boundary.
+        if set(fields) == {"submitted_by", "submitted_at"}:
+            statement = (
+                "UPDATE policy_versions SET state=?,submitted_by=?,submitted_at=? "
+                "WHERE policy_id=? AND version=? AND state=?"
+            )
+            metadata = (fields["submitted_by"], fields["submitted_at"])
+        elif set(fields) == {"staged_by", "staged_at"}:
+            statement = (
+                "UPDATE policy_versions SET state=?,staged_by=?,staged_at=? "
+                "WHERE policy_id=? AND version=? AND state=?"
+            )
+            metadata = (fields["staged_by"], fields["staged_at"])
+        else:
+            raise FleetConfigurationError("policy transition metadata is invalid")
+        with self._lock:
+            current = self._policy_version(policy_id, version)
+            if current["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            changed = self._connection.execute(
+                statement,
+                (next_state, *metadata, policy_id, version, expected_state),
+            )
+            if changed.rowcount != 1:
+                self._connection.rollback()
+                raise FleetConflictError(
+                    f"policy version must be {expected_state} before it can become {next_state}"
+                )
+            self._connection.commit()
+            result = self._policy_version(policy_id, version)
+        self._audit(event, identity.subject, result, identity.organization_id)
+        return result
+
+    def _policy_version(self, policy_id: str, version: int) -> dict[str, Any]:
+        """Load one immutable-numbered policy ledger entry with safe review metadata."""
+        row = self._connection.execute(
+            "SELECT policy_id,organization_id,version,base_version,name,configuration,"
+            "content_hash,state,author,created_at,submitted_by,submitted_at,decided_by,"
+            "decided_at,decision_reason,staged_by,staged_at,activated_by,activated_at "
+            "FROM policy_versions WHERE policy_id=? AND version=?",
+            (policy_id, version),
+        ).fetchone()
+        if row is None:
+            raise FleetNotFoundError("policy version not found")
+        configuration = json.loads(row["configuration"])
+        base_configuration: dict[str, Any] = {}
+        if int(row["base_version"]) > 0:
+            base = self._connection.execute(
+                "SELECT configuration FROM policy_versions WHERE policy_id=? AND version=?",
+                (policy_id, row["base_version"]),
+            ).fetchone()
+            if base is not None:
+                base_configuration = json.loads(base["configuration"])
+        changed_sections = sorted(set(configuration) | set(base_configuration))
+        changed_sections = [
+            section
+            for section in changed_sections
+            if configuration.get(section) != base_configuration.get(section)
+        ]
+        state = row["state"]
+        return {
+            "policyId": row["policy_id"],
+            "organizationId": row["organization_id"],
+            "version": row["version"],
+            "baseVersion": row["base_version"],
+            "name": row["name"],
+            "configuration": configuration,
+            "contentHash": row["content_hash"],
+            "state": state,
+            "author": row["author"],
+            "createdAt": row["created_at"],
+            "submittedBy": row["submitted_by"],
+            "submittedAt": row["submitted_at"],
+            "decidedBy": row["decided_by"],
+            "decidedAt": row["decided_at"],
+            "decisionReason": row["decision_reason"],
+            "approvedBy": row["decided_by"]
+            if state in {"approved", "staged", "active", "retired"}
+            else None,
+            "stagedBy": row["staged_by"],
+            "stagedAt": row["staged_at"],
+            "activatedBy": row["activated_by"],
+            "activatedAt": row["activated_at"],
+            "changeSummary": {"changedSections": changed_sections},
+        }
+
     def _policy(self, policy_id: str) -> dict[str, Any]:
         """Load one policy without exposing credentials or bearer material."""
         row = self._connection.execute(
@@ -2831,15 +3245,33 @@ class EnterpriseFleetStore:
         ).fetchone()
         if row is None:
             raise FleetNotFoundError("policy not found")
+        latest_row = self._connection.execute(
+            "SELECT version,state,author,created_at FROM policy_versions WHERE policy_id=? "
+            "ORDER BY version DESC LIMIT 1",
+            (policy_id,),
+        ).fetchone()
+        active_configuration = json.loads(row["configuration"])
+        if int(row["version"]) == 0 and latest_row is not None:
+            latest_version = self._policy_version(policy_id, int(latest_row["version"]))
+            active_configuration = latest_version["configuration"]
         return {
             "id": row["id"],
             "organizationId": row["organization_id"],
             "name": row["name"],
-            "configuration": json.loads(row["configuration"]),
+            "configuration": active_configuration,
             "version": row["version"],
+            "activeVersion": row["version"] if int(row["version"]) > 0 else None,
+            "latestVersion": latest_row["version"] if latest_row is not None else row["version"],
+            "governanceState": latest_row["state"] if latest_row is not None else "active",
+            "pendingVersion": (
+                latest_row["version"]
+                if latest_row is not None and latest_row["state"] in _POLICY_PENDING_STATES
+                else None
+            ),
+            "pendingAuthor": latest_row["author"] if latest_row is not None else None,
             "createdAt": row["created_at"],
             "author": row["created_by"],
-            "updatedAt": row["created_at"],
+            "updatedAt": latest_row["created_at"] if latest_row is not None else row["created_at"],
         }
 
     def _skill(self, skill_id: str) -> dict[str, Any]:
@@ -3354,6 +3786,37 @@ class EnterpriseFleetApplication:
                             identity, _text(parts[1], "deploymentId")
                         ),
                     )
+                if resource.startswith("policies/") and "/versions" in resource:
+                    self._authorize(identity, "read")
+                    parts = resource.split("/")
+                    if len(parts) == 3 and parts[2] == "versions":
+                        query = parse_qs(str(environ.get("QUERY_STRING", "")))
+                        page = self.store.list_policy_versions(
+                            identity,
+                            _text(parts[1], "policyId"),
+                            cursor=query.get("cursor", [None])[0],
+                            limit=int(query.get("limit", ["200"])[0]),
+                        )
+                        return self._respond(
+                            start_response,
+                            200,
+                            {"items": list(page.items), "nextCursor": page.next_cursor},
+                        )
+                    if len(parts) == 4 and parts[2] == "versions":
+                        try:
+                            version = int(parts[3])
+                        except ValueError as exc:
+                            raise FleetConfigurationError(
+                                "policy version must be an integer"
+                            ) from exc
+                        return self._respond(
+                            start_response,
+                            200,
+                            self.store.policy_version(
+                                identity, _text(parts[1], "policyId"), version
+                            ),
+                        )
+                    raise FleetConfigurationError("policy version route is invalid")
                 if resource.startswith("agents/") and resource.endswith("/verify"):
                     self._authorize(identity, "read")
                     deployment_id, agent_id = self._agent_route(path, effective_prefix, "/verify")
@@ -3705,6 +4168,58 @@ class EnterpriseFleetApplication:
                 )
                 return self._respond(start_response, 201, result)
             policy_versions_prefix = "/api/enterprise/policies/"
+            if method == "POST" and path.startswith(policy_versions_prefix):
+                policy_parts = path[len(policy_versions_prefix) :].split("/")
+                if len(policy_parts) == 4 and policy_parts[1] == "versions":
+                    policy_id = _text(policy_parts[0], "policyId")
+                    try:
+                        version = int(policy_parts[2])
+                    except ValueError as exc:
+                        raise FleetConfigurationError("policy version must be an integer") from exc
+                    action = policy_parts[3]
+                    if action == "submit":
+                        self._authorize(identity, "manage_configuration")
+                        return self._respond(
+                            start_response,
+                            200,
+                            self.store.submit_policy_version(identity, policy_id, version),
+                        )
+                    self._authorize(identity, "approve_configuration")
+                    if action == "decision":
+                        return self._respond(
+                            start_response,
+                            200,
+                            self.store.decide_policy_version(
+                                identity,
+                                policy_id,
+                                version,
+                                decision=_text(body.get("decision"), "decision"),
+                                reason=_text(body.get("reason"), "reason"),
+                            ),
+                        )
+                    if action == "stage":
+                        return self._respond(
+                            start_response,
+                            200,
+                            self.store.stage_policy_version(identity, policy_id, version),
+                        )
+                    if action == "activate":
+                        expected = body.get("expectedActiveVersion")
+                        if not isinstance(expected, int) or isinstance(expected, bool):
+                            raise FleetConfigurationError(
+                                "expectedActiveVersion must be an integer"
+                            )
+                        return self._respond(
+                            start_response,
+                            200,
+                            self.store.activate_policy_version(
+                                identity,
+                                policy_id,
+                                version,
+                                expected_active_version=expected,
+                            ),
+                        )
+                    raise FleetConfigurationError("policy transition is unsupported")
             if (
                 method == "POST"
                 and path.startswith(policy_versions_prefix)
@@ -3819,13 +4334,13 @@ class EnterpriseFleetApplication:
                 )
             if method == "POST" and path == "/api/enterprise/deployment-config/rollback":
                 self._authorize(identity, "manage_configuration")
-                version = body.get("version")
-                if not isinstance(version, int) or isinstance(version, bool):
+                rollback_version = body.get("version")
+                if not isinstance(rollback_version, int) or isinstance(rollback_version, bool):
                     raise FleetConfigurationError("version must be an integer")
                 result = self.store.rollback_deployment(
                     identity,
                     _text(body.get("deploymentId"), "deploymentId"),
-                    version,
+                    rollback_version,
                 )
                 return self._respond(start_response, 200, result)
             if method == "POST" and path == "/api/enterprise/deployment-config/applied":
@@ -3888,6 +4403,8 @@ class EnterpriseFleetApplication:
             return self._respond(start_response, 403, {"error": str(exc)})
         except FleetNotFoundError as exc:
             return self._respond(start_response, 404, {"error": str(exc)})
+        except FleetConflictError as exc:
+            return self._respond(start_response, 409, {"error": str(exc)})
         except (FleetConfigurationError, TypeError, ValueError) as exc:
             return self._respond(start_response, 400, {"error": str(exc)})
         except sqlite3.IntegrityError:
