@@ -5,6 +5,7 @@ while S3 receives redacted lifecycle evidence. No request body is trusted for
 tenant identity; the tenant is derived from the verified Cognito claims.
 """
 
+import base64
 import hashlib
 import json
 import math
@@ -701,6 +702,12 @@ def _required_mutation_capability(path):
         return "identity_admin"
     if normalized.startswith("/enterprise/policies"):
         return "policy_write"
+    if normalized.startswith("/enterprise/deployments/") and normalized.endswith(
+        "/managed-package"
+    ):
+        # Package publication binds endpoint authority and is intentionally
+        # platform-admin-only until delegated two-person governance exists.
+        return "managed_deployment"
     if normalized.startswith("/enterprise/skills") or normalized.startswith(
         "/enterprise/mcp-servers"
     ):
@@ -908,6 +915,26 @@ _MANAGED_SOURCES = {
     "codex-cloud",
     "codex-mdm",
 }
+_MAX_MANAGED_PACKAGE_BYTES = 280 * 1024
+_MANAGED_PACKAGE_FIELDS = {
+    "schemaVersion",
+    "host",
+    "hostVersion",
+    "platform",
+    "policyId",
+    "policyVersion",
+    "bundleHash",
+    "artifacts",
+    "requiredExecutables",
+}
+
+
+class ManagedPackageConflict(RuntimeError):
+    """Raised when package desired state, revision or rollout state conflicts."""
+
+
+class ManagedPackageNotFound(LookupError):
+    """Raised when no package exists for an otherwise valid deployment."""
 
 
 def _managed_integer(value, name, *, positive=False):
@@ -962,6 +989,321 @@ def _managed_host(value, *, report=False):
             raise ValueError("managed configuration timestamps are invalid")
         result.update({"source": source, "verifiedAt": verified_at, "expiresAt": expires_at})
     return result
+
+
+def _reject_duplicate_package_keys(pairs):
+    """Reject duplicate keys before package fields can be interpreted as authority."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("managed package contains duplicate keys")
+        result[key] = value
+    return result
+
+
+def _expected_managed_artifacts(host, platform):
+    """Return the exact managed file paths supported by the SDK package schema."""
+    if host == "claude-code":
+        root = {
+            "macos": "/Library/Application Support/ClaudeCode",
+            "linux": "/etc/claude-code",
+            "windows": r"C:\Program Files\ClaudeCode",
+        }[platform]
+        return (
+            (f"{root}/managed-settings.json", "application/json"),
+            (f"{root}/managed-mcp.json", "application/json"),
+        )
+    return (
+        (
+            r"C:\ProgramData\OpenAI\Codex\requirements.toml"
+            if platform == "windows"
+            else "/etc/codex/requirements.toml",
+            "application/toml",
+        ),
+    )
+
+
+def _managed_package(package_base64, expected_digest):
+    """Decode and independently validate one canonical credential-free package."""
+    if (
+        not isinstance(package_base64, str)
+        or len(package_base64) > (_MAX_MANAGED_PACKAGE_BYTES * 4 // 3) + 8
+        or not isinstance(expected_digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_digest)
+    ):
+        raise ValueError("managed package transport fields are invalid")
+    try:
+        encoded = base64.b64decode(package_base64, validate=True)
+    except (ValueError, TypeError) as error:
+        raise ValueError("managed package base64 is invalid") from error
+    if not encoded or len(encoded) > _MAX_MANAGED_PACKAGE_BYTES:
+        raise ValueError("managed package exceeds the control-plane size limit")
+    if not secrets.compare_digest(hashlib.sha256(encoded).hexdigest(), expected_digest):
+        raise ValueError("managed package digest does not match")
+    try:
+        value = json.loads(
+            encoded.decode("utf-8"), object_pairs_hook=_reject_duplicate_package_keys
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("managed package is malformed") from error
+    if (
+        not isinstance(value, dict)
+        or set(value) != _MANAGED_PACKAGE_FIELDS
+        or value.get("schemaVersion") != 1
+    ):
+        raise ValueError("managed package schema is invalid")
+    canonical = json.dumps(
+        value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+    if canonical != encoded:
+        raise ValueError("managed package is not canonical")
+    target = _managed_host(
+        {
+            "host": value.get("host"),
+            "hostVersion": value.get("hostVersion"),
+            "platform": value.get("platform"),
+            "bundleHash": value.get("bundleHash"),
+            "policyId": value.get("policyId"),
+            "policyVersion": value.get("policyVersion"),
+        }
+    )
+    if not re.fullmatch(
+        r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", target["hostVersion"]
+    ):
+        raise ValueError("managed package host version is invalid")
+    artifacts = value.get("artifacts")
+    expected_artifacts = _expected_managed_artifacts(target["host"], target["platform"])
+    if not isinstance(artifacts, list) or len(artifacts) != len(expected_artifacts):
+        raise ValueError("managed package artifact set is incomplete")
+    for artifact, (expected_path, expected_media_type) in zip(
+        artifacts, expected_artifacts, strict=True
+    ):
+        if not isinstance(artifact, dict) or set(artifact) != {
+            "path",
+            "mediaType",
+            "content",
+            "sha256",
+        }:
+            raise ValueError("managed package artifact schema is invalid")
+        content = artifact.get("content")
+        digest = artifact.get("sha256")
+        if (
+            artifact.get("path") != expected_path
+            or artifact.get("mediaType") != expected_media_type
+            or not isinstance(content, str)
+            or not content
+            or len(content.encode("utf-8")) > 1_000_000
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or not secrets.compare_digest(hashlib.sha256(content.encode()).hexdigest(), digest)
+        ):
+            raise ValueError("managed package artifact is invalid")
+    executables = value.get("requiredExecutables")
+    if not isinstance(executables, list) or not 1 <= len(executables) <= 8:
+        raise ValueError("managed package executables are invalid")
+    expected_prefix = (
+        "C:\\Program Files\\AAI Security\\"
+        if target["platform"] == "windows"
+        else "/opt/aai-security/"
+    )
+    executable_paths = []
+    for executable in executables:
+        if not isinstance(executable, dict) or set(executable) != {"path", "sha256"}:
+            raise ValueError("managed package executable schema is invalid")
+        path = executable.get("path")
+        digest = executable.get("sha256")
+        if (
+            not isinstance(path, str)
+            or not path.startswith(expected_prefix)
+            or ".." in re.split(r"[/\\]", path)
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        ):
+            raise ValueError("managed package executable is invalid")
+        executable_paths.append(path)
+    if len(executable_paths) != len(set(executable_paths)):
+        raise ValueError("managed package executable paths are ambiguous")
+    return value, target, encoded
+
+
+def _desired_managed_host(tenant, deployment_id):
+    """Load current server-owned managed target for one deployment."""
+    configuration = TABLE.get_item(
+        Key=_item_key(tenant, "CONFIGURATION", deployment_id), ConsistentRead=True
+    ).get("Item")
+    desired_configuration = configuration.get("desiredConfiguration", {}) if configuration else {}
+    desired = (
+        desired_configuration.get("managedHost")
+        if isinstance(desired_configuration, dict)
+        else None
+    )
+    if not isinstance(desired, dict):
+        raise ValueError("deployment has no managed-host desired state")
+    return _managed_host(desired), configuration
+
+
+def _managed_package_metadata(tenant, deployment_id, package=None):
+    """Return content-free package metadata with live current/stale status."""
+    package = package or TABLE.get_item(
+        Key=_item_key(tenant, "MANAGED_PACKAGE", deployment_id), ConsistentRead=True
+    ).get("Item")
+    if not package:
+        raise ManagedPackageNotFound("managed deployment package not found")
+    desired, _configuration = _desired_managed_host(tenant, deployment_id)
+    target = {
+        "host": package.get("host"),
+        "hostVersion": package.get("hostVersion"),
+        "platform": package.get("platform"),
+        "bundleHash": package.get("bundleHash"),
+        "policyId": package.get("policyId"),
+        "policyVersion": _managed_integer(
+            package.get("policyVersion"), "managed package policyVersion", positive=True
+        ),
+    }
+    return {
+        "revision": _managed_integer(
+            package.get("revision"), "managed package revision", positive=True
+        ),
+        "status": "current" if target == desired else "stale",
+        "packageSha256": package.get("packageSha256"),
+        "bundleHash": package.get("bundleHash"),
+        "host": package.get("host"),
+        "hostVersion": package.get("hostVersion"),
+        "platform": package.get("platform"),
+        "policyId": package.get("policyId"),
+        "policyVersion": target["policyVersion"],
+        "publishedAt": _managed_integer(package.get("publishedAt"), "publishedAt"),
+        "publishedBy": package.get("publishedBy"),
+    }
+
+
+def _publish_managed_package(tenant, deployment_id, body, actor):
+    """Compare-and-swap one package after exact desired-state validation."""
+    if not isinstance(body, dict) or set(body) != {
+        "expectedRevision",
+        "packageBase64",
+        "packageSha256",
+    }:
+        raise ValueError("managed package request schema is invalid")
+    expected_revision = _managed_integer(
+        body.get("expectedRevision"), "managed package expectedRevision"
+    )
+    package_value, target, encoded = _managed_package(
+        body.get("packageBase64"), body.get("packageSha256")
+    )
+    desired, _configuration = _desired_managed_host(tenant, deployment_id)
+    if target != desired:
+        raise ValueError("managed package does not match deployment desired state")
+    deployment = TABLE.get_item(
+        Key=_item_key(tenant, "DEPLOYMENT", deployment_id), ConsistentRead=True
+    ).get("Item")
+    if not deployment:
+        raise ManagedPackageNotFound("deployment not found")
+    agents = [
+        item
+        for item in _list(tenant, "AGENT", consistent_read=True)
+        if item.get("deployment_id") == deployment_id
+    ]
+    if any(agent.get("host") != target["host"] for agent in agents):
+        raise ValueError("managed package host conflicts with an enrolled deployment agent")
+    current = TABLE.get_item(
+        Key=_item_key(tenant, "MANAGED_PACKAGE", deployment_id), ConsistentRead=True
+    ).get("Item")
+    current_revision = (
+        _managed_integer(current.get("revision"), "managed package revision", positive=True)
+        if current
+        else 0
+    )
+    if current_revision != expected_revision:
+        raise ManagedPackageConflict("managed package revision is stale")
+    now = int(time.time())
+    record = {
+        **_item_key(tenant, "MANAGED_PACKAGE", deployment_id),
+        "tenant_id": tenant,
+        "deploymentId": deployment_id,
+        "revision": current_revision + 1,
+        "packageBase64": base64.b64encode(encoded).decode("ascii"),
+        "packageSha256": hashlib.sha256(encoded).hexdigest(),
+        "bundleHash": target["bundleHash"],
+        "host": target["host"],
+        "hostVersion": target["hostVersion"],
+        "platform": target["platform"],
+        "policyId": target["policyId"],
+        "policyVersion": target["policyVersion"],
+        "publishedAt": now,
+        "publishedBy": actor,
+        "artifactCount": len(package_value["artifacts"]),
+    }
+    try:
+        if current is None:
+            TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+        else:
+            TABLE.put_item(
+                Item=record,
+                ConditionExpression="revision = :expected_revision",
+                ExpressionAttributeValues={":expected_revision": expected_revision},
+            )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise ManagedPackageConflict("managed package revision is stale") from error
+        raise
+    metadata = _managed_package_metadata(tenant, deployment_id, record)
+    _audit(
+        tenant,
+        "managed_deployment_package_published",
+        actor,
+        {
+            "deployment_id": deployment_id,
+            "revision": metadata["revision"],
+            "package_sha256": metadata["packageSha256"],
+            "bundle_hash": metadata["bundleHash"],
+            "host": metadata["host"],
+            "platform": metadata["platform"],
+        },
+    )
+    return metadata
+
+
+def _agent_managed_package(tenant, deployment_id, agent_id, agent):
+    """Return a current package to one exact rollout-selected enrolled agent."""
+    if _fleet_emergency_stop_active(tenant) or agent.get("emergencyStop") is True:
+        raise ManagedPackageConflict("emergency stop blocks managed package retrieval")
+    agent_key = f"{deployment_id}:{agent_id}"
+    groups = [
+        group
+        for group in _fleet(tenant)["groups"]
+        if agent_key in group.get("agent_keys", [])
+    ]
+    if any(group.get("emergencyStop") is True for group in groups):
+        raise ManagedPackageConflict("emergency stop blocks managed package retrieval")
+    desired, configuration = _desired_managed_host(tenant, deployment_id)
+    state = configuration.get("rolloutState")
+    percentage = _managed_integer(
+        configuration.get("rolloutPercentage", 0), "managed package rollout percentage"
+    )
+    if state not in {"canary", "active", "rollback"}:
+        raise ManagedPackageConflict("managed package rollout is not active")
+    bucket = int(hashlib.sha256(agent_key.encode()).hexdigest()[:8], 16) % 100
+    if percentage > 100 or percentage <= bucket:
+        raise ManagedPackageConflict("agent is not selected for managed package rollout")
+    package = TABLE.get_item(
+        Key=_item_key(tenant, "MANAGED_PACKAGE", deployment_id), ConsistentRead=True
+    ).get("Item")
+    metadata = _managed_package_metadata(tenant, deployment_id, package)
+    if metadata["status"] != "current" or metadata["host"] != agent.get("host"):
+        raise ManagedPackageConflict("managed package does not match current agent state")
+    _value, target, _encoded = _managed_package(
+        package.get("packageBase64"), package.get("packageSha256")
+    )
+    if target != desired:
+        raise ManagedPackageConflict("managed package does not match current desired state")
+    return {
+        "schemaVersion": 1,
+        "deploymentId": deployment_id,
+        "agentId": agent_id,
+        **metadata,
+        "packageBase64": package["packageBase64"],
+    }
 
 
 def _managed_configuration_posture(tenant, agent, *, now=None):
@@ -2106,6 +2448,13 @@ def handler(event, context):
             if not governed_agent:
                 return _response(404, {"error": "agent not found"})
             _require_current_attestation(tenant, deployment_id, governed_agent)
+            if method == "GET" and action == ["managed-package"]:
+                return _response(
+                    200,
+                    _agent_managed_package(
+                        tenant, deployment_id, agent_id, governed_agent
+                    ),
+                )
             _require_current_managed_configuration(tenant, governed_agent)
             if method == "POST" and action == ["decisions"]:
                 recorded = _record_agent_decision(tenant, deployment_id, agent_id, _body(event))
@@ -2401,6 +2750,22 @@ def handler(event, context):
                         "createdAt": root.get("created_at"),
                     },
                 )
+            if (
+                method == "GET"
+                and len(parts) == 3
+                and parts[0] == "deployments"
+                and parts[2] == "managed-package"
+            ):
+                deployment_id = _bounded_identifier(parts[1], "deploymentId")
+                deployment = TABLE.get_item(
+                    Key=_item_key(tenant, "DEPLOYMENT", deployment_id),
+                    ConsistentRead=True,
+                ).get("Item")
+                if not deployment:
+                    return _response(404, {"error": "deployment not found"})
+                return _response(
+                    200, _managed_package_metadata(tenant, deployment_id)
+                )
             if method == "GET" and parts == ["compliance", "evidence"]:
                 return _response(200, _fleet(tenant)["complianceEvidence"])
             if method == "POST" and parts == ["projects"]:
@@ -2468,6 +2833,19 @@ def handler(event, context):
                     {"deployment_id": deployment_id, "project_id": project_id},
                 )
                 return _response(201, item)
+            if (
+                method == "PUT"
+                and len(parts) == 3
+                and parts[0] == "deployments"
+                and parts[2] == "managed-package"
+            ):
+                deployment_id = _bounded_identifier(parts[1], "deploymentId")
+                return _response(
+                    201,
+                    _publish_managed_package(
+                        tenant, deployment_id, _body(event), actor
+                    ),
+                )
             if method == "GET" and parts in (
                 ["deployment-config"],
                 ["deployment-config", "history"],
@@ -3180,6 +3558,10 @@ def handler(event, context):
         return _response(400, {"error": str(exc)})
     except PermissionError as exc:
         return _response(403, {"error": str(exc)})
+    except ManagedPackageConflict as exc:
+        return _response(409, {"error": str(exc)})
+    except ManagedPackageNotFound as exc:
+        return _response(404, {"error": str(exc)})
     except Exception as exc:
         print(json.dumps({"error": str(exc), "path": event.get("rawPath")}))
         return _response(500, {"error": "control plane unavailable"})

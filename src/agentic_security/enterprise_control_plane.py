@@ -10,6 +10,7 @@ state.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -28,9 +29,11 @@ from urllib.request import Request, urlopen
 
 from ._command_patterns import compile_command_patterns
 from .audit import AuditSink
+from .managed_deployment import ManagedDeploymentPackage
 
 _MAX_TEXT = 256
 _MAX_PAGE_SIZE = 200
+_MAX_MANAGED_PACKAGE_BYTES = 280 * 1024
 _COMMAND_PATTERN_FIELDS = frozenset(
     {"allowedCommandPatterns", "deniedCommandPatterns", "approvalCommandPatterns"}
 )
@@ -794,7 +797,7 @@ class EnterpriseFleetStore:
         return {
             "adapter": self.persistence.name,
             "highAvailability": self.persistence.supports_high_availability,
-            "schemaVersion": 5,
+            "schemaVersion": 6,
         }
 
     def close(self) -> None:
@@ -1661,6 +1664,174 @@ class EnterpriseFleetStore:
         )
         return result
 
+    def publish_managed_deployment_package(
+        self,
+        identity: FleetIdentity,
+        deployment_id: str,
+        encoded: bytes,
+        *,
+        expected_package_sha256: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """Publish one canonical package bound to current deployment desired state.
+
+        Publication stores credential-free configuration bytes only. The caller
+        must provide the package digest and current revision; package parsing,
+        desired-state binding and compare-and-swap happen before the new
+        revision becomes visible. No endpoint is changed by this method.
+        """
+        deployment_id = _text(deployment_id, "deploymentId")
+        if (
+            isinstance(expected_revision, bool)
+            or not isinstance(expected_revision, int)
+            or expected_revision < 0
+        ):
+            raise FleetConfigurationError("managed package revision must be non-negative")
+        if (
+            not isinstance(encoded, bytes)
+            or not encoded
+            or len(encoded) > _MAX_MANAGED_PACKAGE_BYTES
+        ):
+            raise FleetConfigurationError("managed package exceeds the control-plane size limit")
+        try:
+            package = ManagedDeploymentPackage.from_json(
+                encoded, expected_package_sha256=expected_package_sha256
+            )
+        except (TypeError, ValueError) as exc:
+            raise FleetConfigurationError("managed package is invalid") from exc
+        canonical = package.to_json()
+        package_base64 = base64.b64encode(canonical).decode("ascii")
+        with self._lock:
+            deployment = self._deployment(deployment_id)
+            self._assert_identity_scope(
+                identity, deployment["organizationId"], deployment["projectId"]
+            )
+            desired = self._desired_managed_host(deployment_id)
+            self._require_package_matches_desired(package, desired)
+            host_rows = self._connection.execute(
+                "SELECT DISTINCT host FROM agents WHERE deployment_id=?", (deployment_id,)
+            ).fetchall()
+            if any(row["host"] != package.host.value for row in host_rows):
+                raise FleetConfigurationError(
+                    "managed package host conflicts with an enrolled deployment agent"
+                )
+            current = self._connection.execute(
+                "SELECT revision FROM deployment_managed_packages WHERE deployment_id=?",
+                (deployment_id,),
+            ).fetchone()
+            current_revision = int(current["revision"]) if current is not None else 0
+            if current_revision != expected_revision:
+                raise FleetConfigurationError("managed package revision is stale")
+            next_revision = current_revision + 1
+            values = (
+                next_revision,
+                package_base64,
+                package.package_sha256,
+                package.bundle_hash,
+                package.host.value,
+                package.host_version,
+                package.platform.value,
+                package.policy_id,
+                package.policy_version,
+                self._now(),
+                identity.subject,
+            )
+            try:
+                if current is None:
+                    self._connection.execute(
+                        "INSERT INTO deployment_managed_packages(deployment_id,revision,"
+                        "package_base64,package_sha256,bundle_hash,host,host_version,platform,"
+                        "policy_id,policy_version,published_at,published_by) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (deployment_id, *values),
+                    )
+                else:
+                    updated = self._connection.execute(
+                        "UPDATE deployment_managed_packages SET revision=?,package_base64=?,"
+                        "package_sha256=?,bundle_hash=?,host=?,host_version=?,platform=?,"
+                        "policy_id=?,policy_version=?,published_at=?,published_by=? "
+                        "WHERE deployment_id=? AND revision=?",
+                        (*values, deployment_id, expected_revision),
+                    )
+                    if updated.rowcount != 1:
+                        self._connection.rollback()
+                        raise FleetConfigurationError("managed package revision is stale")
+                self._connection.commit()
+            except sqlite3.IntegrityError as exc:
+                self._connection.rollback()
+                raise FleetConfigurationError("managed package revision is stale") from exc
+            result = self._managed_deployment_package_metadata(deployment_id)
+        self._audit(
+            "managed_deployment_package_published",
+            identity.subject,
+            {
+                "deploymentId": deployment_id,
+                "revision": result["revision"],
+                "packageSha256": result["packageSha256"],
+                "bundleHash": result["bundleHash"],
+                "host": result["host"],
+                "platform": result["platform"],
+            },
+            identity.organization_id,
+        )
+        return result
+
+    def managed_deployment_package_metadata(
+        self, identity: FleetIdentity, deployment_id: str
+    ) -> dict[str, Any]:
+        """Return browser-safe package metadata without embedded configuration."""
+        deployment_id = _text(deployment_id, "deploymentId")
+        with self._lock:
+            deployment = self._deployment(deployment_id)
+            self._assert_identity_scope(
+                identity, deployment["organizationId"], deployment["projectId"]
+            )
+            return self._managed_deployment_package_metadata(deployment_id)
+
+    def agent_managed_deployment_package(
+        self, identity: FleetIdentity, *, deployment_id: str, agent_id: str
+    ) -> dict[str, Any]:
+        """Return an exact package to its authenticated rollout-selected agent.
+
+        Missing or conflicting managed-configuration evidence does not block
+        this repair route. Agent identity, project scope, emergency-stop state,
+        desired state, package integrity and deterministic rollout selection
+        are still checked on every request.
+        """
+        deployment_id, agent_id = _text(deployment_id, "deploymentId"), _text(agent_id, "agentId")
+        with self._lock:
+            agent = self._agent(deployment_id, agent_id)
+            self._assert_identity_scope(identity, agent["organizationId"], agent["projectId"])
+            self._assert_agent_identity(identity, agent_id)
+            if agent["emergencyStop"]:
+                raise FleetConfigurationError("agent emergency stop blocks package retrieval")
+            configuration = self._require_configuration(deployment_id)
+            if configuration["rolloutState"] not in {"canary", "active", "rollback"}:
+                raise FleetConfigurationError("managed package rollout is not active")
+            percentage = int(configuration["rolloutPercentage"])
+            bucket = (
+                int(hashlib.sha256(f"{deployment_id}:{agent_id}".encode()).hexdigest()[:8], 16)
+                % 100
+            )
+            if percentage <= bucket:
+                raise FleetConfigurationError("agent is not selected for managed package rollout")
+            metadata = self._managed_deployment_package_metadata(deployment_id)
+            if metadata["status"] != "current" or metadata["host"] != agent["host"]:
+                raise FleetConfigurationError("managed package does not match current agent state")
+            row = self._connection.execute(
+                "SELECT package_base64 FROM deployment_managed_packages WHERE deployment_id=?",
+                (deployment_id,),
+            ).fetchone()
+            if row is None:
+                raise FleetNotFoundError("managed deployment package not found")
+            return {
+                "schemaVersion": 1,
+                "deploymentId": deployment_id,
+                "agentId": agent_id,
+                **metadata,
+                "packageBase64": row["package_base64"],
+            }
+
     def set_rollout(
         self,
         identity: FleetIdentity,
@@ -2514,6 +2685,13 @@ class EnterpriseFleetStore:
                     applied_hash TEXT, rollout_state TEXT NOT NULL,
                     rollout_percentage INTEGER NOT NULL, version INTEGER NOT NULL,
                     updated_at REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS deployment_managed_packages(
+                    deployment_id TEXT PRIMARY KEY REFERENCES deployments(id),
+                    revision INTEGER NOT NULL, package_base64 TEXT NOT NULL,
+                    package_sha256 TEXT NOT NULL, bundle_hash TEXT NOT NULL,
+                    host TEXT NOT NULL, host_version TEXT NOT NULL, platform TEXT NOT NULL,
+                    policy_id TEXT NOT NULL, policy_version INTEGER NOT NULL,
+                    published_at REAL NOT NULL, published_by TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS deployment_controls(
                     deployment_id TEXT PRIMARY KEY REFERENCES deployments(id),
                     emergency_stop INTEGER NOT NULL, updated_at REAL NOT NULL);
@@ -2555,6 +2733,7 @@ class EnterpriseFleetStore:
                     ON fleet_audit_evidence(organization_id,occurred_at);
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(1);
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(5);
+                INSERT OR IGNORE INTO schema_migrations(version) VALUES(6);
                 """
             )
             deployment_columns = {
@@ -2801,6 +2980,63 @@ class EnterpriseFleetStore:
             "rolloutPercentage": row["rollout_percentage"],
             "version": row["version"],
             "updatedAt": row["updated_at"],
+        }
+
+    def _desired_managed_host(self, deployment_id: str) -> dict[str, Any]:
+        """Return the server-owned managed-host target or fail closed."""
+        configuration = self._require_configuration(deployment_id)["desiredConfiguration"]
+        candidate = configuration.get("managedHost") if isinstance(configuration, Mapping) else None
+        if not isinstance(candidate, Mapping):
+            raise FleetConfigurationError("deployment has no managed-host desired state")
+        return _normalize_managed_host(candidate)
+
+    @staticmethod
+    def _require_package_matches_desired(
+        package: ManagedDeploymentPackage, desired: Mapping[str, Any]
+    ) -> None:
+        """Bind every package target field to current server-owned desired state."""
+        actual = {
+            "host": package.host.value,
+            "hostVersion": package.host_version,
+            "platform": package.platform.value,
+            "bundleHash": package.bundle_hash,
+            "policyId": package.policy_id,
+            "policyVersion": package.policy_version,
+        }
+        if actual != dict(desired):
+            raise FleetConfigurationError("managed package does not match deployment desired state")
+
+    def _managed_deployment_package_metadata(self, deployment_id: str) -> dict[str, Any]:
+        """Load package metadata and derive current/stale state live."""
+        row = self._connection.execute(
+            "SELECT revision,package_sha256,bundle_hash,host,host_version,platform,policy_id,"
+            "policy_version,published_at,published_by FROM deployment_managed_packages "
+            "WHERE deployment_id=?",
+            (deployment_id,),
+        ).fetchone()
+        if row is None:
+            raise FleetNotFoundError("managed deployment package not found")
+        desired = self._desired_managed_host(deployment_id)
+        package_target = {
+            "host": row["host"],
+            "hostVersion": row["host_version"],
+            "platform": row["platform"],
+            "bundleHash": row["bundle_hash"],
+            "policyId": row["policy_id"],
+            "policyVersion": row["policy_version"],
+        }
+        return {
+            "revision": row["revision"],
+            "status": "current" if package_target == desired else "stale",
+            "packageSha256": row["package_sha256"],
+            "bundleHash": row["bundle_hash"],
+            "host": row["host"],
+            "hostVersion": row["host_version"],
+            "platform": row["platform"],
+            "policyId": row["policy_id"],
+            "policyVersion": row["policy_version"],
+            "publishedAt": row["published_at"],
+            "publishedBy": row["published_by"],
         }
 
     def _require_configuration(self, deployment_id: str) -> dict[str, Any]:
@@ -3104,6 +3340,20 @@ class EnterpriseFleetApplication:
                 if resource == "integrations":
                     self._authorize(identity, "read")
                     return self._respond(start_response, 200, self._development_integrations())
+                if resource.startswith("deployments/") and resource.endswith("/managed-package"):
+                    self._authorize(identity, "read")
+                    parts = resource.split("/")
+                    if len(parts) != 3:
+                        raise FleetConfigurationError(
+                            "managed package route must include one deployment"
+                        )
+                    return self._respond(
+                        start_response,
+                        200,
+                        self.store.managed_deployment_package_metadata(
+                            identity, _text(parts[1], "deploymentId")
+                        ),
+                    )
                 if resource.startswith("agents/") and resource.endswith("/verify"):
                     self._authorize(identity, "read")
                     deployment_id, agent_id = self._agent_route(path, effective_prefix, "/verify")
@@ -3123,6 +3373,18 @@ class EnterpriseFleetApplication:
                         start_response,
                         200,
                         self.store.effective_agent_policy(
+                            identity, deployment_id=deployment_id, agent_id=agent_id
+                        ),
+                    )
+                if resource.startswith("agents/") and resource.endswith("/managed-package"):
+                    self._authorize_any(identity, {"read", "agent_presence"})
+                    deployment_id, agent_id = self._agent_route(
+                        path, effective_prefix, "/managed-package"
+                    )
+                    return self._respond(
+                        start_response,
+                        200,
+                        self.store.agent_managed_deployment_package(
                             identity, deployment_id=deployment_id, agent_id=agent_id
                         ),
                     )
@@ -3258,6 +3520,41 @@ class EnterpriseFleetApplication:
                         {"items": list(page.items), "nextCursor": page.next_cursor},
                     )
             body = self._body(environ)
+            managed_package_prefix = "/api/enterprise/deployments/"
+            if (
+                method == "PUT"
+                and path.startswith(managed_package_prefix)
+                and path.endswith("/managed-package")
+            ):
+                self._authorize(identity, "manage_configuration")
+                if set(body) != {"expectedRevision", "packageBase64", "packageSha256"}:
+                    raise FleetConfigurationError("managed package request schema is invalid")
+                encoded_value = body.get("packageBase64")
+                if not isinstance(encoded_value, str) or len(encoded_value) > (
+                    (_MAX_MANAGED_PACKAGE_BYTES * 4 // 3) + 8
+                ):
+                    raise FleetConfigurationError("managed package base64 is invalid")
+                try:
+                    encoded = base64.b64decode(encoded_value, validate=True)
+                except (ValueError, TypeError) as exc:
+                    raise FleetConfigurationError("managed package base64 is invalid") from exc
+                expected_revision = body.get("expectedRevision")
+                if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+                    raise FleetConfigurationError("managed package revision must be an integer")
+                deployment_id = path[len(managed_package_prefix) : -len("/managed-package")].strip(
+                    "/"
+                )
+                return self._respond(
+                    start_response,
+                    201,
+                    self.store.publish_managed_deployment_package(
+                        identity,
+                        _text(deployment_id, "deploymentId"),
+                        encoded,
+                        expected_package_sha256=_text(body.get("packageSha256"), "packageSha256"),
+                        expected_revision=expected_revision,
+                    ),
+                )
             if method == "POST" and path == "/api/enterprise/slo/sample":
                 self._authorize(identity, "manage_inventory")
                 deployment_id = _text(body.get("deploymentId"), "deploymentId")
@@ -3715,7 +4012,7 @@ class EnterpriseFleetApplication:
             if preflight:
                 headers.extend(
                     [
-                        ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                        ("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"),
                         ("Access-Control-Allow-Headers", "Authorization, Content-Type"),
                     ]
                 )

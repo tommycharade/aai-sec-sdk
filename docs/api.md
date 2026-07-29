@@ -140,6 +140,10 @@ self-authorizing. Endpoint management must supply the expected package digest,
 bundle digest, host and platform through an authenticated channel. The optional
 privileged installer is documented in
 [Managed endpoint deployment](managed-endpoint-deployment-design.md).
+The enterprise control plane can publish a package with optimistic concurrency
+and deliver it only over the exact enrolled agent's authenticated route. Use
+`ControlPlaneAgentClient.managed_deployment_package` to retrieve, bound-check
+and reparse that response. Operator reads expose metadata, not package content.
 
 ::: agentic_security.managed_deployment.ManagedDeploymentPackage
 

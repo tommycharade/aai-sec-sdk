@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import io
 import json
 import sqlite3
@@ -15,6 +17,7 @@ import pytest
 
 import agentic_security.enterprise_control_plane as fleet_module
 from agentic_security import (
+    AgentHost,
     CallbackFleetAuthenticator,
     CallbackFleetSecretResolver,
     EnterpriseFleetApplication,
@@ -26,6 +29,13 @@ from agentic_security import (
     FleetSecretReference,
     InMemoryAuditSink,
     InMemoryControlPlaneAuthority,
+    ManagedConfigurationCompiler,
+    ManagedDeploymentPackage,
+    ManagedExecutableRequirement,
+    ManagedPlatform,
+    ManagedPolicyIntent,
+    NativeActionDecision,
+    NativeActionRule,
     PostgresFleetPersistenceAdapter,
     SQLiteFleetPersistenceAdapter,
     StaticFleetAuthenticator,
@@ -141,7 +151,7 @@ def test_reference_persistence_is_explicitly_rejected_for_ha_requirements(tmp_pa
     assert store.persistence_capabilities() == {
         "adapter": "sqlite-reference",
         "highAvailability": False,
-        "schemaVersion": 5,
+        "schemaVersion": 6,
     }
     store.close()
     with pytest.raises(FleetConfigurationError):
@@ -247,6 +257,36 @@ def seed(store: EnterpriseFleetStore) -> None:
         region="eu-west-2",
         team="platform",
     )
+
+
+def managed_package(*, policy_version: int = 1) -> tuple[ManagedDeploymentPackage, dict[str, Any]]:
+    """Build one synthetic canonical Claude package and matching desired target."""
+    hook_path = "/opt/aai-security/hooks/native-policy"
+    bundle = ManagedConfigurationCompiler().compile(
+        ManagedPolicyIntent(
+            "policy-safe",
+            policy_version,
+            action_rules=(NativeActionRule("Read", NativeActionDecision.ALLOW, "synthetic read"),),
+        ),
+        host=AgentHost.CLAUDE_CODE,
+        host_version="2.1.220",
+        platform=ManagedPlatform.LINUX,
+        hook_command=hook_path,
+    )
+    package = ManagedDeploymentPackage.from_bundle(
+        bundle,
+        required_executables=(
+            ManagedExecutableRequirement(hook_path, hashlib.sha256(b"synthetic hook").hexdigest()),
+        ),
+    )
+    return package, {
+        "host": package.host.value,
+        "hostVersion": package.host_version,
+        "platform": package.platform.value,
+        "bundleHash": package.bundle_hash,
+        "policyId": package.policy_id,
+        "policyVersion": package.policy_version,
+    }
 
 
 def test_migrates_inventory_and_enforces_organization_scope(tmp_path: Path) -> None:
@@ -525,6 +565,251 @@ def test_managed_configuration_posture_is_server_derived_and_fail_closed(tmp_pat
         store.list_inventory(operator, "agents").items[0]["managed_configuration"]["status"]
         == "stale"
     )
+
+
+def test_managed_package_publication_and_agent_repair_are_digest_bound(tmp_path: Path) -> None:
+    """A drifted exact agent can retrieve, verify and later report its package."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    operator = identity("org-a")
+    store.register_agent(
+        operator,
+        deployment_id="deploy-a",
+        agent_id="claude-a",
+        host="claude-code",
+        project_root="/workspace/payments",
+    )
+    package, desired = managed_package()
+    store.create_template(
+        operator,
+        template_id="managed-claude",
+        name="Managed Claude",
+        configuration={"managedHost": desired},
+    )
+    store.assign_template(operator, "deploy-a", "managed-claude")
+    store.set_rollout(operator, "deploy-a", state="active", percentage=100)
+
+    published = store.publish_managed_deployment_package(
+        operator,
+        "deploy-a",
+        package.to_json(),
+        expected_package_sha256=package.package_sha256,
+        expected_revision=0,
+    )
+    assert published == {
+        "revision": 1,
+        "status": "current",
+        "packageSha256": package.package_sha256,
+        "bundleHash": package.bundle_hash,
+        "host": "claude-code",
+        "hostVersion": "2.1.220",
+        "platform": "linux",
+        "policyId": "policy-safe",
+        "policyVersion": 1,
+        "publishedAt": published["publishedAt"],
+        "publishedBy": "operator-1",
+    }
+    assert "packageBase64" not in store.managed_deployment_package_metadata(operator, "deploy-a")
+
+    agent = FleetIdentity("claude-a", "org-a", frozenset({"agent"}))
+    response = store.agent_managed_deployment_package(
+        agent, deployment_id="deploy-a", agent_id="claude-a"
+    )
+    assert response["status"] == "current"
+    downloaded = base64.b64decode(response["packageBase64"], validate=True)
+    assert (
+        ManagedDeploymentPackage.from_json(
+            downloaded, expected_package_sha256=response["packageSha256"]
+        )
+        == package
+    )
+
+
+def test_managed_package_rejects_stale_cross_scope_and_unselected_requests(tmp_path: Path) -> None:
+    """Publication and retrieval never cross tenant, revision, target or rollout scope."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    operator = identity("org-a")
+    store.register_agent(
+        operator,
+        deployment_id="deploy-a",
+        agent_id="claude-a",
+        host="claude-code",
+        project_root="/workspace/payments",
+    )
+    package, desired = managed_package()
+    store.create_template(
+        operator,
+        template_id="managed-claude",
+        name="Managed Claude",
+        configuration={"managedHost": desired},
+    )
+    store.assign_template(operator, "deploy-a", "managed-claude")
+
+    with pytest.raises(FleetAuthorizationError):
+        store.publish_managed_deployment_package(
+            identity("org-b"),
+            "deploy-a",
+            package.to_json(),
+            expected_package_sha256=package.package_sha256,
+            expected_revision=0,
+        )
+    wrong, _wrong_desired = managed_package(policy_version=2)
+    with pytest.raises(FleetConfigurationError, match="does not match"):
+        store.publish_managed_deployment_package(
+            operator,
+            "deploy-a",
+            wrong.to_json(),
+            expected_package_sha256=wrong.package_sha256,
+            expected_revision=0,
+        )
+    store.publish_managed_deployment_package(
+        operator,
+        "deploy-a",
+        package.to_json(),
+        expected_package_sha256=package.package_sha256,
+        expected_revision=0,
+    )
+    with pytest.raises(FleetConfigurationError, match="revision is stale"):
+        store.publish_managed_deployment_package(
+            operator,
+            "deploy-a",
+            package.to_json(),
+            expected_package_sha256=package.package_sha256,
+            expected_revision=0,
+        )
+    agent = FleetIdentity("claude-a", "org-a", frozenset({"agent"}))
+    with pytest.raises(FleetConfigurationError, match="rollout is not active"):
+        store.agent_managed_deployment_package(agent, deployment_id="deploy-a", agent_id="claude-a")
+    store.set_rollout(operator, "deploy-a", state="active", percentage=100)
+    with pytest.raises(FleetAuthorizationError, match="does not match"):
+        store.agent_managed_deployment_package(
+            FleetIdentity("another-agent", "org-a", frozenset({"agent"})),
+            deployment_id="deploy-a",
+            agent_id="claude-a",
+        )
+    store.set_agent_emergency_stop(
+        operator, deployment_id="deploy-a", agent_id="claude-a", active=True
+    )
+    with pytest.raises(FleetConfigurationError, match="emergency stop"):
+        store.agent_managed_deployment_package(agent, deployment_id="deploy-a", agent_id="claude-a")
+
+
+def test_managed_package_becomes_unavailable_when_desired_state_changes(tmp_path: Path) -> None:
+    """A template change invalidates an old package before the next endpoint request."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    operator = identity("org-a")
+    store.register_agent(
+        operator,
+        deployment_id="deploy-a",
+        agent_id="claude-a",
+        host="claude-code",
+        project_root="/workspace/payments",
+    )
+    package, desired = managed_package()
+    store.create_template(
+        operator,
+        template_id="managed-v1",
+        name="Managed v1",
+        configuration={"managedHost": desired},
+    )
+    store.assign_template(operator, "deploy-a", "managed-v1")
+    store.publish_managed_deployment_package(
+        operator,
+        "deploy-a",
+        package.to_json(),
+        expected_package_sha256=package.package_sha256,
+        expected_revision=0,
+    )
+    store.set_rollout(operator, "deploy-a", state="active", percentage=100)
+    _next_package, next_desired = managed_package(policy_version=2)
+    store.create_template(
+        operator,
+        template_id="managed-v2",
+        name="Managed v2",
+        configuration={"managedHost": next_desired},
+    )
+    store.assign_template(operator, "deploy-a", "managed-v2")
+    store.set_rollout(operator, "deploy-a", state="active", percentage=100)
+    assert store.managed_deployment_package_metadata(operator, "deploy-a")["status"] == "stale"
+    with pytest.raises(FleetConfigurationError, match="does not match current"):
+        store.agent_managed_deployment_package(
+            FleetIdentity("claude-a", "org-a", frozenset({"agent"})),
+            deployment_id="deploy-a",
+            agent_id="claude-a",
+        )
+
+
+def test_managed_package_http_routes_separate_admin_metadata_from_agent_content(
+    tmp_path: Path,
+) -> None:
+    """The HTTP boundary publishes by admin and returns bytes only on the agent route."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    operator = identity("org-a")
+    store.register_agent(
+        operator,
+        deployment_id="deploy-a",
+        agent_id="claude-a",
+        host="claude-code",
+        project_root="/workspace/payments",
+    )
+    package, desired = managed_package()
+    store.create_template(
+        operator,
+        template_id="managed-claude",
+        name="Managed Claude",
+        configuration={"managedHost": desired},
+    )
+    store.assign_template(operator, "deploy-a", "managed-claude")
+    store.set_rollout(operator, "deploy-a", state="active", percentage=100)
+    admin_token = "fleet-admin-token-1234"  # noqa: S105 - synthetic test credential
+    agent_token = "fleet-agent-token-1234"  # noqa: S105 - synthetic test credential
+    app = EnterpriseFleetApplication(
+        store,
+        authenticator=StaticFleetAuthenticator(
+            {
+                admin_token: operator,
+                agent_token: FleetIdentity("claude-a", "org-a", frozenset({"agent"})),
+            }
+        ),
+    )
+    body = {
+        "expectedRevision": 0,
+        "packageBase64": base64.b64encode(package.to_json()).decode(),
+        "packageSha256": package.package_sha256,
+    }
+    status, published = call_api(
+        app,
+        "PUT",
+        "/api/enterprise/deployments/deploy-a/managed-package",
+        body,
+        token=admin_token,
+    )
+    assert status.startswith("201") and published["revision"] == 1
+    status, metadata = call_api(
+        app,
+        "GET",
+        "/api/enterprise/deployments/deploy-a/managed-package",
+        token=admin_token,
+    )
+    assert status.startswith("200") and "packageBase64" not in metadata
+    status, downloaded = call_api(
+        app,
+        "GET",
+        "/api/enterprise/agents/deploy-a/claude-a/managed-package",
+        token=agent_token,
+    )
+    assert status.startswith("200") and downloaded["packageBase64"] == body["packageBase64"]
+    status, denied = call_api(
+        app,
+        "PUT",
+        "/api/enterprise/deployments/deploy-a/managed-package",
+        body,
+        token=agent_token,
+    )
+    assert status.startswith("403") and denied["error"] == "forbidden"
 
 
 def test_slo_samples_are_bounded_scoped_and_fail_closed(tmp_path: Path) -> None:

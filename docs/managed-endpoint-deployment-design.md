@@ -129,9 +129,11 @@ executables, symlink targets, non-administrator calls, restrictive installed
 modes and complete rollback after a synthetic second-file failure.
 
 This closes the repository's package/install transaction gap but does not
-complete P0-01 through P0-03. Remaining acceptance requires:
+complete P0-01 through P0-03. Authenticated package publication and enrolled
+agent retrieval are now provided by the
+[managed package distribution](managed-package-distribution-design.md)
+contract. Remaining acceptance requires:
 
-- control-plane package storage, authenticated download and digest delivery;
 - MDM deployment of the SDK wheel, gateway, native hook and package;
 - approved-launch enforcement, including Codex flag restrictions;
 - real root-owned macOS/Linux installation and host restart evidence;

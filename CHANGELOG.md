@@ -1,5 +1,12 @@
 # Changelog
 
+- Added tenant-scoped managed-package publication and enrolled-agent retrieval
+  for Claude Code and Codex. Publication is platform-admin-only in the AWS
+  adapter, revision-safe, bounded, canonical and exactly bound to current
+  desired state. Retrieval is project-, identity-, attestation-, rollout- and
+  emergency-stop-gated, while intentionally allowing missing-configuration
+  repair. Operator reads expose metadata only, and the agent client verifies
+  package bytes, digest, target and response metadata before use.
 - Added canonical digest-bound managed endpoint packages and an optional
   privileged POSIX installer for Claude Code and Codex configuration. Packages
   bind exact host files to reviewed administrator-owned executable digests;
