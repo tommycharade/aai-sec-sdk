@@ -4,6 +4,7 @@ import base64
 import hashlib
 import importlib.util
 import json
+import re
 import sys
 import time
 import types
@@ -372,6 +373,26 @@ def _ownership_record(now: int, **changes: Any) -> dict[str, Any]:
         "ownership_reviewed_by": "synthetic-reviewer",
         "ownership_revision": 1,
         **changes,
+    }
+
+
+def _discovery_snapshot(
+    source_kind: str,
+    observations: list[dict[str, Any]],
+    *,
+    now: int,
+    complete: bool = True,
+    expected_revision: int = 0,
+) -> dict[str, Any]:
+    """Return one current synthetic discovery source snapshot."""
+    return {
+        "sourceKind": source_kind,
+        "generation": f"generation-{source_kind}-{expected_revision + 1}",
+        "expectedRevision": expected_revision,
+        "observedAt": now,
+        "expiresAt": now + 300,
+        "complete": complete,
+        "observations": observations,
     }
 
 
@@ -5574,4 +5595,294 @@ def test_demo_seed_uses_the_same_narrow_native_read_commands(monkeypatch: Any) -
         r"^git[ \t]+status[ \t]+--short$",
         r"^git[ \t]+diff[ \t]+--stat$",
         r"^git[ \t]+log[ \t]+--oneline$",
+    ]
+
+
+def test_discovery_reconciles_population_without_inflating_duplicate_coverage(
+    monkeypatch: Any,
+) -> None:
+    """Fresh complete sources expose unmanaged, duplicate, orphan and leaver posture."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-discovery"
+    now = int(time.time())
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    for agent_id, project_root, owner_id in (
+        ("managed-agent", "/synthetic/project", "user-active"),
+        ("orphan-agent", "/orphan/project", "user-left"),
+    ):
+        table.put_item(
+            Item={
+                **module._item_key(tenant, "AGENT", f"deployment-a:{agent_id}"),
+                "tenant_id": tenant,
+                "id": agent_id,
+                "organization_id": "org-a",
+                "project_id": "project-a",
+                "deployment_id": "deployment-a",
+                "host": "claude-code",
+                "project_root": project_root,
+                "environment": "prod",
+                "region": "eu-west-2",
+                "status": "connected",
+                "last_heartbeat": now,
+                "expires_at": now + 300,
+                "lifecycle_state": "active",
+                "lifecycle_revision": 1,
+                **_ownership_record(now, owner_id=owner_id),
+            }
+        )
+
+    managed_digest = hashlib.sha256(b"/synthetic/project").hexdigest()
+    unmanaged_digest = hashlib.sha256(b"/unmanaged/project").hexdigest()
+    snapshots = {
+        "entra": _discovery_snapshot(
+            "identity",
+            [
+                {"kind": "identity", "id": "user-active", "active": True},
+                {"kind": "identity", "id": "user-left", "active": False},
+            ],
+            now=now,
+        ),
+        "mdm": _discovery_snapshot(
+            "endpoint",
+            [
+                {
+                    "kind": "device",
+                    "id": "device-a",
+                    "managed": True,
+                    "businessUnit": "Payments",
+                    "userIds": ["user-active"],
+                },
+                {
+                    "kind": "device",
+                    "id": "device-b",
+                    "managed": True,
+                    "businessUnit": "Payments",
+                    "userIds": ["user-active"],
+                },
+                {
+                    "kind": "installation",
+                    "id": "install-a",
+                    "deviceId": "device-a",
+                    "userId": "user-active",
+                    "repositoryId": "repo-managed",
+                    "host": "claude-code",
+                    "projectRootDigest": managed_digest,
+                    "binaryPresent": True,
+                    "processActive": True,
+                },
+                {
+                    "kind": "installation",
+                    "id": "install-b",
+                    "deviceId": "device-b",
+                    "userId": "user-active",
+                    "repositoryId": "repo-managed",
+                    "host": "claude-code",
+                    "projectRootDigest": managed_digest,
+                    "binaryPresent": True,
+                    "processActive": False,
+                },
+            ],
+            now=now,
+        ),
+        "github": _discovery_snapshot(
+            "source_control",
+            [
+                {
+                    "kind": "repository",
+                    "id": "repo-managed",
+                    "projectRootDigest": managed_digest,
+                    "expectedHosts": ["claude-code"],
+                    "businessUnit": "Payments",
+                },
+                {
+                    "kind": "repository",
+                    "id": "repo-unmanaged",
+                    "projectRootDigest": unmanaged_digest,
+                    "expectedHosts": ["codex-cli"],
+                    "businessUnit": "Risk",
+                },
+            ],
+            now=now,
+        ),
+    }
+    for source_id, snapshot in snapshots.items():
+        created = _invoke(
+            module,
+            _event(
+                f"/api/enterprise/discovery/sources/{source_id}/snapshots",
+                "POST",
+                body=snapshot,
+                claims=claims,
+            ),
+        )
+        assert created["statusCode"] == 201
+        assert "observations" not in json.loads(created["body"])
+
+    response = _invoke(
+        module,
+        _event("/api/enterprise/discovery", "GET", claims=claims),
+    )
+    assert response["statusCode"] == 200
+    report = json.loads(response["body"])
+    assert report["blindSpots"] == []
+    assert report["summary"] == {
+        "denominator": 2,
+        "enrolled": 1,
+        "healthy": 0,
+        "compliant": 0,
+        "unmanaged": 1,
+        "duplicate": 1,
+        "leaver": 1,
+        "orphaned": 1,
+        "coverageAvailable": True,
+        "sourceComplete": True,
+        "coveragePercent": 50.0,
+        "healthyPercent": 0.0,
+        "compliantPercent": 0.0,
+    }
+    managed = next(item for item in report["instances"] if item["host"] == "claude-code")
+    assert managed["agentCount"] == 1
+    assert managed["reasonCodes"] == ["duplicate_installation"]
+    unmanaged = next(item for item in report["instances"] if item["host"] == "codex-cli")
+    assert unmanaged["reasonCodes"] == ["installation_missing", "unmanaged"]
+    orphan = next(item for item in report["agentFindings"] if item["agentId"] == "orphan-agent")
+    assert orphan["reasonCodes"] == ["orphaned_enrollment", "inactive_owner_or_user"]
+    assert [item["businessUnit"] for item in report["breakdowns"]["businessUnits"]] == [
+        "Payments",
+        "Risk",
+    ]
+    exported = _invoke(
+        module,
+        _event("/api/enterprise/discovery/export", "GET", claims=claims),
+    )
+    assert exported["statusCode"] == 200
+    assert re.fullmatch(r"[0-9a-f]{64}", json.loads(exported["body"])["contentHash"])
+
+
+def test_discovery_source_authority_revision_and_fail_closed_completeness(
+    monkeypatch: Any,
+) -> None:
+    """Only platform authority publishes snapshots; incomplete evidence cannot orphan agents."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-discovery-boundary"
+    now = int(time.time())
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "AGENT", "deployment-a:agent-a"),
+            "tenant_id": tenant,
+            "id": "agent-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "deployment-a",
+            "host": "claude-code",
+            "project_root": "/synthetic/project",
+            "environment": "prod",
+            "region": "eu-west-2",
+            "status": "offline",
+            "last_heartbeat": 0,
+            "expires_at": 0,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            **_ownership_record(now),
+        }
+    )
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+    fleet_operator = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-operator-a",
+    }
+    path = "/api/enterprise/discovery/sources/entra/snapshots"
+    identity = _discovery_snapshot("identity", [], now=now)
+    denied = _invoke(module, _event(path, "POST", body=identity, claims=fleet_operator))
+    assert denied["statusCode"] == 403
+    assert json.loads(denied["body"])["requiredCapability"] == "discovery_write"
+    assert (
+        _invoke(module, _event(path, "POST", body=identity, claims=platform))["statusCode"] == 201
+    )
+    assert (
+        _invoke(module, _event(path, "POST", body=identity, claims=platform))["statusCode"] == 409
+    )
+
+    for source_id, snapshot in (
+        ("mdm", _discovery_snapshot("endpoint", [], now=now)),
+        (
+            "github",
+            _discovery_snapshot("source_control", [], now=now, complete=False),
+        ),
+    ):
+        assert (
+            _invoke(
+                module,
+                _event(
+                    f"/api/enterprise/discovery/sources/{source_id}/snapshots",
+                    "POST",
+                    body=snapshot,
+                    claims=platform,
+                ),
+            )["statusCode"]
+            == 201
+        )
+    report = json.loads(
+        _invoke(
+            module,
+            _event("/api/enterprise/discovery", "GET", claims=platform),
+        )["body"]
+    )
+    assert report["summary"]["coverageAvailable"] is False
+    assert report["summary"]["sourceComplete"] is False
+    assert report["summary"]["coveragePercent"] is None
+    assert report["summary"]["orphaned"] == 0
+    assert report["agentFindings"] == []
+    assert report["blindSpots"] == [
+        "empty_source:endpoint",
+        "empty_source:identity",
+        "non_current_source:source_control",
+    ]
+    assert {item["sourceKind"]: item["status"] for item in report["sources"]} == {
+        "identity": "empty",
+        "endpoint": "empty",
+        "source_control": "incomplete",
+    }
+
+    malformed = _invoke(
+        module,
+        _event(
+            "/api/enterprise/discovery/sources/bad/snapshots",
+            "POST",
+            body={**identity, "browserAuthority": True},
+            claims=platform,
+        ),
+    )
+    assert malformed["statusCode"] == 400
+
+    monkeypatch.setattr(module.time, "time", lambda: now + 301)
+    stale_report = json.loads(
+        _invoke(
+            module,
+            _event("/api/enterprise/discovery", "GET", claims=platform),
+        )["body"]
+    )
+    assert stale_report["summary"]["coverageAvailable"] is False
+    assert stale_report["summary"]["coveragePercent"] is None
+    assert stale_report["summary"]["orphaned"] == 0
+    assert stale_report["agentFindings"] == []
+    assert {item["status"] for item in stale_report["sources"]} == {
+        "incomplete",
+        "stale",
+    }
+    assert stale_report["blindSpots"] == [
+        "non_current_source:endpoint",
+        "non_current_source:identity",
+        "non_current_source:source_control",
     ]

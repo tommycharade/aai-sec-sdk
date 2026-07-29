@@ -656,3 +656,18 @@ cannot substitute a different authority set. Dynamic groups reject manual add,
 remove and batch routes, preventing those older paths from bypassing the rule.
 Audit evidence contains only rule hashes and change counts; full membership,
 prompts, tool arguments and credentials are excluded.
+
+## Population discovery boundary
+
+Discovery inputs are deployment-owned observations, never authorization. They
+may lower posture and identify unmanaged, duplicate, leaver, or orphaned state,
+but cannot enroll, revoke, quarantine, assign policy, or approve execution. The
+server correlates them with its own tenant-scoped enrollment inventory.
+
+Only complete, unexpired snapshots from identity, endpoint, and source-control
+sources establish a defensible denominator. Missing, incomplete, stale, or
+empty required evidence suppresses percentages and orphan conclusions. Raw
+project paths, credentials, prompts, commands, and tool content are excluded;
+project scope uses SHA-256 digests. Publication is revision-bound, bounded, and
+audited by source metadata and hash rather than observation content. See
+[Agent population discovery](agent-discovery-design.md).

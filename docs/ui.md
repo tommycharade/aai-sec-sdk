@@ -359,3 +359,12 @@ The first-run host flow ends at central enrollment and verification. Claude
 Code hook fields, generated `settings.json`, and native-tool rules are grouped
 under **Advanced Claude Code settings** so they remain available without
 competing with the primary connection path.
+
+The **Coverage** page is the population-assurance workspace. It keeps expected
+population discovery separate from enrolled-agent operations. The page first
+states whether coverage can be calculated, then shows the explicit denominator,
+source freshness, unmanaged/duplicate/leaver/orphan findings, expected-instance
+details, and business-unit breakdown. If any required source is absent,
+incomplete, or stale, percentages are suppressed and the blind spots are shown.
+Operators can export content-hashed evidence or move directly to Connect agents
+and Agents for response.
