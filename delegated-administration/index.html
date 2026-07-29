@@ -1797,6 +1797,8 @@ includes every delegated grant and its active, expired or revoked state.</p>
 <li>delegated authority cannot manage delegated or break-glass authority;</li>
 <li>self-delegation and <code>platform-admin</code> delegation are rejected;</li>
 <li>delegated-only inventory reads omit out-of-scope records;</li>
+<li>group membership and policy assignment reject missing records, missing
+  ownership and every cross-organization authority edge;</li>
 <li>Entra token issuance accepts an active SCIM operator with a live delegated
   grant without copying that role into tenant-wide Cognito groups.</li>
 </ul>
