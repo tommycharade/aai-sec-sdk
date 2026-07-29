@@ -170,6 +170,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
     const entraClientSecretName = process.env.ENTRA_CLIENT_SECRET_NAME?.trim();
     const entraAaiTenantId = process.env.ENTRA_AAI_TENANT_ID?.trim();
     const entraScimTokenSecretName = process.env.ENTRA_SCIM_TOKEN_SECRET_NAME?.trim();
+    const entraStrongAuthValue = process.env.ENTRA_STRONG_AUTH_ENFORCED?.trim();
+    if (entraStrongAuthValue && !["true", "false"].includes(entraStrongAuthValue)) {
+      throw new Error("ENTRA_STRONG_AUTH_ENFORCED must be true or false");
+    }
+    const entraStrongAuthEnforced = entraStrongAuthValue === "true";
     const runtimeManifestPath = path.join(__dirname, "../lambda/runtime-manifests.json");
     const runtimeManifestBundle = fs.readFileSync(runtimeManifestPath, "utf8");
     validateRuntimeManifests(runtimeManifestBundle);
@@ -196,6 +201,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     }
     if (entraScimTokenSecretName && !entraInputs.every(Boolean)) {
       throw new Error("ENTRA_SCIM_TOKEN_SECRET_NAME requires the complete Entra OIDC configuration");
+    }
+    if (entraStrongAuthEnforced && !entraInputs.every(Boolean)) {
+      throw new Error("ENTRA_STRONG_AUTH_ENFORCED requires the complete Entra OIDC configuration");
     }
 
     const table = new dynamodb.Table(this, "ControlPlaneTable", {
@@ -424,6 +432,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
           SCIM_ENABLED: entraScimTokenSecretName ? "true" : "false",
           SCIM_TABLE: scim.tableName,
           SCIM_AAI_TENANT_ID: entraAaiTenantId,
+          ENTRA_STRONG_AUTH_ENFORCED: entraStrongAuthEnforced ? "true" : "false",
         },
       });
       scim.grantReadData(entraClaims);
@@ -492,6 +501,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
         ENTRA_PROVIDER_ENABLED: entraProvider ? "true" : "false",
         ENTRA_TENANT_ID: entraTenantId ?? "",
         ENTRA_AAI_TENANT_ID: entraAaiTenantId ?? "",
+        ENTRA_STRONG_AUTH_ENFORCED: entraStrongAuthEnforced ? "true" : "false",
         SCIM_ENABLED: entraScimTokenSecretName ? "true" : "false",
         SCIM_TABLE: scim.tableName,
         SPLUNK_STUB_ENABLED: "true",

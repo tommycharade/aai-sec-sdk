@@ -147,8 +147,24 @@ _ROLE_CAPABILITIES = {
     "policy-approver": frozenset({"approval_decision", "policy_approval"}),
     "fleet-operator": frozenset({"fleet_write"}),
     "incident-responder": frozenset({"incident_response"}),
-    "auditor": frozenset(),
+    "auditor": frozenset({"access_certification_read"}),
 }
+_BREAK_GLASS_CAPABILITIES = frozenset(
+    {
+        "approval_decision",
+        "fleet_write",
+        "identity_admin",
+        "incident_response",
+        "managed_deployment",
+        "policy_approval",
+        "policy_write",
+        "runtime_admin",
+    }
+)
+_BREAK_GLASS_MIN_SECONDS = 5 * 60
+_BREAK_GLASS_MAX_SECONDS = 60 * 60
+_BREAK_GLASS_REQUEST_SECONDS = 15 * 60
+_STRONG_AUTH_MAX_AGE_SECONDS = 10 * 60
 _POLICY_VERSION_STATES = frozenset(
     {"draft", "review", "approved", "staged", "active", "rejected", "retired"}
 )
@@ -713,6 +729,10 @@ def _operator_roles(event):
 def _required_mutation_capability(path):
     """Classify a mutating route into one least-privilege capability."""
     normalized = path.removeprefix("/api")
+    if normalized == "/enterprise/identity/break-glass/requests":
+        return "incident_response"
+    if normalized.startswith("/enterprise/identity/break-glass/requests/"):
+        return "identity_admin"
     if normalized in {"/emergency-stop", "/enterprise/emergency-stop"}:
         return "incident_response"
     if "/emergency-stop" in normalized or normalized.endswith("/alerts/dispatch"):
@@ -745,12 +765,25 @@ def _required_mutation_capability(path):
     return "fleet_write"
 
 
-def _operator_authorized(event, capability):
-    """Authorize one explicit capability from canonical operator roles."""
-    return any(
+def _operator_authorized(event, capability, tenant=None, *, include_break_glass=True):
+    """Authorize one live capability from normal roles or an active emergency grant.
+
+    Break-glass authority is resolved from server-owned state for each request;
+    it is never copied into a browser claim. A lookup failure therefore denies
+    emergency authority rather than extending a stale or expired grant.
+    """
+    normally_authorized = any(
         "*" in _ROLE_CAPABILITIES[role] or capability in _ROLE_CAPABILITIES[role]
         for role in _operator_roles(event)
     )
+    if normally_authorized:
+        return True
+    if not include_break_glass or tenant is None or capability not in _BREAK_GLASS_CAPABILITIES:
+        return False
+    try:
+        return capability in _active_break_glass_capabilities(tenant, event)
+    except Exception:
+        return False
 
 
 def _mutation_authorized(event):
@@ -874,6 +907,14 @@ def _identity_access(tenant, event):
         "tenantHint": f"{entra_tenant[:8]}…" if configured else None,
         "tenantBinding": "server_owned",
         "roleSource": "cognito_managed_groups",
+        "strongAuthentication": {
+            "status": (
+                "enforced"
+                if configured and os.environ.get("ENTRA_STRONG_AUTH_ENFORCED") == "true"
+                else "not_configured"
+            ),
+            "maxAuthenticationAgeSeconds": _STRONG_AUTH_MAX_AGE_SECONDS,
+        },
         "subject": _bounded_text(_claims(event).get("sub"), "subject", 256),
         "scimStatus": scim["status"],
         "scim": scim,
@@ -883,6 +924,389 @@ def _identity_access(tenant, event):
             for role, capabilities in _ROLE_CAPABILITIES.items()
         ],
     }
+
+
+def _operator_subject(event):
+    """Return the immutable authenticated subject used for governance actions."""
+    subject = _claims(event).get("sub")
+    if not isinstance(subject, str) or not subject or len(subject) > 256:
+        raise PermissionError("authenticated operator subject is required")
+    return subject
+
+
+def _require_recent_strong_authentication(event):
+    """Require recent MFA evidence from signed Cognito/Entra token claims.
+
+    Browser input cannot satisfy this check. Native sessions may provide a
+    signed ``amr`` value. Federated sessions require the pre-token trigger's
+    server-owned assertion that the configured Entra application is protected
+    by an MFA-enforcing Conditional Access policy.
+    """
+    claims = _claims(event)
+    methods = set()
+    for name in ("amr", "cognito:amr"):
+        methods.update(value.lower() for value in _bounded_claim_values(claims.get(name, [])))
+    entra_strong_auth = (
+        claims.get("aai:identity_provider") == "microsoft_entra_id"
+        and claims.get("aai:strong_auth_enforced") == "true"
+    )
+    if not entra_strong_auth and not methods.intersection(
+        {"mfa", "otp", "fido", "fido2", "webauthn"}
+    ):
+        raise PermissionError("recent multi-factor authentication is required")
+    raw_auth_time = claims.get("auth_time")
+    try:
+        auth_time = int(raw_auth_time)
+    except (TypeError, ValueError) as error:
+        raise PermissionError("recent authentication evidence is required") from error
+    now = int(time.time())
+    if auth_time > now + 60 or now - auth_time > _STRONG_AUTH_MAX_AGE_SECONDS:
+        raise PermissionError("strong authentication is too old")
+
+
+def _break_glass_view(item, *, now=None):
+    """Return one secret-free emergency-access record with live effective state."""
+    current = int(time.time()) if now is None else now
+    status = str(item.get("status", "unknown"))
+    if status == "approved" and int(item.get("grant_expires_at", 0)) <= current:
+        effective_status = "expired"
+    elif status == "approved" and int(item.get("grant_starts_at", 0)) <= current:
+        effective_status = "active"
+    else:
+        effective_status = status
+    return {
+        "id": item.get("id", ""),
+        "subject": item.get("subject", ""),
+        "capabilities": sorted(item.get("capabilities", [])),
+        "reason": item.get("reason", ""),
+        "durationSeconds": int(item.get("duration_seconds", 0)),
+        "requestedAt": int(item.get("requested_at", 0)),
+        "requestExpiresAt": int(item.get("request_expires_at", 0)),
+        "requestedBy": item.get("requested_by", ""),
+        "decidedBy": item.get("decided_by") or None,
+        "decidedAt": int(item["decided_at"]) if item.get("decided_at") else None,
+        "approvedBy": item.get("approved_by") if status in {"approved", "revoked"} else None,
+        "approvedAt": (
+            int(item["approved_at"])
+            if status in {"approved", "revoked"} and item.get("approved_at")
+            else None
+        ),
+        "grantStartsAt": (int(item["grant_starts_at"]) if item.get("grant_starts_at") else None),
+        "grantExpiresAt": (int(item["grant_expires_at"]) if item.get("grant_expires_at") else None),
+        "revokedBy": item.get("revoked_by") or None,
+        "revokedAt": int(item["revoked_at"]) if item.get("revoked_at") else None,
+        "status": status,
+        "effectiveStatus": effective_status,
+    }
+
+
+def _identity_governance_audit_record(tenant, event_type, actor, payload, *, now=None):
+    """Build one immutable, content-minimised identity-governance audit item."""
+    occurred_at = int(time.time()) if now is None else now
+    event_id = str(uuid.uuid4())
+    redacted = {
+        "event_type": event_type,
+        "actor": actor,
+        "tenant_id": tenant,
+        "occurred_at": occurred_at,
+        "payload": payload,
+    }
+    return {
+        **_item_key(tenant, "BREAK_GLASS_AUDIT", f"{occurred_at:012d}#{event_id}"),
+        **redacted,
+        "id": event_id,
+        "payload_hash": hashlib.sha256(
+            json.dumps(redacted, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        "ttl": occurred_at + (366 * 24 * 60 * 60),
+    }
+
+
+def _transact_identity_governance(operations):
+    """Atomically commit emergency authority and its immutable audit evidence."""
+    try:
+        DYNAMODB.transact_write_items(TransactItems=operations)
+    except Exception as error:
+        code = getattr(error, "response", {}).get("Error", {}).get("Code")
+        if code in {"ConditionalCheckFailedException", "TransactionCanceledException"}:
+            raise PolicyConflict("identity governance state changed concurrently") from error
+        raise
+
+
+def _export_identity_governance_audit(tenant, event_type, actor, payload):
+    """Best-effort replicate an already durable governance event into S3 audit."""
+    try:
+        _audit(tenant, event_type, actor, payload)
+    except Exception as error:
+        # DynamoDB transaction evidence is already durable. Do not make a
+        # committed authority change look uncommitted because its secondary
+        # S3 replication failed; emit only a content-free operational signal.
+        print(
+            json.dumps(
+                {"warning": "identity governance audit replication failed", "event": event_type}
+            )
+        )
+
+
+def _active_break_glass_capabilities(tenant, event):
+    """Resolve unexpired emergency capabilities for the exact signed subject."""
+    subject = _operator_subject(event)
+    now = int(time.time())
+    capabilities = set()
+    for item in _list(tenant, "BREAK_GLASS", consistent_read=True):
+        if (
+            item.get("subject") == subject
+            and item.get("status") == "approved"
+            and int(item.get("grant_starts_at", 0)) <= now
+            and int(item.get("grant_expires_at", 0)) > now
+        ):
+            values = item.get("capabilities", [])
+            if isinstance(values, list):
+                capabilities.update(value for value in values if value in _BREAK_GLASS_CAPABILITIES)
+    return capabilities
+
+
+def _create_break_glass_request(tenant, event, body):
+    """Create one MFA-bound, self-targeted and time-limited emergency request."""
+    _require_recent_strong_authentication(event)
+    actor = _operator_subject(event)
+    reason = _bounded_text(body.get("reason"), "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("reason must contain at least 20 characters")
+    capabilities = body.get("capabilities")
+    if (
+        not isinstance(capabilities, list)
+        or not 1 <= len(capabilities) <= len(_BREAK_GLASS_CAPABILITIES)
+        or len(capabilities) != len(set(capabilities))
+        or any(value not in _BREAK_GLASS_CAPABILITIES for value in capabilities)
+    ):
+        raise ValueError("capabilities must be a unique supported emergency capability list")
+    duration_minutes = body.get("durationMinutes")
+    if isinstance(duration_minutes, bool) or not isinstance(duration_minutes, int):
+        raise ValueError("durationMinutes must be an integer")
+    duration_seconds = duration_minutes * 60
+    if not _BREAK_GLASS_MIN_SECONDS <= duration_seconds <= _BREAK_GLASS_MAX_SECONDS:
+        raise ValueError("durationMinutes must be between 5 and 60")
+    now = int(time.time())
+    request_id = str(uuid.uuid4())
+    item = {
+        **_item_key(tenant, "BREAK_GLASS", request_id),
+        "tenant_id": tenant,
+        **{
+            "id": request_id,
+            "subject": actor,
+            "capabilities": sorted(capabilities),
+            "reason": reason,
+            "duration_seconds": duration_seconds,
+            "status": "pending",
+            "requested_at": now,
+            "request_expires_at": now + _BREAK_GLASS_REQUEST_SECONDS,
+            "requested_by": actor,
+            # Evidence outlives the grant. DynamoDB expiry cannot silently
+            # erase a still-authoritative emergency access decision.
+            "ttl": now + (366 * 24 * 60 * 60),
+            "revision": 1,
+        },
+    }
+    audit_payload = {
+        "request_id": request_id,
+        "capabilities": sorted(capabilities),
+        "duration_seconds": duration_seconds,
+    }
+    audit_record = _identity_governance_audit_record(
+        tenant, "break_glass_requested", actor, audit_payload, now=now
+    )
+    _transact_identity_governance(
+        [
+            _transaction_put(item, condition="attribute_not_exists(pk)"),
+            _transaction_put(audit_record, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_identity_governance_audit(tenant, "break_glass_requested", actor, audit_payload)
+    return _break_glass_view(item, now=now)
+
+
+def _decide_break_glass_request(tenant, event, request_id, decision):
+    """Approve, deny or revoke emergency authority with conditional state change."""
+    _require_recent_strong_authentication(event)
+    actor = _operator_subject(event)
+    if decision not in {"approve", "deny", "revoke"}:
+        raise ValueError("break-glass decision is unsupported")
+    now = int(time.time())
+    key = _item_key(tenant, "BREAK_GLASS", _bounded_identifier(request_id, "requestId"))
+    current = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if not current:
+        return None
+    if current.get("requested_by") == actor:
+        raise PermissionError("break-glass requester cannot decide their own request")
+    names = {"#status": "status", "#revision": "revision"}
+    expected_revision = int(current.get("revision", 0))
+    if expected_revision < 1:
+        raise PolicyConflict("break-glass request has no revision authority")
+    updated = {**current, "revision": expected_revision + 1}
+    if decision in {"approve", "deny"}:
+        if current.get("status") != "pending" or int(current.get("request_expires_at", 0)) <= now:
+            raise PolicyConflict("break-glass request is no longer pending")
+        if decision == "approve":
+            updated.update(
+                {
+                    "status": "approved",
+                    "decided_by": actor,
+                    "decided_at": now,
+                    "approved_by": actor,
+                    "approved_at": now,
+                    "grant_starts_at": now,
+                    "grant_expires_at": now + int(current.get("duration_seconds", 0)),
+                }
+            )
+        else:
+            updated.update(
+                {
+                    "status": "denied",
+                    "decided_by": actor,
+                    "decided_at": now,
+                }
+            )
+        condition = (
+            "#status = :expected_status AND #revision = :expected_revision AND "
+            "request_expires_at > :now AND requested_by <> :actor"
+        )
+        values = {
+            ":expected_status": "pending",
+            ":expected_revision": expected_revision,
+            ":now": now,
+            ":actor": actor,
+        }
+    else:
+        if current.get("status") != "approved" or int(current.get("grant_expires_at", 0)) <= now:
+            raise PolicyConflict("break-glass grant is not active")
+        updated.update({"status": "revoked", "revoked_by": actor, "revoked_at": now})
+        condition = (
+            "#status = :expected_status AND #revision = :expected_revision AND "
+            "grant_expires_at > :now AND requested_by <> :actor"
+        )
+        values = {
+            ":expected_status": "approved",
+            ":expected_revision": expected_revision,
+            ":actor": actor,
+            ":now": now,
+        }
+    event_type = {
+        "approve": "break_glass_approved",
+        "deny": "break_glass_denied",
+        "revoke": "break_glass_revoked",
+    }[decision]
+    audit_payload = {
+        "request_id": request_id,
+        "subject": current.get("subject", ""),
+        "capabilities": sorted(current.get("capabilities", [])),
+        "grant_expires_at": updated.get("grant_expires_at"),
+    }
+    audit_record = _identity_governance_audit_record(
+        tenant, event_type, actor, audit_payload, now=now
+    )
+    _transact_identity_governance(
+        [
+            _transaction_put(updated, condition=condition, names=names, values=values),
+            _transaction_put(audit_record, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_identity_governance_audit(tenant, event_type, actor, audit_payload)
+    return _break_glass_view(updated, now=now)
+
+
+def _break_glass_requests(tenant):
+    """Return bounded emergency-access evidence ordered newest first."""
+    now = int(time.time())
+    return sorted(
+        (
+            _break_glass_view(item, now=now)
+            for item in _list(tenant, "BREAK_GLASS", consistent_read=True)
+        ),
+        key=lambda item: item["requestedAt"],
+        reverse=True,
+    )
+
+
+def _access_certification(tenant, event):
+    """Build a complete bounded access-review artifact with a stable digest."""
+    generated_at = int(time.time())
+    scim = _scim_lifecycle(tenant)
+    operators = []
+    if scim["status"] == "configured":
+        result = SCIM.query(
+            KeyConditionExpression=Key("pk").eq(f"TENANT#{tenant}"),
+            Limit=501,
+            ConsistentRead=True,
+        )
+        items = result.get("Items", [])
+        if result.get("LastEvaluatedKey") or len(items) > 500:
+            raise RuntimeError("SCIM inventory exceeds the certification bound")
+        users = [item for item in items if str(item.get("sk", "")).startswith("USER#")]
+        groups = {
+            str(item.get("id", "")): item
+            for item in items
+            if str(item.get("sk", "")).startswith("GROUP#")
+        }
+        for user in sorted(users, key=lambda item: str(item.get("user_name", "")).lower()):
+            user_id = str(user.get("id", ""))
+            memberships = SCIM.query(
+                KeyConditionExpression=Key("pk").eq(f"TENANT#{tenant}#USER#{user_id}")
+                & Key("sk").begins_with("GROUP#"),
+                Limit=33,
+                ConsistentRead=True,
+            )
+            member_items = memberships.get("Items", [])
+            if memberships.get("LastEvaluatedKey") or len(member_items) > 32:
+                raise RuntimeError("SCIM membership exceeds the certification bound")
+            group_ids = sorted(
+                str(item.get("sk", "")).removeprefix("GROUP#") for item in member_items
+            )
+            roles = sorted(
+                {
+                    groups[group_id].get("mapped_role")
+                    for group_id in group_ids
+                    if group_id in groups
+                    and groups[group_id].get("active") is True
+                    and groups[group_id].get("mapped_role") in _CANONICAL_OPERATOR_ROLES
+                }
+            )
+            operators.append(
+                {
+                    "subjectId": user_id,
+                    "userName": user.get("user_name", ""),
+                    "displayName": user.get("display_name", ""),
+                    "active": user.get("active") is True,
+                    "groupIds": group_ids,
+                    "roles": roles,
+                    "lastProvisionedAt": int(user.get("updated_at", 0)),
+                }
+            )
+    artifact = {
+        "schemaVersion": 1,
+        "tenantId": tenant,
+        "identityProvider": "microsoft_entra_id",
+        "lifecycleStatus": scim["status"],
+        "complete": scim["status"] == "configured",
+        "operators": operators,
+        "groupMappings": scim["groupMappings"],
+        "breakGlass": _break_glass_requests(tenant),
+        "roleMatrix": [
+            {"role": role, "capabilities": sorted(capabilities)}
+            for role, capabilities in _ROLE_CAPABILITIES.items()
+        ],
+    }
+    digest = hashlib.sha256(
+        json.dumps(_json(artifact), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    actor = _operator_subject(event)
+    audit_payload = {"content_hash": digest, "operator_count": len(operators)}
+    audit_record = _identity_governance_audit_record(
+        tenant, "access_certification_exported", actor, audit_payload, now=generated_at
+    )
+    TABLE.put_item(Item=audit_record, ConditionExpression="attribute_not_exists(pk)")
+    _export_identity_governance_audit(tenant, "access_certification_exported", actor, audit_payload)
+    return {**artifact, "generatedAt": generated_at, "contentHash": digest}
 
 
 def _enterprise_integrations():
@@ -3225,7 +3649,13 @@ def handler(event, context):
         actor = _bounded_text(_claims(event).get("sub", "cognito-operator"), "actor", 256)
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
             capability = _required_mutation_capability(path)
-            if not _operator_authorized(event, capability):
+            is_break_glass_governance = "/enterprise/identity/break-glass/requests" in path
+            if not _operator_authorized(
+                event,
+                capability,
+                tenant,
+                include_break_glass=not is_break_glass_governance,
+            ):
                 return _response(
                     403,
                     {
@@ -3310,6 +3740,41 @@ def handler(event, context):
                 return _response(200, _fleet(tenant)["capabilities"])
             if method == "GET" and parts == ["identity"]:
                 return _response(200, _identity_access(tenant, event))
+            if method == "GET" and parts == ["identity", "break-glass", "requests"]:
+                if not (
+                    _operator_authorized(event, "incident_response", tenant)
+                    or _operator_authorized(event, "identity_admin", tenant)
+                ):
+                    return _response(
+                        403,
+                        {
+                            "error": "operator role does not permit this action",
+                            "requiredCapability": "incident_response or identity_admin",
+                        },
+                    )
+                return _response(200, {"items": _break_glass_requests(tenant)})
+            if method == "POST" and parts == ["identity", "break-glass", "requests"]:
+                return _response(201, _create_break_glass_request(tenant, event, _body(event)))
+            if (
+                method == "POST"
+                and len(parts) == 5
+                and parts[:3] == ["identity", "break-glass", "requests"]
+                and parts[4] in {"approve", "deny", "revoke"}
+            ):
+                request = _decide_break_glass_request(tenant, event, parts[3], parts[4])
+                if request is None:
+                    return _response(404, {"error": "break-glass request not found"})
+                return _response(200, request)
+            if method == "GET" and parts == ["identity", "access-certification"]:
+                if not _operator_authorized(event, "access_certification_read", tenant):
+                    return _response(
+                        403,
+                        {
+                            "error": "operator role does not permit this action",
+                            "requiredCapability": "access_certification_read",
+                        },
+                    )
+                return _response(200, _access_certification(tenant, event))
             if (
                 method == "PUT"
                 and len(parts) == 5

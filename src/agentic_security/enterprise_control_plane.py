@@ -4431,7 +4431,7 @@ class EnterpriseFleetApplication:
             "policy-approver": ["approval_decision", "policy_approval"],
             "fleet-operator": ["fleet_write"],
             "incident-responder": ["incident_response"],
-            "auditor": [],
+            "auditor": ["access_certification_read"],
         }
         active_roles = sorted(
             {role_mapping[role] for role in identity.roles if role in role_mapping}
@@ -4444,6 +4444,10 @@ class EnterpriseFleetApplication:
             "tenantHint": identity.organization_id,
             "tenantBinding": "server_owned",
             "roleSource": "deployment_authenticator",
+            "strongAuthentication": {
+                "status": "not_configured",
+                "maxAuthenticationAgeSeconds": 600,
+            },
             "subject": identity.subject,
             "scimStatus": "not_configured",
             "scim": {

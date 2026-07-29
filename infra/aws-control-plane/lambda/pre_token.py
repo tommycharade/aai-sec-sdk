@@ -119,6 +119,12 @@ def handler(event, _context):
         "aai:identity_provider": "microsoft_entra_id",
         "aai:entra_tenant_id": tenant_id,
     }
+    if os.environ.get("ENTRA_STRONG_AUTH_ENFORCED") == "true":
+        # This assertion is deployment-owned: it is enabled only after the
+        # exact Entra enterprise application is bound to an MFA-enforcing
+        # Conditional Access policy and that policy passes live acceptance.
+        # No mutable user attribute or browser value can create this claim.
+        provenance["aai:strong_auth_enforced"] = "true"
     roles = None
     if os.environ.get("SCIM_ENABLED") == "true":
         roles, revision = _scim_roles(attributes)
