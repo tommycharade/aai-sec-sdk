@@ -1,5 +1,9 @@
 # Changelog
 
+- Updated the deployed AWS acceptance harness for project-bound agent
+  sessions. It now proves that missing and mismatched project-root digests are
+  denied before confirming that the enrolled digest can heartbeat, retrieve
+  effective policy, and consume an approval.
 - Added fail-closed Codex CLI native-tool enforcement using the documented
   `PreToolUse` hook. Project onboarding now installs a required SDK MCP gateway
   and a secret-free native hook; Bash, `apply_patch`, MCP and unknown-tool

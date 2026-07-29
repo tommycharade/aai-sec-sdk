@@ -192,10 +192,11 @@ AWS_PROFILE=p1 AWS_REGION=eu-west-2 python scripts/test_aws_control_plane.py \
 ```
 
 The test prints one passing result only after it has checked unauthenticated
-401 handling, synthetic agent registration and one-time enrollment, heartbeat,
-agent emergency-stop enforcement and recovery, exact approval consumption and
-replay refusal, a two-process DynamoDB claim race, restart replay, terminal
-write, and a `GuardedRuntime` execution that replays the typed
+401 handling, synthetic agent registration and one-time enrollment, denial of
+heartbeats with a missing or mismatched project-root digest, acceptance of the
+enrolled digest, agent emergency-stop enforcement and recovery, exact approval
+consumption and replay refusal, a two-process DynamoDB claim race, restart
+replay, terminal write, and a `GuardedRuntime` execution that replays the typed
 `ExecutionResult` without invoking the synthetic side effect twice. It also
 checks the deployed audit bucket's compliance retention, versioning, and
 inability to delete a retained object version, and publishes a synthetic alert
