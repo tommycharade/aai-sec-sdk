@@ -653,6 +653,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#accountable-agent-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accountable agent ownership
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#central-action-approvals" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2839,6 +2850,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#accountable-agent-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accountable agent ownership
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#central-action-approvals" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4231,6 +4253,10 @@ failures are errors rather than empty or synthetic credentials.</p>
 <td>Remove operational data from a revoked identity while retaining a lifecycle tombstone</td>
 </tr>
 <tr>
+<td><code>PUT /api/enterprise/agents/{deployment}/{agent}/ownership</code></td>
+<td>Review accountable ownership using its expected ownership revision</td>
+</tr>
+<tr>
 <td><code>POST /api/enterprise/agents/{deployment}/{agent}/heartbeat</code></td>
 <td>Refresh presence and optionally publish bounded aggregate SDK telemetry plus managed-host evidence</td>
 </tr>
@@ -4404,6 +4430,28 @@ a tombstone: tenant lineage, host, lifecycle actors/reasons, timestamps,
 replacement relationship and a project-root digest remain, while the local
 path, telemetry and managed-host observations are removed. Agent IDs are never
 reusable.</p>
+<h3 id="accountable-agent-ownership">Accountable agent ownership</h3>
+<p>New agent registration requires an <code>ownership</code> object containing a stable
+<code>ownerId</code>, human-readable <code>ownerName</code>, monitored <code>businessContact</code> mailbox and
+one of <code>low</code>, <code>medium</code>, <code>high</code> or <code>critical</code>. The API does not accept team or
+environment from that object: it copies both from the existing tenant-owned
+deployment so a browser cannot rewrite business lineage. When Microsoft Entra
+SCIM is configured for the tenant, <code>ownerId</code> must be an active provisioned
+Entra object UUID.</p>
+<p>Ownership reviews are valid for 90 days. The server returns <code>current</code>, <code>stale</code>
+or <code>missing</code> plus review timestamps and reason codes; it never accepts the
+status from a client. Missing, malformed or expired ownership prevents the
+agent verification endpoint from returning <code>verified=true</code>. Legacy identities
+remain visible as missing until a fleet operator completes a review.</p>
+<p><code>PUT /enterprise/agents/{deployment}/{agent}/ownership</code> requires the exact
+<code>expectedOwnershipRevision</code>, a complete replacement ownership object and a
+reason of at least 20 characters. Revision zero is valid only for an agent that
+has never had ownership metadata. The control plane compares lifecycle and
+ownership state in one DynamoDB transaction and writes immutable, content-
+minimised evidence in that same transaction. The S3 audit copy is secondary.
+Replacement identities inherit the predecessor's current ownership review;
+offboarding retains owner ID, team, criticality, review timing and a hash of the
+business contact while removing the contact value and local project path.</p>
 <h3 id="central-action-approvals">Central action approvals</h3>
 <p>An enrolled agent submits a held action through its deployment/agent-bound
 session. The server derives <code>agentKey</code> from that session and accepts only the

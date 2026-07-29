@@ -992,6 +992,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#agent-identity-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent identity lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#governed-policy-ledger" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1632,6 +1643,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#agent-identity-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent identity lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#governed-policy-ledger" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1727,15 +1749,15 @@ Codex has loaded and enforced it.</p>
 </tr>
 <tr>
 <td>SDK deployed merge</td>
-<td><code>f3ff32b8f41ad7b6b4002476f978d323a5c2243b</code></td>
+<td><code>6bead88002e436071b5a6dd3d66c13c38a212f92</code></td>
 </tr>
 <tr>
 <td>UI deployed merge</td>
-<td><code>0dd6cfdd4e642e9330476e8e0618cf3bd283c49c</code></td>
+<td><code>9311a52f53914e70f2bb82f905f791701658d2c1</code></td>
 </tr>
 <tr>
 <td>Deployed UI JavaScript</td>
-<td><code>assets/index-B0EySmng.js</code></td>
+<td><code>assets/index-BgcTctCD.js</code></td>
 </tr>
 </tbody>
 </table>
@@ -1800,6 +1822,64 @@ zero remaining DynamoDB records and zero remaining S3 objects. This proves the
 deployed software boundary, including live revocation. It does not substitute
 for the outstanding real Entra/SCIM and independent multi-business-unit
 exercise.</p>
+<h2 id="agent-identity-lifecycle">Agent identity lifecycle</h2>
+<p>The deployed control-plane harness created one unique synthetic deployment and
+agent, enrolled it, established a live session and assigned the safe policy
+group. It then exercised the merged lifecycle boundary against API Gateway,
+Lambda and DynamoDB:</p>
+<table>
+<thead>
+<tr>
+<th>Assertion</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Issue an unused predecessor bootstrap token</td>
+<td>HTTP 201</td>
+</tr>
+<tr>
+<td>Atomically replace the active identity</td>
+<td>HTTP 201; predecessor <code>revoked</code>, successor <code>active</code></td>
+</tr>
+<tr>
+<td>Reuse the predecessor session after replacement</td>
+<td>HTTP 403</td>
+</tr>
+<tr>
+<td>Consume the predecessor's unused bootstrap token</td>
+<td>HTTP 403</td>
+</tr>
+<tr>
+<td>Issue fresh bootstrap material for the successor</td>
+<td>HTTP 201</td>
+</tr>
+<tr>
+<td>Enrol the successor with fresh material</td>
+<td>HTTP 201</td>
+</tr>
+<tr>
+<td>Offboard the revoked predecessor</td>
+<td>HTTP 200; lifecycle <code>deleted</code></td>
+</tr>
+<tr>
+<td>Remove the predecessor's local project path</td>
+<td>Empty path with retained SHA-256 digest</td>
+</tr>
+</tbody>
+</table>
+<p>The same run also passed project-scope binding, managed-configuration
+missing/conflict enforcement, approval replay denial, emergency-stop recovery,
+multi-process idempotency, WORM audit retention and SNS/SQS alert delivery.
+Exact synthetic agent, session, bootstrap, membership, deployment, template,
+configuration, approval and idempotency records were removed afterward;
+content-minimised immutable lifecycle audit records remain as intended.</p>
+<p>Runtime attestation was the sole failed positive-verification check and the
+deployed API explicitly returned <code>not_configured</code>. The harness continued only
+under its named pilot flag and printed that this did not prove release
+provenance or full agent verification. This is a lifecycle acceptance pass, not
+a P0-05 attestation pass.</p>
 <h2 id="governed-policy-ledger">Governed policy ledger</h2>
 <p>The deployed Lambda was invoked through AWS IAM with a synthetic,
 tenant-scoped administrator subject to read the immutable version ledger for
