@@ -1104,6 +1104,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../delegated-administration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Delegated administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-operations-readiness/" class="md-nav__link">
         
   
@@ -1734,8 +1761,8 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.</p>
 <td>P0-06</td>
 <td>Entra SSO, SCIM and granular RBAC</td>
 <td>Partial</td>
-<td>Tenant-specific Entra OIDC; tenant-bound SCIM lifecycle and canonical-role mapping; five-minute token reconciliation; recent-MFA, four-eyes, maximum-60-minute break glass with live revocation; digest-bound auditor access export; adversarial contracts and Identity &amp; Trust UI</td>
-<td>Configure the pilot tenant; prove real OIDC and SCIM joiner/mover/leaver; run the deployed two-person MFA emergency exercise and certification review; add delegated scopes</td>
+<td>Tenant-specific Entra OIDC; tenant-bound SCIM lifecycle and canonical-role mapping; five-minute token reconciliation; expiring organization/project/deployment role delegation with live revocation and scoped reads; recent-MFA, four-eyes, maximum-60-minute break glass; schema-v2 digest-bound access export; adversarial contracts and Identity &amp; Trust UI</td>
+<td>Configure the pilot tenant; prove real OIDC and SCIM joiner/mover/leaver; run deployed two-person MFA, delegated multi-business-unit and certification exercises</td>
 </tr>
 <tr>
 <td>P0-07</td>
@@ -1877,8 +1904,13 @@ with Microsoft Entra ID as the first adapter:</p>
     recent-MFA, four-eyes and bounded to 60 minutes; the server rechecks it on
     every mutation and revocation takes effect immediately.</li>
 <li>Auditors can export a digest-bound complete SCIM, role and emergency-access
-    artifact; oversized partial inventories fail and unconfigured SCIM is
-    explicitly incomplete.</li>
+   artifact; oversized partial inventories fail and unconfigured SCIM is
+   explicitly incomplete.</li>
+<li>Tenant identity administrators can assign an expiring non-admin role to an
+    active Entra object for one organization, project or deployment. The API
+    resolves lineage and live grant state per mutation, filters delegated-only
+    reads, denies self/platform-admin/identity delegation, and includes the
+    complete ledger in access-certification schema version 2.</li>
 </ol>
 <p>The live acceptance command now discovers deployed posture, reads its bearer
 only from Secrets Manager, and exercises synthetic joiner, mover and leaver
@@ -1887,7 +1919,7 @@ because the pilot stack has no Entra tenant configuration; this is correct
 fail-closed evidence, not an acceptance pass. P0-06 still requires a configured
 pilot tenant and real Entra OIDC sign-in, role transition and token-revocation
 exercise, a deployed two-person Entra MFA break-glass and access-review
-exercise, and delegated administrative scopes.</p>
+exercise, and a multi-business-unit delegated-scope exercise.</p>
 <h2 id="current-aws-acceptance-2026-07-29">Current AWS acceptance — 2026-07-29</h2>
 <p>The governed policy lifecycle and hosted UI are merged and deployed. The live
 safe-default policy migrated to an immutable active version-2 ledger entry

@@ -16,7 +16,7 @@
         <link rel="prev" href="../entra-scim-runbook/">
       
       
-        <link rel="next" href="../enterprise-operations-readiness/">
+        <link rel="next" href="../delegated-administration/">
       
       
         
@@ -1068,6 +1068,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#delegated-operator-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delegated operator access
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#acceptance-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1082,6 +1093,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../delegated-administration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Delegated administration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1616,6 +1654,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#delegated-operator-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delegated operator access
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#acceptance-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1724,6 +1773,8 @@ in <strong>Identity &amp; trust</strong>. The tenant-scoped artifact contains:</
   directory object ID;</li>
 <li>current group membership and exact group-to-role mappings;</li>
 <li>the canonical role-to-capability matrix;</li>
+<li>every delegated role, organization/project/deployment scope, expiry and
+  revocation state;</li>
 <li>pending, active, expired, denied and revoked break-glass records;</li>
 <li>generation time and a SHA-256 digest of the complete review payload.</li>
 </ul>
@@ -1736,6 +1787,19 @@ access-governance evidence under the customer's retention and privacy rules.
 The digest detects accidental or unrecorded content change; it is not a digital
 signature, immutable storage guarantee, or proof that a human completed the
 review.</p>
+<h2 id="delegated-operator-access">Delegated operator access</h2>
+<p>Use <strong>Identity &amp; trust → Delegated operator access</strong> for normal least-privilege
+operations, not break glass. The target must be an active SCIM operator when
+SCIM is configured. Select one non-admin canonical role, an organization,
+project or deployment, an expiry no longer than 366 days, and a reviewable
+business rationale. The API rejects self-delegation and never allows
+<code>platform-admin</code> or identity governance to be delegated.</p>
+<p>After creating the grant, remove any broader Entra group membership that would
+still assign a tenant-wide role. Verify the operator can manage one in-scope
+synthetic resource and receives HTTP 403 for a sibling resource. Revoke the
+grant and repeat the in-scope action to prove immediate denial. The complete
+procedure and API contract are in
+<a href="../delegated-administration/">Delegated administration</a>.</p>
 <h2 id="acceptance-evidence">Acceptance evidence</h2>
 <p>Before enterprise rollout, retain synthetic evidence that proves:</p>
 <ol>
@@ -1748,6 +1812,8 @@ review.</p>
 <li>granted authority cannot perform an unrequested capability;</li>
 <li>expiry and revocation remove authority on the next API request;</li>
 <li>a cross-tenant subject receives no grant;</li>
+<li>delegated authority permits one descendant resource, denies a sibling,
+   expires automatically and is denied immediately after revocation;</li>
 <li>the certification export is complete, digest-verifiable and auditor-only;
    and</li>
 <li>every lifecycle transition has content-minimised durable audit evidence.</li>

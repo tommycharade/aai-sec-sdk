@@ -1074,6 +1074,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#delegated-operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delegated operator
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1124,6 +1135,33 @@
     
   
     Emergency access and access certification runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../delegated-administration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Delegated administration
   
 
     
@@ -1699,6 +1737,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#delegated-operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delegated operator
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1854,6 +1903,20 @@ content-minimised lifecycle audit records are intentionally retained.</p>
 <li>Verify any already-issued operator token stops working within five minutes.</li>
 <li>Retain the lifecycle audit record and the denied authentication evidence.</li>
 </ol>
+<h3 id="delegated-operator">Delegated operator</h3>
+<ol>
+<li>Provision an active pilot operator without a tenant-wide mapped role.</li>
+<li>As a different platform administrator, create a 7-day <code>fleet-operator</code>
+   grant for one synthetic project in <strong>Delegated operator access</strong>.</li>
+<li>Sign in as the pilot and confirm token issuance reports delegated access
+   without adding <code>fleet-operator</code> to <code>cognito:groups</code>.</li>
+<li>Create one synthetic deployment inside the project and confirm success.</li>
+<li>Attempt the same operation in a sibling project and confirm HTTP 403.</li>
+<li>Revoke the grant and confirm the formerly permitted operation receives HTTP
+   403 immediately, without waiting for token expiry.</li>
+<li>Generate access certification and confirm the grant and revocation appear
+   in schema version 2 evidence.</li>
+</ol>
 <h2 id="operations-and-incident-response">Operations and incident response</h2>
 <ul>
 <li><strong>Provisioning failure:</strong> do not create a local Cognito group workaround.
@@ -1879,7 +1942,8 @@ content-minimised lifecycle audit records are intentionally retained.</p>
 command proves the deployed SCIM protocol once configured; real Entra OIDC
 sign-in and joiner/mover/leaver acceptance, configurable provisioning SLO
 alarms, immediate global token
-revocation and delegated administrative scopes remain outstanding. The
+revocation and live multi-business-unit delegated-scope acceptance remain
+outstanding. The
 break-glass and access-certification contracts are implemented but still need
 the deployed two-person Entra MFA acceptance exercise. Splunk remains a
 non-delivering stub.</p>
