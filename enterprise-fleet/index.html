@@ -505,6 +505,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../codex-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex CLI example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ui/" class="md-nav__link">
         
   
@@ -3765,6 +3792,10 @@ requests fail closed with HTTP 409 while it is active, including requests from
 agents enrolled after activation. Clearing the fleet stop does not clear a
 narrower stop. Every transition records the operator identity, resulting state,
 and affected-agent count in the redacted audit trail.</p>
+<p>Agent verification returns <code>host</code>, the exact sole <code>group</code>, and the consistently
+read <code>policyId</code>/<code>policyVersion</code> alongside liveness and stop checks. Missing or
+conflicting policy state returns null policy identity and cannot verify. A UI
+must compare this complete tuple with its selected activation scope.</p>
 <h3 id="central-action-approvals">Central action approvals</h3>
 <p>An enrolled agent submits a held action through its deployment/agent-bound
 session. The server derives <code>agentKey</code> from that session and accepts only the
@@ -4818,9 +4849,9 @@ credentials, opaque sessions, and raw audit payloads.</p>
     <div class="doc doc-contents ">
 
         <p>Return the one policy currently effective for an enrolled agent.</p>
-<p>The lookup is authenticated and tenant-scoped. An agent with no group
-assignment, or with memberships that resolve to different policies,
-fails closed instead of receiving an arbitrary policy. The returned
+<p>The lookup is authenticated and tenant-scoped. An agent must have
+exactly one group membership; duplicate memberships fail closed even
+when they reference the same policy. The returned
 policy is configuration data; the deployment-owned runtime remains
 responsible for translating it into its typed policy and adapters.</p>
 

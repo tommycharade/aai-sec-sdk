@@ -673,6 +673,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../codex-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex CLI example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ui/" class="md-nav__link">
         
   
@@ -1532,20 +1559,145 @@ durable remote acceptance; export failure raises and the runtime fails closed.
 <code>JsonlAuditSink</code> remains a local recovery/evidence adapter, not WORM or
 tamper-proof forensic storage. Follow the <a href="../runbooks/">operational runbooks</a>
 for outages, corruption, rotation, and evidence preservation.</p>
+<p>Native host hooks are policy enforcement points, not deployment integrity
+controls. Claude and Codex project hook files can be changed or disabled by a
+user who controls the project. Codex additionally requires explicit trust for
+non-managed project hooks. Enterprise Codex deployments should distribute the
+reviewed hook outside the repository, pin hooks on in managed
+<code>requirements.toml</code>, and optionally reject non-managed hooks. The control plane
+must treat a missing hook, stale evidence or configuration drift as unhealthy;
+an MCP heartbeat alone does not prove native-tool coverage.
+Current-CLI acceptance also demonstrated that <code>--ignore-user-config</code> bypasses
+the project hook layer. Enterprise launch policy must prohibit unmanaged
+profiles and flags, independently verify the managed requirement, and alert on
+missing native evidence; the SDK does not claim authority over an unmanaged
+Codex process started by a user who controls the host.</p>
+<p>Codex <code>PreToolUse</code> does not currently support an approval-producing <code>ask</code>
+decision: attempting it fails the hook and continues the tool call. The SDK
+therefore records the local policy result as approval-required but emits a host
+deny. Exact approval and subsequent execution occur only through
+<code>GuardedRuntime</code> and the governed MCP workflow.
+Allowed Codex native calls use successful exit with no output. This avoids the
+host's fail-open error path for a bare <code>permissionDecision: "allow"</code>, which is
+valid only when accompanied by <code>updatedInput</code> for a rewrite. Denials alone emit
+the hook-specific permission decision.</p>
+<p>Native command allow rules use complete-string matching; deny and approval
+rules search the whole string for a matching component. This ordering and
+matching asymmetry prevents a safe prefix from authorizing an appended shell
+operation. Codex patch confinement validates every declared source and move
+destination before returning allow and rejects <code>.codex</code>, <code>.claude</code>, <code>.git</code>,
+and <code>.mcp.json</code> security-state targets. Claude native writes enforce the same
+protected paths. Protecting <code>.git</code> prevents an agent from changing repository
+configuration or hooks that a later Git command could execute. Invalid central regex configuration takes
+the same explicit deny path as a missing policy rather than crashing the hook.
+Patch operation authority is also explicit: <code>Write</code> grants Add, <code>Edit</code> grants
+Update and Delete, and Move requires both capabilities; path confinement alone
+never expands an operation grant.
+Native command allow decisions bind the live event working directory to the
+approved project root. Codex also binds every tool-level working-directory
+override. Missing, malformed, escaping, or symlink-resolved external
+directories deny explicitly; deny and approval patterns remain global.
+Native decision evidence may include only a SHA-256 digest derived from the
+native tool name plus already-redacted action and working-directory digests.
+Claude Bash correlation uses the exact command and Claude Read correlation uses
+the resolved file path; optional descriptions, offsets, and limits cannot
+substitute a different action or prevent a legitimate proof. The complete
+untrusted tool input remains independently hashed in local audit evidence. The
+control plane exposes only the scoped digest for exact action correlation,
+without retaining command text, arguments, paths, prompts, or outputs; the same
+action in a different project produces different evidence.
+The shared policy validator limits each command-pattern class to 100 entries,
+each pattern to 256 characters, rejects lookarounds, inline flags,
+backreferences and quantified groups, and caps evaluated command text at 8,192
+characters. Wildcard repetition and ambiguous overlapping repetition are also
+rejected, including repeats separated by an atom that the earlier repeat could
+consume. The enterprise write API and each hook repeat this validation so a
+legacy stored policy cannot bypass a newer control. Native allow decisions
+also reject newlines, command substitution, shell lists, pipelines,
+redirections and subshell syntax independently of regex configuration; shipped
+allow patterns use <code>[ \\t]</code> rather than newline-inclusive <code>\s</code>. Control syntax
+is rejected even when quoted inside a nested shell or <code>eval</code> argument. Shell
+and <code>eval</code> entry points themselves—including <code>sh -c id</code>, <code>bash -c ...</code>, and
+wrapper-launched shells—plus <code>source</code> and <code>.</code> file execution—are never eligible
+for native allow because their visible argv introduces a second command-parsing
+boundary. Parameter expansion is also ineligible: forms such as <code>$SHELL -c id</code>
+can replace the authorized executable after evaluation. Pattern
+count limits are validated over each complete decision class before activation,
+not one expression at a time. Audit initialization is also inside the
+fail-closed boundary: directory, permission, and corrupt-chain errors produce a
+deny-only hook response because a process crash is not an authoritative
+decision on either host. A final setup boundary catches unexpected adapter
+exceptions and emits the same denial.
+The exported Codex <code>handle()</code> API converts malformed host payloads into the
+same explicit denial as the stdio adapter; integrations cannot turn validation
+exceptions into a non-authoritative hook failure.
+Central Claude and Codex policy activation also requires the server-owned <code>emergencyStop</code> field
+to be exactly <code>false</code>; absence, null, strings, numbers, and active state deny.
+Codex patch proposals are bounded to 256 KiB and 256 declared source/move
+targets before path resolution, keeping attacker-controlled hook work finite.
+Relative patch targets resolve from the hook event's live working directory,
+which must itself remain inside the approved project root. This matches the
+host's write semantics and prevents an outside or protected subdirectory from
+changing where an apparently safe relative header lands. Claude and Codex
+conservatively case-fold the first relative path component before checking
+<code>.claude</code>, <code>.codex</code>, <code>.git</code>, and <code>.mcp.json</code>, preventing case-insensitive hosts
+from mapping a differently cased spelling onto protected authority state.
+Command patterns also reject Python-only named Unicode escapes such as
+<code>\N{SEMICOLON}</code> so browser and SDK validation cannot interpret one policy
+differently at the shell boundary.
+The reference Codex hook caps its per-project local audit chain at 1 MB because
+each short-lived process verifies that chain before appending. Reaching the cap
+fails closed and requires operator export/rotation; AWS-enrolled agents still
+require synchronous central replication for every decision.
+The checked-in offline fallback permits only exact <code>pwd</code>/<code>ls</code> and narrowly
+enumerated read-only <code>git status</code>, <code>git diff --stat</code>, and <code>git log --oneline</code>
+forms. It does not admit arbitrary Git flag tails or test runners: Git output
+flags can overwrite authority files, and project tests execute repository code.
+Operator verification is bound to the live host identity and the sole assigned
+effective policy ID/version. The console must compare that tuple before offering
+activation commands; an inventory heartbeat or group name alone is insufficient
+proof that the host has reconciled the policy being displayed. The AWS agent
+policy route independently rejects zero or multiple group memberships before
+returning authority. Project root is required at registration and immutable
+after enrollment; a legacy empty record may be repaired once before enrollment
+resumes. That repair is a conditional DynamoDB update, so concurrent operators
+cannot make the scope last-writer-wins; the first non-empty root becomes
+authoritative and a conflicting request receives HTTP 409.
+Onboarding pins native-hook and MCP imports to the explicitly selected SDK
+checkout; an absent or different globally installed package cannot silently
+remove or replace the enforcement implementation.</p>
+<p>Required remote audit replication uses a provisional local event. If export
+fails, the host denies and the primary sink appends a linked
+<code>*_effective_decision</code> event with <code>replication_status=failed</code>; its
+<code>supersedes_event_hash</code> identifies the provisional event. This prevents local
+operators from mistaking a pre-export allow for the host's effective outcome.
+The bounded JSONL adapter reserves up to 64 KiB, but never more than half its
+configured file limit, outside ordinary-write capacity for that compensation
+path. A normal append can therefore report “full” before
+the physical file limit is reached; emergency use remains size checked, fsynced,
+locked, redacted, and hash chained. Ordinary event records are also bounded to
+half the reserve, leaving room for the larger superseding fields.</p>
 <h2 id="claude-presence-and-control-plane-threat-model">Claude presence and control-plane threat model</h2>
 <p>The optional Claude/MCP presence bridge is a separate authenticated boundary.
 An MCP process registers with a short-lived agent credential, and the control
 plane binds the submitted agent identifier to the authenticated token subject.
 Project root and host metadata are bounded input; they never grant policy,
-principal, credential, or tool authority. Heartbeat session identifiers are
-opaque bearer values and are returned only to the registering process, never
-to the operator dashboard.</p>
+principal, credential, or tool authority. The registered immutable project
+root is nevertheless part of the agent identity boundary: bootstrap exchange,
+the issued session, the host cache key, and every authenticated agent request
+must all present the same canonical-root digest. The control plane rechecks the
+live registered root before accepting a request. This prevents a bearer or
+cache entry copied from one checkout from silently controlling another; it is
+not device attestation and does not protect against an attacker who controls
+the same OS account and can steal both the credential and root. Heartbeat
+session identifiers are opaque bearer values and are returned only to the
+registering process, never to the operator dashboard.</p>
 <p>Host onboarding treats shell history and host configuration as persistence
 boundaries. The UI never embeds an exchanged bearer in its generated command:
 the operator copies the session separately and pastes it into a hidden shell
 prompt. Neither Claude nor Codex writes it to project configuration. Instead,
 the installer places it in an SDK-owned host credential cache scoped by the
-control-plane URL, deployment and agent. The cache is outside the repository,
+control-plane URL, deployment, agent and canonical project root. The cache is outside the repository,
 written atomically in a <code>0700</code> directory with a <code>0600</code> file, and rejects
 symlinks, foreign ownership, broad permissions, malformed records and expired
 values. A copied or cached token can still be exposed through the clipboard,
@@ -1559,6 +1711,11 @@ ACL-aware OS/device credential broker while preserving the same rotation
 contract. Cache records are opened without following symlinks, revalidated
 from the open descriptor, and read with a strict 4096-byte allocation bound
 before decoding or parsing.</p>
+<p>Local <code>JsonlAuditSink</code> paths use the same no-follow principle for the audit
+directory, event file and inter-process lock. Each child is opened relative to
+an already verified directory descriptor and <code>fstat</code> confirms a regular file
+before content is trusted. Replacing any component with a symlink therefore
+fails closed instead of redirecting security evidence to another target.</p>
 <p>The registry expires missing heartbeats, records registration, heartbeat, and
 disconnect transitions through the configured audit sink, and the example MCP
 gateway stops its guarded runtime when heartbeat delivery fails. The control
@@ -1579,6 +1736,12 @@ never authorize execution, satisfy an approval, change policy, or override an
 emergency stop. A compromised enrolled process can still submit false evidence,
 so forensic assurance must correlate this stream with deployment-owned WORM
 audit, identity, and infrastructure logs.</p>
+<p>Native hook audit events persist deterministic digests of tool input and the
+working directory, not raw commands, arguments or paths. This content-minimised
+default reduces local secret and source disclosure while still supporting
+event correlation. A digest is not anonymization and may be susceptible to
+guessing for low-entropy values, so local JSONL permissions, retention and
+replication remain security controls.</p>
 <p>Handlers may return arbitrary application values, but the runtime applies the
 optional tool output normalizer, performs key and common-token content
 redaction, and
@@ -1678,8 +1841,8 @@ malicious Docker daemon or host kernel.</p>
 <li>Run the release verification, SBOM, provenance, and compatibility checks
   described in <code>releasing.md</code> before depending on a published version.</li>
 <li>Treat mutation evidence as commit- and scope-bound assurance: the checked
-  evidence must name the exact tool, score, commit, and complete 11-file security
-  scope. It is not portable evidence for another source revision.</li>
+  evidence must name the exact tool, score, commit, and complete declared
+  security scope. It is not portable evidence for another source revision.</li>
 </ul>
 <h2 id="deployment-adapters-and-process-boundaries">Deployment adapters and process boundaries</h2>
 <p><code>JsonlAuditSink</code>, HTTP OPA/Cedar and approval adapters, and
@@ -1696,8 +1859,8 @@ to the existing runtime boundary. The browser is an untrusted operator client;
 the authenticated API and injected authorizer decide whether an operation is
 permitted. Fleet persistence stores metadata, configuration references, and
 content hashes, never bearer tokens or credentials. Agent sessions are opaque,
-short-lived, scoped to one deployment and agent, and excluded from inventory
-responses. Every lifecycle and rollout mutation is auditable. Provider-backed
+short-lived, scoped to one deployment, agent and canonical project root, and
+excluded from inventory responses. Every lifecycle and rollout mutation is auditable. Provider-backed
 authentication, policy, IAM, approval, audit retention, isolation, and runtime
 activation remain explicit adapters and are not simulated by the UI.
 Central approval requests cross two distinct trust boundaries. The agent

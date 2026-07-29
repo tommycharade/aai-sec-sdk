@@ -585,6 +585,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../codex-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex CLI example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ui/" class="md-nav__link">
         
   
@@ -1387,7 +1414,10 @@ authoritative audit sink and emits one span per redacted security event.
 OpenTelemetry is optional; applications install <code>opentelemetry-api</code> and pass
 their configured tracer to the adapter.</p>
 <p>Durable audit is an explicit two-stage boundary. <code>JsonlAuditSink</code> provides
-local fsync, locking, size limits, and chain verification. <code>ReplicatedAuditSink</code>
+local fsync, locking, size limits, chain verification, and a reserved tail for
+a linked fail-closed result when required export fails. The tail scales down to
+at most half of small explicit file limits so normal writes retain capacity.
+<code>ReplicatedAuditSink</code>
 requires an <code>AuditExporter</code> acknowledgement and raises on remote failure, so
 the runtime cannot report a normally recorded consequential action when the
 configured replica is unavailable. WORM storage, retention, signing, and

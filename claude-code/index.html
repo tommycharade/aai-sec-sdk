@@ -16,7 +16,7 @@
         <link rel="prev" href="../integrations/">
       
       
-        <link rel="next" href="../ui/">
+        <link rel="next" href="../codex-cli/">
       
       
         
@@ -790,6 +790,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codex-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex CLI example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1783,7 +1810,9 @@ python3 -m venv &quot;$SDK_ROOT/.venv&quot;
 environment. Set <code>AAI_SEC_SDK_ROOT</code> when the SDK is already checked out at a
 different path. The private virtual environment ensures the generated hook and
 MCP commands use an interpreter where the SDK is actually installed. The
-script writes only project-scoped configuration plus, for enterprise
+generated environments also pin imports to the selected checkout's <code>src</code>
+directory, preventing a different global package from replacing that checkout.
+The script writes only project-scoped configuration plus, for enterprise
 enrollment, the separate user-private session cache. It creates timestamped
 backups before changing existing project configuration.</p>
 <p>The script creates or updates <code>.claude/settings.json</code> and <code>.mcp.json</code>, keeps
@@ -1826,9 +1855,14 @@ claude
 non-secret routing metadata to Claude's files, and places the short-lived
 session in the SDK's user-private host cache. The cache is outside the project,
 uses a <code>0700</code> directory and <code>0600</code> file, and is scoped to the control-plane URL,
-deployment and agent. You can unset <code>AAI_SEC_AGENT_TOKEN</code> before starting
+deployment, agent, and canonical project root. Bootstrap exchange, the issued
+session and every authenticated agent request are checked against that same
+registered root, so a credential copied to another checkout fails closed. You
+can unset <code>AAI_SEC_AGENT_TOKEN</code> before starting
 Claude. The MCP heartbeat rotates the cache and each native hook process reads
-the current value, so a healthy session continues beyond the original bearer.</p>
+the current value, so a healthy session continues beyond the original bearer.
+Use the exact value from <code>pwd -P</code> when registering the agent; broad, relative,
+or lexically non-canonical roots are rejected.</p>
 <p>The real-device acceptance run for Claude Code 2.1.220 is recorded in
 <a href="../real-claude-code-acceptance-evidence-2026-07-27/">real Claude Code acceptance evidence</a>.</p>
 <p>The deployment ID determines which organization/project fleet receives the
@@ -1855,11 +1889,14 @@ cannot grant authority.</p>
 agents</strong> presents a three-step activation proof. Run the supplied safe read,
 approval-bound <code>git push</code>, and blocked destructive-command prompts in Claude
 Code. Decline the approval prompt. The UI completes the proof only after it
-observes matching <code>claude_native</code> evidence for that enrolled agent. The denied
-test targets a deliberately nonexistent project path and must be blocked before
-execution. Codex CLI does not yet expose equivalent native shell/file evidence
-through this integration, so the UI states that limitation instead of showing
-synthetic success.</p>
+observes matching <code>claude_native</code> evidence for that enrolled agent, policy
+version, project root, tool, and exact semantic action. Unrelated allowed,
+approval, or denial events cannot complete a displayed step. The denied test
+targets a deliberately nonexistent project path and must be blocked before
+execution. Codex CLI now exports equivalent content-minimised <code>codex_native</code>
+decisions through its own <code>PreToolUse</code> adapter; see the <a href="../codex-cli/">Codex CLI guide</a>.
+Unlike Claude Code, Codex cannot currently convert a native hook result into an
+interactive approval, so approval-rule matches deny and route to governed MCP.</p>
 <p>The hook configuration and MCP configuration are separate Claude Code host
 boundaries. Put the <code>hooks</code> object in <code>.claude/settings.json</code>; put the
 <code>mcpServers</code> object in <code>.mcp.json</code> or register it with <code>claude mcp add</code>. Do not
@@ -2044,8 +2081,34 @@ hook = ClaudeCodeHook(
 )
 </code></pre>
 <p>Rules are evaluated in order and the default decision is deny. A rule
-exception also denies. Add tests for every new command or path rule and run
+exception also denies. Command patterns are count/length bounded and reject
+lookarounds, inline flags, backreferences and quantified groups before Python's
+regex engine sees live command text. Wildcard repetition and ambiguous
+overlapping repetitions are also rejected, including repeats separated by a
+character the earlier repeat can consume; use delimiter-bounded character
+classes such as <code>[^|]+</code> instead of <code>.*</code>. Commands over 8,192 characters deny
+before matching. Native allow decisions additionally reject newlines, command
+substitution, lists, pipelines, redirections and subshell syntax regardless of
+the regex, including control operators quoted inside nested shell or <code>eval</code>
+arguments; use <code>[ \\t]</code> rather than <code>\s</code> for horizontal whitespace. If the
+decision is <code>ALLOW</code>, <code>command_rule</code> also requires <code>allowed_root</code>; the live
+Claude event <code>cwd</code> must resolve inside that root or the result is an explicit
+denial. Deny and approval rules intentionally remain global. If the
+audit directory or existing hash chain cannot be
+opened safely, the runnable hook emits an explicit deny-only response rather
+than crashing. Unexpected provider and filesystem setup exceptions cross the
+same final deny boundary. Add tests for every new command or path rule and run
 <code>make check</code> before distributing the hook configuration.</p>
+<p>Native <code>Edit</code> and <code>Write</code> calls cannot change <code>.claude</code>, <code>.codex</code>, or
+<code>.mcp.json</code>, even when those paths are under the approved project root. Reads
+remain available for diagnosis. This blocks agent-initiated changes to policy,
+hooks, MCP registration, and native audit evidence; enterprise deployment must
+still protect managed configuration from the host user at the OS layer.</p>
+<p>If required remote audit export fails after the provisional local decision is
+written, the hook denies and writes a linked local effective-denial event. The
+second event's <code>supersedes_event_hash</code> is the authoritative relationship for
+incident review; <code>replication_status=failed</code> records that it is not remotely
+durable.</p>
 
 
 <div class="doc doc-object doc-module">
@@ -2359,14 +2422,14 @@ boundary, while stdout contains only Claude's hook response.</p>
 
 
 <h2 id="agentic_security.claude_code.command_rule" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">command_rule</span><span class="p">(</span><span class="n">patterns</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">decision</span><span class="p">,</span> <span class="n">reason</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">command_rule</span><span class="p">(</span><span class="n">patterns</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">decision</span><span class="p">,</span> <span class="n">reason</span><span class="p">,</span> <span class="n">allowed_root</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h2>
 
 
     <div class="doc doc-contents ">
 
-        <p>Create a rule matching Bash <code>command</code> values with regex patterns.</p>
+        <p>Match Bash <code>command</code> text, confining allow results to <code>allowed_root</code>.</p>
 
 
     </div>
@@ -2402,7 +2465,7 @@ boundary, while stdout contains only Claude's hook response.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Allow file tools only when their path is lexically under <code>root</code>.</p>
+        <p>Allow file tools under <code>root</code> without granting writes to SDK authority.</p>
 
 
     </div>

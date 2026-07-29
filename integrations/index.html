@@ -1022,6 +1022,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../codex-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex CLI example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ui/" class="md-nav__link">
         
   
@@ -2230,7 +2257,7 @@ choose those security inputs.</p>
 <tr>
 <td>Codex CLI</td>
 <td><code>codex-cli</code></td>
-<td>MCP server configured with <code>codex mcp</code></td>
+<td>MCP gateway and SDK <code>PreToolUse</code> adapter</td>
 </tr>
 </tbody>
 </table>
@@ -2337,14 +2364,23 @@ secured. The script preserves unrelated TOML and owns only a marked
   --deployment-id synthetic-deployment \
   --agent-id synthetic-codex-agent
 </code></pre>
-<p>The generated <code>.codex/config.toml</code> stores only non-secret routing metadata.
+<p>The generated <code>.codex/config.toml</code> stores only non-secret routing metadata and
+configures both a required MCP gateway and the SDK's deny-by-default
+<code>PreToolUse</code> hook. See the complete <a href="../codex-cli/">Codex CLI guide</a>.
 During onboarding the short-lived bearer is copied to the SDK's
 identity-scoped, user-private host cache; it is never serialized into project
 TOML or forwarded through <code>env_vars</code>. You can unset the variable, run
 <code>codex mcp get agentic-security --json</code>, and start <code>codex</code>. The gateway reads
-and rotates the cache. The installer rejects invalid TOML, unmanaged duplicate
+and rotates the cache. Start Codex, review the project hook trust prompt, and
+inspect <code>/hooks</code>; a project-local hook does not run until its project layer and
+command have been trusted. The installer rejects invalid TOML, unmanaged duplicate
 server entries, unsafe identifiers and symlinked configuration rather than
 overwriting them.</p>
+<p>Codex cannot currently turn a <code>PreToolUse</code> result into an interactive approval.
+The SDK records an approval-rule match as approval-required evidence but denies
+the native call. Route actions needing approval through the governed MCP
+gateway. Enterprise deployments should move the hook to managed
+<code>requirements.toml</code> configuration distributed with device management.</p>
 <p>For Copilot cloud agent, a deployment-specific credential broker must provide
 and renew agent sessions without serializing them into repository MCP
 configuration. Copilot's repository MCP configuration can run local MCP

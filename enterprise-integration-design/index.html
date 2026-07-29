@@ -505,6 +505,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../codex-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex CLI example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ui/" class="md-nav__link">
         
   
@@ -1741,21 +1768,23 @@ heartbeat, failed renewal, unsafe cache, revoked session or emergency stop
 still fails closed.</p>
 <h2 id="codex-cli">Codex CLI</h2>
 <h3 id="enforcement-surface">Enforcement surface</h3>
-<p>Codex CLI should use its authenticated MCP server configuration. The current
-Codex supports project-scoped MCP configuration for trusted projects; the
-server routes SDK-owned tools through the same <code>GuardedRuntime</code>. Set
+<p>Codex CLI uses an authenticated MCP server plus a <code>PreToolUse</code> hook. The hook
+intercepts supported native <code>Bash</code>, <code>apply_patch</code>, MCP and local function tools;
+the server routes SDK-owned tools through the same <code>GuardedRuntime</code>. Set
 <code>AAI_SEC_AGENT_HOST=codex-cli</code> so audit events and MCP initialization identify
 the client as Codex rather than relying on model-supplied metadata.</p>
 <p>The shared agent client carries that host value into the authenticated
 registration request; Codex presence is not recorded as Claude Code by
-default. <code>scripts/onboard_codex.py</code> writes a project-scoped MCP entry with
-non-secret routing metadata only. The short-lived value is accepted during
+default. <code>scripts/onboard_codex.py</code> writes a project-scoped required MCP entry
+and native hook with non-secret routing metadata only. The short-lived value is accepted during
 onboarding and then rotated through the SDK-owned host credential cache; it is
 not forwarded through Codex project configuration.</p>
-<p>The first integration should not invent a Codex-specific policy language. It
-should translate Codex MCP tool calls into the existing typed
-<code>ActionProposal</code>, preserving the authenticated agent identity at the process
-boundary.</p>
+<p>The integration does not invent a Codex-specific policy language. It maps the
+shared native-tool policy onto canonical Codex events and translates MCP tool
+calls into the existing typed <code>ActionProposal</code>, preserving authenticated agent
+identity at the process boundary. Approval-rule matches are audited but denied
+at the native hook because Codex does not currently support an approval-producing
+<code>PreToolUse</code> result. Approval-bound operations must use the governed MCP path.</p>
 <h3 id="ui-onboarding-flow_1">UI onboarding flow</h3>
 <p>The UI generates:</p>
 <ul>
@@ -1779,8 +1808,11 @@ Operators should treat a process that cannot heartbeat as unenrolled, even if
 its user-local MCP entry and cached credential remain.</p>
 <h3 id="trust-boundaries_1">Trust boundaries</h3>
 <p>Codex MCP registration only starts the gateway. It does not itself authorize a
-tool or establish a principal. The gateway must require authenticated process
-context and fail closed when the control plane or runtime authority is absent.</p>
+tool or establish a principal. The gateway requires authenticated process
+context and fails closed when the control plane or runtime authority is absent.
+Project hook trust is user-controlled and therefore suitable for pilots, not
+immutable enterprise enforcement. Production rollout distributes the hook with
+device management and pins managed hooks in <code>requirements.toml</code>.</p>
 <h2 id="github-copilot-agent">GitHub Copilot Agent</h2>
 <h3 id="enforcement-surface_1">Enforcement surface</h3>
 <p>GitHub Copilot Agent should use the supported MCP integration and, where the
@@ -1827,7 +1859,7 @@ principals remain denied by the selected policy.</p>
 <tr>
 <td>Native host hook</td>
 <td><code>PreToolUse</code></td>
-<td>Host/version dependent; do not assume</td>
+<td><code>PreToolUse</code>; native approval becomes deny + MCP route</td>
 <td>Host/version dependent; verify deployment support</td>
 </tr>
 <tr>
@@ -1851,13 +1883,13 @@ principals remain denied by the selected policy.</p>
 <tr>
 <td>Policy enforcement</td>
 <td>Hook plus runtime</td>
-<td>Runtime gateway</td>
+<td>Hook plus runtime gateway</td>
 <td>Runtime gateway plus supported host controls</td>
 </tr>
 <tr>
 <td>Verification</td>
 <td><code>/mcp</code> and synthetic hook checks</td>
-<td>MCP list/get and synthetic calls</td>
+<td><code>/hooks</code>, MCP get and native/MCP synthetic calls</td>
 <td>MCP/agent configuration and synthetic calls</td>
 </tr>
 <tr>

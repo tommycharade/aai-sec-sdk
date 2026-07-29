@@ -505,6 +505,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../codex-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex CLI example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../ui/" class="md-nav__link">
         
   
@@ -1452,10 +1479,20 @@ not prove the deployed claim projection.</p>
 <p>The control plane also exposes a separate agent boundary. An operator creates a
 short-lived bootstrap secret for a registered agent; the agent exchanges it
 once at <code>POST /agent/enroll</code> and receives a 15-minute bearer session. The
-session is bound to the deployment and agent identifiers and can call only
-heartbeat, effective-policy, and exact approval-consumption routes. Bootstrap
-secrets are hashed at rest and consumed conditionally, so the control plane
-does not accept a tenant or agent identity from an enrollment request body.
+session is bound to the deployment, agent, and registered immutable project
+root and can call only heartbeat, decision evidence, effective-policy, and
+exact approval routes. Enrollment must present the registered root before the
+one-time secret is consumed. Every subsequent agent request sends its
+canonical-root digest; the control plane compares it to both the session scope
+and the live agent registration. Bootstrap secrets are hashed at rest and
+consumed conditionally, so the control plane does not accept a tenant or agent
+identity from an enrollment request body. Project-root binding prevents
+cross-checkout credential reuse but is not a substitute for device attestation
+against an attacker controlling the same OS account.
+Register the root exactly as <code>pwd -P</code> reports it on the target host. Relative
+paths, <code>/</code>, trailing separators, repeated separators, and <code>.</code>/<code>..</code> segments are
+rejected before immutable agent inventory is created. The generated installer
+rechecks the live directory before accepting the copied credential.
 During authenticated heartbeats, the control plane rotates the bearer when it
 is within five minutes of expiry and invalidates the previous bearer. The
 reference gateway adopts the replacement in memory, allowing a healthy process
