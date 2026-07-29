@@ -21,9 +21,12 @@ The role vocabulary separates platform administration, security operations,
 policy authoring, policy approval, fleet operation, incident response and
 audit. Provider adapters map enterprise directory lifecycle into those roles;
 the core authorization layer consumes only the canonical role/capability
-contract. The Entra OIDC adapter and manual managed-group assignment are
-implemented first. SCIM and automatic Entra group/app-role reconciliation
-remain required before enterprise-wide rollout.
+contract. The Entra adapter now accepts tenant-bound SCIM user, group and
+membership lifecycle and lets a platform administrator map exact directory
+groups to canonical roles. Token issuance reconciles that live state every
+five minutes and fails closed for inactive, unprovisioned or roleless users.
+Live Entra acceptance, break-glass access, certification and delegated
+administration remain required before enterprise-wide rollout.
 
 SIEM adapters use the same honest-capability rule. The initial Splunk surface
 is a schema and workflow stub and must report `deliveryVerified: false`; it

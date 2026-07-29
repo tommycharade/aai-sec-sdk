@@ -2921,6 +2921,14 @@ class EnterpriseFleetApplication:
             if method == "GET" and path.startswith(inventory_prefix):
                 resource = path[len(inventory_prefix) :]
                 effective_prefix = "/api/enterprise/agents/"
+                if resource == "identity":
+                    self._authorize(identity, "read")
+                    return self._respond(
+                        start_response, 200, self._development_identity_access(identity)
+                    )
+                if resource == "integrations":
+                    self._authorize(identity, "read")
+                    return self._respond(start_response, 200, self._development_integrations())
                 if resource.startswith("agents/") and resource.endswith("/verify"):
                     self._authorize(identity, "read")
                     deployment_id, agent_id = self._agent_route(path, effective_prefix, "/verify")
@@ -3416,6 +3424,66 @@ class EnterpriseFleetApplication:
         """Require the injected authenticator to approve an operation."""
         if not self.authenticator.authorize(identity, action):
             raise FleetAuthorizationError("forbidden")
+
+    @staticmethod
+    def _development_identity_access(identity: FleetIdentity) -> dict[str, Any]:
+        """Describe local authentication without pretending it is enterprise SSO."""
+        role_mapping = {
+            "admin": "platform-admin",
+            "operator": "fleet-operator",
+            "viewer": "auditor",
+            "incident_commander": "incident-responder",
+        }
+        capabilities = {
+            "platform-admin": ["*"],
+            "security-operator": ["approval_decision", "incident_response"],
+            "policy-author": ["policy_write"],
+            "policy-approver": ["approval_decision", "policy_approval"],
+            "fleet-operator": ["fleet_write"],
+            "incident-responder": ["incident_response"],
+            "auditor": [],
+        }
+        active_roles = sorted(
+            {role_mapping[role] for role in identity.roles if role in role_mapping}
+        )
+        return {
+            "provider": "development_static",
+            "providerLabel": "Development static bearer",
+            "protocol": "static_bearer",
+            "status": "development_only",
+            "tenantHint": identity.organization_id,
+            "tenantBinding": "server_owned",
+            "roleSource": "deployment_authenticator",
+            "scimStatus": "not_configured",
+            "scim": {
+                "status": "not_configured",
+                "lifecycleEnforced": False,
+                "users": {"total": 0, "active": 0, "disabled": 0},
+                "groups": {"total": 0, "mapped": 0, "unmapped": 0},
+                "groupMappings": [],
+                "lastProvisionedAt": None,
+            },
+            "activeRoles": active_roles,
+            "roleMatrix": [
+                {"role": role, "capabilities": role_capabilities}
+                for role, role_capabilities in capabilities.items()
+            ],
+        }
+
+    @staticmethod
+    def _development_integrations() -> dict[str, Any]:
+        """Report the Splunk placeholder without claiming local delivery."""
+        return {
+            "splunk": {
+                "provider": "splunk_hec",
+                "status": "stub",
+                "deliveryVerified": False,
+                "description": (
+                    "Schema and operator workflow placeholder only; "
+                    "no event delivery is configured."
+                ),
+            }
+        }
 
     def _authorize_any(self, identity: FleetIdentity, actions: set[str]) -> None:
         """Permit one of several explicit role actions without broadening scope."""

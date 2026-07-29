@@ -823,6 +823,17 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
     assert status.startswith("401")
     assert unauthorized["error"] == "authentication required"
 
+    identity_status, identity_payload = call_api(app, "GET", "/api/enterprise/identity")
+    assert identity_status.startswith("200")
+    assert identity_payload["provider"] == "development_static"
+    assert identity_payload["status"] == "development_only"
+    assert identity_payload["activeRoles"] == ["platform-admin"]
+    assert identity_payload["scim"]["lifecycleEnforced"] is False
+    integration_status, integration_payload = call_api(app, "GET", "/api/enterprise/integrations")
+    assert integration_status.startswith("200")
+    assert integration_payload["splunk"]["status"] == "stub"
+    assert integration_payload["splunk"]["deliveryVerified"] is False
+
     assert call_api(
         app, "POST", "/api/enterprise/organizations", {"organizationId": "org-a", "name": "Alpha"}
     )[0].startswith("201")
