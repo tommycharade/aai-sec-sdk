@@ -1672,6 +1672,23 @@ rejects unsupported filters, unknown users, malformed UUIDs, more than 20
 operations per request and inventories beyond its bounded response limit.</p>
 <h2 id="acceptance-procedure">Acceptance procedure</h2>
 <p>Use synthetic identities and retain redaction-safe timestamps and result IDs.</p>
+<p>Before testing with a real Entra pilot identity, run the deployment acceptance
+command. It discovers the endpoint from CloudFormation, reads the dedicated
+bearer directly from Secrets Manager, rejects an invalid bearer, and exercises
+synthetic joiner, mover and leaver behavior. The bearer is never accepted as a
+command argument or written to output:</p>
+<pre><code class="language-bash">ENTRA_SCIM_TOKEN_SECRET_NAME=&lt;scim-bearer-secret-name&gt; \
+ENTRA_AAI_TENANT_ID=&lt;provisioned-aai-tenant-id&gt; \
+PYTHONPATH=src python scripts/test_aws_entra_scim.py \
+  --stack-name AaiSecControlPlane \
+  --profile p1 \
+  --region eu-west-2
+</code></pre>
+<p>Exit status <code>0</code> proves the live SCIM endpoint behavior. Exit status <code>2</code> means
+the stack or required operator inputs are not configured and must never be
+recorded as an acceptance pass. Exit status <code>1</code> means configured behavior
+failed. Exact synthetic user, group and membership records are removed on exit;
+content-minimised lifecycle audit records are intentionally retained.</p>
 <h3 id="joiner">Joiner</h3>
 <ol>
 <li>Assign a new pilot operator and mapped group to the Entra application.</li>
@@ -1716,8 +1733,10 @@ operations per request and inventories beyond its bounded response limit.</p>
   evidence.</li>
 </ul>
 <h2 id="current-limitations">Current limitations</h2>
-<p>This implementation advances P0-06 but does not complete it. Live Entra
-acceptance, configurable provisioning SLO alarms, immediate global token
+<p>This implementation advances P0-06 but does not complete it. The automated
+command proves the deployed SCIM protocol once configured; real Entra OIDC
+sign-in and joiner/mover/leaver acceptance, configurable provisioning SLO
+alarms, immediate global token
 revocation, break-glass workflow, quarterly access certification and delegated
 administrative scopes remain outstanding. Splunk remains a non-delivering stub.</p>
 

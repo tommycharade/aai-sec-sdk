@@ -1511,6 +1511,17 @@ API protocol only; it is not evidence that a real Claude Code process loaded a
 managed file. Retain separate device evidence from the privileged-file
 measurement and live host action probes in
 <a href="../managed-host-configuration/">Managed host configuration</a>.</p>
+<p><code>scripts/test_aws_entra_scim.py</code> is the live Microsoft Entra provisioning
+acceptance command. It discovers Entra and SCIM status from the selected
+CloudFormation stack, resolves the dedicated bearer directly from Secrets
+Manager, and tests invalid authentication, bounded capability discovery,
+joiner, duplicate, mover, leaver and inactive-user denial. It returns <code>2</code>
+without reading a secret or writing lifecycle state when the stack is not
+configured. Exact synthetic state is removed on success or failure while the
+content-minimised lifecycle audit is retained. Unit contracts live in
+<code>tests/test_aws_entra_scim_script.py</code>; the Lambda's adversarial protocol
+contracts remain in <code>tests/test_aws_scim_contract.py</code>. This does not replace a
+real Entra OIDC login and token-revocation exercise.</p>
 <h2 id="deterministic-propertyfuzz-coverage">Deterministic property/fuzz coverage</h2>
 <p><code>tests/test_assurance.py</code> runs a finite checked-in corpus from
 <code>tests/corpus/malformed_inputs.json</code>. It exercises proposal construction,

@@ -1577,8 +1577,8 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.</p>
 <td>P0-06</td>
 <td>Entra SSO, SCIM and granular RBAC</td>
 <td>Partial</td>
-<td>Tenant-specific Entra OIDC, tenant-bound SCIM users/groups/memberships, admin-controlled canonical-role mapping, five-minute token reconciliation, adversarial contracts and Identity &amp; Trust UI</td>
-<td>Live Entra joiner/mover/leaver acceptance, break glass, access certification and delegated scopes</td>
+<td>Tenant-specific Entra OIDC, tenant-bound SCIM users/groups/memberships, admin-controlled canonical-role mapping, five-minute token reconciliation, adversarial contracts, Identity &amp; Trust UI and a fail-closed live lifecycle acceptance command</td>
+<td>Configure the pilot tenant, run live SCIM plus real OIDC joiner/mover/leaver acceptance, then add break glass, access certification and delegated scopes</td>
 </tr>
 <tr>
 <td>P0-07</td>
@@ -1709,9 +1709,14 @@ with Microsoft Entra ID as the first adapter:</p>
    preserving honest degraded and not-configured states. Splunk remains a
    non-delivering stub.</li>
 </ol>
-<p>This advances but does not close P0-06. The next identity acceptance slice is
-a live Entra joiner/mover/leaver exercise, followed by break glass, quarterly
-access certification and delegated administrative scopes.</p>
+<p>The live acceptance command now discovers deployed posture, reads its bearer
+only from Secrets Manager, and exercises synthetic joiner, mover and leaver
+state with exact cleanup. The 2026-07-29 AWS preflight returned <code>NOT READY</code>
+because the pilot stack has no Entra tenant configuration; this is correct
+fail-closed evidence, not an acceptance pass. P0-06 still requires a configured
+pilot tenant and real Entra OIDC sign-in, role transition and token-revocation
+exercise, followed by break glass, quarterly access certification and
+delegated administrative scopes.</p>
 
 
 

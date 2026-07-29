@@ -1250,6 +1250,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#aws-pilot-evidence-2026-07-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AWS pilot evidence — 2026-07-29
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1403,6 +1414,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#aws-pilot-evidence-2026-07-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AWS pilot evidence — 2026-07-29
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1450,6 +1472,32 @@ sinks, and Python handlers are reference implementations for tests and pilots;
 they are not deployment evidence for high-impact actions. Keep the evidence
 with the deployed commit, adapter versions, configuration, and release
 verification record.</p>
+<h2 id="aws-pilot-evidence-2026-07-29">AWS pilot evidence — 2026-07-29</h2>
+<p>The merged commit <code>066cb8725d112c58867cfb776d4d69bf37688f0c</code> was deployed to
+the <code>AaiSecControlPlane</code> stack in <code>eu-west-2</code> with AWS profile <code>p1</code>.
+TypeScript compilation and CDK synthesis passed. CloudFormation updated both
+Lambda functions and reached <code>UPDATE_COMPLETE</code> at 11:15 Europe/London.</p>
+<p>The deployed control-plane acceptance then established the following exact
+state:</p>
+<ul>
+<li>the earlier production-only DynamoDB <code>Decimal</code> policy-version rejection no
+  longer occurred;</li>
+<li>an exact, fresh synthetic Claude managed bundle produced
+  <code>managedConfiguration.passed: true</code> and status <code>enforced</code>;</li>
+<li>the overall agent remained <code>verified: false</code> because
+  <code>runtimeAttestation.passed</code> was false with
+  <code>approved_manifest_missing</code>;</li>
+<li>a post-run DynamoDB scan found zero records containing the unique
+  <code>aws-smoke</code> prefix, proving synthetic lifecycle cleanup;</li>
+<li>the Entra SCIM acceptance preflight returned exit status <code>2</code> and
+  <code>Microsoft Entra ID is not configured in this stack</code> before any secret
+  lookup or lifecycle write.</li>
+</ul>
+<p>This is positive production evidence for the managed-host protocol fix and
+negative evidence for two outstanding P0 prerequisites. It is not a full AWS,
+runtime-attestation or Entra acceptance pass. The checked-in runtime manifest
+bundle remains deliberately empty, and the stack outputs report Microsoft
+Entra ID, SCIM and runtime attestation as <code>not-configured</code>.</p>
 
 
 
