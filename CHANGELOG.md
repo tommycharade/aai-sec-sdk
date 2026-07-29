@@ -1,5 +1,12 @@
 # Changelog
 
+- Added a bounded live Microsoft Entra SCIM acceptance command. It discovers
+  deployment posture from CloudFormation, resolves the dedicated bearer only
+  from Secrets Manager, and proves invalid-bearer denial plus synthetic
+  joiner, duplicate, mover, leaver and inactive-user behavior. Exact synthetic
+  lifecycle state is cleaned on success or failure while content-minimised
+  audit evidence is retained; an unconfigured deployment returns an explicit
+  not-ready status rather than a false pass.
 - Added read-only managed-host measurement and authenticated heartbeat evidence.
   The SDK opens administrator-owned files without following symlinks, verifies
   root ownership, restrictive modes, bounded exact bytes and host/source
