@@ -22,6 +22,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Wider enterprise UI](docs/enterprise-ui.md)
 - [Enterprise integration design](docs/enterprise-integration-design.md)
 - [Enterprise user journeys](docs/enterprise-user-journeys.md)
+- [Enterprise rollout P0 and P1 requirements](docs/enterprise-rollout-p0-p1-requirements.md)
 - [Product Owner enterprise Claude Code rollout review](docs/product-owner-enterprise-claude-rollout-review-2026-07-27.md)
 - [Enterprise Claude Code rollout plan](docs/enterprise-claude-rollout-plan.md)
 - [Real Claude Code acceptance evidence](docs/real-claude-code-acceptance-evidence-2026-07-27.md)
