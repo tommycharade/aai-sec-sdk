@@ -118,7 +118,8 @@ iteration. No Splunk credential is required yet.
 Engineering can continue autonomously on:
 
 - bulk enrollment import and dynamic groups;
-- automatic orphan and leaver detection;
+- production identity, endpoint and source-control connector packaging for the
+  implemented orphan/leaver reconciler;
 - managed upgrades and expiring exceptions;
 - policy simulation, semantic diff, inheritance, scheduling and signed
   bundles;
@@ -133,4 +134,3 @@ Engineering can continue autonomously on:
 
 Progress and evidence remain tracked in the
 [enterprise P0 and P1 implementation status](p0-p1-implementation-status.md).
-

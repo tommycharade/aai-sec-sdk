@@ -1,5 +1,12 @@
 # Changelog
 
+- Added enterprise agent-population discovery for Claude Code and Codex. The
+  AWS control plane accepts bounded, revision-bound and expiring identity,
+  endpoint and source-control snapshots; computes a complete-source denominator;
+  detects unmanaged, duplicate, leaver and orphan state; and emits a redacted,
+  content-hashed export. Missing, incomplete or stale evidence suppresses
+  percentages and orphan conclusions. The management UI adds a dedicated
+  Coverage workspace with source confidence, findings and business-unit posture.
 - Exact-pinned AWS CDK infrastructure tooling as development-only dependencies
   and documented a 30-day exception for the upstream bundled
   `brace-expansion@5.0.7` denial-of-service advisory. A daily workflow inspects

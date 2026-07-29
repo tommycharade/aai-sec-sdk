@@ -79,6 +79,25 @@ From the dashboard, the operator can open a filtered fleet view, group view,
 agent detail, audit event or deployment rollout without losing the active
 filters.
 
+### Journey 4a: Establish population coverage
+
+**Actor:** Endpoint, identity, or security operations engineer.
+
+1. Configure deployment-owned identity, endpoint, and source-control collectors.
+2. Publish complete, short-lived snapshots through source-scoped authority.
+3. Open **Coverage** and confirm all required sources are current.
+4. Review the expected Claude Code and Codex denominator before using any
+   percentage.
+5. Investigate unmanaged or duplicate instances, inactive owners/users, and
+   active enrollments absent from the expected inventory.
+6. Connect a missing agent or use the Agents lifecycle controls for a verified
+   leaver or orphan.
+7. Export the content-hashed report for assessment evidence.
+
+If any source is missing, incomplete, or stale, the journey stops at source
+recovery. The UI must not present a percentage or recommend destructive action
+from absence alone.
+
 ## Journey 5: Respond to an incident
 
 **Actor:** Security operations engineer.

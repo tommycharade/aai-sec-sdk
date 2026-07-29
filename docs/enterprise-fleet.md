@@ -476,3 +476,18 @@ tokens in Vite variables or screenshots.
         - FleetNotFoundError
         - StaticFleetAuthenticator
       show_source: false
+
+## Population coverage
+
+Enrollment is not a complete inventory. The AWS pilot adds a separate
+**Coverage** workspace backed by current identity, endpoint, and source-control
+snapshots. It shows whether the expected-population denominator is defensible,
+which Claude Code or Codex targets are unmanaged or duplicated, and which active
+enrollments belong to leavers or no longer map to an expected target.
+
+Coverage is unavailable—not zero or 100%—when a required source is missing,
+incomplete, stale, or establishes no denominator. The operator can inspect
+source freshness, review business-unit posture, move to connection or agent
+lifecycle workflows, and export a redacted content-hashed report. The report is
+detection evidence; it does not automatically grant policy or contain an agent.
+See [Agent population discovery](agent-discovery-design.md).

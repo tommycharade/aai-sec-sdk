@@ -127,6 +127,20 @@ _DYNAMIC_GROUP_MEMBER_LIMIT = 500
 _AGENT_CRITICALITIES = frozenset({"low", "medium", "high", "critical"})
 _AGENT_OWNERSHIP_REVIEW_SECONDS = 90 * 24 * 60 * 60
 
+# Discovery snapshots are trusted adapter observations, not agent authority.
+# A complete, fresh snapshot may reduce coverage or identify an orphan, but it
+# never grants policy, revokes identity, or executes containment by itself.
+_DISCOVERY_SOURCE_KINDS = frozenset({"identity", "endpoint", "source_control"})
+_DISCOVERY_REQUIRED_SOURCE_KINDS = _DISCOVERY_SOURCE_KINDS
+_DISCOVERY_OBSERVATION_KINDS = {
+    "identity": frozenset({"identity"}),
+    "endpoint": frozenset({"device", "installation"}),
+    "source_control": frozenset({"repository"}),
+}
+_DISCOVERY_SNAPSHOT_LIMIT = 100
+_DISCOVERY_EXPECTED_HOST_LIMIT = 2
+_DISCOVERY_MAX_VALIDITY_SECONDS = 24 * 60 * 60
+
 # Agent decision evidence is operationally useful but never authoritative.
 # The authenticated host may report only this fixed, content-free vocabulary;
 # tenant, agent, deployment, policy and timestamps are derived server-side.
@@ -807,6 +821,11 @@ def _required_mutation_capability(path):
         return "identity_admin"
     if normalized.startswith("/enterprise/identity/delegated-grants"):
         return "identity_admin"
+    if normalized.startswith("/enterprise/discovery/sources/"):
+        # Population evidence can lower measured coverage and create leaver or
+        # orphan findings. Until scoped service identities are implemented,
+        # only the platform-administration wildcard may publish it.
+        return "discovery_write"
     if re.fullmatch(
         r"/enterprise/policies/[^/]+/versions/[1-9][0-9]*/(decision|stage|activate)",
         normalized,
@@ -3175,6 +3194,222 @@ def _agent_ownership_view(agent, *, now=None):
     }
 
 
+def _discovery_integer(value, field, *, minimum=0):
+    """Normalize one exact bounded integer from JSON or DynamoDB."""
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        raise ValueError(f"{field} must be an integer")
+    if isinstance(value, Decimal) and value != value.to_integral_value():
+        raise ValueError(f"{field} must be an integer")
+    result = int(value)
+    if result < minimum:
+        raise ValueError(f"{field} must be at least {minimum}")
+    return result
+
+
+def _discovery_digest(value, field="projectRootDigest"):
+    """Require a lowercase SHA-256 correlation key without accepting a raw path."""
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError(f"{field} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _discovery_optional_identifier(value, field):
+    """Validate an optional opaque inventory identifier."""
+    return None if value is None else _bounded_identifier(value, field)
+
+
+def _discovery_identifier_list(value, field, *, limit=20):
+    """Return a unique bounded list of opaque identifiers."""
+    if not isinstance(value, list) or len(value) > limit:
+        raise ValueError(f"{field} must be a bounded list")
+    result = [_bounded_identifier(item, field) for item in value]
+    if len(set(result)) != len(result):
+        raise ValueError(f"{field} must not contain duplicates")
+    return sorted(result)
+
+
+def _discovery_observation(value, source_kind):
+    """Validate one source-specific, content-minimised discovery observation."""
+    if not isinstance(value, dict):
+        raise ValueError("discovery observation must be an object")
+    kind = value.get("kind")
+    if kind not in _DISCOVERY_OBSERVATION_KINDS[source_kind]:
+        raise ValueError("discovery observation kind is not valid for its source")
+    schemas = {
+        "identity": (
+            {"kind", "id", "active"},
+            {"kind", "id", "active", "businessUnit"},
+        ),
+        "device": (
+            {"kind", "id", "managed"},
+            {"kind", "id", "managed", "businessUnit", "userIds"},
+        ),
+        "repository": (
+            {"kind", "id", "projectRootDigest", "expectedHosts"},
+            {"kind", "id", "projectRootDigest", "expectedHosts", "businessUnit"},
+        ),
+        "installation": (
+            {
+                "kind",
+                "id",
+                "deviceId",
+                "host",
+                "projectRootDigest",
+                "binaryPresent",
+                "processActive",
+            },
+            {
+                "kind",
+                "id",
+                "deviceId",
+                "host",
+                "projectRootDigest",
+                "binaryPresent",
+                "processActive",
+                "userId",
+                "repositoryId",
+                "businessUnit",
+            },
+        ),
+    }
+    required, allowed = schemas[kind]
+    if not required.issubset(value) or not set(value).issubset(allowed):
+        raise ValueError(f"{kind} discovery observation has an invalid schema")
+    result = {"kind": kind, "id": _bounded_identifier(value.get("id"), "observation id")}
+    if "businessUnit" in value:
+        result["businessUnit"] = _bounded_text(value.get("businessUnit"), "businessUnit", 128)
+    if kind == "identity":
+        if not isinstance(value.get("active"), bool):
+            raise ValueError("identity active must be boolean")
+        result["active"] = value["active"]
+    elif kind == "device":
+        if not isinstance(value.get("managed"), bool):
+            raise ValueError("device managed must be boolean")
+        result["managed"] = value["managed"]
+        result["userIds"] = _discovery_identifier_list(value.get("userIds", []), "userIds")
+    elif kind == "repository":
+        result["projectRootDigest"] = _discovery_digest(value.get("projectRootDigest"))
+        hosts = value.get("expectedHosts")
+        if not isinstance(hosts, list) or not 1 <= len(hosts) <= _DISCOVERY_EXPECTED_HOST_LIMIT:
+            raise ValueError("expectedHosts must contain one or two supported hosts")
+        result["expectedHosts"] = sorted({_agent_host(host) for host in hosts})
+        if len(result["expectedHosts"]) != len(hosts):
+            raise ValueError("expectedHosts must not contain duplicates")
+    else:
+        for field in ("binaryPresent", "processActive"):
+            if not isinstance(value.get(field), bool):
+                raise ValueError(f"{field} must be boolean")
+            result[field] = value[field]
+        result.update(
+            {
+                "deviceId": _bounded_identifier(value.get("deviceId"), "deviceId"),
+                "host": _agent_host(value.get("host")),
+                "projectRootDigest": _discovery_digest(value.get("projectRootDigest")),
+                "userId": _discovery_optional_identifier(value.get("userId"), "userId"),
+                "repositoryId": _discovery_optional_identifier(
+                    value.get("repositoryId"), "repositoryId"
+                ),
+            }
+        )
+    return result
+
+
+def _publish_discovery_snapshot(tenant, source_id, value, actor):
+    """Atomically replace one trusted source snapshot with optimistic concurrency."""
+    required = {
+        "sourceKind",
+        "generation",
+        "expectedRevision",
+        "observedAt",
+        "expiresAt",
+        "complete",
+        "observations",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError("discovery snapshot has an invalid schema")
+    source_kind = value.get("sourceKind")
+    if source_kind not in _DISCOVERY_SOURCE_KINDS:
+        raise ValueError("sourceKind is unsupported")
+    generation = _bounded_identifier(value.get("generation"), "generation")
+    expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision")
+    observed_at = _discovery_integer(value.get("observedAt"), "observedAt", minimum=1)
+    expires_at = _discovery_integer(value.get("expiresAt"), "expiresAt", minimum=1)
+    complete = value.get("complete")
+    observations = value.get("observations")
+    now = int(time.time())
+    if not isinstance(complete, bool):
+        raise ValueError("complete must be boolean")
+    if not isinstance(observations, list) or len(observations) > _DISCOVERY_SNAPSHOT_LIMIT:
+        raise ValueError(f"observations must contain at most {_DISCOVERY_SNAPSHOT_LIMIT} records")
+    if observed_at > now + 300 or expires_at <= now:
+        raise ValueError("discovery snapshot must be current")
+    if expires_at <= observed_at or expires_at - observed_at > _DISCOVERY_MAX_VALIDITY_SECONDS:
+        raise ValueError("discovery snapshot validity is unsafe")
+    normalized = [_discovery_observation(item, source_kind) for item in observations]
+    identities = [(item["kind"], item["id"]) for item in normalized]
+    if len(set(identities)) != len(identities):
+        raise ValueError("discovery observations must be unique within a snapshot")
+    normalized.sort(key=lambda item: (item["kind"], item["id"]))
+    source_id = _bounded_identifier(source_id, "sourceId")
+    existing = TABLE.get_item(
+        Key=_item_key(tenant, "DISCOVERY_SOURCE", source_id), ConsistentRead=True
+    ).get("Item")
+    current_revision = int(existing.get("revision", 0)) if existing else 0
+    if current_revision != expected:
+        raise PolicyConflict("discovery source revision changed")
+    content = {
+        "sourceId": source_id,
+        "sourceKind": source_kind,
+        "generation": generation,
+        "observedAt": observed_at,
+        "expiresAt": expires_at,
+        "complete": complete,
+        "observations": normalized,
+    }
+    content_hash = hashlib.sha256(
+        json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    record = {
+        **_item_key(tenant, "DISCOVERY_SOURCE", source_id),
+        **content,
+        "revision": expected + 1,
+        "contentHash": content_hash,
+        "publishedAt": now,
+        "publishedBy": actor,
+        "tenant_id": tenant,
+    }
+    arguments = {"Item": record}
+    if expected == 0:
+        arguments["ConditionExpression"] = "attribute_not_exists(pk)"
+    else:
+        arguments.update(
+            {
+                "ConditionExpression": "revision = :expected_revision",
+                "ExpressionAttributeValues": {":expected_revision": expected},
+            }
+        )
+    try:
+        TABLE.put_item(**arguments)
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("discovery source revision changed") from error
+        raise
+    _audit(
+        tenant,
+        "discovery_snapshot_published",
+        actor,
+        {
+            "source_id": source_id,
+            "source_kind": source_kind,
+            "revision": expected + 1,
+            "complete": complete,
+            "observation_count": len(normalized),
+            "content_hash": content_hash,
+        },
+    )
+    return {key: item for key, item in record.items() if key not in {"pk", "sk", "observations"}}
+
+
 def _create_item(tenant, kind, identifier, item):
     """Create one tenant-scoped record without allowing identity replacement."""
     record = {**_item_key(tenant, kind, identifier), **item, "tenant_id": tenant}
@@ -3400,7 +3635,8 @@ def _dynamic_group_rule(raw_rule):
             or not 1 <= len(raw_values) <= _DYNAMIC_GROUP_VALUE_LIMIT
         ):
             raise ValueError(
-                f"dynamic group condition values must contain 1 to {_DYNAMIC_GROUP_VALUE_LIMIT} entries"
+                "dynamic group condition values must contain 1 to "
+                f"{_DYNAMIC_GROUP_VALUE_LIMIT} entries"
             )
         values = sorted({_bounded_text(value, "dynamic group value", 128) for value in raw_values})
         if len(values) != len(raw_values):
@@ -4433,6 +4669,330 @@ def _all_agents(tenant, *, consistent_read=False):
         agent["managed_configuration"] = _managed_configuration_posture(tenant, agent, now=now)
         agent["ownership"] = _agent_ownership_view(agent, now=now)
     return agents
+
+
+def _discovery_counts(instances):
+    """Count target posture without allowing duplicates to inflate coverage."""
+    denominator = len(instances)
+    enrolled = sum(1 for item in instances if item["agentCount"] >= 1)
+    healthy = sum(1 for item in instances if item["healthy"] is True)
+    compliant = sum(1 for item in instances if item["compliant"] is True)
+    return {
+        "denominator": denominator,
+        "enrolled": enrolled,
+        "healthy": healthy,
+        "compliant": compliant,
+        "unmanaged": sum(1 for item in instances if "unmanaged" in item["reasonCodes"]),
+        "duplicate": sum(
+            1
+            for item in instances
+            if any(reason.startswith("duplicate_") for reason in item["reasonCodes"])
+        ),
+        "leaver": sum(1 for item in instances if "inactive_user" in item["reasonCodes"]),
+    }
+
+
+def _discovery_breakdown(instances, field, label):
+    """Aggregate one privacy-reviewed display dimension from target records."""
+    buckets = {}
+    for instance in instances:
+        values = instance.get(field) or ["unassigned"]
+        for value in values:
+            buckets.setdefault(value, []).append(instance)
+    return [
+        {label: value, **_discovery_counts(items)}
+        for value, items in sorted(buckets.items(), key=lambda entry: entry[0].lower())
+    ]
+
+
+def _discovery_report(tenant, *, now=None):
+    """Reconcile fresh source snapshots with server-owned enrolled-agent inventory.
+
+    The report is deliberately observational. Source records may lower posture
+    and raise findings, but they cannot create enrollment, change policy, or
+    revoke an agent. Missing, incomplete, stale, or empty required population
+    evidence makes percentage coverage unavailable instead of optimistic.
+    """
+    current_time = int(time.time()) if now is None else int(now)
+    source_records = _list(tenant, "DISCOVERY_SOURCE", consistent_read=True)
+    current_sources = []
+    source_views = []
+    for source in sorted(source_records, key=lambda item: str(item.get("sourceId", ""))):
+        complete = source.get("complete") is True
+        fresh = int(source.get("expiresAt", 0)) > current_time
+        observations = source.get("observations", [])
+        has_observations = isinstance(observations, list) and bool(observations)
+        status = (
+            "current"
+            if complete and fresh and has_observations
+            else "incomplete"
+            if not complete
+            else "stale"
+            if not fresh
+            else "empty"
+        )
+        if status == "current" and isinstance(observations, list):
+            current_sources.append(source)
+        source_views.append(
+            {
+                "sourceId": source.get("sourceId"),
+                "sourceKind": source.get("sourceKind"),
+                "generation": source.get("generation"),
+                "revision": int(source.get("revision", 0)),
+                "status": status,
+                "complete": complete,
+                "observedAt": int(source.get("observedAt", 0)),
+                "expiresAt": int(source.get("expiresAt", 0)),
+                "observationCount": len(observations) if isinstance(observations, list) else 0,
+                "contentHash": source.get("contentHash"),
+            }
+        )
+    current_kinds = {source.get("sourceKind") for source in current_sources}
+    blind_spots = []
+    for required_kind in sorted(_DISCOVERY_REQUIRED_SOURCE_KINDS):
+        records = [source for source in source_views if source.get("sourceKind") == required_kind]
+        if not records:
+            blind_spots.append(f"missing_source:{required_kind}")
+        elif not any(source["status"] == "current" for source in records):
+            prefix = (
+                "empty_source"
+                if any(source["status"] == "empty" for source in records)
+                else "non_current_source"
+            )
+            blind_spots.append(f"{prefix}:{required_kind}")
+
+    observations = [
+        observation
+        for source in current_sources
+        for observation in source.get("observations", [])
+        if isinstance(observation, dict)
+    ]
+    identities = {
+        item["id"]: item
+        for item in observations
+        if item.get("kind") == "identity" and isinstance(item.get("id"), str)
+    }
+    devices = {
+        item["id"]: item
+        for item in observations
+        if item.get("kind") == "device" and isinstance(item.get("id"), str)
+    }
+    repositories = [item for item in observations if item.get("kind") == "repository"]
+    installations = [item for item in observations if item.get("kind") == "installation"]
+
+    targets = {}
+
+    def target_for(project_digest, host):
+        key = f"{project_digest}:{host}"
+        return targets.setdefault(
+            key,
+            {
+                "projectRootDigest": project_digest,
+                "host": host,
+                "repositories": set(),
+                "devices": set(),
+                "businessUnits": set(),
+                "installations": [],
+            },
+        )
+
+    for repository in repositories:
+        for host in repository.get("expectedHosts", []):
+            target = target_for(repository.get("projectRootDigest"), host)
+            target["repositories"].add(repository.get("id"))
+            if repository.get("businessUnit"):
+                target["businessUnits"].add(repository["businessUnit"])
+    for installation in installations:
+        target = target_for(installation.get("projectRootDigest"), installation.get("host"))
+        target["installations"].append(installation)
+        target["devices"].add(installation.get("deviceId"))
+        if installation.get("repositoryId"):
+            target["repositories"].add(installation["repositoryId"])
+        if installation.get("businessUnit"):
+            target["businessUnits"].add(installation["businessUnit"])
+        device = devices.get(installation.get("deviceId"))
+        if device and device.get("businessUnit"):
+            target["businessUnits"].add(device["businessUnit"])
+
+    agents = [
+        agent
+        for agent in _all_agents(tenant, consistent_read=True)
+        if _agent_lifecycle_state(agent) == "active"
+    ]
+    agents_by_target = {}
+    agent_targets = {}
+    for agent in agents:
+        project_root = agent.get("project_root")
+        if not isinstance(project_root, str) or not project_root:
+            continue
+        key = f"{hashlib.sha256(project_root.encode()).hexdigest()}:{agent.get('host')}"
+        agents_by_target.setdefault(key, []).append(agent)
+        agent_targets[f"{agent.get('deployment_id')}:{agent.get('id')}"] = key
+
+    instance_views = []
+    leaver_agent_keys = {
+        f"{agent.get('deployment_id')}:{agent.get('id')}"
+        for agent in agents
+        if agent.get("owner_id") in identities
+        and identities[agent.get("owner_id")].get("active") is False
+    }
+    duplicate_agent_keys = set()
+    for target_key, target in sorted(targets.items()):
+        matched_agents = agents_by_target.get(target_key, [])
+        matched_installations = target["installations"]
+        reasons = []
+        if not matched_agents:
+            reasons.append("unmanaged")
+        if len(matched_agents) > 1:
+            reasons.append("duplicate_enrollment")
+        if len(matched_installations) > 1:
+            reasons.append("duplicate_installation")
+        if not matched_installations:
+            reasons.append("installation_missing")
+        elif not any(item.get("binaryPresent") is True for item in matched_installations):
+            reasons.append("binary_missing")
+        if matched_installations and not any(
+            item.get("processActive") is True for item in matched_installations
+        ):
+            reasons.append("process_not_observed")
+        if any(
+            devices.get(item.get("deviceId"), {}).get("managed") is False
+            for item in matched_installations
+        ):
+            reasons.append("unmanaged_device")
+        inactive_users = {
+            item.get("userId")
+            for item in matched_installations
+            if item.get("userId") in identities
+            and identities[item.get("userId")].get("active") is False
+        }
+        for agent in matched_agents:
+            owner_id = agent.get("owner_id")
+            if owner_id in identities and identities[owner_id].get("active") is False:
+                inactive_users.add(owner_id)
+        if inactive_users:
+            reasons.append("inactive_user")
+            leaver_agent_keys.update(
+                f"{agent.get('deployment_id')}:{agent.get('id')}" for agent in matched_agents
+            )
+        if len(matched_agents) > 1 or len(matched_installations) > 1:
+            duplicate_agent_keys.update(
+                f"{agent.get('deployment_id')}:{agent.get('id')}" for agent in matched_agents
+            )
+        exact_agent = matched_agents[0] if len(matched_agents) == 1 else None
+        healthy = bool(
+            exact_agent
+            and exact_agent.get("status") == "connected"
+            and not any(
+                reason
+                in {
+                    "duplicate_installation",
+                    "installation_missing",
+                    "process_not_observed",
+                    "inactive_user",
+                    "unmanaged_device",
+                    "binary_missing",
+                }
+                for reason in reasons
+            )
+        )
+        managed = exact_agent.get("managed_configuration", {}) if exact_agent else {}
+        compliant = bool(
+            healthy
+            and exact_agent.get("attestation_status") == "compliant"
+            and isinstance(managed, dict)
+            and managed.get("status") == "enforced"
+        )
+        agent_keys = sorted(
+            f"{agent.get('deployment_id')}:{agent.get('id')}" for agent in matched_agents
+        )
+        instance_views.append(
+            {
+                "targetId": hashlib.sha256(target_key.encode()).hexdigest(),
+                "host": target["host"],
+                "projectRootDigest": target["projectRootDigest"],
+                "businessUnits": sorted(value for value in target["businessUnits"] if value),
+                "repositoryIds": sorted(value for value in target["repositories"] if value),
+                "deviceIds": sorted(value for value in target["devices"] if value),
+                "installationIds": sorted(item["id"] for item in matched_installations),
+                "agentKeys": agent_keys,
+                "agentCount": len(matched_agents),
+                "installationCount": len(matched_installations),
+                "healthy": healthy,
+                "compliant": compliant,
+                "reasonCodes": sorted(set(reasons)),
+            }
+        )
+
+    source_complete = current_kinds == _DISCOVERY_REQUIRED_SOURCE_KINDS
+    orphaned_agent_keys = {
+        f"{agent.get('deployment_id')}:{agent.get('id')}"
+        for agent in agents
+        if source_complete
+        and agent_targets.get(f"{agent.get('deployment_id')}:{agent.get('id')}") not in targets
+    }
+    agent_findings = []
+    for agent in agents:
+        agent_key = f"{agent.get('deployment_id')}:{agent.get('id')}"
+        reasons = []
+        if agent_key in orphaned_agent_keys:
+            reasons.append("orphaned_enrollment")
+        if agent_key in leaver_agent_keys:
+            reasons.append("inactive_owner_or_user")
+        if agent_key in duplicate_agent_keys:
+            reasons.append("duplicate_target")
+        if reasons:
+            agent_findings.append(
+                {
+                    "agentKey": agent_key,
+                    "deploymentId": agent.get("deployment_id"),
+                    "agentId": agent.get("id"),
+                    "host": agent.get("host"),
+                    "reasonCodes": reasons,
+                }
+            )
+
+    counts = _discovery_counts(instance_views)
+    population_available = source_complete and counts["denominator"] > 0
+    if source_complete and counts["denominator"] == 0:
+        blind_spots.append("empty_expected_population")
+
+    def percentage(numerator):
+        return round((100 * numerator) / counts["denominator"], 1) if population_available else None
+
+    summary = {
+        **counts,
+        "orphaned": len(orphaned_agent_keys),
+        "leaver": len(leaver_agent_keys),
+        "coverageAvailable": population_available,
+        "sourceComplete": source_complete,
+        "coveragePercent": percentage(counts["enrolled"]),
+        "healthyPercent": percentage(counts["healthy"]),
+        "compliantPercent": percentage(counts["compliant"]),
+    }
+    return {
+        "schemaVersion": 1,
+        "generatedAt": current_time,
+        "summary": summary,
+        "blindSpots": sorted(set(blind_spots)),
+        "sources": source_views,
+        "instances": instance_views,
+        "agentFindings": agent_findings,
+        "breakdowns": {
+            "businessUnits": _discovery_breakdown(instance_views, "businessUnits", "businessUnit"),
+            "repositories": _discovery_breakdown(instance_views, "repositoryIds", "repositoryId"),
+            "devices": _discovery_breakdown(instance_views, "deviceIds", "deviceId"),
+        },
+    }
+
+
+def _discovery_export(tenant):
+    """Return a content-addressed discovery report without raw paths or user names."""
+    report = _discovery_report(tenant)
+    digest = hashlib.sha256(
+        json.dumps(_json(report), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {**report, "contentHash": digest}
 
 
 def _fleet(tenant):
@@ -5692,6 +6252,28 @@ def handler(event, context):
                 return _response(200, {"items": items, "nextCursor": None})
             if method == "GET" and parts == ["capabilities"]:
                 return _response(200, _fleet(tenant)["capabilities"])
+            if method == "GET" and parts in (["discovery"], ["discovery", "export"]):
+                if not _operator_roles(event):
+                    return _response(
+                        403,
+                        {"error": "tenant-wide discovery requires a tenant operator role"},
+                    )
+                report = (
+                    _discovery_export(tenant)
+                    if parts == ["discovery", "export"]
+                    else _discovery_report(tenant)
+                )
+                return _response(200, report)
+            if (
+                method == "POST"
+                and len(parts) == 4
+                and parts[:2] == ["discovery", "sources"]
+                and parts[3] == "snapshots"
+            ):
+                return _response(
+                    201,
+                    _publish_discovery_snapshot(tenant, parts[2], _body(event), actor),
+                )
             if method == "GET" and parts == ["identity"]:
                 return _response(200, _identity_access(tenant, event))
             if method == "GET" and parts == ["identity", "break-glass", "requests"]:

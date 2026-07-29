@@ -461,3 +461,22 @@ container or platform isolation.
 ::: agentic_security.telemetry.CompositeAuditSink
 
 ::: agentic_security.telemetry.OpenTelemetryAuditSink
+
+## Enterprise population discovery
+
+The AWS control plane exposes a content-minimised discovery contract for
+reconciling the expected Claude Code and Codex population with enrolled agents:
+
+- `POST /api/enterprise/discovery/sources/{sourceId}/snapshots` publishes one
+  complete, expiring, revision-bound identity, endpoint, or source-control
+  snapshot. It requires `discovery_write`, currently limited to platform
+  administrators.
+- `GET /api/enterprise/discovery` returns current source confidence, the
+  expected-instance denominator, findings, and business-unit/repository/device
+  breakdowns.
+- `GET /api/enterprise/discovery/export` adds a canonical content hash for
+  evidence handling.
+
+Percentages are `null` unless every required source class is complete and
+current. See [Agent population discovery](agent-discovery-design.md) for exact
+schemas, limits, semantics, and trust boundaries.
