@@ -1,5 +1,6 @@
 """Contract tests for the deployed AWS control-plane Lambda boundary."""
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -11,6 +12,17 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+
+from agentic_security import (
+    AgentHost,
+    ManagedConfigurationCompiler,
+    ManagedDeploymentPackage,
+    ManagedExecutableRequirement,
+    ManagedPlatform,
+    ManagedPolicyIntent,
+    NativeActionDecision,
+    NativeActionRule,
+)
 
 
 class ConditionalFailure(Exception):
@@ -31,8 +43,13 @@ class FakeTable:
 
     def put_item(self, *, Item: dict[str, Any], **kwargs: Any) -> None:
         key = (Item["pk"], Item.get("sk", ""))
-        if kwargs.get("ConditionExpression") and key in self.items:
-            raise ConditionalFailure()
+        if kwargs.get("ConditionExpression"):
+            values = kwargs.get("ExpressionAttributeValues", {})
+            if ":expected_revision" in values:
+                if self.items.get(key, {}).get("revision") != values[":expected_revision"]:
+                    raise ConditionalFailure()
+            elif key in self.items:
+                raise ConditionalFailure()
         self.items[key] = dict(Item)
 
     def delete_item(self, *, Key: dict[str, str], **_: Any) -> None:
@@ -232,6 +249,38 @@ def _runtime_manifest(host: str = "claude-code") -> dict[str, Any]:
         "gatewayDigest": "d" * 64,
         "hookDigest": "e" * 64,
         "host": host,
+    }
+
+
+def _managed_package_fixture(
+    *, policy_version: int = 1
+) -> tuple[ManagedDeploymentPackage, dict[str, Any]]:
+    """Build canonical package bytes and matching AWS desired-host metadata."""
+    hook_path = "/opt/aai-security/hooks/native-policy"
+    bundle = ManagedConfigurationCompiler().compile(
+        ManagedPolicyIntent(
+            "policy-safe",
+            policy_version,
+            action_rules=(NativeActionRule("Read", NativeActionDecision.ALLOW, "synthetic read"),),
+        ),
+        host=AgentHost.CLAUDE_CODE,
+        host_version="2.1.220",
+        platform=ManagedPlatform.LINUX,
+        hook_command=hook_path,
+    )
+    package = ManagedDeploymentPackage.from_bundle(
+        bundle,
+        required_executables=(
+            ManagedExecutableRequirement(hook_path, hashlib.sha256(b"synthetic hook").hexdigest()),
+        ),
+    )
+    return package, {
+        "host": package.host.value,
+        "hostVersion": package.host_version,
+        "platform": package.platform.value,
+        "bundleHash": package.bundle_hash,
+        "policyId": package.policy_id,
+        "policyVersion": package.policy_version,
     }
 
 
@@ -1813,6 +1862,201 @@ def test_aws_managed_configuration_posture_rejects_drift_and_staleness(
     assert dynamodb_report["verifiedAt"] == 90
     with pytest.raises(ValueError, match="policyVersion"):
         module._managed_host({**desired, "policyVersion": Decimal("3.5")})
+
+
+def test_aws_managed_package_validator_matches_canonical_sdk_contract(monkeypatch: Any) -> None:
+    """The standalone Lambda adapter rejects altered and non-canonical package bytes."""
+    module, _table = _load_handler(monkeypatch)
+    package, desired = _managed_package_fixture()
+    package_base64 = base64.b64encode(package.to_json()).decode()
+    value, target, encoded = module._managed_package(package_base64, package.package_sha256)
+    assert target == desired
+    assert encoded == package.to_json()
+    assert value["artifacts"][0]["sha256"] == package.artifacts[0].sha256
+
+    with pytest.raises(ValueError, match="digest does not match"):
+        module._managed_package(package_base64, "f" * 64)
+    noncanonical = json.dumps(package.to_wire(), indent=2, sort_keys=True).encode()
+    with pytest.raises(ValueError, match="not canonical"):
+        module._managed_package(
+            base64.b64encode(noncanonical).decode(), hashlib.sha256(noncanonical).hexdigest()
+        )
+    tampered = cast(dict[str, Any], package.to_wire())
+    tampered["artifacts"][0]["content"] = "altered"
+    tampered_bytes = json.dumps(tampered, separators=(",", ":"), sort_keys=True).encode()
+    with pytest.raises(ValueError, match="artifact is invalid"):
+        module._managed_package(
+            base64.b64encode(tampered_bytes).decode(),
+            hashlib.sha256(tampered_bytes).hexdigest(),
+        )
+
+
+def test_aws_managed_package_publication_and_drift_repair_route(monkeypatch: Any) -> None:
+    """AWS publishes by CAS and lets only the exact attested agent repair drift."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-package"
+    now = 1_900_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
+    package, desired = _managed_package_fixture()
+    project_root = "/synthetic/project"
+    token = "synthetic-managed-package-agent-session"  # noqa: S105
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root")
+        | {"id": tenant, "status": "active", "emergencyStop": False}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {
+            "id": "dep-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "sdk_version": "1.1.0",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "CONFIGURATION", "dep-a")
+        | {
+            "deploymentId": "dep-a",
+            "desiredConfiguration": {"managedHost": desired},
+            "rolloutState": "active",
+            "rolloutPercentage": 100,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "project_root": project_root,
+            "status": "connected",
+            "expires_at": now + 300,
+            "emergencyStop": False,
+            "attestation_status": "compliant",
+            "attestation_expires_at": now + 300,
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", token),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "project_root_hash": hashlib.sha256(project_root.encode()).hexdigest(),
+            "expires_at": now + 300,
+        }
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+    body = {
+        "expectedRevision": 0,
+        "packageBase64": base64.b64encode(package.to_json()).decode(),
+        "packageSha256": package.package_sha256,
+    }
+    published = _invoke(
+        module,
+        _event(
+            "/enterprise/deployments/dep-a/managed-package",
+            "PUT",
+            claims=claims,
+            body=body,
+        ),
+    )
+    assert published["statusCode"] == 201
+    assert json.loads(published["body"])["revision"] == 1
+    replay = _invoke(
+        module,
+        _event(
+            "/enterprise/deployments/dep-a/managed-package",
+            "PUT",
+            claims=claims,
+            body=body,
+        ),
+    )
+    assert replay["statusCode"] == 409
+
+    metadata = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/enterprise/deployments/dep-a/managed-package",
+                "GET",
+                claims={
+                    "custom:tenant_id": tenant,
+                    "cognito:groups": ["auditor"],
+                    "sub": "auditor-a",
+                },
+            ),
+        )["body"]
+    )
+    assert metadata["status"] == "current"
+    assert "packageBase64" not in metadata
+
+    # Missing managed evidence must not deadlock package repair while every
+    # identity, project-scope and runtime-attestation check still holds.
+    downloaded = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/managed-package",
+            "GET",
+            token=token,
+            project_root=project_root,
+        ),
+    )
+    payload = json.loads(downloaded["body"])
+    assert downloaded["statusCode"] == 200
+    assert payload["packageBase64"] == body["packageBase64"]
+    assert payload["packageSha256"] == package.package_sha256
+    assert payload["agentId"] == "agent-a"
+
+    table.items[(f"TENANT#{tenant}", "CONFIGURATION#dep-a")]["rolloutState"] = "paused"
+    paused = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/managed-package",
+            "GET",
+            token=token,
+            project_root=project_root,
+        ),
+    )
+    assert paused["statusCode"] == 409
+
+
+def test_aws_managed_package_publication_requires_platform_admin(monkeypatch: Any) -> None:
+    """Policy and fleet roles cannot independently publish endpoint authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-package-role"
+    package, desired = _managed_package_fixture()
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(tenant, "DEPLOYMENT", "dep-a") | {"id": "dep-a"})
+    table.put_item(
+        Item=module._item_key(tenant, "CONFIGURATION", "dep-a")
+        | {"desiredConfiguration": {"managedHost": desired}}
+    )
+    denied = _invoke(
+        module,
+        _event(
+            "/enterprise/deployments/dep-a/managed-package",
+            "PUT",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["policy-author"],
+                "sub": "author-a",
+            },
+            body={
+                "expectedRevision": 0,
+                "packageBase64": base64.b64encode(package.to_json()).decode(),
+                "packageSha256": package.package_sha256,
+            },
+        ),
+    )
+    assert denied["statusCode"] == 403
+    assert json.loads(denied["body"])["requiredCapability"] == "managed_deployment"
 
 
 def test_list_reads_every_dynamodb_page_before_policy_verification(monkeypatch: Any) -> None:

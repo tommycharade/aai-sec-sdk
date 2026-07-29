@@ -16,6 +16,7 @@ development host.
 
 from __future__ import annotations
 
+import base64
 import hmac
 import json
 import math
@@ -44,7 +45,8 @@ from ._command_patterns import compile_command_patterns
 from .agent_sessions import AgentSessionCredential, AgentSessionStore
 from .audit import AuditEvent, AuditSink
 from .integrations import AgentHost
-from .managed_configuration import ManagedConfigurationEvidence
+from .managed_configuration import ManagedConfigurationEvidence, ManagedPlatform
+from .managed_deployment import ManagedDeploymentPackage
 from .runtime_attestation import RuntimeAttestor
 
 try:  # pragma: no cover - platform branch; control-plane reference targets Unix hosts.
@@ -718,6 +720,105 @@ class ControlPlaneAgentClient:
                     },
                 }
         return response
+
+    def managed_deployment_package(
+        self, *, platform: ManagedPlatform | str
+    ) -> ManagedDeploymentPackage:
+        """Fetch and verify the current rollout-selected endpoint package.
+
+        The endpoint response is authenticated transport metadata, not trusted
+        Python state. This method verifies its exact schema, bounded canonical
+        bytes, out-of-band digest, agent identity, host, platform, bundle and
+        package metadata before returning a typed package. It performs no file
+        writes and does not invoke the privileged installer.
+        """
+        if not self.deployment_id:
+            raise ControlPlaneDependencyError(
+                "managed package requires a deployment-scoped agent client"
+            )
+        try:
+            expected_platform = (
+                platform if isinstance(platform, ManagedPlatform) else ManagedPlatform(platform)
+            )
+        except ValueError as exc:
+            raise ControlPlaneConfigurationError("managed package platform is unsupported") from exc
+        request = Request(  # noqa: S310 - URL scheme is validated above.
+            f"{self.base_url}{self._agent_path('managed-package')}",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.token}",
+                **(
+                    {"X-AAI-Project-Root-Digest": self.project_root_digest}
+                    if self.aws_agent_session
+                    else {}
+                ),
+            },
+            method="GET",
+        )
+        try:
+            with _open_https(request, self.timeout_seconds) as response:
+                value = json.loads(response.read(1_000_000))
+        except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
+            raise ControlPlaneDependencyError("managed package lookup failed") from exc
+        result = dict(_mapping(value, "managed package response"))
+        fields = {
+            "schemaVersion",
+            "deploymentId",
+            "agentId",
+            "revision",
+            "status",
+            "packageSha256",
+            "bundleHash",
+            "host",
+            "hostVersion",
+            "platform",
+            "policyId",
+            "policyVersion",
+            "publishedAt",
+            "publishedBy",
+            "packageBase64",
+        }
+        if set(result) != fields or result.get("schemaVersion") != 1:
+            raise ControlPlaneDependencyError("managed package response schema is invalid")
+        if (
+            result.get("deploymentId") != self.deployment_id
+            or result.get("agentId") != self.agent_id
+            or result.get("status") != "current"
+            or isinstance(result.get("revision"), bool)
+            or not isinstance(result.get("revision"), int)
+            or result["revision"] <= 0
+        ):
+            raise ControlPlaneDependencyError("managed package response identity is invalid")
+        encoded_value = result.get("packageBase64")
+        if not isinstance(encoded_value, str) or len(encoded_value) > 410_000:
+            raise ControlPlaneDependencyError("managed package content is invalid")
+        try:
+            encoded = base64.b64decode(encoded_value, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ControlPlaneDependencyError("managed package content is invalid") from exc
+        digest = result.get("packageSha256")
+        bundle_hash = result.get("bundleHash")
+        if not isinstance(digest, str) or not isinstance(bundle_hash, str):
+            raise ControlPlaneDependencyError("managed package digests are invalid")
+        try:
+            package = ManagedDeploymentPackage.from_json(encoded, expected_package_sha256=digest)
+            package.require_target(
+                host=self.host, platform=expected_platform, bundle_hash=bundle_hash
+            )
+        except (TypeError, ValueError) as exc:
+            raise ControlPlaneDependencyError("managed package verification failed") from exc
+        metadata = {
+            "host": package.host.value,
+            "hostVersion": package.host_version,
+            "platform": package.platform.value,
+            "policyId": package.policy_id,
+            "policyVersion": package.policy_version,
+            "bundleHash": package.bundle_hash,
+            "packageSha256": package.package_sha256,
+        }
+        if any(result.get(key) != expected for key, expected in metadata.items()):
+            raise ControlPlaneDependencyError("managed package metadata does not match content")
+        return package
 
     def request_approval(
         self,

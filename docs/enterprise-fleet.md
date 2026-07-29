@@ -282,6 +282,25 @@ secret manager and is never persisted by the fleet store.
 Delivery failures are reported as failures and do not clear, hide, or mutate
 the underlying alert condition.
 
+## Managed package distribution
+
+A platform administrator can publish one exact canonical Claude Code or Codex
+package for a deployment with `PUT
+/api/enterprise/deployments/{deploymentId}/managed-package`. Publication uses
+an expected revision, validates the SHA-256 and canonical SDK schema, and
+requires the package target to match current server-owned desired state.
+Operator `GET` on the same route returns metadata only.
+
+An enrolled endpoint retrieves package bytes through `GET
+/agent/{deploymentId}/{agentId}/managed-package`. The route is tenant-,
+project-, agent-, attestation-, rollout- and emergency-stop-bound. It remains
+available when managed configuration is missing or conflicting so a managed
+endpoint can repair itself. The SDK client verifies the response and package
+again before returning a typed object. Publication or download is never
+reported as installation or enforcement evidence; a subsequent protected-file
+measurement and live host acceptance remain necessary. See
+[Managed package distribution](managed-package-distribution-design.md).
+
 ## Reference setup
 
 The local UI example multiplexes the original runtime API with the enterprise

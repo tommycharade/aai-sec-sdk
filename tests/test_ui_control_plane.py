@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import io
 import json
 from hashlib import sha256
@@ -25,9 +27,15 @@ from agentic_security import (
     ControlPlaneStore,
     InMemoryAuditSink,
     InMemoryControlPlaneAuthority,
+    ManagedConfigurationCompiler,
     ManagedConfigurationEvidence,
     ManagedConfigurationSource,
+    ManagedDeploymentPackage,
+    ManagedExecutableRequirement,
     ManagedPlatform,
+    ManagedPolicyIntent,
+    NativeActionDecision,
+    NativeActionRule,
     OperatorIdentity,
     StaticBearerAuthenticator,
     validate_configuration,
@@ -44,6 +52,28 @@ from agentic_security.ui_control_plane import (
 )
 
 TOKEN = "synthetic-local-token-1234"  # noqa: S105 - synthetic test credential
+
+
+def deployment_package() -> ManagedDeploymentPackage:
+    """Build one canonical synthetic package for agent-client response tests."""
+    hook_path = "/opt/aai-security/hooks/native-policy"
+    bundle = ManagedConfigurationCompiler().compile(
+        ManagedPolicyIntent(
+            "policy-safe",
+            1,
+            action_rules=(NativeActionRule("Read", NativeActionDecision.ALLOW, "synthetic read"),),
+        ),
+        host=AgentHost.CLAUDE_CODE,
+        host_version="2.1.220",
+        platform=ManagedPlatform.LINUX,
+        hook_command=hook_path,
+    )
+    return ManagedDeploymentPackage.from_bundle(
+        bundle,
+        required_executables=(
+            ManagedExecutableRequirement(hook_path, hashlib.sha256(b"synthetic hook").hexdigest()),
+        ),
+    )
 
 
 def store(path: Path) -> ControlPlaneStore:
@@ -418,6 +448,71 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
         "https://control.example.test/api/agent/deployment-prod/claude-code-local/effective-policy",
     ]
     assert aws_client.disconnect(TOKEN) == {"status": "disconnect_pending_expiry"}
+
+
+def test_agent_client_verifies_managed_package_response_and_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The client rejects transport metadata that does not bind exact package bytes."""
+    import agentic_security.ui_control_plane as control_plane
+
+    package = deployment_package()
+    response_value: dict[str, object] = {
+        "schemaVersion": 1,
+        "deploymentId": "deployment-prod",
+        "agentId": "claude-managed",
+        "revision": 1,
+        "status": "current",
+        "packageSha256": package.package_sha256,
+        "bundleHash": package.bundle_hash,
+        "host": package.host.value,
+        "hostVersion": package.host_version,
+        "platform": package.platform.value,
+        "policyId": package.policy_id,
+        "policyVersion": package.policy_version,
+        "publishedAt": 100,
+        "publishedBy": "platform-admin",
+        "packageBase64": base64.b64encode(package.to_json()).decode(),
+    }
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(response_value).encode()
+
+    captured: list[Any] = []
+
+    def fake_urlopen(request: Any, **_kwargs: object) -> Response:
+        captured.append(request)
+        return Response()
+
+    monkeypatch.setattr(control_plane, "urlopen", fake_urlopen)
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-managed",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+    )
+    assert client.managed_deployment_package(platform=ManagedPlatform.LINUX) == package
+    assert captured[0].method == "GET"
+    assert captured[0].full_url.endswith("/agent/deployment-prod/claude-managed/managed-package")
+
+    response_value["packageSha256"] = "f" * 64
+    with pytest.raises(ControlPlaneDependencyError, match="verification failed"):
+        client.managed_deployment_package(platform=ManagedPlatform.LINUX)
+    response_value["packageSha256"] = package.package_sha256
+    response_value["policyVersion"] = 2
+    with pytest.raises(ControlPlaneDependencyError, match="metadata does not match"):
+        client.managed_deployment_package(platform=ManagedPlatform.LINUX)
+    with pytest.raises(ControlPlaneConfigurationError, match="platform is unsupported"):
+        client.managed_deployment_package(platform="android")
 
 
 def test_agent_client_remeasures_and_reports_typed_managed_configuration(

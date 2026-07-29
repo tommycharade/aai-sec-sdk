@@ -144,6 +144,14 @@ scope-mismatched, malformed, or tampered evidence.
 
 ## Adapter contracts
 
+Managed package distribution contracts cover canonical publication and exact
+typed client verification, tenant/deployment/agent separation, stale revision
+conflicts, desired-state changes, inactive rollouts, emergency stops, missing
+managed-configuration repair, altered response digests and metadata mismatch.
+The standalone AWS Lambda validator is checked against real SDK-generated
+packages. These are protocol tests, not evidence that MDM installed the package
+or that a live Claude Code or Codex process loaded it.
+
 The local contract suite uses synthetic fakes for OPA, Cedar, approval, IAM,
 idempotency, remote audit, and isolation boundaries. These tests verify request
 shape, binding, malformed-response handling, and fail-closed behavior. They do
