@@ -717,10 +717,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pilot-constraints-and-production-path" class="md-nav__link">
+  <a href="#deployment-constraints-and-next-acceptance-work" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pilot constraints and production path
+        Deployment constraints and next acceptance work
       
     </span>
   </a>
@@ -732,6 +732,17 @@
     <span class="md-ellipsis">
       
         Operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reference-collector-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference collector workflow
       
     </span>
   </a>
@@ -1773,10 +1784,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pilot-constraints-and-production-path" class="md-nav__link">
+  <a href="#deployment-constraints-and-next-acceptance-work" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pilot constraints and production path
+        Deployment constraints and next acceptance work
       
     </span>
   </a>
@@ -1788,6 +1799,17 @@
     <span class="md-ellipsis">
       
         Operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reference-collector-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference collector workflow
       
     </span>
   </a>
@@ -1839,10 +1861,12 @@ enrollment, and exposes the result in the <strong>Coverage</strong> workspace.</
 create a finding, but it cannot enroll, revoke, quarantine, assign policy, or
 approve an action. Those authorities remain in their existing control-plane
 boundaries.</p>
-<p>The initial AWS pilot permits only a <code>platform-admin</code> to publish snapshots via
-the <code>discovery_write</code> capability. Production connectors should exchange that
-operator path for workload identities scoped to one tenant and one source. The
-browser never supplies trusted inventory.</p>
+<p>Platform administrators create or rotate a connector credential through the
+<code>discovery_write</code> capability. The plaintext secret is returned once; the
+control plane stores only its SHA-256 digest and binds it to exactly one tenant,
+source identifier and source class. Connector credentials cannot call operator
+or agent routes and can be revoked immediately. The browser never supplies
+trusted inventory.</p>
 <p>Required source classes are:</p>
 <table>
 <thead>
@@ -1896,7 +1920,8 @@ evidence never produces orphan conclusions.</p>
 <p>Findings are deterministic observations, not automatic containment. Operators
 must verify the source and use the existing agent lifecycle controls to respond.</p>
 <h2 id="api-contract">API contract</h2>
-<p><code>POST /api/enterprise/discovery/sources/{sourceId}/snapshots</code> accepts exactly:</p>
+<p>The legacy small-pilot endpoint
+<code>POST /api/enterprise/discovery/sources/{sourceId}/snapshots</code> accepts exactly:</p>
 <pre><code class="language-json">{
   &quot;sourceKind&quot;: &quot;source_control&quot;,
   &quot;generation&quot;: &quot;github-enterprise-2026-07-29T21:00Z&quot;,
@@ -1919,17 +1944,44 @@ must verify the source and use the existing agent lifecycle controls to respond.
 expired or overlong validity windows, invalid digests, more than 100
 observations, and stale revisions. The response excludes observations. Audit
 evidence records only source metadata, count, revision, and hash.</p>
+<p>Production-shaped ingestion uses a source-scoped credential and three phases:</p>
+<ol>
+<li><code>POST /api/discovery-ingest/{tenantId}/{sourceId}/generations</code> declares a
+   generation, its expected source revision, observation/expiry times and a
+   page count from 1 to 20.</li>
+<li><code>PUT /api/discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/pages/{pageNumber}</code>
+   uploads one immutable page containing 1 to 100 normalized observations. The
+   response returns the canonical page hash.</li>
+<li><code>POST /api/discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/commit</code>
+   supplies the ordered hash of every declared page. The control plane strongly
+   reads and validates every page, rejects cross-page duplicate identities, and
+   atomically advances both the source revision and generation state.</li>
+</ol>
+<p>Until commit succeeds, a generation has no effect on coverage. Missing pages,
+hash mismatches, duplicate observations, credential revocation, replay, or a
+concurrent source revision all fail closed. A committed generation supports up
+to 2,000 observations while retaining bounded Lambda and DynamoDB work.</p>
+<p>Credential lifecycle is operator-owned:</p>
+<ul>
+<li><code>POST /api/enterprise/discovery/sources/{sourceId}/connector-credential</code>
+  creates or rotates a source credential using <code>sourceKind</code> and
+  <code>expectedRevision</code>;</li>
+<li><code>DELETE /api/enterprise/discovery/sources/{sourceId}/connector-credential</code>
+  revokes it immediately.</li>
+</ul>
 <p><code>GET /api/enterprise/discovery</code> returns the current reconciliation report.
 <code>GET /api/enterprise/discovery/export</code> returns the same redacted report with a
 canonical <code>contentHash</code> for evidence handling.</p>
-<h2 id="pilot-constraints-and-production-path">Pilot constraints and production path</h2>
-<p>The serverless pilot stores one bounded snapshot per source in the tenant
-control table, with a maximum of 100 observations. This is suitable for contract
-validation and a small pilot, not a large enterprise inventory. Production
-adapters should upload signed, paginated source generations to dedicated
-storage, atomically mark a generation complete, and publish only the normalized
-current view to the reconciler. The fail-closed freshness and completeness
-semantics must not change.</p>
+<h2 id="deployment-constraints-and-next-acceptance-work">Deployment constraints and next acceptance work</h2>
+<p>The legacy snapshot route remains for small pilots and compatibility. Connector
+generations remove its 100-record ceiling and are suitable for a bounded pilot;
+very large estates should move immutable pages to dedicated object storage and
+retain the same atomic current-generation pointer. The application bearer is a
+revocable service credential, not hardware-backed workload identity. Production
+acceptance should add secret-manager delivery/rotation, optional cloud workload
+identity at the gateway, scheduled connector operation, and proof that at least
+95% of the agreed pilot population is represented. The fail-closed freshness,
+completeness and commit semantics must not change.</p>
 <h2 id="operator-journey">Operator journey</h2>
 <ol>
 <li>Deployment-owned connectors collect identity, endpoint, and repository
@@ -1941,6 +1993,44 @@ semantics must not change.</p>
    lifecycle response.</li>
 <li>The operator exports the content-hashed report as assessment evidence.</li>
 </ol>
+<h2 id="reference-collector-workflow">Reference collector workflow</h2>
+<p>The repository includes provider-minimising reference collectors and an atomic
+publisher. They are separate so an operator can review normalized inventory
+before sending it. Provider and connector secrets are environment-only and are
+never command arguments or output.</p>
+<pre><code class="language-bash"># Entra identity inventory. The Graph token needs only the deployment-approved
+# user read scope; the output retains opaque ID, active state and department.
+AZURE_GRAPH_TOKEN='&lt;from-secret-manager&gt;' \
+  python scripts/collect_discovery_inventory.py entra &gt; /tmp/entra-inventory.json
+
+# Endpoint inventory uses an exact deployment-owned JSON export schema.
+python scripts/collect_discovery_inventory.py endpoint \
+  --input /path/to/synthetic-or-managed-endpoint-export.json \
+  &gt; /tmp/endpoint-inventory.json
+
+# GitHub requires a reviewed map from repository full name to a SHA-256 project
+# root digest and expected Claude/Codex hosts; raw paths are never accepted.
+GITHUB_TOKEN='&lt;from-secret-manager&gt;' \
+  python scripts/collect_discovery_inventory.py github \
+  --organization example-enterprise \
+  --mapping /path/to/repository-discovery-map.json \
+  &gt; /tmp/github-inventory.json
+
+# Use the API Gateway origin printed by the AWS stack, not the UI URL or /api.
+AAI_DISCOVERY_CONNECTOR_TOKEN='&lt;one-time-returned-source-secret&gt;' \
+  python scripts/publish_discovery_generation.py \
+  --api-url https://example.execute-api.eu-west-2.amazonaws.com \
+  --tenant-id tenant-synthetic \
+  --source-id github-enterprise \
+  --input /tmp/github-inventory.json \
+  --generation github-2026-07-29T23-00Z \
+  --expected-revision 0
+</code></pre>
+<p>Temporary inventory files remain deployment-owned sensitive operational data;
+store them in an access-controlled temporary location and remove them under the
+deployment retention policy. For scheduled operation, run collection and
+publication in one isolated job with a secret-manager injection and no shell
+history substitution.</p>
 <h2 id="security-acceptance-criteria">Security acceptance criteria</h2>
 <ul>
 <li>Missing, incomplete, empty-denominator, or expired required sources never
@@ -1948,6 +2038,10 @@ semantics must not change.</p>
 <li>Duplicate installations never inflate the enrolled numerator.</li>
 <li>A non-platform operator cannot publish source authority.</li>
 <li>Revision replay and malformed or over-broad input fail closed.</li>
+<li>Connector credentials are source-scoped, digest-only at rest, returned once,
+  revocable, and rejected on every mismatched route.</li>
+<li>Partial generations, missing pages, altered hashes, duplicate cross-page
+  identities and concurrent source revisions never change the active source.</li>
 <li>Raw paths and observation contents do not appear in publication audit events.</li>
 <li>UI tests render complete coverage and unavailable coverage as distinct states.</li>
 </ul>
