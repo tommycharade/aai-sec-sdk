@@ -101,6 +101,26 @@ _AGENT_REPLACEMENT_GROUP_LIMIT = 97
 # so one browser request cannot create unbounded DynamoDB work or audit data.
 _GROUP_MEMBERSHIP_BATCH_LIMIT = 100
 
+# Dynamic group rules select policy authority from server-owned inventory. The
+# first production-shaped contract deliberately supports a small conjunction
+# over stable attributes; free-form expressions, regex and browser-supplied
+# posture are excluded because they are difficult to bound and audit.
+_DYNAMIC_GROUP_FIELDS = frozenset(
+    {
+        "criticality",
+        "deploymentId",
+        "environment",
+        "host",
+        "projectId",
+        "region",
+        "team",
+    }
+)
+_DYNAMIC_GROUP_OPERATORS = frozenset({"equals_any", "not_equals_any"})
+_DYNAMIC_GROUP_CONDITION_LIMIT = 7
+_DYNAMIC_GROUP_VALUE_LIMIT = 20
+_DYNAMIC_GROUP_MEMBER_LIMIT = 500
+
 # Ownership is operational authority metadata, not a browser label. New
 # identities must carry a reviewed accountable owner and all reviews expire on
 # a fixed bounded cadence so abandoned agents cannot remain silently trusted.
@@ -3335,6 +3355,299 @@ def _group_agent_keys(group):
     return sorted(keys)
 
 
+def _group_membership_mode(group):
+    """Return the stored membership authority mode or fail closed."""
+    mode = group.get("membership_mode", "manual")
+    if mode not in {"manual", "dynamic"}:
+        raise PolicyConflict("group membership mode is malformed")
+    return mode
+
+
+def _dynamic_group_rule(raw_rule):
+    """Normalize one closed, deterministic rule over trusted inventory fields."""
+    if not isinstance(raw_rule, dict) or set(raw_rule) != {"match", "conditions"}:
+        raise ValueError("dynamic group rule schema is invalid")
+    if raw_rule.get("match") != "all":
+        raise ValueError("dynamic group rules currently require match=all")
+    raw_conditions = raw_rule.get("conditions")
+    if (
+        not isinstance(raw_conditions, list)
+        or not 1 <= len(raw_conditions) <= _DYNAMIC_GROUP_CONDITION_LIMIT
+    ):
+        raise ValueError(
+            f"dynamic group conditions must contain 1 to {_DYNAMIC_GROUP_CONDITION_LIMIT} entries"
+        )
+    conditions = []
+    seen_fields = set()
+    for raw_condition in raw_conditions:
+        if not isinstance(raw_condition, dict) or set(raw_condition) != {
+            "field",
+            "operator",
+            "values",
+        }:
+            raise ValueError("dynamic group condition schema is invalid")
+        field = raw_condition.get("field")
+        operator = raw_condition.get("operator")
+        if field not in _DYNAMIC_GROUP_FIELDS:
+            raise ValueError("dynamic group condition field is unsupported")
+        if field in seen_fields:
+            raise ValueError("dynamic group condition fields must be unique")
+        if operator not in _DYNAMIC_GROUP_OPERATORS:
+            raise ValueError("dynamic group condition operator is unsupported")
+        raw_values = raw_condition.get("values")
+        if (
+            not isinstance(raw_values, list)
+            or not 1 <= len(raw_values) <= _DYNAMIC_GROUP_VALUE_LIMIT
+        ):
+            raise ValueError(
+                f"dynamic group condition values must contain 1 to {_DYNAMIC_GROUP_VALUE_LIMIT} entries"
+            )
+        values = sorted({_bounded_text(value, "dynamic group value", 128) for value in raw_values})
+        if len(values) != len(raw_values):
+            raise ValueError("dynamic group condition values must be unique")
+        seen_fields.add(field)
+        conditions.append({"field": field, "operator": operator, "values": values})
+    return {"match": "all", "conditions": sorted(conditions, key=lambda item: item["field"])}
+
+
+def _dynamic_group_request(body):
+    """Validate one preview/apply request without accepting caller authority."""
+    if not isinstance(body, dict) or set(body) != {
+        "mode",
+        "requestId",
+        "expectedMembershipRevision",
+        "rule",
+        "reason",
+    }:
+        raise ValueError("dynamic group request schema is invalid")
+    mode = body.get("mode")
+    if mode not in {"preview", "apply"}:
+        raise ValueError("mode must be preview or apply")
+    request_id = _bounded_identifier(body.get("requestId"), "requestId")
+    expected = _positive_membership_revision(body.get("expectedMembershipRevision"))
+    reason = _bounded_text(body.get("reason"), "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("reason must contain at least 20 characters")
+    return mode, request_id, expected, _dynamic_group_rule(body.get("rule")), reason
+
+
+def _dynamic_agent_attributes(agent, deployment):
+    """Project only stable server-owned values used by dynamic membership."""
+    ownership = agent.get("ownership")
+    criticality = ownership.get("criticality") if isinstance(ownership, dict) else None
+    return {
+        "criticality": criticality,
+        "deploymentId": deployment.get("id"),
+        "environment": deployment.get("environment"),
+        "host": agent.get("host"),
+        "projectId": deployment.get("project_id"),
+        "region": deployment.get("region"),
+        "team": deployment.get("team"),
+    }
+
+
+def _dynamic_rule_matches(rule, attributes):
+    """Evaluate a canonical conjunction; missing attributes never match."""
+    for condition in rule["conditions"]:
+        value = attributes.get(condition["field"])
+        if not isinstance(value, str) or not value:
+            return False
+        included = value in condition["values"]
+        if condition["operator"] == "equals_any" and not included:
+            return False
+        if condition["operator"] == "not_equals_any" and included:
+            return False
+    return True
+
+
+def _dynamic_membership_evaluation(tenant, group, rule):
+    """Derive desired membership and overlap conflicts from consistent state."""
+    group_id = group.get("id")
+    organization_id = group.get("organizationId") or group.get("organization_id")
+    if not group_id or not organization_id:
+        raise PolicyConflict("group organization ownership is missing")
+    deployments = {
+        item.get("id"): item for item in _list(tenant, "DEPLOYMENT", consistent_read=True)
+    }
+    all_groups = _list(tenant, "GROUP", consistent_read=True)
+    memberships = {}
+    for candidate_group in all_groups:
+        candidate_id = candidate_group.get("id")
+        if not candidate_id:
+            raise PolicyConflict("group membership record is malformed")
+        for key in _group_agent_keys(candidate_group):
+            memberships.setdefault(key, set()).add(candidate_id)
+    desired = []
+    conflicts = []
+    # Apply-time authority must be derived from strongly consistent inventory;
+    # eventual reads could otherwise retain or grant policy access after an
+    # administrator changed a trusted deployment or agent attribute.
+    for agent in _all_agents(tenant, consistent_read=True):
+        if _agent_lifecycle_state(agent) != "active":
+            continue
+        if (agent.get("organization_id") or agent.get("organizationId")) != organization_id:
+            continue
+        deployment_id = agent.get("deployment_id")
+        agent_id = agent.get("id")
+        deployment = deployments.get(deployment_id)
+        if not deployment or not agent_id:
+            raise PolicyConflict("dynamic group inventory lineage is incomplete")
+        if (
+            deployment.get("organization_id") or deployment.get("organizationId")
+        ) != organization_id:
+            raise PolicyConflict("dynamic group inventory lineage conflicts")
+        if not _dynamic_rule_matches(rule, _dynamic_agent_attributes(agent, deployment)):
+            continue
+        key = f"{deployment_id}:{agent_id}"
+        other_groups = sorted(memberships.get(key, set()) - {group_id})
+        reference = {"deploymentId": deployment_id, "agentId": agent_id}
+        if other_groups:
+            conflicts.append({**reference, "groupIds": other_groups})
+        else:
+            desired.append(key)
+    if len(desired) + len(conflicts) > _DYNAMIC_GROUP_MEMBER_LIMIT:
+        raise PolicyConflict("dynamic group candidate set exceeds the supported limit")
+    return sorted(desired), sorted(
+        conflicts, key=lambda item: (item["deploymentId"], item["agentId"])
+    )
+
+
+def _agent_references(keys):
+    """Convert validated internal membership keys into content-minimised references."""
+    return [
+        {"deploymentId": deployment_id, "agentId": agent_id}
+        for deployment_id, agent_id in (key.split(":", 1) for key in sorted(keys))
+    ]
+
+
+def _configure_dynamic_group(tenant, group_id, body, actor):
+    """Preview or atomically materialize one deterministic dynamic group rule."""
+    mode, request_id, expected, rule, reason = _dynamic_group_request(body)
+    canonical_rule = json.dumps(rule, sort_keys=True, separators=(",", ":"))
+    rule_hash = hashlib.sha256(canonical_rule.encode()).hexdigest()
+    semantic_request = {
+        "actor": actor,
+        "expectedMembershipRevision": expected,
+        "groupId": group_id,
+        "reason": reason,
+        "rule": rule,
+    }
+    request_hash = hashlib.sha256(
+        json.dumps(semantic_request, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    operation_key = _item_key(tenant, "DYNAMIC_GROUP_OPERATION", request_id)
+    if mode == "apply":
+        existing = TABLE.get_item(Key=operation_key, ConsistentRead=True).get("Item")
+        if existing:
+            if not secrets.compare_digest(str(existing.get("request_hash", "")), request_hash):
+                raise PolicyConflict("requestId is already bound to a different dynamic rule")
+            response = existing.get("response")
+            if not isinstance(response, dict):
+                raise PolicyConflict("stored dynamic group result is malformed")
+            return {**response, "replayed": True}
+    group = TABLE.get_item(Key=_item_key(tenant, "GROUP", group_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not group:
+        raise LookupError("group not found")
+    current_revision = _group_membership_revision(group)
+    if current_revision != expected:
+        raise PolicyConflict("group membership revision is stale")
+    current_keys = _group_agent_keys(group)
+    desired_keys, conflicts = _dynamic_membership_evaluation(tenant, group, rule)
+    additions = sorted(set(desired_keys) - set(current_keys))
+    removals = sorted(set(current_keys) - set(desired_keys))
+    unchanged = sorted(set(current_keys) & set(desired_keys))
+    previous_rule_hash = str(group.get("dynamic_rule_hash", ""))
+    changed = (
+        _group_membership_mode(group) != "dynamic"
+        or previous_rule_hash != rule_hash
+        or current_keys != desired_keys
+    )
+    can_apply = not conflicts and changed
+    next_revision = current_revision + 1 if mode == "apply" and changed else current_revision
+    response = {
+        "groupId": group_id,
+        "requestId": request_id,
+        "mode": mode,
+        "membershipRevision": current_revision,
+        "resultingMembershipRevision": next_revision,
+        "rule": rule,
+        "ruleHash": rule_hash,
+        "counts": {
+            "matched": len(desired_keys) + len(conflicts),
+            "additions": len(additions),
+            "removals": len(removals),
+            "unchanged": len(unchanged),
+            "conflicts": len(conflicts),
+        },
+        "additions": _agent_references(additions),
+        "removals": _agent_references(removals),
+        "unchanged": _agent_references(unchanged),
+        "conflicts": conflicts,
+        "canApply": mode == "preview" and can_apply,
+        "replayed": False,
+    }
+    if mode == "preview":
+        return response
+    if conflicts:
+        raise PolicyConflict("dynamic group rule overlaps another policy group")
+    now = int(time.time())
+    audit_payload = {
+        "request_id": request_id,
+        "request_hash": request_hash,
+        "group_id": group_id,
+        "rule_hash": rule_hash,
+        "membership_revision_before": current_revision,
+        "membership_revision_after": next_revision,
+        "matched_count": len(desired_keys),
+        "addition_count": len(additions),
+        "removal_count": len(removals),
+        "unchanged_count": len(unchanged),
+        "reason": reason,
+    }
+    audit = _membership_audit_record(
+        tenant, "dynamic_group_membership_applied", actor, audit_payload, now=now
+    )
+    operation = {
+        **operation_key,
+        "id": request_id,
+        "group_id": group_id,
+        "actor": actor,
+        "request_hash": request_hash,
+        "created_at": now,
+        "response": response,
+    }
+    operations = []
+    if changed:
+        updated = {
+            **group,
+            "agent_keys": desired_keys,
+            "membership_revision": next_revision,
+            "membership_mode": "dynamic",
+            "dynamic_rule": rule,
+            "dynamic_rule_hash": rule_hash,
+            "dynamic_last_evaluated_at": now,
+            "dynamic_last_evaluated_by": actor,
+        }
+        if "membership_revision" in group:
+            condition = "agent_keys = :agent_keys AND membership_revision = :membership_revision"
+            values = {":agent_keys": current_keys, ":membership_revision": current_revision}
+        else:
+            condition = "agent_keys = :agent_keys AND attribute_not_exists(membership_revision)"
+            values = {":agent_keys": current_keys}
+        operations.append(_transaction_put(updated, condition=condition, values=values))
+    operations.extend(
+        [
+            _transaction_put(operation, condition="attribute_not_exists(pk)"),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _transact_group_membership(operations)
+    _export_group_membership_audit(tenant, "dynamic_group_membership_applied", actor, audit_payload)
+    return response
+
+
 def _membership_request(body):
     """Validate and normalize one closed-schema bulk assignment request."""
     if not isinstance(body, dict) or set(body) != {
@@ -3552,6 +3865,8 @@ def _bulk_assign_group_membership(
     )
     if not group:
         raise LookupError("group not found")
+    if _group_membership_mode(group) == "dynamic":
+        raise PolicyConflict("dynamic group membership can only change by rule reevaluation")
     current_revision = _group_membership_revision(group)
     if current_revision != expected:
         raise PolicyConflict("group membership revision is stale")
@@ -3655,6 +3970,8 @@ def _remove_group_member(tenant, group_id, agent_key, actor):
     )
     if not group:
         raise LookupError("group not found")
+    if _group_membership_mode(group) == "dynamic":
+        raise PolicyConflict("dynamic group membership can only change by rule reevaluation")
     current_keys = _group_agent_keys(group)
     if agent_key not in current_keys:
         return group
@@ -4100,8 +4417,9 @@ def _seed(tenant):
     _audit(tenant, "bootstrap_seeded", "system", {"deployment_id": "deployment-claude-local"})
 
 
-def _all_agents(tenant):
-    agents = _list(tenant, "AGENT")
+def _all_agents(tenant, *, consistent_read=False):
+    """Return agent inventory with derived posture and optional strong reads."""
+    agents = _list(tenant, "AGENT", consistent_read=consistent_read)
     now = int(time.time())
     for agent in agents:
         if _agent_lifecycle_state(agent) != "active":
@@ -4122,6 +4440,11 @@ def _fleet(tenant):
     groups = []
     for group in _list(tenant, "GROUP"):
         group["membershipRevision"] = _group_membership_revision(group)
+        group["membershipMode"] = _group_membership_mode(group)
+        group["dynamicRule"] = group.get("dynamic_rule")
+        group["dynamicRuleHash"] = group.get("dynamic_rule_hash")
+        group["dynamicLastEvaluatedAt"] = group.get("dynamic_last_evaluated_at")
+        group["dynamicLastEvaluatedBy"] = group.get("dynamic_last_evaluated_by")
         group["agents"] = [
             a for a in agents if f"{a['deployment_id']}:{a['id']}" in group.get("agent_keys", [])
         ]
@@ -6071,6 +6394,7 @@ def handler(event, context):
                             "createdAt": int(time.time()),
                             "agent_keys": [],
                             "membership_revision": 1,
+                            "membership_mode": "manual",
                         },
                     )
                 except Exception as error:
@@ -6137,6 +6461,19 @@ def handler(event, context):
                 return _response(
                     200, next(g for g in _fleet(tenant)["groups"] if g["id"] == parts[1])
                 )
+            if (
+                method == "POST"
+                and len(parts) == 3
+                and parts[0] == "groups"
+                and parts[2] == "dynamic-membership"
+            ):
+                result = _configure_dynamic_group(
+                    tenant,
+                    _bounded_identifier(parts[1], "groupId"),
+                    _body(event),
+                    actor,
+                )
+                return _response(200, result)
             if (
                 method == "POST"
                 and len(parts) == 4

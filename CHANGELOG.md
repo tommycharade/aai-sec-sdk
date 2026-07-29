@@ -1,5 +1,13 @@
 # Changelog
 
+- Added trusted dynamic policy groups. Operators author bounded typed rules over
+  server-owned host, project, deployment, team, environment, region and reviewed
+  criticality fields, then preview exact additions, removals and overlaps before
+  applying. The control plane uses strong reads, optimistic revisions,
+  deterministic canonicalization, exact-request idempotency and an atomic
+  membership/rule/audit transaction. Overlap and manual mutation of dynamic
+  groups fail closed. The responsive UI presents a human-readable rule builder,
+  contextual help, removal warnings and an application receipt.
 - Added enterprise bulk policy-group assignment for up to 100 active agents.
   Operators now select agents, provide an audit rationale, preview live
   eligibility, and apply through an optimistic membership revision. The AWS

@@ -90,6 +90,15 @@ multiple assigned groups resolve to different policies. The response contains
 configuration data only; the deployment must translate it into typed SDK
 objects and keep immutable SDK safeguards in force.
 
+Group assignment has two explicit operating models. Manual groups use a
+revision-bound preview/apply batch. Dynamic groups use a typed conjunction over
+trusted deployment and agent inventory: an operator previews the exact
+authority change, resolves overlap, and applies the same request. The control
+plane materializes membership, so Claude Code and Codex retrieve one ordinary
+effective policy; host integrations do not evaluate browser rules and cannot
+nominate their own attributes. See
+[Dynamic policy groups](dynamic-groups-design.md).
+
 ## Claude Code
 
 ### Enforcement surfaces
