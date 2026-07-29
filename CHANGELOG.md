@@ -1,5 +1,14 @@
 # Changelog
 
+- Added content-minimised runtime attestation for Claude Code and Codex CLI.
+  Authenticated heartbeats now use one-time challenges and can prove approved
+  SDK, gateway, native-hook and source artifacts while binding project config,
+  executable and launch context at enrollment. The AWS control plane validates
+  deployment-owned manifests, rejects stale/replayed or changed evidence,
+  quarantines mismatched agents, revokes their sessions and blocks governed
+  policy/decision/approval routes. The checked-in manifest bundle remains
+  explicitly empty and `not_configured` until an operator pins independently
+  verified release manifests.
 - Added tenant-bound Microsoft Entra SCIM 2.0 lifecycle provisioning for users,
   groups and memberships. Platform administrators can map exact directory
   groups to canonical roles in the Identity & Trust UI; Cognito token issuance

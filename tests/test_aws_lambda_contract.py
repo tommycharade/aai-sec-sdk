@@ -48,6 +48,23 @@ class FakeTable:
         item = self.items.get(key)
         if item is None:
             raise ConditionalFailure()
+        if ":nonce" in ExpressionAttributeValues and ":expires" in ExpressionAttributeValues:
+            if item.get("expires_at", 0) <= ExpressionAttributeValues[":now"]:
+                raise ConditionalFailure()
+            item["attestation_nonce"] = ExpressionAttributeValues[":nonce"]
+            item["attestation_nonce_expires_at"] = ExpressionAttributeValues[":expires"]
+            self.items[key] = item
+            return {"Attributes": dict(item)}
+        if ":nonce" in ExpressionAttributeValues and ":expires" not in ExpressionAttributeValues:
+            if (
+                item.get("attestation_nonce") != ExpressionAttributeValues[":nonce"]
+                or item.get("attestation_nonce_expires_at", 0) <= ExpressionAttributeValues[":now"]
+            ):
+                raise ConditionalFailure()
+            item.pop("attestation_nonce", None)
+            item.pop("attestation_nonce_expires_at", None)
+            self.items[key] = item
+            return {"Attributes": dict(item)}
         if ":project_root" in ExpressionAttributeValues:
             if item.get("project_root") not in (None, ""):
                 raise ConditionalFailure()
@@ -202,6 +219,39 @@ def _event(
 def _invoke(module: Any, event: dict[str, Any]) -> dict[str, Any]:
     """Invoke the Lambda with the context value unused by this handler."""
     return cast(dict[str, Any], module.handler(event, None))
+
+
+def _runtime_manifest(host: str = "claude-code") -> dict[str, Any]:
+    """Return one synthetic deployment-owned approved runtime manifest."""
+    return {
+        "schemaVersion": 1,
+        "sdkVersion": "1.1.0",
+        "sdkRevision": "a" * 40,
+        "sourceOriginDigest": "b" * 64,
+        "packageDigest": "c" * 64,
+        "gatewayDigest": "d" * 64,
+        "hookDigest": "e" * 64,
+        "host": host,
+    }
+
+
+def _runtime_evidence(
+    nonce: str,
+    *,
+    observed_at: int,
+    host: str = "claude-code",
+    configuration_digest: str = "f" * 64,
+) -> dict[str, Any]:
+    """Return synthetic content-minimised evidence for one challenge."""
+    return {
+        **_runtime_manifest(host),
+        "configurationDigest": configuration_digest,
+        "executableDigest": "1" * 64,
+        "launchContextDigest": "2" * 64,
+        "projectRootDigest": hashlib.sha256(b"/synthetic/project").hexdigest(),
+        "observedAt": observed_at,
+        "nonce": nonce,
+    }
 
 
 @pytest.mark.parametrize(
@@ -919,6 +969,282 @@ def test_agent_enrollment_is_one_time_and_identity_bound(monkeypatch: Any) -> No
     assert wrong_identity["statusCode"] == 403
 
 
+def test_runtime_attestation_binds_heartbeat_and_quarantines_tampering(
+    monkeypatch: Any,
+) -> None:
+    """Only fresh exact runtime evidence can establish and retain agent readiness."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    monkeypatch.setenv(
+        "RUNTIME_ATTESTATION_MANIFESTS",
+        json.dumps([_runtime_manifest()]),
+    )
+    tenant = "tenant-attestation"
+    token = "synthetic-attested-agent-session-123456"  # noqa: S105
+    project_digest = hashlib.sha256(b"/synthetic/project").hexdigest()
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant, "status": "active"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {
+            "id": "dep-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "sdk_version": "1.1.0",
+        }
+    )
+    agent = module._item_key(tenant, "AGENT", "dep-a:agent-a") | {
+        "id": "agent-a",
+        "deployment_id": "dep-a",
+        "host": "claude-code",
+        "project_root": "/synthetic/project",
+        "status": "offline",
+        "expires_at": 0,
+        "emergencyStop": False,
+    }
+    table.put_item(Item=agent)
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", token),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "project_root_hash": project_digest,
+            "issued_at": now,
+            "expires_at": now + 900,
+            "ttl": now + 900,
+        }
+    )
+    policy = module._item_key(tenant, "POLICY", "policy-a") | {
+        "id": "policy-a",
+        "version": 1,
+        "configuration": {"runtime": {"allowedTools": ["read_repository"]}},
+    }
+    group = module._item_key(tenant, "GROUP", "group-a") | {
+        "id": "group-a",
+        "policyId": "policy-a",
+        "agent_keys": ["dep-a:agent-a"],
+    }
+    table.put_item(Item=policy)
+    table.put_item(Item=group)
+
+    challenge = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/attestation/challenge",
+            "POST",
+            token=token,
+        ),
+    )
+    assert challenge["statusCode"] == 200
+    nonce = json.loads(challenge["body"])["nonce"]
+    heartbeat = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/heartbeat",
+            "POST",
+            token=token,
+            body={"attestation": _runtime_evidence(nonce, observed_at=now)},
+        ),
+    )
+    assert heartbeat["statusCode"] == 200
+    stored = table.items[(f"TENANT#{tenant}", "AGENT#dep-a:agent-a")]
+    assert stored["status"] == "connected"
+    assert stored["attestation_status"] == "compliant"
+    assert stored["attestation_expires_at"] == now + 300
+    assert "configurationDigest" not in stored
+
+    claims = {"custom:tenant_id": tenant, "cognito:groups": ["auditor"], "sub": "auditor"}
+    verified = json.loads(
+        _invoke(
+            module,
+            _event("/enterprise/agents/dep-a/agent-a/verify", "GET", claims=claims),
+        )["body"]
+    )
+    assert verified["verified"] is True
+    assert verified["checks"]["runtimeAttestation"]["passed"] is True
+    effective = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/effective-policy", "GET", token=token),
+    )
+    assert effective["statusCode"] == 200
+
+    second_challenge = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/agent/dep-a/agent-a/attestation/challenge",
+                "POST",
+                token=token,
+            ),
+        )["body"]
+    )["nonce"]
+    tampered = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/heartbeat",
+            "POST",
+            token=token,
+            body={
+                "attestation": _runtime_evidence(
+                    second_challenge,
+                    observed_at=now,
+                    configuration_digest="9" * 64,
+                )
+            },
+        ),
+    )
+    assert tampered["statusCode"] == 403
+    assert "enrollment_baseline_mismatch" in json.loads(tampered["body"])["error"]
+    quarantined = table.items[(f"TENANT#{tenant}", "AGENT#dep-a:agent-a")]
+    assert quarantined["status"] == "quarantined"
+    assert quarantined["attestation_reason_codes"] == ["enrollment_baseline_mismatch"]
+    assert (
+        module._token_key("AGENT_SESSION", token),
+        "SESSION",
+    ) not in table.items
+    denied = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/effective-policy", "GET", token=token),
+    )
+    assert denied["statusCode"] == 403
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    [
+        ({}, "evidence_schema_invalid"),
+        ({"observedAt": 1_800_000_000}, "evidence_stale"),
+        ({"nonce": "wrong-runtime-attestation-challenge-value"}, "challenge_invalid"),
+        ({"packageDigest": "9" * 64}, "packageDigest_mismatch"),
+    ],
+)
+def test_runtime_attestation_rejects_missing_stale_replayed_and_modified_evidence(
+    monkeypatch: Any,
+    mutation: dict[str, Any],
+    reason: str,
+) -> None:
+    """Every bypass class revokes the session and emits a bounded reason code."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", json.dumps([_runtime_manifest()]))
+    tenant = "tenant-negative-attestation"
+    token = "synthetic-negative-attestation-token-123456"  # noqa: S105
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {"id": "dep-a", "sdk_version": "1.1.0"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "project_root": "/synthetic/project",
+            "status": "offline",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", token),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "project_root_hash": hashlib.sha256(b"/synthetic/project").hexdigest(),
+            "expires_at": now + 900,
+        }
+    )
+    challenge = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/agent/dep-a/agent-a/attestation/challenge",
+                "POST",
+                token=token,
+            ),
+        )["body"]
+    )["nonce"]
+    evidence = _runtime_evidence(challenge, observed_at=now)
+    evidence.update(mutation)
+    if mutation == {}:
+        evidence = {}
+    result = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/heartbeat",
+            "POST",
+            token=token,
+            body={"attestation": evidence},
+        ),
+    )
+    assert result["statusCode"] == 403
+    assert reason in json.loads(result["body"])["error"]
+
+
+def test_runtime_attestation_rejects_host_version_missing_from_configured_bundle(
+    monkeypatch: Any,
+) -> None:
+    """A configured trust bundle cannot silently fall back for an unapproved release."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", json.dumps([_runtime_manifest()]))
+    tenant = "tenant-unapproved-version"
+    token = "synthetic-unapproved-attestation-token-123456"  # noqa: S105
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {"id": "dep-a", "sdk_version": "9.9.9"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "project_root": "/synthetic/project",
+            "status": "offline",
+        }
+    )
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", token),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "project_root_hash": hashlib.sha256(b"/synthetic/project").hexdigest(),
+            "expires_at": now + 900,
+        }
+    )
+
+    challenge = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/attestation/challenge",
+            "POST",
+            token=token,
+        ),
+    )
+    assert json.loads(challenge["body"])["required"] is True
+    heartbeat = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/heartbeat",
+            "POST",
+            token=token,
+            body={"attestation": _runtime_evidence("unused", observed_at=now)},
+        ),
+    )
+    assert heartbeat["statusCode"] == 403
+    assert "approved_manifest_missing" in json.loads(heartbeat["body"])["error"]
+    assert table.items[(f"TENANT#{tenant}", "AGENT#dep-a:agent-a")]["status"] == ("quarantined")
+
+
 def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visible(
     monkeypatch: Any,
 ) -> None:
@@ -1146,7 +1472,12 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
     module, table = _load_handler(monkeypatch)
     tenant = "tenant-verify"
     now = int(time.time())
+    monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", json.dumps([_runtime_manifest()]))
     table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {"id": "dep-a", "sdk_version": "1.1.0"}
+    )
     table.put_item(
         Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
         | {
@@ -1155,8 +1486,12 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
             "status": "connected",
             "expires_at": now + 300,
             "emergencyStop": False,
-            "host": "Claude Code",
+            "host": "claude-code",
             "project_root": "/synthetic/project",
+            "attestation_status": "compliant",
+            "attestation_observed_at": now,
+            "attestation_expires_at": now + 300,
+            "attestation_reason_codes": [],
         }
     )
     table.put_item(
@@ -1181,7 +1516,7 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
     payload = json.loads(verified["body"])
     assert payload["verified"] is True
     assert all(check["passed"] for check in payload["checks"].values())
-    assert payload["host"] == "Claude Code"
+    assert payload["host"] == "claude-code"
     assert payload["groups"] == ["group-a"]
     assert payload["policyId"] == "policy-a"
     assert payload["policyVersion"] == 1

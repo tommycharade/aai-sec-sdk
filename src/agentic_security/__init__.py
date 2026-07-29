@@ -148,6 +148,12 @@ from .isolation import (
 from .policies import AllowListPolicy, PolicyDecision, PolicyEngine, PolicyResult
 from .policy_adapters import CedarPolicyEngine, OpaPolicyEngine, PolicyRequest
 from .runtime import GuardedRuntime, RuntimeConfig
+from .runtime_attestation import (
+    RuntimeArtifactManifest,
+    RuntimeAttestationError,
+    RuntimeAttestationEvidence,
+    RuntimeAttestor,
+)
 from .telemetry import CompositeAuditSink, OpenTelemetryAuditSink
 from .tools import OutputValidator, ReconciliationHandler, ToolDefinition, ToolRegistry
 from .types import (
@@ -208,6 +214,10 @@ __all__ = [
     "AuditSink",
     "InMemoryAuditExporter",
     "ReplicatedAuditSink",
+    "RuntimeArtifactManifest",
+    "RuntimeAttestationError",
+    "RuntimeAttestationEvidence",
+    "RuntimeAttestor",
     "CompositeAuditSink",
     "CredentialBroker",
     "CredentialPreparation",

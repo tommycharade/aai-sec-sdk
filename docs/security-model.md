@@ -267,6 +267,25 @@ uses HTTPS outside explicitly permitted localhost development URLs and bounds
 responses; deployments must still provide TLS termination, token rotation,
 network policy, and monitoring.
 
+When a deployment-owned approved runtime manifest is configured, every
+heartbeat consumes a one-time control-plane challenge and carries fresh,
+content-minimised hashes for the SDK package, gateway, native hook, project
+configuration, executable, launch context, source revision and project scope.
+Invariant hashes must match the approved manifest; project-specific hashes are
+bound on first compliant enrollment. Missing, stale, replayed or changed
+evidence quarantines the agent, revokes its session and blocks policy,
+decision, and approval routes. Symbolic links, oversized files, unsafe Git
+metadata and measurement races fail closed on the host.
+
+An empty approved-manifest bundle is an explicit `not_configured` state, not a
+successful attestation. It preserves development compatibility but fails the
+operator verification check and must not be accepted for production rollout.
+Software measurement cannot defeat an administrator/root attacker able to
+replace the attestor or process memory. Hardware-backed endpoint/workload
+identity and endpoint management remain outside this SDK boundary and are
+required for a stronger device-integrity claim. See
+[Runtime attestation design](runtime-attestation-design.md).
+
 Host decision reports are a separate evidence boundary. A valid agent session
 authenticates which enrolled process sent a report, but does not make the report
 authoritative. The control plane accepts only a fixed decision vocabulary and a

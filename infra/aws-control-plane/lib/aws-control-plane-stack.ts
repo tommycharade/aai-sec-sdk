@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { createHash } from "node:crypto";
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
@@ -20,6 +21,62 @@ import * as sns from "aws-cdk-lib/aws-sns";
 import * as subscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as sqs from "aws-cdk-lib/aws-sqs";
 
+const runtimeManifestFields = new Set([
+  "schemaVersion",
+  "sdkVersion",
+  "sdkRevision",
+  "sourceOriginDigest",
+  "packageDigest",
+  "gatewayDigest",
+  "hookDigest",
+  "host",
+]);
+
+/** Fail synthesis before an invalid deployment-owned trust bundle can reach Lambda. */
+function validateRuntimeManifests(raw: string): void {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error("runtime-manifests.json must contain valid JSON");
+  }
+  if (!Array.isArray(value) || value.length > 32) {
+    throw new Error("runtime-manifests.json must contain at most 32 manifests");
+  }
+  const identities = new Set<string>();
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new Error("each runtime manifest must be an object");
+    }
+    const manifest = candidate as Record<string, unknown>;
+    const keys = Object.keys(manifest);
+    if (keys.length !== runtimeManifestFields.size || keys.some((key) => !runtimeManifestFields.has(key))) {
+      throw new Error("runtime manifest schema is invalid");
+    }
+    if (
+      manifest.schemaVersion !== 1
+      || (manifest.host !== "claude-code" && manifest.host !== "codex-cli")
+      || typeof manifest.sdkVersion !== "string"
+      || manifest.sdkVersion.length < 1
+      || manifest.sdkVersion.length > 64
+      || typeof manifest.sdkRevision !== "string"
+      || !/^[0-9a-f]{40}$/.test(manifest.sdkRevision)
+    ) {
+      throw new Error("runtime manifest identity is invalid");
+    }
+    for (const field of ["sourceOriginDigest", "packageDigest", "gatewayDigest", "hookDigest"]) {
+      if (typeof manifest[field] !== "string" || !/^[0-9a-f]{64}$/.test(manifest[field] as string)) {
+        throw new Error(`runtime manifest ${field} must be SHA-256`);
+      }
+    }
+    const identity = `${manifest.host}:${manifest.sdkVersion}`;
+    if (identities.has(identity)) {
+      throw new Error("runtime manifest host and SDK version must be unique");
+    }
+    identities.add(identity);
+  }
+}
+
 /** Initial production-shaped AWS boundary for the fleet management UI. */
 export class AwsControlPlaneStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -30,6 +87,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
     const entraClientSecretName = process.env.ENTRA_CLIENT_SECRET_NAME?.trim();
     const entraAaiTenantId = process.env.ENTRA_AAI_TENANT_ID?.trim();
     const entraScimTokenSecretName = process.env.ENTRA_SCIM_TOKEN_SECRET_NAME?.trim();
+    const runtimeManifestPath = path.join(__dirname, "../lambda/runtime-manifests.json");
+    const runtimeManifestBundle = fs.readFileSync(runtimeManifestPath, "utf8");
+    validateRuntimeManifests(runtimeManifestBundle);
+    const runtimeManifestCount = (JSON.parse(runtimeManifestBundle) as unknown[]).length;
+    const runtimeManifestDigest = createHash("sha256").update(runtimeManifestBundle).digest("hex");
     const entraInputs = [entraTenantId, entraClientId, entraClientSecretName, entraAaiTenantId];
     if (entraInputs.some(Boolean) && !entraInputs.every(Boolean)) {
       throw new Error(
@@ -343,6 +405,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
         SCIM_ENABLED: entraScimTokenSecretName ? "true" : "false",
         SCIM_TABLE: scim.tableName,
         SPLUNK_STUB_ENABLED: "true",
+        RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
       },
       tracing: lambda.Tracing.PASS_THROUGH,
     });
@@ -440,6 +503,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
       value: entraProvider ? "configured" : "not-configured",
     });
     new cdk.CfnOutput(this, "MicrosoftEntraScimStatus", { value: scimEndpointStatus });
+    new cdk.CfnOutput(this, "RuntimeAttestationStatus", {
+      value: runtimeManifestCount > 0 ? `configured:${runtimeManifestCount}` : "not-configured",
+    });
     if (scimEndpointStatus === "configured") {
       new cdk.CfnOutput(this, "MicrosoftEntraScimEndpoint", {
         value: `${api.apiEndpoint}/scim/v2`,
