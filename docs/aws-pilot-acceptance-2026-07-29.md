@@ -13,11 +13,11 @@ Codex has loaded and enforced it.
 | CloudFormation stack | `AaiSecControlPlane` — `UPDATE_COMPLETE` |
 | Hosted UI | `https://d2ir54klde64bd.cloudfront.net` |
 | API | `https://lwg33pxwk8.execute-api.eu-west-2.amazonaws.com` |
-| SDK deployed merge | `ef1b19260902f14c37c77e75e22cadf03cb35789` |
-| UI deployed merge | `6e45fbe2b6c585b753da51de54de48ad802cd959` |
-| Deployed UI JavaScript | `assets/index-s1dzxwjs.js` |
-| Deployed UI CSS | `assets/index-GjcLWlT8.css` |
-| CloudFront invalidation | `IC6IXRE64DTLLMLZ6Z88UCD1C0` — `Completed` |
+| SDK deployed merge | `37954425a3c5a989107971b094551e0a10fb5342` |
+| UI deployed merge | `e0bd94a001c72dedcfcb364ceea5115b6ee2baf7` |
+| Deployed UI JavaScript | `assets/index-DxR5xx_M.js` |
+| Deployed UI CSS | `assets/index-D_yH0ew4.css` |
+| CloudFront invalidation | `IDCBM8228C6CAQSWT1325U4QK6` — `Completed` |
 
 The deployed CloudFront index referenced the exact JavaScript and CSS build
 assets, both assets returned HTTP 200, and the deployment invalidation reached
@@ -118,6 +118,30 @@ advanced only for the successful member, while the missing agent remained a
 content-minimised rejection. Synthetic operational records were removed after
 the run; immutable audit evidence remains by design.
 
+## Trusted dynamic groups
+
+The merged Lambda was deployed after a CDK diff showed only the two expected
+Lambda code-package updates. CloudFormation reached `UPDATE_COMPLETE`. A live
+IAM-authorized acceptance exercise then created an isolated synthetic
+deployment, agent and policy group under the pilot tenant:
+
+| Assertion | Result |
+| --- | --- |
+| Preview exact deployment selector | HTTP 200; one match and one addition |
+| Preview persistence | Group remained manual at revision `1` with no members |
+| Apply the reviewed request | HTTP 200; dynamic group at revision `2` |
+| Materialized membership | Exact synthetic deployment/agent key only |
+| Manually remove the dynamic member | HTTP 409 |
+| Inspect durable operation evidence | Stored rule hash matched the response |
+
+The observed canonical SHA-256 rule hash was
+`1145d18178fa496cd03660c44dca667bcd268c0aec2ca2ab29c3d206996250a3`.
+The synthetic group, agent, deployment, idempotency result and its acceptance
+audit were deleted after verification. Contract tests separately prove
+overlap denial, stale revision denial, unsupported and duplicate-field denial,
+deterministic removal after a trusted attribute change, request collision
+denial and transaction-race rollback.
+
 ## Hosted UI and responsive workflow
 
 The deployed CloudFront landing page loaded the merged JavaScript and CSS
@@ -135,6 +159,16 @@ non-wrapping inspector action row, then observed document width and viewport
 width both equal to `390` with no horizontal overflow. This validates the
 rendered interaction and responsive containment, but it does not substitute
 for the pending authenticated Cognito role and cross-tenant exercise.
+
+The same merged UI build was subsequently exercised through the complete
+dynamic-group journey. The Groups table labelled membership mode, group detail
+offered **Automate membership**, and the modal exposed typed trusted field,
+operator, exact-value and rationale controls with keyboard-focusable contextual
+help. Preview showed matched/add/remove/conflict counts and a human-readable
+effective rule; apply reused the reviewed request and displayed the revisioned
+completion receipt. No browser console errors were observed. CloudFront served
+the new asset names above, and the deployed JavaScript contained the expected
+dynamic-membership controls.
 
 Runtime attestation was the sole failed positive-verification check and the
 deployed API explicitly returned `not_configured`. The harness continued only
