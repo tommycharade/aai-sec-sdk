@@ -53,8 +53,11 @@ service or run against untrusted repositories or user-supplied patterns.
 3. CloudFormation diff is reviewed before deployment.
 4. Production artifacts are built and audited independently of the CDK
    development package.
-5. Dependabot dismissal is scoped to this single advisory and links to this
-   record; other findings remain blocking.
+5. GitHub automatically marks Dependabot alert 1 as `auto_dismissed` because
+   the affected transitive package is development-scoped. The API does not
+   attach a manual dismissal rationale to that state, so this record and
+   tracking issue 34 provide the accountable decision trail. Other findings
+   remain blocking unless separately accepted.
 6. `.github/workflows/cdk-upstream-watch.yml` inspects the latest published CDK
    bundle every day. It deliberately fails when the patched bundle becomes
    available, making removal of the exception an operator action.
@@ -71,8 +74,8 @@ Close the exception only after all of the following are true:
 3. full `npm audit` reports no finding for this advisory;
 4. TypeScript build, CDK synthesis and CloudFormation diff succeed;
 5. SDK `make check` succeeds; and
-6. the Dependabot dismissal and this active exception are closed with the
-   upgrade commit recorded.
+6. Dependabot alert 1 is marked fixed by dependency-graph evidence, tracking
+   issue 34 is closed with the upgrade commit, and this exception is retired.
 
 If no fixed AWS package is available by 2026-08-28, the owner must explicitly
 renew the exception with new evidence or replace the CDK packaging strategy.
@@ -81,5 +84,6 @@ CI is intended to fail rather than silently extending the acceptance.
 ## References
 
 - [GitHub security advisory](https://github.com/advisories/GHSA-mh99-v99m-4gvg)
+- [Repository tracking issue 34](https://github.com/tommycharade/aai-sec-sdk/issues/34)
 - [AWS CDK upstream issue 38409](https://github.com/aws/aws-cdk/issues/38409)
 - [Merged AWS CDK fix 38410](https://github.com/aws/aws-cdk/pull/38410)
