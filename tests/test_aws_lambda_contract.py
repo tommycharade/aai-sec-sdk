@@ -2657,6 +2657,7 @@ def test_aws_managed_discovery_secret_tagging_is_least_privileged() -> None:
     assert "discoverySecretKey.grantDecrypt(new kms.ViaServicePrincipal(" in stack
     assert "`secretsmanager.${this.region}.amazonaws.com`" in stack
     assert "discoverySecretKey.grantDecrypt(handler);" not in stack
+    assert "arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME" in stack
 
 
 def test_aws_strong_authentication_assertion_is_server_owned() -> None:

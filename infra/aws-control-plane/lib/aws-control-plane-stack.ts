@@ -586,6 +586,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       service: "lambda",
       resource: "function",
       resourceName: discoveryCollectorFunctionName,
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
     });
     const discoveryCollector = new lambda.Function(this, "DiscoveryCollector", {
       functionName: discoveryCollectorFunctionName,
