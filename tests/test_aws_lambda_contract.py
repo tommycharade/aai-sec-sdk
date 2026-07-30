@@ -2654,6 +2654,9 @@ def test_aws_managed_discovery_secret_tagging_is_least_privileged() -> None:
     assert 'Null: { "aws:RequestTag/aai-sec:tenant-id": "false" }' in stack
     assert '"aws:TagKeys": ["aai-sec:tenant-id", "aai-sec:purpose"]' in stack
     assert 'actions: ["secretsmanager:DeleteSecret"]' in stack
+    assert "discoverySecretKey.grantDecrypt(new kms.ViaServicePrincipal(" in stack
+    assert "`secretsmanager.${this.region}.amazonaws.com`" in stack
+    assert "discoverySecretKey.grantDecrypt(handler);" not in stack
 
 
 def test_aws_strong_authentication_assertion_is_server_owned() -> None:

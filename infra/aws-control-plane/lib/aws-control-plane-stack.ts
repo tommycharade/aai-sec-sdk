@@ -669,9 +669,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
       actions: ["secretsmanager:DeleteSecret"],
       resources: connectorSecretResources,
     }));
-    // CreateSecret needs data-key/encrypt authority. The control-plane handler
-    // deliberately receives no decrypt grant or GetSecretValue permission.
+    // Secrets Manager performs both data-key generation and a decrypt check
+    // when it creates a customer-key-encrypted secret. Bind decrypt to calls
+    // routed through Secrets Manager; the handler deliberately has no
+    // GetSecretValue permission and therefore cannot retrieve secret bytes.
     discoverySecretKey.grantEncrypt(handler);
+    discoverySecretKey.grantDecrypt(new kms.ViaServicePrincipal(
+      `secretsmanager.${this.region}.amazonaws.com`,
+      handler.grantPrincipal,
+    ));
     handler.addToRolePolicy(new iam.PolicyStatement({
       actions: [
         "scheduler:CreateSchedule",
