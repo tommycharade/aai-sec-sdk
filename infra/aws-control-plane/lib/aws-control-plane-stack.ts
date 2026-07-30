@@ -655,7 +655,18 @@ export class AwsControlPlaneStack extends cdk.Stack {
       },
     }));
     handler.addToRolePolicy(new iam.PolicyStatement({
-      actions: ["secretsmanager:CreateSecret", "secretsmanager:DeleteSecret"],
+      actions: ["secretsmanager:CreateSecret", "secretsmanager:TagResource"],
+      resources: connectorSecretResources,
+      conditions: {
+        StringEquals: { "aws:RequestTag/aai-sec:purpose": "discovery-connector" },
+        Null: { "aws:RequestTag/aai-sec:tenant-id": "false" },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": ["aai-sec:tenant-id", "aai-sec:purpose"],
+        },
+      },
+    }));
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["secretsmanager:DeleteSecret"],
       resources: connectorSecretResources,
     }));
     // CreateSecret needs data-key/encrypt authority. The control-plane handler

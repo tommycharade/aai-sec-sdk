@@ -2644,6 +2644,18 @@ def test_aws_policy_governance_deployment_grants_transaction_authority() -> None
     assert 'table.grant(handler, "dynamodb:TransactWriteItems")' in stack
 
 
+def test_aws_managed_discovery_secret_tagging_is_least_privileged() -> None:
+    """Connector creation may attach only the two required discovery tags."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    assert 'actions: ["secretsmanager:CreateSecret", "secretsmanager:TagResource"]' in stack
+    assert '"aws:RequestTag/aai-sec:purpose": "discovery-connector"' in stack
+    assert 'Null: { "aws:RequestTag/aai-sec:tenant-id": "false" }' in stack
+    assert '"aws:TagKeys": ["aai-sec:tenant-id", "aai-sec:purpose"]' in stack
+    assert 'actions: ["secretsmanager:DeleteSecret"]' in stack
+
+
 def test_aws_strong_authentication_assertion_is_server_owned() -> None:
     """Emergency MFA posture must not be derived from a mutable user attribute."""
     stack = (
