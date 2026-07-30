@@ -1180,6 +1180,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../discovery-source-management-acceptance-2026-07-30/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Discovery source management acceptance — 2026-07-30
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../entra-scim-runbook/" class="md-nav__link">
         
   
@@ -1946,13 +1973,13 @@ observations, and stale revisions. The response excludes observations. Audit
 evidence records only source metadata, count, revision, and hash.</p>
 <p>Production-shaped ingestion uses a source-scoped credential and three phases:</p>
 <ol>
-<li><code>POST /api/discovery-ingest/{tenantId}/{sourceId}/generations</code> declares a
+<li><code>POST /discovery-ingest/{tenantId}/{sourceId}/generations</code> declares a
    generation, its expected source revision, observation/expiry times and a
    page count from 1 to 20.</li>
-<li><code>PUT /api/discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/pages/{pageNumber}</code>
+<li><code>PUT /discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/pages/{pageNumber}</code>
    uploads one immutable page containing 1 to 100 normalized observations. The
    response returns the canonical page hash.</li>
-<li><code>POST /api/discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/commit</code>
+<li><code>POST /discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/commit</code>
    supplies the ordered hash of every declared page. The control plane strongly
    reads and validates every page, rejects cross-page duplicate identities, and
    atomically advances both the source revision and generation state.</li>
@@ -1961,8 +1988,17 @@ evidence records only source metadata, count, revision, and hash.</p>
 hash mismatches, duplicate observations, credential revocation, replay, or a
 concurrent source revision all fail closed. A committed generation supports up
 to 2,000 observations while retaining bounded Lambda and DynamoDB work.</p>
+<p>The deployed API Gateway deliberately exposes this connector-authenticated path
+without the operator <code>/api</code> prefix. Supplying <code>/api/discovery-ingest/...</code> enters
+the Cognito-protected operator route and is rejected. The reference publisher
+constructs the correct path from the API Gateway origin.</p>
 <p>Credential lifecycle is operator-owned:</p>
 <ul>
+<li><code>GET /api/enterprise/discovery/sources</code> lists the union of registered
+  credentials and committed snapshots for tenant operators. It returns only
+  source identity, credential lifecycle metadata, and redacted snapshot
+  freshness metadata; token digests, plaintext credentials, observations, and
+  raw provider data are excluded;</li>
 <li><code>POST /api/enterprise/discovery/sources/{sourceId}/connector-credential</code>
   creates or rotates a source credential using <code>sourceKind</code> and
   <code>expectedRevision</code>;</li>
@@ -1984,15 +2020,28 @@ identity at the gateway, scheduled connector operation, and proof that at least
 completeness and commit semantics must not change.</p>
 <h2 id="operator-journey">Operator journey</h2>
 <ol>
-<li>Deployment-owned connectors collect identity, endpoint, and repository
-   inventory and publish complete snapshots.</li>
-<li>The operator opens <strong>Coverage</strong> and first checks source confidence.</li>
+<li>A platform administrator opens <strong>Coverage → Inventory sources</strong>, registers
+   a stable source ID and saves the one-time publisher credential in the
+   approved secret manager. Registration does not create evidence or authority.</li>
+<li>A deployment-owned scheduled job uses the appropriate reference collector
+   and the source-scoped publisher to commit a complete generation.</li>
+<li>The operator verifies that credential state is <strong>Active</strong> and independently
+   verifies that evidence state is <strong>Current</strong>. Either state can fail without
+   being cosmetically upgraded by the other.</li>
+<li>The operator opens <strong>Coverage posture</strong> and first checks source confidence.</li>
 <li>If coverage is available, the operator reviews the denominator, unmanaged
    targets, duplicates, leavers, orphans, and business-unit breakdown.</li>
 <li>The operator connects a missing agent or opens the Agents workspace for
    lifecycle response.</li>
 <li>The operator exports the content-hashed report as assessment evidence.</li>
 </ol>
+<p>Rotation requires the current credential revision and invalidates the previous
+secret immediately. Revocation denies all subsequent ingestion while retaining
+the last committed snapshot until its declared expiry; the console states this
+impact before applying either change. The one-time credential exists only in
+the issuance response and transient browser component state. Closing the
+credential panel removes it from the rendered UI, and reloading cannot recover
+it.</p>
 <h2 id="reference-collector-workflow">Reference collector workflow</h2>
 <p>The repository includes provider-minimising reference collectors and an atomic
 publisher. They are separate so an operator can review normalized inventory
@@ -2040,6 +2089,9 @@ history substitution.</p>
 <li>Revision replay and malformed or over-broad input fail closed.</li>
 <li>Connector credentials are source-scoped, digest-only at rest, returned once,
   revocable, and rejected on every mismatched route.</li>
+<li>The operator source directory never returns credential material, token
+  digests, raw observations, or provider payloads, and is denied without a
+  tenant operator role.</li>
 <li>Partial generations, missing pages, altered hashes, duplicate cross-page
   identities and concurrent source revisions never change the active source.</li>
 <li>Raw paths and observation contents do not appear in publication audit events.</li>
