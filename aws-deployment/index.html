@@ -1408,10 +1408,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#aws-managed-microsoft-entra-discovery" class="md-nav__link">
+  <a href="#aws-managed-entra-and-github-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       
-        AWS-managed Microsoft Entra discovery
+        AWS-managed Entra and GitHub discovery
       
     </span>
   </a>
@@ -1877,10 +1877,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#aws-managed-microsoft-entra-discovery" class="md-nav__link">
+  <a href="#aws-managed-entra-and-github-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       
-        AWS-managed Microsoft Entra discovery
+        AWS-managed Entra and GitHub discovery
       
     </span>
   </a>
@@ -2153,7 +2153,7 @@ not enterprise SSO acceptance evidence.</p>
 <a href="../aws-pilot-acceptance-2026-07-29/">AWS pilot acceptance evidence</a>. Entra OIDC
 and SCIM are not configured in that environment, so the source contracts must
 not be presented as live federation acceptance.</p>
-<h2 id="aws-managed-microsoft-entra-discovery">AWS-managed Microsoft Entra discovery</h2>
+<h2 id="aws-managed-entra-and-github-discovery">AWS-managed Entra and GitHub discovery</h2>
 <p>After deployment, CloudFormation outputs <code>DiscoverySecretKmsKeyArn</code> and
 <code>DiscoveryProviderSecretNamePrefix</code>. A platform administrator can also obtain
 these non-secret values from <strong>Coverage → Inventory sources → Add source</strong>.
@@ -2164,6 +2164,13 @@ an exact JSON object:</p>
   &quot;tenantId&quot;: &quot;&lt;entra-directory-uuid&gt;&quot;,
   &quot;clientId&quot;: &quot;&lt;entra-application-uuid&gt;&quot;,
   &quot;clientSecret&quot;: &quot;&lt;secret&gt;&quot;
+}
+</code></pre>
+<p>For GitHub, use an organization-approved fine-grained token covering all
+repositories, with repository metadata read-only and no code-content,
+administration, Actions or write access. Store exactly:</p>
+<pre><code class="language-json">{
+  &quot;token&quot;: &quot;&lt;github-token&gt;&quot;
 }
 </code></pre>
 <p>Create the secret under
@@ -2179,7 +2186,11 @@ delayed EventBridge schedule; neither secret is returned to the browser or
 included in source-directory responses. The dedicated collector can read only
 the tagged provider/connector namespaces, contacts fixed Entra/Graph/API hosts,
 and publishes through the same atomic generation contract as an external
-collector.</p>
+collector. For GitHub, also enter the exact organization and a reviewed mapping
+from every active repository full name to a SHA-256 project-root digest and one
+or both expected hosts (<code>claude-code</code>, <code>codex-cli</code>). The UI supports typed rows
+and schema-checked JSON import. The saved read model exposes only organization
+and mapping count.</p>
 <p>Treat <strong>Scheduled</strong>, <strong>Healthy</strong> and <strong>Current evidence</strong> as distinct states.
 Only a successful collection plus atomic commit produces Current evidence.
 Disable revokes ingestion authority before schedule deletion. Investigate
@@ -2187,6 +2198,10 @@ Disable revokes ingestion authority before schedule deletion. Investigate
 <code>DiscoveryCollectorDlqArn</code>; follow
 <a href="../scheduled-discovery-connectors-design/">AWS-managed discovery connectors</a>
 for fixed failure codes and non-guarantees.</p>
+<p>Before production use, independently prove that the GitHub token can enumerate
+all repositories in the organization. The API cannot reveal a repository that
+the token itself is not permitted to see. Retain the permission review and an
+independent repository count as deployment evidence.</p>
 <p>The authenticated <code>GET /enterprise/identity</code> route returns redaction-safe
 provider status, tenant hint, active roles and the enforced role matrix. It
 never returns the OIDC client ID or secret. <code>GET /enterprise/integrations</code>
