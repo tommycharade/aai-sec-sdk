@@ -2,12 +2,11 @@
 
 ## Decision
 
-The first managed discovery provider is Microsoft Entra ID. The AWS control
-plane creates a tenant-scoped EventBridge Scheduler job that invokes a dedicated
-collector Lambda. The collector renews a Microsoft Graph application token from
-an AWS Secrets Manager client-credential secret, collects a bounded user
-inventory, and publishes it through the existing source-scoped atomic ingestion
-contract.
+The managed discovery providers are Microsoft Entra ID and GitHub. The AWS
+control plane creates a tenant-scoped EventBridge Scheduler job that invokes a
+dedicated collector Lambda. Entra produces the expected identity population;
+GitHub produces the expected Claude Code and Codex repository population. Both
+publish through the existing source-scoped atomic ingestion contract.
 
 This is intentionally separate from Entra operator SSO and SCIM. Those
 integrations authenticate and provision console operators. Discovery observes
@@ -21,9 +20,10 @@ collection would combine unrelated authority and make revocation unsafe.
 The browser submits only:
 
 - the stable source ID;
-- the provider enum `entra`;
+- the provider enum `entra` or `github`;
 - an interval from the closed set supported by the service;
 - the ARN of a deployment-owned provider secret; and
+- for GitHub only, a bounded typed repository-to-project mapping; and
 - optimistic-concurrency revisions.
 
 It never submits a client secret, Graph token, connector token, tenant override,
@@ -33,7 +33,7 @@ control plane derives every AWS target.
 
 ### Provider secret
 
-The provider secret contains exactly:
+An Entra provider secret contains exactly:
 
 ```json
 {
@@ -59,7 +59,11 @@ connector secret bytes.
 
 The Entra application receives only Microsoft Graph application permission
 `User.Read.All`, with tenant-admin consent and no directory write permission.
-Production onboarding must retain evidence of that permission review.
+A GitHub provider secret contains exactly `{"token":"<secret>"}`. Use an
+organization-approved fine-grained token covering every organization
+repository, with repository metadata read-only and no content, administration,
+Actions, or write permission. Production onboarding must retain evidence of
+the selected organization's permission and repository-access review.
 
 ### Connector credential
 
@@ -90,10 +94,21 @@ The Entra collector may contact only:
   continuation links; and
 - the deployment-owned HTTPS API Gateway origin for discovery ingestion.
 
+The GitHub collector may contact only `api.github.com` at the fixed
+`/orgs/{organization}/repos` endpoint and the same deployment-owned ingestion
+origin. The service supplies the API version, sort order, pagination and page
+size; browser input cannot change a hostname, path or query.
+
 Collection is bounded to 20 pages and 2,000 users, applies independent request
 timeouts, rejects duplicate or malformed identities, and retains only opaque
-object ID, active state, and optional department. Email, display name, token
-responses, and arbitrary Graph properties are not persisted.
+object ID, active state, and optional department. GitHub collection has the
+same 20-page and 2,000-observation limits. It rejects duplicate or malformed
+repository IDs and requires every visible active repository to have exactly one
+deployment-owned mapping and every configured repository to be visible.
+Archived, unmapped repositories are ignored. Only the numeric repository ID,
+project-root digest, expected hosts and optional business unit are published.
+Names remain transient mapping keys. Email, display name, repository name,
+provider token responses, and arbitrary provider properties are not persisted.
 
 The collector strongly reads the current source revision before publication.
 Partial upload pages remain invisible until the existing hash-bound atomic
@@ -105,7 +120,9 @@ One `DISCOVERY_JOB` record exists per managed source:
 
 | Field | Purpose |
 | --- | --- |
-| `provider` | Closed provider enum; initially `entra` |
+| `provider` | Closed provider enum: `entra` or `github` |
+| `providerConfiguration` | Canonical non-secret GitHub organization and repository map; absent for Entra |
+| `providerConfigurationDigest` | SHA-256 binding used by the schedule and collector |
 | `status` | `provisioning`, `scheduled`, `running`, `healthy`, `degraded`, or `disabled` |
 | `revision` | Optimistic-concurrency revision for operator changes |
 | `intervalMinutes` | Bounded service-defined cadence |
@@ -144,6 +161,34 @@ connector secret and schedule before conditionally committing authority. Any
 failed precondition removes the newly created external resources. A schedule
 cannot run before its delayed start time, so no job observes uncommitted state.
 
+GitHub uses the same route with a typed configuration:
+
+```json
+{
+  "provider": "github",
+  "intervalMinutes": 15,
+  "providerSecretArn": "arn:aws:secretsmanager:eu-west-2:123456789012:secret:aai-sec/discovery/providers/tenant-a/github-production-AbCdEf",
+  "providerConfiguration": {
+    "organization": "example-enterprise",
+    "repositories": [
+      {
+        "fullName": "example-enterprise/platform-api",
+        "projectRootDigest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "expectedHosts": ["claude-code", "codex-cli"],
+        "businessUnit": "Platform"
+      }
+    ]
+  },
+  "expectedJobRevision": 0,
+  "expectedCredentialRevision": 0
+}
+```
+
+The configuration permits at most 500 mappings. Unknown fields, unsafe slugs,
+raw project paths, duplicate repositories or digests, unsupported hosts and
+empty host sets fail closed. The response exposes only organization and mapping
+count, never repository names, project digests or secret references.
+
 ### Disable
 
 `DELETE /api/enterprise/discovery/sources/{sourceId}/managed-collector`
@@ -171,6 +216,7 @@ The collector records only fixed reason codes:
 - `provider_transport_failed`
 - `provider_response_invalid`
 - `provider_inventory_too_large`
+- `provider_mapping_incomplete`
 - `source_revision_conflict`
 - `ingestion_rejected`
 - `internal_error`
@@ -182,13 +228,14 @@ last success, failure count, and fixed reason without exposing provider data.
 
 ## Low-friction operator journey
 
-1. In **Coverage → Inventory sources**, choose **Microsoft Entra ID** and
-   **AWS-managed schedule**.
+1. In **Coverage → Inventory sources**, choose **Microsoft Entra ID** or
+   **GitHub organization**, then **AWS-managed schedule**.
 2. Copy the generated AWS CLI template for the required KMS key, secret prefix,
    and tags; fill the three values locally or through the enterprise secret
    provisioning workflow.
-3. Paste only the resulting secret ARN, select a cadence, and review the exact
-   permission and data-minimisation boundary.
+3. For GitHub, enter the organization and edit or import the typed repository
+   map. Paste only the resulting secret ARN, select a cadence, and review the
+   exact permission and data-minimisation boundary.
 4. Choose **Create managed collector**. The UI reports schedule state separately
    from credential and evidence state.
 5. Wait for the first run or choose a bounded **Run now** action when supported.
@@ -197,7 +244,12 @@ last success, failure count, and fixed reason without exposing provider data.
 
 ## Non-guarantees and remaining work
 
-- AWS-managed Entra collection does not prove endpoint or GitHub coverage.
+- Managed Entra and GitHub collection does not prove endpoint coverage.
+- GitHub REST responses can prove only repositories visible to the token. A
+  token that hides both an unmapped repository and its mapping cannot reveal
+  that blind spot. Production acceptance must independently prove that the
+  token covers all organization repositories; a future organization-installed
+  GitHub App is preferred for centrally governed access and revocation.
 - A client secret is not workload identity; future deployments may replace it
   with Entra workload identity federation without changing normalized output.
 - The first live acceptance can prove AWS scheduling, secret isolation, bounded

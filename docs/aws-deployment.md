@@ -151,7 +151,7 @@ The current pilot's post-deployment result is recorded in
 and SCIM are not configured in that environment, so the source contracts must
 not be presented as live federation acceptance.
 
-## AWS-managed Microsoft Entra discovery
+## AWS-managed Entra and GitHub discovery
 
 After deployment, CloudFormation outputs `DiscoverySecretKmsKeyArn` and
 `DiscoveryProviderSecretNamePrefix`. A platform administrator can also obtain
@@ -165,6 +165,16 @@ an exact JSON object:
   "tenantId": "<entra-directory-uuid>",
   "clientId": "<entra-application-uuid>",
   "clientSecret": "<secret>"
+}
+```
+
+For GitHub, use an organization-approved fine-grained token covering all
+repositories, with repository metadata read-only and no code-content,
+administration, Actions or write access. Store exactly:
+
+```json
+{
+  "token": "<github-token>"
 }
 ```
 
@@ -184,7 +194,11 @@ delayed EventBridge schedule; neither secret is returned to the browser or
 included in source-directory responses. The dedicated collector can read only
 the tagged provider/connector namespaces, contacts fixed Entra/Graph/API hosts,
 and publishes through the same atomic generation contract as an external
-collector.
+collector. For GitHub, also enter the exact organization and a reviewed mapping
+from every active repository full name to a SHA-256 project-root digest and one
+or both expected hosts (`claude-code`, `codex-cli`). The UI supports typed rows
+and schema-checked JSON import. The saved read model exposes only organization
+and mapping count.
 
 Treat **Scheduled**, **Healthy** and **Current evidence** as distinct states.
 Only a successful collection plus atomic commit produces Current evidence.
@@ -193,6 +207,11 @@ Disable revokes ingestion authority before schedule deletion. Investigate
 `DiscoveryCollectorDlqArn`; follow
 [AWS-managed discovery connectors](scheduled-discovery-connectors-design.md)
 for fixed failure codes and non-guarantees.
+
+Before production use, independently prove that the GitHub token can enumerate
+all repositories in the organization. The API cannot reveal a repository that
+the token itself is not permitted to see. Retain the permission review and an
+independent repository count as deployment evidence.
 
 The authenticated `GET /enterprise/identity` route returns redaction-safe
 provider status, tenant hint, active roles and the enforced role matrix. It

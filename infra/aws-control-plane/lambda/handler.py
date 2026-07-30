@@ -147,6 +147,11 @@ _DISCOVERY_GENERATION_MAX_PAGES = 20
 _DISCOVERY_EXPECTED_HOST_LIMIT = 2
 _DISCOVERY_MAX_VALIDITY_SECONDS = 24 * 60 * 60
 _MANAGED_DISCOVERY_INTERVALS = frozenset({5, 15, 30, 60, 180, 360, 720, 1440})
+_MANAGED_DISCOVERY_PROVIDER_KINDS = {
+    "entra": "identity",
+    "github": "source_control",
+}
+_MANAGED_GITHUB_REPOSITORY_LIMIT = 500
 
 # Agent decision evidence is operationally useful but never authoritative.
 # The authenticated host may report only this fixed, content-free vocabulary;
@@ -3538,13 +3543,116 @@ def _managed_discovery_capabilities():
         return {"available": False, "providers": [], "intervalMinutes": []}
     return {
         "available": True,
-        "providers": ["entra"],
+        "providers": sorted(_MANAGED_DISCOVERY_PROVIDER_KINDS),
         "intervalMinutes": sorted(_MANAGED_DISCOVERY_INTERVALS),
         "region": environment["region"],
         "providerSecretNamePrefix": environment["providerSecretPrefix"],
         "kmsKeyArn": environment["kmsKeyArn"],
+        # Retain the original field for older Entra-only consoles while the
+        # provider-specific contract gives new consoles an exact typed setup.
         "providerSecretSchema": ["tenantId", "clientId", "clientSecret"],
+        "providerConfigurations": {
+            "entra": {
+                "sourceKind": "identity",
+                "secretSchema": ["tenantId", "clientId", "clientSecret"],
+                "configurationSchema": [],
+            },
+            "github": {
+                "sourceKind": "source_control",
+                "secretSchema": ["token"],
+                "configurationSchema": ["organization", "repositories"],
+                "maximumRepositories": _MANAGED_GITHUB_REPOSITORY_LIMIT,
+            },
+        },
     }
+
+
+def _managed_github_slug(value, field, *, maximum=100, organization=False):
+    """Normalize one GitHub organization or repository slug.
+
+    GitHub identifiers are case-insensitive. Canonical lower-case values avoid
+    duplicate mappings whose only difference is case and keep comparisons
+    independent of provider presentation.
+    """
+    pattern = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?" if organization else r"[A-Za-z0-9._-]+"
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= maximum
+        or not re.fullmatch(pattern, value)
+        or value in {".", ".."}
+        or (organization and "--" in value)
+    ):
+        raise ValueError(f"{field} is not a safe GitHub identifier")
+    return value.lower()
+
+
+def _managed_github_configuration(value):
+    """Validate bounded deployment-owned repository correlation configuration."""
+    if not isinstance(value, dict) or set(value) != {"organization", "repositories"}:
+        raise ValueError("GitHub provider configuration has an invalid schema")
+    organization = _managed_github_slug(
+        value.get("organization"), "organization", maximum=39, organization=True
+    )
+    repositories = value.get("repositories")
+    if (
+        not isinstance(repositories, list)
+        or not 1 <= len(repositories) <= _MANAGED_GITHUB_REPOSITORY_LIMIT
+    ):
+        raise ValueError("GitHub repository mappings must be a non-empty bounded list")
+    normalized = []
+    seen = set()
+    seen_digests = set()
+    for item in repositories:
+        if not isinstance(item, dict) or frozenset(item) not in {
+            frozenset({"fullName", "projectRootDigest", "expectedHosts"}),
+            frozenset({"fullName", "projectRootDigest", "expectedHosts", "businessUnit"}),
+        }:
+            raise ValueError("GitHub repository mapping has an invalid schema")
+        full_name = item.get("fullName")
+        if not isinstance(full_name, str) or full_name.count("/") != 1:
+            raise ValueError("GitHub repository fullName is invalid")
+        owner, repository = full_name.split("/", 1)
+        owner = _managed_github_slug(owner, "repository owner", maximum=39, organization=True)
+        repository = _managed_github_slug(repository, "repository name")
+        if owner != organization:
+            raise ValueError("GitHub repository mapping is outside the configured organization")
+        canonical_name = f"{owner}/{repository}"
+        if canonical_name in seen:
+            raise ValueError("GitHub repository mappings must not contain duplicates")
+        seen.add(canonical_name)
+        hosts = item.get("expectedHosts")
+        if not isinstance(hosts, list) or not 1 <= len(hosts) <= _DISCOVERY_EXPECTED_HOST_LIMIT:
+            raise ValueError("GitHub expectedHosts must contain one or two supported hosts")
+        normalized_hosts = sorted({_agent_host(host) for host in hosts})
+        if len(normalized_hosts) != len(hosts):
+            raise ValueError("GitHub expectedHosts must not contain duplicates")
+        project_root_digest = _discovery_digest(item.get("projectRootDigest"))
+        if project_root_digest in seen_digests:
+            raise ValueError("GitHub repository mappings must not reuse a project root digest")
+        seen_digests.add(project_root_digest)
+        mapping = {
+            "fullName": canonical_name,
+            "projectRootDigest": project_root_digest,
+            "expectedHosts": normalized_hosts,
+        }
+        if "businessUnit" in item:
+            mapping["businessUnit"] = _bounded_text(item.get("businessUnit"), "businessUnit", 128)
+        normalized.append(mapping)
+    return {
+        "organization": organization,
+        "repositories": sorted(normalized, key=lambda x: x["fullName"]),
+    }
+
+
+def _managed_provider_configuration(provider, value):
+    """Return one exact provider configuration without accepting hidden fields."""
+    if provider == "entra":
+        if value not in (None, {}):
+            raise ValueError("Entra managed discovery does not accept provider configuration")
+        return {}
+    if provider == "github":
+        return _managed_github_configuration(value)
+    raise ValueError("managed discovery provider is unsupported")
 
 
 def _managed_discovery_secret(tenant, arn, secrets_client, environment):
@@ -3575,16 +3683,23 @@ def _managed_discovery_secret(tenant, arn, secrets_client, environment):
 
 
 def _managed_discovery_schedule_input(
-    tenant, source_id, provider_secret_arn, connector_secret_arn, revision
+    tenant,
+    source_id,
+    provider,
+    provider_secret_arn,
+    connector_secret_arn,
+    provider_configuration_digest,
+    revision,
 ):
     """Build and bind the exact scheduler input accepted by the collector."""
     value = {
         "schemaVersion": 1,
         "tenantId": tenant,
         "sourceId": source_id,
-        "provider": "entra",
+        "provider": provider,
         "providerSecretArn": provider_secret_arn,
         "connectorSecretArn": connector_secret_arn,
+        "providerConfigurationDigest": provider_configuration_digest,
         "jobRevision": revision,
         "validitySeconds": 3600,
     }
@@ -3631,19 +3746,28 @@ def _export_managed_discovery_audit(tenant, event_type, actor, payload):
 
 
 def _create_managed_discovery(tenant, source_id, value, actor):
-    """Create one scheduled Entra collector while keeping credentials out of the UI."""
-    fields = {
+    """Create one scheduled collector while keeping credentials out of the UI."""
+    base_fields = {
         "provider",
         "providerSecretArn",
         "intervalMinutes",
         "expectedJobRevision",
         "expectedCredentialRevision",
     }
-    if not isinstance(value, dict) or set(value) != fields:
+    if not isinstance(value, dict):
+        raise ValueError("managed discovery configuration has an invalid schema")
+    provider = value.get("provider")
+    expected_fields = base_fields | ({"providerConfiguration"} if provider == "github" else set())
+    if set(value) != expected_fields:
         raise ValueError("managed discovery configuration has an invalid schema")
     source_id = _bounded_identifier(source_id, "sourceId")
-    if value.get("provider") != "entra":
+    if provider not in _MANAGED_DISCOVERY_PROVIDER_KINDS:
         raise ValueError("managed discovery provider is unsupported")
+    provider_configuration = _managed_provider_configuration(
+        provider, value.get("providerConfiguration")
+    )
+    provider_configuration_digest = _configuration_hash(provider_configuration)
+    source_kind = _MANAGED_DISCOVERY_PROVIDER_KINDS[provider]
     interval = _discovery_integer(value.get("intervalMinutes"), "intervalMinutes")
     if interval not in _MANAGED_DISCOVERY_INTERVALS:
         raise ValueError("managed discovery interval is unsupported")
@@ -3659,8 +3783,8 @@ def _create_managed_discovery(tenant, source_id, value, actor):
     source = TABLE.get_item(
         Key=_item_key(tenant, "DISCOVERY_SOURCE", source_id), ConsistentRead=True
     ).get("Item")
-    if source and source.get("sourceKind") != "identity":
-        raise PolicyConflict("managed Entra discovery requires an identity source")
+    if source and source.get("sourceKind") != source_kind:
+        raise PolicyConflict("managed discovery sourceKind conflicts with existing evidence")
     secrets_client, scheduler = _managed_discovery_clients()
     provider_secret = _managed_discovery_secret(
         tenant, value.get("providerSecretArn"), secrets_client, environment
@@ -3683,7 +3807,13 @@ def _create_managed_discovery(tenant, source_id, value, actor):
         )
         connector_arn = connector["ARN"]
         schedule_input = _managed_discovery_schedule_input(
-            tenant, source_id, provider_secret, connector_arn, 1
+            tenant,
+            source_id,
+            provider,
+            provider_secret,
+            connector_arn,
+            provider_configuration_digest,
+            1,
         )
         scheduler.create_schedule(
             Name=names["schedule"],
@@ -3691,7 +3821,7 @@ def _create_managed_discovery(tenant, source_id, value, actor):
             FlexibleTimeWindow={"Mode": "OFF"},
             StartDate=datetime.fromtimestamp(now + 60, tz=UTC),
             State="ENABLED",
-            Description="AAI Security managed Entra discovery",
+            Description=f"AAI Security managed {provider} discovery",
             Target={
                 "Arn": environment["collectorArn"],
                 "RoleArn": environment["schedulerRoleArn"],
@@ -3705,7 +3835,7 @@ def _create_managed_discovery(tenant, source_id, value, actor):
             **_item_key(tenant, "DISCOVERY_CONNECTOR", source_id),
             "tenant_id": tenant,
             "sourceId": source_id,
-            "sourceKind": "identity",
+            "sourceKind": source_kind,
             "tokenHash": hashlib.sha256(token.encode()).hexdigest(),
             "revision": 1,
             "status": "active",
@@ -3717,10 +3847,12 @@ def _create_managed_discovery(tenant, source_id, value, actor):
             **_item_key(tenant, "DISCOVERY_JOB", source_id),
             "tenant_id": tenant,
             "sourceId": source_id,
-            "sourceKind": "identity",
-            "provider": "entra",
+            "sourceKind": source_kind,
+            "provider": provider,
             "providerSecretArn": provider_secret,
             "connectorSecretArn": connector_arn,
+            "providerConfiguration": provider_configuration,
+            "providerConfigurationDigest": provider_configuration_digest,
             "scheduleName": names["schedule"],
             "configurationDigest": schedule_input["configurationDigest"],
             "intervalMinutes": interval,
@@ -3732,8 +3864,10 @@ def _create_managed_discovery(tenant, source_id, value, actor):
         }
         audit_payload = {
             "source_id": source_id,
-            "provider": "entra",
+            "provider": provider,
             "interval_minutes": interval,
+            "configuration_digest": provider_configuration_digest,
+            "repository_count": len(provider_configuration.get("repositories", [])),
         }
         audit_record = _managed_discovery_audit_record(
             tenant, "managed_discovery_created", actor, audit_payload, now=now
@@ -3856,8 +3990,18 @@ def _managed_discovery_view(job):
     """Return operational posture without secret or scheduler coordinates."""
     if not job:
         return None
+    configuration = job.get("providerConfiguration")
+    provider_summary = None
+    if job.get("provider") == "github" and isinstance(configuration, dict):
+        repositories = configuration.get("repositories")
+        provider_summary = {
+            "organization": configuration.get("organization"),
+            "repositoryCount": len(repositories) if isinstance(repositories, list) else 0,
+        }
     return {
         "provider": job.get("provider"),
+        "sourceKind": job.get("sourceKind"),
+        "providerSummary": provider_summary,
         "status": job.get("status"),
         "revision": int(job.get("revision", 0)),
         "intervalMinutes": int(job.get("intervalMinutes", 0)),

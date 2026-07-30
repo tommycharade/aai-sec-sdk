@@ -115,6 +115,7 @@ def _configuration(module: Any, **changes: Any) -> dict[str, Any]:
             "arn:aws:secretsmanager:eu-west-2:123456789012:secret:"
             "aai-sec/discovery/connectors/a/b-AbCdEf"
         ),
+        "providerConfigurationDigest": module._canonical_digest({}),
         "jobRevision": 1,
         "validitySeconds": 1_800,
         **changes,
@@ -137,6 +138,7 @@ def _install_job(table: FakeCollectorTable, configuration: dict[str, Any]) -> No
         "providerSecretArn": configuration["providerSecretArn"],
         "connectorSecretArn": configuration["connectorSecretArn"],
         "configurationDigest": configuration["configurationDigest"],
+        "providerConfigurationDigest": configuration["providerConfigurationDigest"],
         "consecutiveFailures": 0,
     }
 
@@ -198,6 +200,230 @@ def test_managed_collector_publishes_and_records_healthy_state(
     assert job["lastAttemptAt"] == 1_785_000_000
     assert job["lastSuccessAt"] == 1_785_000_000
     assert job["consecutiveFailures"] == 0
+
+
+def test_managed_github_collector_uses_digest_bound_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GitHub collection receives only the live, digest-bound repository map."""
+    module, table, secrets = _load_collector(monkeypatch)
+    provider_configuration = {
+        "organization": "example-enterprise",
+        "repositories": [
+            {
+                "fullName": "example-enterprise/.github",
+                "projectRootDigest": "a" * 64,
+                "expectedHosts": ["claude-code", "codex-cli"],
+                "businessUnit": "Platform",
+            }
+        ],
+    }
+    configuration = _configuration(
+        module,
+        sourceId="github-production",
+        provider="github",
+        providerSecretArn=(
+            "arn:aws:secretsmanager:eu-west-2:123456789012:secret:"
+            "aai-sec/discovery/providers/tenant-synthetic/github-AbCdEf"
+        ),
+        providerConfigurationDigest=module._canonical_digest(provider_configuration),
+    )
+    _install_job(table, configuration)
+    job_key = ("TENANT#tenant-synthetic", "DISCOVERY_JOB#github-production")
+    table.items[job_key]["providerConfiguration"] = provider_configuration
+    secrets.values[configuration["providerSecretArn"]] = json.dumps(
+        {"token": "synthetic-github-token-value"}
+    )
+    secrets.values[configuration["connectorSecretArn"]] = json.dumps(
+        {"token": "synthetic-connector-token"}
+    )
+    collected: list[tuple[str, dict[str, Any]]] = []
+
+    def collect_github(token: str, value: dict[str, Any]) -> list[dict[str, Any]]:
+        collected.append((token, value))
+        return [
+            {
+                "kind": "repository",
+                "id": "101",
+                "projectRootDigest": "a" * 64,
+                "expectedHosts": ["claude-code", "codex-cli"],
+            }
+        ]
+
+    monkeypatch.setattr(
+        module,
+        "_collect_github_repositories",
+        collect_github,
+    )
+    monkeypatch.setattr(
+        module,
+        "_publish",
+        lambda *args, **kwargs: {
+            "generation": "github-synthetic",
+            "revision": 1,
+            "observationCount": 1,
+        },
+    )
+
+    result = module.handler(configuration, None)
+
+    assert result["status"] == "healthy"
+    assert collected == [
+        (
+            "synthetic-github-token-value",
+            {
+                "organization": "example-enterprise",
+                "repositories": {
+                    "example-enterprise/.github": {
+                        "projectRootDigest": "a" * 64,
+                        "expectedHosts": ["claude-code", "codex-cli"],
+                        "businessUnit": "Platform",
+                    }
+                },
+            },
+        )
+    ]
+    assert secrets.reads == [
+        configuration["providerSecretArn"],
+        configuration["connectorSecretArn"],
+    ]
+
+
+def test_github_collection_is_bounded_and_requires_complete_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unmapped or token-hidden repositories never publish a partial denominator."""
+    module, _, _ = _load_collector(monkeypatch)
+    configured = {
+        "organization": "example-enterprise",
+        "repositories": {
+            "example-enterprise/repository-a": {
+                "projectRootDigest": "b" * 64,
+                "expectedHosts": ["claude-code"],
+            }
+        },
+    }
+    requests: list[Any] = []
+
+    def unmapped(request: Any, **_: Any) -> list[dict[str, Any]]:
+        requests.append(request)
+        return [{"id": 101, "full_name": "example-enterprise/repository-b", "archived": False}]
+
+    monkeypatch.setattr(module, "_open_json", unmapped)
+    with pytest.raises(module.ManagedDiscoveryError) as caught:
+        module._collect_github_repositories("synthetic-github-token-value", configured)
+    assert caught.value.code == "provider_mapping_incomplete"
+    assert requests[0].full_url == (
+        "https://api.github.com/orgs/example-enterprise/repos"
+        "?per_page=100&page=1&type=all&sort=full_name&direction=asc"
+    )
+    assert requests[0].headers["Authorization"] == "Bearer synthetic-github-token-value"
+    assert requests[0].headers["X-github-api-version"] == "2022-11-28"
+
+    monkeypatch.setattr(module, "_open_json", lambda *args, **kwargs: [])
+    with pytest.raises(module.ManagedDiscoveryError) as hidden:
+        module._collect_github_repositories("synthetic-github-token-value", configured)
+    assert hidden.value.code == "provider_mapping_incomplete"
+
+
+def test_github_collection_minimises_provider_records_and_ignores_archived_unmapped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only mapped active repository identity and correlation fields are retained."""
+    module, _, _ = _load_collector(monkeypatch)
+    configured = {
+        "organization": "example-enterprise",
+        "repositories": {
+            "example-enterprise/.github": {
+                "projectRootDigest": "c" * 64,
+                "expectedHosts": ["codex-cli"],
+                "businessUnit": "Security",
+            }
+        },
+    }
+    monkeypatch.setattr(
+        module,
+        "_open_json",
+        lambda *args, **kwargs: [
+            {
+                "id": 201,
+                "full_name": "Example-Enterprise/.GitHub",
+                "archived": False,
+                "private": True,
+                "description": "must not persist",
+            },
+            {
+                "id": 202,
+                "full_name": "example-enterprise/retired",
+                "archived": True,
+            },
+        ],
+    )
+
+    assert module._collect_github_repositories("synthetic-github-token-value", configured) == [
+        {
+            "kind": "repository",
+            "id": "201",
+            "projectRootDigest": "c" * 64,
+            "expectedHosts": ["codex-cli"],
+            "businessUnit": "Security",
+        }
+    ]
+
+
+def test_github_configuration_tamper_fails_before_provider_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A job mapping changed without its digest cannot reach GitHub."""
+    module, table, secrets = _load_collector(monkeypatch)
+    provider_configuration = {
+        "organization": "example-enterprise",
+        "repositories": [
+            {
+                "fullName": "example-enterprise/repository-a",
+                "projectRootDigest": "d" * 64,
+                "expectedHosts": ["claude-code"],
+            }
+        ],
+    }
+    configuration = _configuration(
+        module,
+        sourceId="github-production",
+        provider="github",
+        providerConfigurationDigest=module._canonical_digest(provider_configuration),
+    )
+    _install_job(table, configuration)
+    table.items[("TENANT#tenant-synthetic", "DISCOVERY_JOB#github-production")][
+        "providerConfiguration"
+    ] = provider_configuration | {"organization": "tampered-enterprise"}
+
+    with pytest.raises(RuntimeError, match="configuration_invalid"):
+        module.handler(configuration, None)
+
+    assert secrets.reads == []
+
+
+@pytest.mark.parametrize("token", ["short", "synthetic token with spaces", "x" * 513])
+def test_github_collection_rejects_unsafe_token_before_network(
+    monkeypatch: pytest.MonkeyPatch, token: str
+) -> None:
+    """Malformed provider credentials never enter an authorization header."""
+    module, _, _ = _load_collector(monkeypatch)
+    requested = False
+
+    def open_json(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal requested
+        requested = True
+        return []
+
+    monkeypatch.setattr(module, "_open_json", open_json)
+    with pytest.raises(module.ManagedDiscoveryError) as caught:
+        module._collect_github_repositories(
+            token,
+            {"organization": "example-enterprise", "repositories": {}},
+        )
+    assert caught.value.code == "provider_secret_unavailable"
+    assert requested is False
 
 
 @pytest.mark.parametrize(

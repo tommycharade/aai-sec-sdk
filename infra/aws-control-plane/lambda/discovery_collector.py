@@ -35,6 +35,7 @@ _EVENT_FIELDS = frozenset(
         "provider",
         "providerSecretArn",
         "connectorSecretArn",
+        "providerConfigurationDigest",
         "jobRevision",
         "validitySeconds",
         "configurationDigest",
@@ -48,6 +49,9 @@ _MAX_USERS_PER_PAGE = 100
 _MAX_OBSERVATIONS = 2_000
 _MAX_RESPONSE_BYTES = 1_000_000
 _REQUEST_TIMEOUT_SECONDS = 10.0
+_PROVIDERS = frozenset({"entra", "github"})
+_SUPPORTED_HOSTS = frozenset({"claude-code", "codex-cli"})
+_MAX_GITHUB_REPOSITORY_MAPPINGS = 500
 _ERROR_CODES = frozenset(
     {
         "configuration_invalid",
@@ -57,6 +61,7 @@ _ERROR_CODES = frozenset(
         "provider_transport_failed",
         "provider_response_invalid",
         "provider_inventory_too_large",
+        "provider_mapping_incomplete",
         "source_revision_conflict",
         "ingestion_rejected",
         "internal_error",
@@ -117,7 +122,7 @@ def _validated_event(event: Any) -> dict[str, Any]:
     """Validate the exact scheduler contract before any external operation."""
     if not isinstance(event, dict) or set(event) != _EVENT_FIELDS:
         raise ManagedDiscoveryError("configuration_invalid")
-    if event.get("schemaVersion") != 1 or event.get("provider") != "entra":
+    if event.get("schemaVersion") != 1 or event.get("provider") not in _PROVIDERS:
         raise ManagedDiscoveryError("configuration_invalid")
     tenant_id = _identifier(event.get("tenantId"), "tenantId")
     source_id = _identifier(event.get("sourceId"), "sourceId")
@@ -126,15 +131,16 @@ def _validated_event(event: Any) -> dict[str, Any]:
     for field in ("providerSecretArn", "connectorSecretArn"):
         if not isinstance(event.get(field), str) or len(event[field]) > 1_024:
             raise ManagedDiscoveryError("configuration_invalid")
-    supplied_digest = event.get("configurationDigest")
-    if (
-        not isinstance(supplied_digest, str)
-        or len(supplied_digest) != 64
-        or any(character not in "0123456789abcdef" for character in supplied_digest)
-    ):
-        raise ManagedDiscoveryError("configuration_invalid")
+    for field in ("configurationDigest", "providerConfigurationDigest"):
+        supplied_digest = event.get(field)
+        if (
+            not isinstance(supplied_digest, str)
+            or len(supplied_digest) != 64
+            or any(character not in "0123456789abcdef" for character in supplied_digest)
+        ):
+            raise ManagedDiscoveryError("configuration_invalid")
     digest_input = {key: event[key] for key in sorted(_EVENT_FIELDS - {"configurationDigest"})}
-    if not hmac.compare_digest(_canonical_digest(digest_input), supplied_digest):
+    if not hmac.compare_digest(_canonical_digest(digest_input), event["configurationDigest"]):
         raise ManagedDiscoveryError("configuration_invalid")
     return {
         **event,
@@ -164,9 +170,10 @@ def _load_live_job(configuration: dict[str, Any]) -> dict[str, Any]:
     if (
         int(item.get("revision", 0)) != configuration["jobRevision"]
         or item.get("status") == "disabled"
-        or item.get("provider") != "entra"
+        or item.get("provider") != configuration["provider"]
         or item.get("providerSecretArn") != configuration["providerSecretArn"]
         or item.get("connectorSecretArn") != configuration["connectorSecretArn"]
+        or item.get("providerConfigurationDigest") != configuration["providerConfigurationDigest"]
         or item.get("configurationDigest") != configuration["configurationDigest"]
     ):
         # Stale or tampered schedules are denied before secret retrieval.
@@ -395,6 +402,174 @@ def _collect_entra_users(token: str) -> list[dict[str, Any]]:
     return observations
 
 
+def _github_slug(value: Any, *, maximum: int, organization: bool = False) -> str:
+    """Validate and normalize one server-owned GitHub slug."""
+    allowed = (
+        frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
+        if organization
+        else frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+    )
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= maximum
+        or any(character not in allowed for character in value)
+        or value in {".", ".."}
+        or (organization and (value[0] == "-" or value[-1] == "-" or "--" in value))
+    ):
+        raise ManagedDiscoveryError("configuration_invalid")
+    return value.lower()
+
+
+def _github_configuration(value: Any, expected_digest: str) -> dict[str, Any]:
+    """Revalidate and digest-bind the live GitHub repository mapping."""
+    if not isinstance(value, dict) or set(value) != {"organization", "repositories"}:
+        raise ManagedDiscoveryError("configuration_invalid")
+    if not hmac.compare_digest(_canonical_digest(value), expected_digest):
+        raise ManagedDiscoveryError("configuration_invalid")
+    organization = _github_slug(value.get("organization"), maximum=39, organization=True)
+    repositories = value.get("repositories")
+    if (
+        not isinstance(repositories, list)
+        or not 1 <= len(repositories) <= _MAX_GITHUB_REPOSITORY_MAPPINGS
+    ):
+        raise ManagedDiscoveryError("configuration_invalid")
+    normalized: dict[str, dict[str, Any]] = {}
+    seen_digests: set[str] = set()
+    for item in repositories:
+        if not isinstance(item, dict) or frozenset(item) not in {
+            frozenset({"fullName", "projectRootDigest", "expectedHosts"}),
+            frozenset({"fullName", "projectRootDigest", "expectedHosts", "businessUnit"}),
+        }:
+            raise ManagedDiscoveryError("configuration_invalid")
+        full_name = item.get("fullName")
+        if not isinstance(full_name, str) or full_name.count("/") != 1:
+            raise ManagedDiscoveryError("configuration_invalid")
+        owner, repository = full_name.split("/", 1)
+        canonical_name = (
+            f"{_github_slug(owner, maximum=39, organization=True)}/"
+            f"{_github_slug(repository, maximum=100)}"
+        )
+        hosts = item.get("expectedHosts")
+        digest = item.get("projectRootDigest")
+        if (
+            not canonical_name.startswith(f"{organization}/")
+            or canonical_name in normalized
+            or not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+            or digest in seen_digests
+            or not isinstance(hosts, list)
+            or not hosts
+            or len(hosts) > len(_SUPPORTED_HOSTS)
+            or len(hosts) != len(set(hosts))
+            or not set(hosts).issubset(_SUPPORTED_HOSTS)
+        ):
+            raise ManagedDiscoveryError("configuration_invalid")
+        seen_digests.add(digest)
+        mapping: dict[str, Any] = {
+            "projectRootDigest": digest,
+            "expectedHosts": sorted(hosts),
+        }
+        business_unit = item.get("businessUnit")
+        if business_unit is not None:
+            if (
+                not isinstance(business_unit, str)
+                or not business_unit.strip()
+                or len(business_unit.strip()) > 128
+            ):
+                raise ManagedDiscoveryError("configuration_invalid")
+            mapping["businessUnit"] = business_unit.strip()
+        normalized[canonical_name] = mapping
+    return {"organization": organization, "repositories": normalized}
+
+
+def _github_url(organization: str, page: int) -> str:
+    """Construct one fixed GitHub organization-repository page URL."""
+    organization_path = urllib.parse.quote(organization, safe="")
+    return (
+        f"https://api.github.com/orgs/{organization_path}/repos"
+        f"?per_page=100&page={page}&type=all&sort=full_name&direction=asc"
+    )
+
+
+def _collect_github_repositories(token: str, configuration: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collect an exact mapped GitHub organization repository population."""
+    if (
+        not isinstance(token, str)
+        or not 20 <= len(token) <= 512
+        or any(character.isspace() for character in token)
+    ):
+        raise ManagedDiscoveryError("provider_secret_unavailable")
+    organization = configuration["organization"]
+    mappings = configuration["repositories"]
+    observations: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_names: set[str] = set()
+    for page_number in range(1, _MAX_PROVIDER_PAGES + 1):
+        request = urllib.request.Request(  # noqa: S310
+            _github_url(organization, page_number),
+            headers={
+                "authorization": f"Bearer {token}",
+                "accept": "application/vnd.github+json",
+                "x-github-api-version": "2022-11-28",
+                "user-agent": "aai-sec-managed-discovery/1",
+            },
+        )
+        page = _open_json(request, error_code="provider_response_invalid")
+        if not isinstance(page, list) or len(page) > _MAX_USERS_PER_PAGE:
+            raise ManagedDiscoveryError("provider_response_invalid")
+        for repository in page:
+            if not isinstance(repository, dict):
+                raise ManagedDiscoveryError("provider_response_invalid")
+            repository_id = repository.get("id")
+            full_name = repository.get("full_name")
+            archived = repository.get("archived")
+            if (
+                isinstance(repository_id, bool)
+                or not isinstance(repository_id, int)
+                or repository_id < 1
+                or not isinstance(full_name, str)
+                or full_name.count("/") != 1
+                or not isinstance(archived, bool)
+            ):
+                raise ManagedDiscoveryError("provider_response_invalid")
+            owner, name = full_name.split("/", 1)
+            canonical_name = (
+                f"{_github_slug(owner, maximum=39, organization=True)}/"
+                f"{_github_slug(name, maximum=100)}"
+            )
+            identifier = str(repository_id)
+            if identifier in seen_ids or canonical_name in seen_names:
+                raise ManagedDiscoveryError("provider_response_invalid")
+            seen_ids.add(identifier)
+            seen_names.add(canonical_name)
+            if archived:
+                continue
+            mapping = mappings.get(canonical_name)
+            if mapping is None:
+                # Missing mappings hide expected host scope, so publishing a
+                # partial source-control denominator would be unsafe.
+                raise ManagedDiscoveryError("provider_mapping_incomplete")
+            observation = {
+                "kind": "repository",
+                "id": identifier,
+                "projectRootDigest": mapping["projectRootDigest"],
+                "expectedHosts": mapping["expectedHosts"],
+            }
+            if "businessUnit" in mapping:
+                observation["businessUnit"] = mapping["businessUnit"]
+            observations.append(observation)
+            if len(observations) > _MAX_OBSERVATIONS:
+                raise ManagedDiscoveryError("provider_inventory_too_large")
+        if len(page) < _MAX_USERS_PER_PAGE:
+            if seen_names.intersection(mappings) != set(mappings):
+                # A configured repository omitted by the token may be private
+                # or deleted. Either case invalidates completeness.
+                raise ManagedDiscoveryError("provider_mapping_incomplete")
+            return observations
+    raise ManagedDiscoveryError("provider_inventory_too_large")
+
+
 def _source_revision(tenant_id: str, source_id: str) -> int:
     """Strongly read the live source revision for optimistic publication."""
     item = TABLE.get_item(
@@ -462,7 +637,7 @@ def _publish(
         raise ManagedDiscoveryError("provider_response_invalid")
     revision = _source_revision(configuration["tenantId"], configuration["sourceId"])
     base = _control_plane_endpoint(configuration["tenantId"], configuration["sourceId"])
-    generation = f"entra-{now}-{uuid.uuid4().hex}"
+    generation = f"{configuration['provider']}-{now}-{uuid.uuid4().hex}"
     pages = [
         observations[index : index + _MAX_USERS_PER_PAGE]
         for index in range(0, len(observations), _MAX_USERS_PER_PAGE)
@@ -516,7 +691,7 @@ def _publish(
 
 
 def handler(event: Any, context: Any) -> dict[str, Any]:
-    """Collect and publish one scheduled Entra generation.
+    """Collect and publish one scheduled provider generation.
 
     The return value contains operational metadata only. Any expected failure is
     persisted as a fixed reason code and then raised so Lambda metrics, Scheduler
@@ -528,21 +703,35 @@ def handler(event: Any, context: Any) -> dict[str, Any]:
     now = int(time.time())
     try:
         configuration = _validated_event(event)
-        _load_live_job(configuration)
+        live_job = _load_live_job(configuration)
         live_job_bound = True
         _update_job_attempt(configuration, now=now, status="running")
-        provider = _secret_json(
-            configuration["providerSecretArn"],
-            frozenset({"tenantId", "clientId", "clientSecret"}),
-            error_code="provider_secret_unavailable",
-        )
+        if configuration["provider"] == "entra":
+            provider = _secret_json(
+                configuration["providerSecretArn"],
+                frozenset({"tenantId", "clientId", "clientSecret"}),
+                error_code="provider_secret_unavailable",
+            )
+            access_token = _entra_access_token(provider)
+        else:
+            provider_configuration = _github_configuration(
+                live_job.get("providerConfiguration"),
+                configuration["providerConfigurationDigest"],
+            )
+            provider = _secret_json(
+                configuration["providerSecretArn"],
+                frozenset({"token"}),
+                error_code="provider_secret_unavailable",
+            )
         connector = _secret_json(
             configuration["connectorSecretArn"],
             frozenset({"token"}),
             error_code="connector_secret_unavailable",
         )
-        access_token = _entra_access_token(provider)
-        observations = _collect_entra_users(access_token)
+        if configuration["provider"] == "entra":
+            observations = _collect_entra_users(access_token)
+        else:
+            observations = _collect_github_repositories(provider["token"], provider_configuration)
         result = _publish(configuration, connector["token"], observations, now=now)
         _update_job_attempt(configuration, now=now, status="healthy")
         return {"status": "healthy", **result}
