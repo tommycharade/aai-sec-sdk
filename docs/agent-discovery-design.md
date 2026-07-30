@@ -139,10 +139,10 @@ The legacy snapshot route remains for small pilots and compatibility. Connector
 generations remove its 100-record ceiling and are suitable for a bounded pilot;
 very large estates should move immutable pages to dedicated object storage and
 retain the same atomic current-generation pointer. AWS deployments can use the
-[managed Entra collector](scheduled-discovery-connectors-design.md), which
-delivers credentials through KMS-encrypted Secrets Manager values and runs a
-bounded EventBridge schedule. Its application bearer is still a revocable
-service credential, not hardware-backed workload identity. Production
+[managed Entra and GitHub collectors](scheduled-discovery-connectors-design.md),
+which deliver credentials through KMS-encrypted Secrets Manager values and run
+bounded EventBridge schedules. Their application bearers are still revocable
+service credentials, not hardware-backed workload identities. Production
 acceptance should evaluate cloud workload identity at the gateway and prove
 that at least 95% of the agreed pilot population is represented. The
 fail-closed freshness, completeness and commit semantics must not change.

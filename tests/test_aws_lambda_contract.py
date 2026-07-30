@@ -5997,12 +5997,14 @@ class FakeManagedDiscoveryScheduler:
         self.deleted.append(dict(kwargs))
 
 
-def _managed_discovery_doubles(monkeypatch: Any, module: Any, tenant: str) -> tuple[Any, Any, str]:
+def _managed_discovery_doubles(
+    monkeypatch: Any, module: Any, tenant: str, *, provider_name: str = "entra-primary"
+) -> tuple[Any, Any, str]:
     """Configure deployment coordinates and return managed AWS adapter doubles."""
     key_arn = "arn:aws:kms:eu-west-2:111122223333:key/00000000-1111-4222-8333-444444444444"
     provider_arn = (
         "arn:aws:secretsmanager:eu-west-2:111122223333:secret:"
-        f"aai-sec/discovery/providers/{tenant}/entra-primary-abc123"
+        f"aai-sec/discovery/providers/{tenant}/{provider_name}-abc123"
     )
     environment = {
         "DISCOVERY_COLLECTOR_ARN": "arn:aws:lambda:eu-west-2:111122223333:function:collector",
@@ -6048,6 +6050,13 @@ def test_managed_entra_discovery_create_directory_and_disable_are_fail_closed(
     capability_body = json.loads(capabilities["body"])
     assert capability_body["available"] is True
     assert capability_body["providerSecretNamePrefix"] == "aai-sec/discovery/providers/"
+    assert capability_body["providers"] == ["entra", "github"]
+    assert capability_body["providerConfigurations"]["github"] == {
+        "sourceKind": "source_control",
+        "secretSchema": ["token"],
+        "configurationSchema": ["organization", "repositories"],
+        "maximumRepositories": 500,
+    }
 
     path = "/api/enterprise/discovery/sources/entra-primary/managed-collector"
     created = _invoke(
@@ -6098,6 +6107,8 @@ def test_managed_entra_discovery_create_directory_and_disable_are_fail_closed(
     directory_body = json.loads(directory["body"])
     assert directory_body["items"][0]["managedCollector"] == {
         "provider": "entra",
+        "sourceKind": "identity",
+        "providerSummary": None,
         "status": "scheduled",
         "revision": 1,
         "intervalMinutes": 60,
@@ -6137,6 +6148,195 @@ def test_managed_entra_discovery_create_directory_and_disable_are_fail_closed(
     )
     assert scheduler.deleted == [{"Name": scheduler.created[0]["Name"]}]
     assert secret_client.deleted[-1]["RecoveryWindowInDays"] == 7
+
+
+def test_managed_github_discovery_binds_repository_mapping_and_redacts_directory(
+    monkeypatch: Any,
+) -> None:
+    """GitHub setup stores a digest-bound map but exposes only safe summary metadata."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-managed-github"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    secret_client, scheduler, provider_arn = _managed_discovery_doubles(
+        monkeypatch, module, tenant, provider_name="github-primary"
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+    provider_configuration = {
+        "organization": "Example-Enterprise",
+        "repositories": [
+            {
+                "fullName": "Example-Enterprise/.GitHub",
+                "projectRootDigest": "a" * 64,
+                "expectedHosts": ["codex-cli", "claude-code"],
+                "businessUnit": "Platform",
+            }
+        ],
+    }
+    path = "/api/enterprise/discovery/sources/github-primary/managed-collector"
+
+    created = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                "provider": "github",
+                "providerSecretArn": provider_arn,
+                "providerConfiguration": provider_configuration,
+                "intervalMinutes": 60,
+                "expectedJobRevision": 0,
+                "expectedCredentialRevision": 0,
+            },
+            claims=claims,
+        ),
+    )
+
+    assert created["statusCode"] == 201
+    created_body = json.loads(created["body"])
+    assert created_body == {
+        "provider": "github",
+        "sourceKind": "source_control",
+        "providerSummary": {
+            "organization": "example-enterprise",
+            "repositoryCount": 1,
+        },
+        "status": "scheduled",
+        "revision": 1,
+        "intervalMinutes": 60,
+        "lastAttemptAt": 0,
+        "lastSuccessAt": 0,
+        "lastErrorCode": None,
+        "consecutiveFailures": 0,
+        "cleanupRequired": False,
+    }
+    job = table.items[(f"TENANT#{tenant}", "DISCOVERY_JOB#github-primary")]
+    assert job["sourceKind"] == "source_control"
+    assert job["providerConfiguration"] == {
+        "organization": "example-enterprise",
+        "repositories": [
+            {
+                "fullName": "example-enterprise/.github",
+                "projectRootDigest": "a" * 64,
+                "expectedHosts": ["claude-code", "codex-cli"],
+                "businessUnit": "Platform",
+            }
+        ],
+    }
+    schedule_input = json.loads(scheduler.created[0]["Target"]["Input"])
+    assert schedule_input["provider"] == "github"
+    assert schedule_input["providerConfigurationDigest"] == job["providerConfigurationDigest"]
+    assert "providerConfiguration" not in schedule_input
+    assert scheduler.created[0]["Description"] == "AAI Security managed github discovery"
+    assert secret_client.described == [provider_arn]
+
+    directory = _invoke(
+        module,
+        _event("/api/enterprise/discovery/sources", "GET", claims=claims),
+    )
+    assert directory["statusCode"] == 200
+    directory_body = json.loads(directory["body"])
+    assert directory_body["items"][0]["managedCollector"]["providerSummary"] == {
+        "organization": "example-enterprise",
+        "repositoryCount": 1,
+    }
+    for forbidden in (
+        "providerSecretArn",
+        "connectorSecretArn",
+        "providerConfigurationDigest",
+        "fullName",
+        "projectRootDigest",
+    ):
+        assert forbidden not in directory["body"]
+
+
+@pytest.mark.parametrize(
+    "provider_configuration",
+    [
+        {"organization": "example-enterprise", "repositories": []},
+        {
+            "organization": "example-enterprise",
+            "repositories": [
+                {
+                    "fullName": "another-enterprise/repository-a",
+                    "projectRootDigest": "a" * 64,
+                    "expectedHosts": ["claude-code"],
+                }
+            ],
+        },
+        {
+            "organization": "example-enterprise",
+            "repositories": [
+                {
+                    "fullName": "example-enterprise/repository-a",
+                    "projectRootDigest": "not-a-digest",
+                    "expectedHosts": ["claude-code"],
+                }
+            ],
+        },
+        {
+            "organization": "example-enterprise",
+            "repositories": [
+                {
+                    "fullName": "example-enterprise/repository-a",
+                    "projectRootDigest": "a" * 64,
+                    "expectedHosts": ["claude-code", "claude-code"],
+                }
+            ],
+        },
+        {
+            "organization": "example-enterprise",
+            "repositories": [
+                {
+                    "fullName": "example-enterprise/repository-a",
+                    "projectRootDigest": "a" * 64,
+                    "expectedHosts": ["claude-code"],
+                },
+                {
+                    "fullName": "example-enterprise/repository-b",
+                    "projectRootDigest": "a" * 64,
+                    "expectedHosts": ["codex-cli"],
+                },
+            ],
+        },
+    ],
+)
+def test_managed_github_discovery_rejects_unsafe_mapping_before_aws(
+    monkeypatch: Any, provider_configuration: dict[str, Any]
+) -> None:
+    """Malformed, cross-organization and ambiguous maps cannot provision resources."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-managed-github-invalid"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    secret_client, scheduler, provider_arn = _managed_discovery_doubles(
+        monkeypatch, module, tenant, provider_name="github-primary"
+    )
+    response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/discovery/sources/github-primary/managed-collector",
+            "POST",
+            body={
+                "provider": "github",
+                "providerSecretArn": provider_arn,
+                "providerConfiguration": provider_configuration,
+                "intervalMinutes": 60,
+                "expectedJobRevision": 0,
+                "expectedCredentialRevision": 0,
+            },
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["platform-admin"],
+                "sub": "platform-admin-a",
+            },
+        ),
+    )
+    assert response["statusCode"] == 400
+    assert secret_client.described == []
+    assert scheduler.created == []
 
 
 def test_managed_discovery_rejects_cross_tenant_secret_before_aws_lookup(

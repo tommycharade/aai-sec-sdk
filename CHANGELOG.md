@@ -1,5 +1,14 @@
 # Changelog
 
+- Added UI-first AWS-managed GitHub source-control discovery. A platform
+  administrator selects a GitHub organization, imports or edits a bounded typed
+  repository-to-project mapping, and supplies only a tenant-tagged Secrets
+  Manager ARN for a read-only token. The schedule binds the mapping digest to
+  live server state; the collector uses a fixed GitHub API endpoint, bounded
+  pages/time/response size, content-minimised repository observations, atomic
+  publication and fixed failure codes. Unmapped, duplicate or token-hidden
+  configured repositories fail closed rather than producing optimistic
+  coverage.
 - Fixed the managed discovery deployment role so connector creation can attach
   only the required tenant and `discovery-connector` tags. `CreateSecret` and
   `TagResource` remain connector-prefix scoped and tag constrained, while
