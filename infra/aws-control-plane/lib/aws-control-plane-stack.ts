@@ -601,7 +601,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
       },
       tracing: lambda.Tracing.PASS_THROUGH,
     });
-    table.grantReadWriteData(discoveryCollector);
+    discoveryCollector.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["dynamodb:GetItem", "dynamodb:UpdateItem"],
+      resources: [table.tableArn],
+    }));
     const providerSecretPrefix = "aai-sec/discovery/providers/";
     const connectorSecretPrefix = "aai-sec/discovery/connectors/";
     const providerSecretResources = [
