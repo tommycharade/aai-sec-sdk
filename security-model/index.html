@@ -852,6 +852,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../scheduled-discovery-connectors-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS-managed discovery connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dynamic-groups-design/" class="md-nav__link">
         
   
@@ -2653,6 +2680,26 @@ snapshot or connector registration establishes it, preventing later credential
 issuance from reinterpreting trusted source data. The UI holds a newly issued
 plaintext credential only until the operator acknowledges the one-time panel;
 it does not place it in fleet state or browser storage.</p>
+<p>AWS-managed discovery adds three separate authorities: a tenant-tagged Entra
+provider secret, a source-scoped ingestion bearer, and a scheduler invocation
+role. The browser supplies only the provider secret ARN and a closed cadence;
+it never submits either secret value, a schedule expression, target ARN, URL,
+or tenant. The control plane validates same-account, same-region, KMS key,
+tenant namespace and exact purpose tags without reading provider secret bytes.
+It writes the generated ingestion bearer directly to a separately tagged KMS
+secret and retains only its digest in DynamoDB.</p>
+<p>The scheduled event is canonical and digest-bound to the live job revision,
+provider and both secret ARNs. The collector strongly reads that job before
+secret or network access, accepts only the Entra users endpoint and deployment
+API origin, and bounds time, response bytes, pages and identities. Redirects or
+continuation links outside the exact Graph host/path/query contract fail
+closed. Failed, partial or empty collection never advances current evidence.
+Disable atomically marks the job disabled and revokes ingestion before
+best-effort schedule/secret cleanup; a stale schedule therefore cannot publish
+even if AWS cleanup is delayed. Client-credential theft, malicious AWS
+administrators, Entra tenant compromise and the absence of hardware-backed
+workload identity remain deployment risks. See
+<a href="../scheduled-discovery-connectors-design/">AWS-managed discovery connectors</a>.</p>
 
 
 

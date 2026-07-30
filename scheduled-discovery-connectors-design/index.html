@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/claude-managed-resources/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/scheduled-discovery-connectors-design/">
       
       
-        <link rel="prev" href="../policy-governance-design/">
+        <link rel="prev" href="../agent-discovery-design/">
       
       
-        <link rel="next" href="../enterprise-ui/">
+        <link rel="next" href="../dynamic-groups-design/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Managed Claude resources - Agentic AI Security SDK</title>
+        <title>AWS-managed discovery connectors - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#managed-claude-resources" class="md-skip">
+        <a href="#aws-managed-discovery-connectors" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Managed Claude resources
+              AWS-managed discovery connectors
             
           </span>
         </div>
@@ -637,10 +637,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../scheduled-discovery-connectors-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS-managed discovery connectors
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -656,6 +683,203 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Trust boundaries">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#browser-to-control-plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Browser to control plane
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#provider-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connector-credential" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connector credential
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scheduler-to-collector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduler to collector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#collector-to-provider-and-ingestion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collector to provider and ingestion
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#state-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-and-monitoring-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure and monitoring behavior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#low-friction-operator-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Low-friction operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-guarantees-and-remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-guarantees and remaining work
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -745,37 +969,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Managed Claude resources
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../claude-managed-resources/" class="md-nav__link">
         
   
   
@@ -791,59 +988,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#trust-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trust boundary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#application-lifecycle" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Application lifecycle
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-this-does-not-provide" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What this does not provide
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1739,10 +1883,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#trust-boundary" class="md-nav__link">
+  <a href="#decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Trust boundary
+        Decision
       
     </span>
   </a>
@@ -1750,10 +1894,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#application-lifecycle" class="md-nav__link">
+  <a href="#trust-boundaries" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Application lifecycle
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Trust boundaries">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#browser-to-control-plane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Browser to control plane
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#provider-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connector-credential" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connector credential
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scheduler-to-collector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduler to collector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#collector-to-provider-and-ingestion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collector to provider and ingestion
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#state-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State model
       
     </span>
   </a>
@@ -1761,10 +1977,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-does-not-provide" class="md-nav__link">
+  <a href="#api" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What this does not provide
+        API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-and-monitoring-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure and monitoring behavior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#low-friction-operator-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Low-friction operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-guarantees-and-remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-guarantees and remaining work
       
     </span>
   </a>
@@ -1791,49 +2079,208 @@
   
 
 
-<h1 id="managed-claude-resources">Managed Claude resources</h1>
-<p>Skills and MCP servers are enterprise resources, not arbitrary policy JSON.
-The control plane owns a tenant-scoped registry; policies reference registered
-resource IDs; and an enrolled deployment reconciles the effective policy into
-the project configuration.</p>
-<h2 id="trust-boundary">Trust boundary</h2>
-<p>The browser never writes to a developer's filesystem. It can register a
-resource and select it in a policy, but a deployment agent must authenticate,
-fetch the effective policy, validate the resource manifest, and apply it to
-the target project. The deployment agent reports the applied manifest hash and
-drift status back to the control plane.</p>
-<p>Skills are stored as reviewed, versioned content with a digest. They are
-installed as project-scoped <code>.claude/skills/&lt;name&gt;/SKILL.md</code> files. Skill
-content is prompt input and may influence the model; it is not a security
-authority and cannot alter immutable SDK safeguards.</p>
-<p>MCP registrations contain transport, executable or URL, arguments, and
-non-secret environment references. Secret values are deployment-owned and are
-never stored in the policy or resource registry. Project-scoped MCP entries
-are written to <code>.mcp.json</code>; the SDK gateway remains mandatory for SDK-owned
-tools. External MCP servers are only made available when explicitly selected
-by the policy and allowed by the deployment's host controls.</p>
-<h2 id="application-lifecycle">Application lifecycle</h2>
+<h1 id="aws-managed-discovery-connectors">AWS-managed discovery connectors</h1>
+<h2 id="decision">Decision</h2>
+<p>The first managed discovery provider is Microsoft Entra ID. The AWS control
+plane creates a tenant-scoped EventBridge Scheduler job that invokes a dedicated
+collector Lambda. The collector renews a Microsoft Graph application token from
+an AWS Secrets Manager client-credential secret, collects a bounded user
+inventory, and publishes it through the existing source-scoped atomic ingestion
+contract.</p>
+<p>This is intentionally separate from Entra operator SSO and SCIM. Those
+integrations authenticate and provision console operators. Discovery observes
+the population that should be governed. Reusing an SSO or SCIM credential for
+collection would combine unrelated authority and make revocation unsafe.</p>
+<h2 id="trust-boundaries">Trust boundaries</h2>
+<h3 id="browser-to-control-plane">Browser to control plane</h3>
+<p>The browser submits only:</p>
+<ul>
+<li>the stable source ID;</li>
+<li>the provider enum <code>entra</code>;</li>
+<li>an interval from the closed set supported by the service;</li>
+<li>the ARN of a deployment-owned provider secret; and</li>
+<li>optimistic-concurrency revisions.</li>
+</ul>
+<p>It never submits a client secret, Graph token, connector token, tenant override,
+target Lambda ARN, scheduler role ARN, network URL, or arbitrary schedule
+expression. The authenticated tenant comes from the operator context and the
+control plane derives every AWS target.</p>
+<h3 id="provider-secret">Provider secret</h3>
+<p>The provider secret contains exactly:</p>
+<pre><code class="language-json">{
+  &quot;tenantId&quot;: &quot;11111111-1111-4111-8111-111111111111&quot;,
+  &quot;clientId&quot;: &quot;22222222-2222-4222-8222-222222222222&quot;,
+  &quot;clientSecret&quot;: &quot;&lt;deployment-owned-secret&gt;&quot;
+}
+</code></pre>
+<p>It must be in the deployed AWS account and region, use the stack's discovery
+KMS key, have a name under
+<code>aai-sec/discovery/providers/{aaiTenantId}/</code>, and carry exact tags
+<code>aai-sec:tenant-id={aaiTenantId}</code> and
+<code>aai-sec:purpose=discovery-provider</code>. The control-plane Lambda may describe but
+cannot read provider values. Only the collector Lambda can call
+<code>GetSecretValue</code> for this bounded namespace.</p>
+<p>The Entra application receives only Microsoft Graph application permission
+<code>User.Read.All</code>, with tenant-admin consent and no directory write permission.
+Production onboarding must retain evidence of that permission review.</p>
+<h3 id="connector-credential">Connector credential</h3>
+<p>For a managed source, the control plane generates the ingestion bearer and
+stores its SHA-256 digest in DynamoDB. The plaintext is written directly to a
+KMS-encrypted service secret whose name is derived from hashes of the tenant and
+source IDs. It is never returned to the browser, logs, audit payloads, or job
+read model. The collector reads it only when publishing.</p>
+<p>Manual connectors keep the existing one-time-returned credential flow. A source
+cannot be both manual and managed at the same credential revision.</p>
+<h3 id="scheduler-to-collector">Scheduler to collector</h3>
+<p>The schedule name and invocation payload are derived by the control plane. A
+dedicated IAM role can invoke only the collector Lambda and send failed events
+only to the collector dead-letter queue. Schedule targets use a fixed retry
+budget and no flexible delivery window. The collector accepts an exact event
+schema and rejects unknown fields, providers, identifiers, secret namespaces,
+and unbounded values before any network request.</p>
+<h3 id="collector-to-provider-and-ingestion">Collector to provider and ingestion</h3>
+<p>The Entra collector may contact only:</p>
+<ul>
+<li><code>login.microsoftonline.com</code> for the exact tenant OAuth token endpoint;</li>
+<li><code>graph.microsoft.com</code> for the exact <code>/v1.0/users</code> collection and validated
+  continuation links; and</li>
+<li>the deployment-owned HTTPS API Gateway origin for discovery ingestion.</li>
+</ul>
+<p>Collection is bounded to 20 pages and 2,000 users, applies independent request
+timeouts, rejects duplicate or malformed identities, and retains only opaque
+object ID, active state, and optional department. Email, display name, token
+responses, and arbitrary Graph properties are not persisted.</p>
+<p>The collector strongly reads the current source revision before publication.
+Partial upload pages remain invisible until the existing hash-bound atomic
+commit succeeds.</p>
+<h2 id="state-model">State model</h2>
+<p>One <code>DISCOVERY_JOB</code> record exists per managed source:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>provider</code></td>
+<td>Closed provider enum; initially <code>entra</code></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>provisioning</code>, <code>scheduled</code>, <code>running</code>, <code>healthy</code>, <code>degraded</code>, or <code>disabled</code></td>
+</tr>
+<tr>
+<td><code>revision</code></td>
+<td>Optimistic-concurrency revision for operator changes</td>
+</tr>
+<tr>
+<td><code>intervalMinutes</code></td>
+<td>Bounded service-defined cadence</td>
+</tr>
+<tr>
+<td><code>providerSecretArn</code></td>
+<td>Reviewed AWS reference, never secret content</td>
+</tr>
+<tr>
+<td><code>scheduleName</code></td>
+<td>Server-derived EventBridge Scheduler identity</td>
+</tr>
+<tr>
+<td><code>lastAttemptAt</code></td>
+<td>Start of the latest collector invocation</td>
+</tr>
+<tr>
+<td><code>lastSuccessAt</code></td>
+<td>Latest committed generation</td>
+</tr>
+<tr>
+<td><code>lastErrorCode</code></td>
+<td>Fixed content-free operational reason</td>
+</tr>
+<tr>
+<td><code>consecutiveFailures</code></td>
+<td>Bounded failure counter for UI/alerting</td>
+</tr>
+</tbody>
+</table>
+<p>Credential state, job state, and snapshot state remain separate. A configured
+schedule does not imply that credentials work, that Graph collection succeeded,
+or that evidence is current.</p>
+<h2 id="api">API</h2>
+<p>All mutations require <code>discovery_write</code> and exact platform-administrator
+authority.</p>
+<h3 id="configure">Configure</h3>
+<p><code>POST /api/enterprise/discovery/sources/{sourceId}/managed-collector</code></p>
+<pre><code class="language-json">{
+  &quot;provider&quot;: &quot;entra&quot;,
+  &quot;intervalMinutes&quot;: 15,
+  &quot;providerSecretArn&quot;: &quot;arn:aws:secretsmanager:eu-west-2:123456789012:secret:aai-sec/discovery/providers/tenant-a/entra-production-AbCdEf&quot;,
+  &quot;expectedJobRevision&quot;: 0,
+  &quot;expectedCredentialRevision&quot;: 0
+}
+</code></pre>
+<p>The response is redacted job metadata. Initial provisioning creates the
+connector secret and schedule before conditionally committing authority. Any
+failed precondition removes the newly created external resources. A schedule
+cannot run before its delayed start time, so no job observes uncommitted state.</p>
+<h3 id="disable">Disable</h3>
+<p><code>DELETE /api/enterprise/discovery/sources/{sourceId}/managed-collector</code>
+requires the job and credential revisions in its JSON body. The control plane
+atomically marks the job disabled and revokes the connector before deleting the
+schedule and scheduling secret deletion. If external cleanup fails, ingestion
+still remains denied by live connector state and the job reports cleanup
+required.</p>
+<h3 id="read">Read</h3>
+<p><code>GET /api/enterprise/discovery/sources</code> includes redacted <code>managedCollector</code>
+metadata alongside credential and snapshot state. It never includes connector
+secret names/ARNs, provider secret values, Graph tokens, schedule input, or raw
+errors.</p>
+<h2 id="failure-and-monitoring-behavior">Failure and monitoring behavior</h2>
+<p>The collector records only fixed reason codes:</p>
+<ul>
+<li><code>configuration_invalid</code></li>
+<li><code>provider_secret_unavailable</code></li>
+<li><code>connector_secret_unavailable</code></li>
+<li><code>provider_authentication_failed</code></li>
+<li><code>provider_transport_failed</code></li>
+<li><code>provider_response_invalid</code></li>
+<li><code>provider_inventory_too_large</code></li>
+<li><code>source_revision_conflict</code></li>
+<li><code>ingestion_rejected</code></li>
+<li><code>internal_error</code></li>
+</ul>
+<p>Every failed invocation increments a bounded counter and leaves the previous
+snapshot untouched. Lambda failure metrics and the dedicated dead-letter queue
+feed the existing security alerting foundation. The UI shows the last attempt,
+last success, failure count, and fixed reason without exposing provider data.</p>
+<h2 id="low-friction-operator-journey">Low-friction operator journey</h2>
 <ol>
-<li>A security operator registers and reviews a Skill or MCP server.</li>
-<li>The operator selects resource IDs in a typed policy editor.</li>
-<li>Applying the policy creates a new immutable policy version and audits the
-   resource set.</li>
-<li>The enrolled deployment agent fetches the effective policy, resolves the
-   selected registry entries, validates signatures/digests and writes only the
-   project-scoped managed files.</li>
-<li>Claude Code is restarted or refreshed, and the agent reports the applied
-   manifest hash. Missing, invalid, revoked, or unavailable resources fail
-   closed and are not installed.</li>
+<li>In <strong>Coverage → Inventory sources</strong>, choose <strong>Microsoft Entra ID</strong> and
+   <strong>AWS-managed schedule</strong>.</li>
+<li>Copy the generated AWS CLI template for the required KMS key, secret prefix,
+   and tags; fill the three values locally or through the enterprise secret
+   provisioning workflow.</li>
+<li>Paste only the resulting secret ARN, select a cadence, and review the exact
+   permission and data-minimisation boundary.</li>
+<li>Choose <strong>Create managed collector</strong>. The UI reports schedule state separately
+   from credential and evidence state.</li>
+<li>Wait for the first run or choose a bounded <strong>Run now</strong> action when supported.</li>
+<li>Confirm <strong>Healthy</strong> collector state and <strong>Current</strong> evidence before relying on
+   coverage.</li>
 </ol>
-<p>Removing a resource from a policy removes it from the managed set on the next
-reconciliation. Files outside the managed manifest are preserved and are
-reported as unmanaged configuration rather than silently deleted.</p>
-<h2 id="what-this-does-not-provide">What this does not provide</h2>
-<p>This mechanism does not sandbox Claude Code, make arbitrary Skills trusted, or
-make an external MCP server secure. High-risk MCP actions still need to route
-through the SDK gateway or an independently reviewed, authenticated adapter.
-Host-level permissions, secrets, network egress and process isolation remain
-deployment-owned controls.</p>
+<h2 id="non-guarantees-and-remaining-work">Non-guarantees and remaining work</h2>
+<ul>
+<li>AWS-managed Entra collection does not prove endpoint or GitHub coverage.</li>
+<li>A client secret is not workload identity; future deployments may replace it
+  with Entra workload identity federation without changing normalized output.</li>
+<li>The first live acceptance can prove AWS scheduling, secret isolation, bounded
+  failure, and synthetic provider contracts. Successful real Graph collection
+  requires pilot-tenant credentials and admin consent.</li>
+<li>Population acceptance still requires a measured 95% pilot denominator and
+  documented blind spots.</li>
+</ul>
 
 
 
