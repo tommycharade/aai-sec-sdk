@@ -67,6 +67,22 @@ Microsoft Intune, because Microsoft Entra ID is the first identity provider.
 These inputs are required to replace the deployed `not-configured` runtime
 attestation posture with release-bound enforcement evidence.
 
+### GitHub organization discovery pilot
+
+- GitHub organization slug and an agreed complete repository denominator.
+- An organization-approved read-only credential stored in the deployed AWS
+  Secrets Manager namespace; provide only its secret ARN to the control plane.
+- Independent evidence that the credential can enumerate every repository in
+  scope, including private repositories.
+- A reviewed repository-to-project-root mapping and expected Claude Code or
+  Codex host selection for each active repository.
+- Approval to migrate from the initial token adapter to a centrally installed
+  GitHub App when that integration is implemented.
+
+These inputs are required to replace the synthetic failure-path acceptance
+with successful collection and measured source-control coverage. The current
+hosted connector and UI workflow are deployed and synthetically validated.
+
 ## Enterprise operating decisions
 
 The following decisions can be supplied progressively:
