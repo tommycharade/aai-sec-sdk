@@ -48,6 +48,7 @@ nav:
   - Management UI: ui.md
   - Enterprise fleet: enterprise-fleet.md
   - Agent population discovery: agent-discovery-design.md
+  - AWS-managed discovery connectors: scheduled-discovery-connectors-design.md
   - Dynamic policy groups: dynamic-groups-design.md
   - Policy editor: policy-editor.md
   - Policy governance design: policy-governance-design.md

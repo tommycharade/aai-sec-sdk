@@ -1,5 +1,13 @@
 # Changelog
 
+- Added UI-first AWS-managed Microsoft Entra population discovery. Platform
+  administrators provide only a tenant-tagged Secrets Manager ARN and fixed
+  cadence; the control plane validates account, region, namespace, tags and KMS
+  key without reading provider bytes, creates a separate source bearer directly
+  in Secrets Manager, and schedules a dedicated bounded collector. Live job
+  revision/digest checks, exact Graph endpoint validation, atomic publication,
+  revocation-before-cleanup, least-privilege IAM, DLQ alarms and redacted UI
+  health keep failed or stale collection from becoming current evidence.
 - Added source-scoped, revocable discovery connector credentials and bounded
   paginated inventory generations. Connectors upload immutable hash-addressed
   pages and an atomic commit alone advances current coverage, so partial,

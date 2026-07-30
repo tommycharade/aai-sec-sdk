@@ -14,6 +14,7 @@ import re
 import secrets
 import time
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -145,6 +146,7 @@ _DISCOVERY_GENERATION_PAGE_LIMIT = 100
 _DISCOVERY_GENERATION_MAX_PAGES = 20
 _DISCOVERY_EXPECTED_HOST_LIMIT = 2
 _DISCOVERY_MAX_VALIDITY_SECONDS = 24 * 60 * 60
+_MANAGED_DISCOVERY_INTERVALS = frozenset({5, 15, 30, 60, 180, 360, 720, 1440})
 
 # Agent decision evidence is operationally useful but never authoritative.
 # The authenticated host may report only this fixed, content-free vocabulary;
@@ -3507,6 +3509,366 @@ def _revoke_discovery_connector(tenant, source_id, actor):
     return {"sourceId": source_id, "status": "revoked", "revision": existing["revision"]}
 
 
+def _managed_discovery_clients():
+    """Create deployment adapters lazily so core request tests stay provider-neutral."""
+    return boto3.client("secretsmanager"), boto3.client("scheduler")
+
+
+def _managed_discovery_environment():
+    """Return immutable deployment-owned managed collector coordinates."""
+    names = {
+        "collectorArn": "DISCOVERY_COLLECTOR_ARN",
+        "schedulerRoleArn": "DISCOVERY_SCHEDULER_ROLE_ARN",
+        "deadLetterArn": "DISCOVERY_COLLECTOR_DLQ_ARN",
+        "kmsKeyArn": "DISCOVERY_SECRET_KMS_KEY_ARN",
+        "providerSecretPrefix": "DISCOVERY_PROVIDER_SECRET_PREFIX",
+        "connectorSecretPrefix": "DISCOVERY_CONNECTOR_SECRET_PREFIX",
+        "region": "AWS_REGION",
+        "accountId": "AWS_ACCOUNT_ID",
+        "partition": "AWS_PARTITION",
+    }
+    value = {key: os.environ.get(environment, "").strip() for key, environment in names.items()}
+    return value if all(value.values()) else None
+
+
+def _managed_discovery_capabilities():
+    """Expose non-secret setup coordinates needed by an enterprise administrator."""
+    environment = _managed_discovery_environment()
+    if not environment:
+        return {"available": False, "providers": [], "intervalMinutes": []}
+    return {
+        "available": True,
+        "providers": ["entra"],
+        "intervalMinutes": sorted(_MANAGED_DISCOVERY_INTERVALS),
+        "region": environment["region"],
+        "providerSecretNamePrefix": environment["providerSecretPrefix"],
+        "kmsKeyArn": environment["kmsKeyArn"],
+        "providerSecretSchema": ["tenantId", "clientId", "clientSecret"],
+    }
+
+
+def _managed_discovery_secret(tenant, arn, secrets_client, environment):
+    """Validate a tenant-tagged provider secret without reading its value."""
+    expected_prefix = (
+        f"arn:{environment['partition']}:secretsmanager:{environment['region']}:"
+        f"{environment['accountId']}:secret:"
+        f"{environment['providerSecretPrefix']}{tenant}/"
+    )
+    if not isinstance(arn, str) or len(arn) > 1024 or not arn.startswith(expected_prefix):
+        raise ValueError("providerSecretArn is outside the tenant provider-secret namespace")
+    try:
+        description = secrets_client.describe_secret(SecretId=arn)
+    except Exception as error:
+        raise ValueError("provider secret is unavailable") from error
+    tags = {
+        item.get("Key"): item.get("Value")
+        for item in description.get("Tags", [])
+        if isinstance(item, dict)
+    }
+    if (
+        description.get("ARN") != arn
+        or description.get("KmsKeyId") != environment["kmsKeyArn"]
+        or tags != {"aai-sec:tenant-id": tenant, "aai-sec:purpose": "discovery-provider"}
+    ):
+        raise ValueError("provider secret encryption or tenant tags are invalid")
+    return arn
+
+
+def _managed_discovery_schedule_input(
+    tenant, source_id, provider_secret_arn, connector_secret_arn, revision
+):
+    """Build and bind the exact scheduler input accepted by the collector."""
+    value = {
+        "schemaVersion": 1,
+        "tenantId": tenant,
+        "sourceId": source_id,
+        "provider": "entra",
+        "providerSecretArn": provider_secret_arn,
+        "connectorSecretArn": connector_secret_arn,
+        "jobRevision": revision,
+        "validitySeconds": 3600,
+    }
+    value["configurationDigest"] = _configuration_hash(value)
+    return value
+
+
+def _managed_discovery_names(tenant, source_id, environment):
+    """Derive opaque bounded AWS resource names without exposing tenant labels."""
+    digest = hashlib.sha256(f"{tenant}\0{source_id}".encode()).hexdigest()[:32]
+    return {
+        "schedule": f"aai-sec-discovery-{digest}",
+        "connectorSecret": f"{environment['connectorSecretPrefix']}{digest}",
+    }
+
+
+def _managed_discovery_audit_record(tenant, event_type, actor, payload, *, now):
+    """Build primary durable evidence committed with managed job authority."""
+    event_id = str(uuid.uuid4())
+    redacted = {
+        "event_type": event_type,
+        "actor": actor,
+        "tenant_id": tenant,
+        "occurred_at": now,
+        "payload": payload,
+    }
+    return {
+        **_item_key(tenant, "DISCOVERY_AUDIT", f"{now:012d}#{event_id}"),
+        **redacted,
+        "id": event_id,
+        "payload_hash": hashlib.sha256(
+            json.dumps(redacted, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        "ttl": now + (366 * 24 * 60 * 60),
+    }
+
+
+def _export_managed_discovery_audit(tenant, event_type, actor, payload):
+    """Best-effort copy already-durable job evidence to the S3 audit stream."""
+    try:
+        _audit(tenant, event_type, actor, payload)
+    except Exception:
+        print(json.dumps({"warning": "managed discovery audit replication failed"}))
+
+
+def _create_managed_discovery(tenant, source_id, value, actor):
+    """Create one scheduled Entra collector while keeping credentials out of the UI."""
+    fields = {
+        "provider",
+        "providerSecretArn",
+        "intervalMinutes",
+        "expectedJobRevision",
+        "expectedCredentialRevision",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("managed discovery configuration has an invalid schema")
+    source_id = _bounded_identifier(source_id, "sourceId")
+    if value.get("provider") != "entra":
+        raise ValueError("managed discovery provider is unsupported")
+    interval = _discovery_integer(value.get("intervalMinutes"), "intervalMinutes")
+    if interval not in _MANAGED_DISCOVERY_INTERVALS:
+        raise ValueError("managed discovery interval is unsupported")
+    expected_job = _discovery_integer(value.get("expectedJobRevision"), "expectedJobRevision")
+    expected_credential = _discovery_integer(
+        value.get("expectedCredentialRevision"), "expectedCredentialRevision"
+    )
+    if expected_job != 0 or expected_credential != 0:
+        raise ValueError("managed discovery creation requires zero initial revisions")
+    environment = _managed_discovery_environment()
+    if not environment:
+        raise RuntimeError("managed discovery is not configured")
+    source = TABLE.get_item(
+        Key=_item_key(tenant, "DISCOVERY_SOURCE", source_id), ConsistentRead=True
+    ).get("Item")
+    if source and source.get("sourceKind") != "identity":
+        raise PolicyConflict("managed Entra discovery requires an identity source")
+    secrets_client, scheduler = _managed_discovery_clients()
+    provider_secret = _managed_discovery_secret(
+        tenant, value.get("providerSecretArn"), secrets_client, environment
+    )
+    names = _managed_discovery_names(tenant, source_id, environment)
+    token = secrets.token_urlsafe(32)
+    now = int(time.time())
+    connector_arn = ""
+    schedule_created = False
+    try:
+        connector = secrets_client.create_secret(
+            Name=names["connectorSecret"],
+            Description="AAI Security managed discovery connector credential",
+            KmsKeyId=environment["kmsKeyArn"],
+            SecretString=json.dumps({"token": token}, separators=(",", ":")),
+            Tags=[
+                {"Key": "aai-sec:tenant-id", "Value": tenant},
+                {"Key": "aai-sec:purpose", "Value": "discovery-connector"},
+            ],
+        )
+        connector_arn = connector["ARN"]
+        schedule_input = _managed_discovery_schedule_input(
+            tenant, source_id, provider_secret, connector_arn, 1
+        )
+        scheduler.create_schedule(
+            Name=names["schedule"],
+            ScheduleExpression=f"rate({interval} minutes)",
+            FlexibleTimeWindow={"Mode": "OFF"},
+            StartDate=datetime.fromtimestamp(now + 60, tz=UTC),
+            State="ENABLED",
+            Description="AAI Security managed Entra discovery",
+            Target={
+                "Arn": environment["collectorArn"],
+                "RoleArn": environment["schedulerRoleArn"],
+                "Input": json.dumps(schedule_input, sort_keys=True, separators=(",", ":")),
+                "DeadLetterConfig": {"Arn": environment["deadLetterArn"]},
+                "RetryPolicy": {"MaximumEventAgeInSeconds": 900, "MaximumRetryAttempts": 2},
+            },
+        )
+        schedule_created = True
+        connector_record = {
+            **_item_key(tenant, "DISCOVERY_CONNECTOR", source_id),
+            "tenant_id": tenant,
+            "sourceId": source_id,
+            "sourceKind": "identity",
+            "tokenHash": hashlib.sha256(token.encode()).hexdigest(),
+            "revision": 1,
+            "status": "active",
+            "rotatedAt": now,
+            "rotatedBy": actor,
+            "managed": True,
+        }
+        job = {
+            **_item_key(tenant, "DISCOVERY_JOB", source_id),
+            "tenant_id": tenant,
+            "sourceId": source_id,
+            "sourceKind": "identity",
+            "provider": "entra",
+            "providerSecretArn": provider_secret,
+            "connectorSecretArn": connector_arn,
+            "scheduleName": names["schedule"],
+            "configurationDigest": schedule_input["configurationDigest"],
+            "intervalMinutes": interval,
+            "revision": 1,
+            "status": "scheduled",
+            "consecutiveFailures": 0,
+            "createdAt": now,
+            "createdBy": actor,
+        }
+        audit_payload = {
+            "source_id": source_id,
+            "provider": "entra",
+            "interval_minutes": interval,
+        }
+        audit_record = _managed_discovery_audit_record(
+            tenant, "managed_discovery_created", actor, audit_payload, now=now
+        )
+        DYNAMODB.transact_write_items(
+            TransactItems=[
+                _transaction_put(connector_record, condition="attribute_not_exists(pk)"),
+                _transaction_put(job, condition="attribute_not_exists(pk)"),
+                _transaction_put(audit_record, condition="attribute_not_exists(pk)"),
+            ]
+        )
+    except Exception as error:
+        if schedule_created:
+            try:
+                scheduler.delete_schedule(Name=names["schedule"])
+            except Exception:
+                print(json.dumps({"warning": "managed discovery schedule cleanup failed"}))
+        if connector_arn:
+            try:
+                secrets_client.delete_secret(SecretId=connector_arn, RecoveryWindowInDays=7)
+            except Exception:
+                print(json.dumps({"warning": "managed discovery secret cleanup failed"}))
+        if getattr(error, "response", {}).get("Error", {}).get("Code") in {
+            "ConditionalCheckFailedException",
+            "TransactionCanceledException",
+        }:
+            raise PolicyConflict("managed discovery source already exists") from error
+        # AWS exception text may include resource coordinates. Collapse it at
+        # this trust boundary before the generic request logger sees it.
+        raise RuntimeError("managed discovery provisioning failed") from error
+    _export_managed_discovery_audit(tenant, "managed_discovery_created", actor, audit_payload)
+    return _managed_discovery_view(job)
+
+
+def _disable_managed_discovery(tenant, source_id, value, actor):
+    """Revoke live authority atomically before deleting scheduled AWS resources."""
+    if not isinstance(value, dict) or set(value) != {
+        "expectedJobRevision",
+        "expectedCredentialRevision",
+    }:
+        raise ValueError("managed discovery disable request has an invalid schema")
+    source_id = _bounded_identifier(source_id, "sourceId")
+    expected_job = _discovery_integer(value.get("expectedJobRevision"), "expectedJobRevision")
+    expected_credential = _discovery_integer(
+        value.get("expectedCredentialRevision"), "expectedCredentialRevision"
+    )
+    job_key = _item_key(tenant, "DISCOVERY_JOB", source_id)
+    connector_key = _item_key(tenant, "DISCOVERY_CONNECTOR", source_id)
+    job = TABLE.get_item(Key=job_key, ConsistentRead=True).get("Item")
+    connector = TABLE.get_item(Key=connector_key, ConsistentRead=True).get("Item")
+    if not job or not connector or job.get("status") == "disabled":
+        raise LookupError("managed discovery source not found")
+    now = int(time.time())
+    disabled_job = {
+        **job,
+        "status": "disabled",
+        "revision": expected_job + 1,
+        "disabledAt": now,
+        "disabledBy": actor,
+    }
+    revoked_connector = {
+        **connector,
+        "status": "revoked",
+        "revision": expected_credential + 1,
+        "revokedAt": now,
+        "revokedBy": actor,
+    }
+    audit_payload = {"source_id": source_id, "cleanup_required": False}
+    audit_record = _managed_discovery_audit_record(
+        tenant, "managed_discovery_disabled", actor, audit_payload, now=now
+    )
+    try:
+        DYNAMODB.transact_write_items(
+            TransactItems=[
+                _transaction_put(
+                    disabled_job,
+                    condition="revision = :revision AND #status <> :disabled",
+                    names={"#status": "status"},
+                    values={":revision": expected_job, ":disabled": "disabled"},
+                ),
+                _transaction_put(
+                    revoked_connector,
+                    condition="revision = :revision AND #status = :active",
+                    names={"#status": "status"},
+                    values={":revision": expected_credential, ":active": "active"},
+                ),
+                _transaction_put(audit_record, condition="attribute_not_exists(pk)"),
+            ]
+        )
+    except Exception as error:
+        if getattr(error, "response", {}).get("Error", {}).get("Code") in {
+            "ConditionalCheckFailedException",
+            "TransactionCanceledException",
+        }:
+            raise PolicyConflict("managed discovery source changed") from error
+        raise
+    secrets_client, scheduler = _managed_discovery_clients()
+    cleanup_required = False
+    try:
+        scheduler.delete_schedule(Name=job["scheduleName"])
+    except Exception:
+        cleanup_required = True
+    try:
+        secrets_client.delete_secret(SecretId=job["connectorSecretArn"], RecoveryWindowInDays=7)
+    except Exception:
+        cleanup_required = True
+    if cleanup_required:
+        disabled_job["cleanupRequired"] = True
+        TABLE.put_item(Item=disabled_job)
+    _export_managed_discovery_audit(
+        tenant,
+        "managed_discovery_disabled",
+        actor,
+        {"source_id": source_id, "cleanup_required": cleanup_required},
+    )
+    return _managed_discovery_view(disabled_job)
+
+
+def _managed_discovery_view(job):
+    """Return operational posture without secret or scheduler coordinates."""
+    if not job:
+        return None
+    return {
+        "provider": job.get("provider"),
+        "status": job.get("status"),
+        "revision": int(job.get("revision", 0)),
+        "intervalMinutes": int(job.get("intervalMinutes", 0)),
+        "lastAttemptAt": int(job.get("lastAttemptAt", 0)),
+        "lastSuccessAt": int(job.get("lastSuccessAt", 0)),
+        "lastErrorCode": job.get("lastErrorCode"),
+        "consecutiveFailures": int(job.get("consecutiveFailures", 0)),
+        "cleanupRequired": job.get("cleanupRequired") is True,
+    }
+
+
 def _discovery_connector_identity(event, tenant, source_id):
     """Authenticate one live bearer against its exact tenant and source record."""
     tenant = _bounded_identifier(tenant, "tenantId")
@@ -3581,11 +3943,17 @@ def _discovery_source_directory(tenant, *, now=None):
         for item in _list(tenant, "DISCOVERY_SOURCE", consistent_read=True)
         if isinstance(item.get("sourceId"), str)
     }
+    jobs = {
+        item.get("sourceId"): item
+        for item in _list(tenant, "DISCOVERY_JOB", consistent_read=True)
+        if isinstance(item.get("sourceId"), str)
+    }
     items = []
-    for source_id in sorted(set(connectors) | set(sources)):
+    for source_id in sorted(set(connectors) | set(sources) | set(jobs)):
         connector = connectors.get(source_id)
         source = sources.get(source_id)
-        source_kind = (connector or source or {}).get("sourceKind")
+        job = jobs.get(source_id)
+        source_kind = (connector or source or job or {}).get("sourceKind")
         if source_kind not in _DISCOVERY_SOURCE_KINDS:
             # Malformed server state must not be presented as configured.
             continue
@@ -3607,6 +3975,7 @@ def _discovery_source_directory(tenant, *, now=None):
                 "sourceKind": source_kind,
                 "credential": credential,
                 "snapshot": _discovery_snapshot_metadata(source, now=current_time),
+                "managedCollector": _managed_discovery_view(job),
             }
         )
     return {"items": items, "nextCursor": None}
@@ -6741,6 +7110,13 @@ def handler(event, context):
                         {"error": "discovery sources require a tenant operator role"},
                     )
                 return _response(200, _discovery_source_directory(tenant))
+            if method == "GET" and parts == ["discovery", "managed-collector-capabilities"]:
+                if not _operator_roles(event):
+                    return _response(
+                        403,
+                        {"error": "managed discovery requires a tenant operator role"},
+                    )
+                return _response(200, _managed_discovery_capabilities())
             if (
                 method == "POST"
                 and len(parts) == 4
@@ -6763,6 +7139,21 @@ def handler(event, context):
                     )
                 if method == "DELETE":
                     return _response(200, _revoke_discovery_connector(tenant, parts[2], actor))
+            if (
+                len(parts) == 4
+                and parts[:2] == ["discovery", "sources"]
+                and parts[3] == "managed-collector"
+            ):
+                if method == "POST":
+                    return _response(
+                        201,
+                        _create_managed_discovery(tenant, parts[2], _body(event), actor),
+                    )
+                if method == "DELETE":
+                    return _response(
+                        200,
+                        _disable_managed_discovery(tenant, parts[2], _body(event), actor),
+                    )
             if method == "GET" and parts == ["identity"]:
                 return _response(200, _identity_access(tenant, event))
             if method == "GET" and parts == ["identity", "break-glass", "requests"]:

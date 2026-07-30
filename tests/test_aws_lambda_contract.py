@@ -5935,6 +5935,272 @@ def test_discovery_connector_cannot_reinterpret_legacy_source_kind(
     )
 
 
+class FakeManagedDiscoverySecrets:
+    """Capture managed collector secret metadata without retaining a live credential."""
+
+    def __init__(self, provider_arn: str, key_arn: str, tenant: str) -> None:
+        self.provider_arn = provider_arn
+        self.key_arn = key_arn
+        self.tenant = tenant
+        self.described: list[str] = []
+        self.created: list[dict[str, Any]] = []
+        self.deleted: list[dict[str, Any]] = []
+
+    def describe_secret(self, *, SecretId: str) -> dict[str, Any]:
+        self.described.append(SecretId)
+        return {
+            "ARN": self.provider_arn,
+            "KmsKeyId": self.key_arn,
+            "Tags": [
+                {"Key": "aai-sec:tenant-id", "Value": self.tenant},
+                {"Key": "aai-sec:purpose", "Value": "discovery-provider"},
+            ],
+        }
+
+    def create_secret(self, **kwargs: Any) -> dict[str, str]:
+        self.created.append(dict(kwargs))
+        return {
+            "ARN": (f"arn:aws:secretsmanager:eu-west-2:111122223333:secret:{kwargs['Name']}-abc123")
+        }
+
+    def delete_secret(self, **kwargs: Any) -> None:
+        self.deleted.append(dict(kwargs))
+
+
+class FakeManagedDiscoveryScheduler:
+    """Capture exact schedule creation and deletion calls."""
+
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+        self.deleted: list[dict[str, Any]] = []
+
+    def create_schedule(self, **kwargs: Any) -> None:
+        self.created.append(dict(kwargs))
+
+    def delete_schedule(self, **kwargs: Any) -> None:
+        self.deleted.append(dict(kwargs))
+
+
+def _managed_discovery_doubles(monkeypatch: Any, module: Any, tenant: str) -> tuple[Any, Any, str]:
+    """Configure deployment coordinates and return managed AWS adapter doubles."""
+    key_arn = "arn:aws:kms:eu-west-2:111122223333:key/00000000-1111-4222-8333-444444444444"
+    provider_arn = (
+        "arn:aws:secretsmanager:eu-west-2:111122223333:secret:"
+        f"aai-sec/discovery/providers/{tenant}/entra-primary-abc123"
+    )
+    environment = {
+        "DISCOVERY_COLLECTOR_ARN": "arn:aws:lambda:eu-west-2:111122223333:function:collector",
+        "DISCOVERY_SCHEDULER_ROLE_ARN": "arn:aws:iam::111122223333:role/scheduler",
+        "DISCOVERY_COLLECTOR_DLQ_ARN": "arn:aws:sqs:eu-west-2:111122223333:collector-dlq",
+        "DISCOVERY_SECRET_KMS_KEY_ARN": key_arn,
+        "DISCOVERY_PROVIDER_SECRET_PREFIX": "aai-sec/discovery/providers/",
+        "DISCOVERY_CONNECTOR_SECRET_PREFIX": "aai-sec/discovery/connectors/",
+        "AWS_REGION": "eu-west-2",
+        "AWS_ACCOUNT_ID": "111122223333",
+        "AWS_PARTITION": "aws",
+    }
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    secret_client = FakeManagedDiscoverySecrets(provider_arn, key_arn, tenant)
+    scheduler = FakeManagedDiscoveryScheduler()
+    monkeypatch.setattr(module, "_managed_discovery_clients", lambda: (secret_client, scheduler))
+    return secret_client, scheduler, provider_arn
+
+
+def test_managed_entra_discovery_create_directory_and_disable_are_fail_closed(
+    monkeypatch: Any,
+) -> None:
+    """The managed lifecycle stores no plaintext and revokes before AWS cleanup."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-managed-discovery"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    secret_client, scheduler, provider_arn = _managed_discovery_doubles(monkeypatch, module, tenant)
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+    capabilities = _invoke(
+        module,
+        _event(
+            "/api/enterprise/discovery/managed-collector-capabilities",
+            "GET",
+            claims=claims,
+        ),
+    )
+    assert capabilities["statusCode"] == 200
+    capability_body = json.loads(capabilities["body"])
+    assert capability_body["available"] is True
+    assert capability_body["providerSecretNamePrefix"] == "aai-sec/discovery/providers/"
+
+    path = "/api/enterprise/discovery/sources/entra-primary/managed-collector"
+    created = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                "provider": "entra",
+                "providerSecretArn": provider_arn,
+                "intervalMinutes": 60,
+                "expectedJobRevision": 0,
+                "expectedCredentialRevision": 0,
+            },
+            claims=claims,
+        ),
+    )
+    assert created["statusCode"] == 201
+    assert json.loads(created["body"])["status"] == "scheduled"
+    assert secret_client.described == [provider_arn]
+    assert len(secret_client.created) == 1
+    secret_value = json.loads(secret_client.created[0]["SecretString"])
+    assert set(secret_value) == {"token"}
+    assert secret_value["token"] not in json.dumps(list(table.items.values()))
+    assert (
+        len(
+            [
+                item
+                for item in table.items.values()
+                if str(item.get("sk", "")).startswith("DISCOVERY_AUDIT#")
+            ]
+        )
+        == 1
+    )
+    assert len(scheduler.created) == 1
+    schedule_input = json.loads(scheduler.created[0]["Target"]["Input"])
+    assert schedule_input["tenantId"] == tenant
+    assert schedule_input["sourceId"] == "entra-primary"
+    assert schedule_input["configurationDigest"] == module._configuration_hash(
+        {key: value for key, value in schedule_input.items() if key != "configurationDigest"}
+    )
+
+    directory = _invoke(
+        module,
+        _event("/api/enterprise/discovery/sources", "GET", claims=claims),
+    )
+    assert directory["statusCode"] == 200
+    directory_body = json.loads(directory["body"])
+    assert directory_body["items"][0]["managedCollector"] == {
+        "provider": "entra",
+        "status": "scheduled",
+        "revision": 1,
+        "intervalMinutes": 60,
+        "lastAttemptAt": 0,
+        "lastSuccessAt": 0,
+        "lastErrorCode": None,
+        "consecutiveFailures": 0,
+        "cleanupRequired": False,
+    }
+    for forbidden in ("providerSecretArn", "connectorSecretArn", "scheduleName", "tokenHash"):
+        assert forbidden not in directory["body"]
+
+    disabled = _invoke(
+        module,
+        _event(
+            path,
+            "DELETE",
+            body={"expectedJobRevision": 1, "expectedCredentialRevision": 1},
+            claims=claims,
+        ),
+    )
+    assert disabled["statusCode"] == 200
+    assert json.loads(disabled["body"])["status"] == "disabled"
+    assert (
+        table.items[(f"TENANT#{tenant}", "DISCOVERY_CONNECTOR#entra-primary")]["status"]
+        == "revoked"
+    )
+    assert (
+        len(
+            [
+                item
+                for item in table.items.values()
+                if str(item.get("sk", "")).startswith("DISCOVERY_AUDIT#")
+            ]
+        )
+        == 2
+    )
+    assert scheduler.deleted == [{"Name": scheduler.created[0]["Name"]}]
+    assert secret_client.deleted[-1]["RecoveryWindowInDays"] == 7
+
+
+def test_managed_discovery_rejects_cross_tenant_secret_before_aws_lookup(
+    monkeypatch: Any,
+) -> None:
+    """A browser cannot bind another tenant/account/region secret to a collector."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-managed-isolation"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    secret_client, scheduler, _provider_arn = _managed_discovery_doubles(
+        monkeypatch, module, tenant
+    )
+    response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/discovery/sources/entra/managed-collector",
+            "POST",
+            body={
+                "provider": "entra",
+                "providerSecretArn": (
+                    "arn:aws:secretsmanager:eu-west-2:111122223333:secret:"
+                    "aai-sec/discovery/providers/another-tenant/entra-abc123"
+                ),
+                "intervalMinutes": 60,
+                "expectedJobRevision": 0,
+                "expectedCredentialRevision": 0,
+            },
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["platform-admin"],
+                "sub": "admin-a",
+            },
+        ),
+    )
+    assert response["statusCode"] == 400
+    assert secret_client.described == []
+    assert scheduler.created == []
+
+
+def test_managed_discovery_transaction_conflict_cleans_external_resources(
+    monkeypatch: Any,
+) -> None:
+    """A concurrent create leaves no schedule or usable secret behind."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-managed-race"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    secret_client, scheduler, provider_arn = _managed_discovery_doubles(monkeypatch, module, tenant)
+
+    def concurrent_create() -> None:
+        table.put_item(
+            Item=module._item_key(tenant, "DISCOVERY_JOB", "entra")
+            | {"sourceId": "entra", "sourceKind": "identity", "revision": 1}
+        )
+
+    module.DYNAMODB.before_transaction = concurrent_create
+    response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/discovery/sources/entra/managed-collector",
+            "POST",
+            body={
+                "provider": "entra",
+                "providerSecretArn": provider_arn,
+                "intervalMinutes": 15,
+                "expectedJobRevision": 0,
+                "expectedCredentialRevision": 0,
+            },
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["platform-admin"],
+                "sub": "admin-a",
+            },
+        ),
+    )
+    assert response["statusCode"] == 409
+    assert len(scheduler.deleted) == 1
+    assert secret_client.deleted[-1]["RecoveryWindowInDays"] == 7
+    assert not any(key[1] == "DISCOVERY_CONNECTOR#entra" for key in table.items)
+
+
 def test_discovery_connector_commits_complete_paginated_generation_atomically(
     monkeypatch: Any,
 ) -> None:
@@ -5984,6 +6250,7 @@ def test_discovery_connector_commits_complete_paginated_generation_atomically(
             "revokedAt": None,
         },
         "snapshot": None,
+        "managedCollector": None,
     }
     assert registered["items"][0]["credential"]["rotatedAt"] >= now
     assert token not in directory["body"]
