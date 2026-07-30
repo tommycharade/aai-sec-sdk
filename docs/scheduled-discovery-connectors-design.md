@@ -51,6 +51,12 @@ KMS key, have a name under
 cannot read provider values. Only the collector Lambda can call
 `GetSecretValue` for this bounded namespace.
 
+Secrets Manager requires a KMS decrypt check while creating a connector secret
+with the customer-managed key. The control-plane role's KMS decrypt permission
+is therefore constrained to requests routed through Secrets Manager. The role
+still has no `GetSecretValue` permission, so it cannot retrieve provider or
+connector secret bytes.
+
 The Entra application receives only Microsoft Graph application permission
 `User.Read.All`, with tenant-admin consent and no directory write permission.
 Production onboarding must retain evidence of that permission review.

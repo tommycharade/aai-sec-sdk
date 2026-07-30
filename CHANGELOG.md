@@ -3,7 +3,9 @@
 - Fixed the managed discovery deployment role so connector creation can attach
   only the required tenant and `discovery-connector` tags. `CreateSecret` and
   `TagResource` remain connector-prefix scoped and tag constrained, while
-  deletion is a separate prefix-scoped permission.
+  deletion is a separate prefix-scoped permission. The required KMS decrypt
+  check is constrained to Secrets Manager requests and does not grant the
+  handler `GetSecretValue`.
 - Added UI-first AWS-managed Microsoft Entra population discovery. Platform
   administrators provide only a tenant-tagged Secrets Manager ARN and fixed
   cadence; the control plane validates account, region, namespace, tags and KMS
