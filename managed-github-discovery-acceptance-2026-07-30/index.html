@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/managed-package-distribution-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/managed-github-discovery-acceptance-2026-07-30/">
       
       
-        <link rel="prev" href="../managed-endpoint-deployment-design/">
+        <link rel="prev" href="../managed-discovery-acceptance-2026-07-30/">
       
       
-        <link rel="next" href="../enterprise-user-journeys/">
+        <link rel="next" href="../entra-scim-runbook/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Managed package distribution design - Agentic AI Security SDK</title>
+        <title>AWS-managed GitHub discovery acceptance — 2026-07-30 - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#managed-package-distribution-design" class="md-skip">
+        <a href="#aws-managed-github-discovery-acceptance-2026-07-30" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Managed package distribution design
+              AWS-managed GitHub discovery acceptance — 2026-07-30
             
           </span>
         </div>
@@ -907,37 +907,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Managed package distribution design
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../managed-package-distribution-design/" class="md-nav__link">
         
   
   
@@ -953,70 +926,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#security-boundary-and-threat-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Security boundary and threat model
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#api-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        API contract
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#endpoint-and-mdm-journey" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Endpoint and MDM journey
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#acceptance-evidence-and-remaining-work" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Acceptance evidence and remaining work
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1214,10 +1123,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../managed-github-discovery-acceptance-2026-07-30/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS-managed GitHub discovery acceptance — 2026-07-30
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1233,6 +1169,92 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tested-revisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tested revisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#live-acceptance-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live acceptance path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-properties-demonstrated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security properties demonstrated
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-production-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining production acceptance
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1804,10 +1826,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#security-boundary-and-threat-model" class="md-nav__link">
+  <a href="#scope" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Security boundary and threat model
+        Scope
       
     </span>
   </a>
@@ -1815,10 +1837,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#api-contract" class="md-nav__link">
+  <a href="#tested-revisions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API contract
+        Tested revisions
       
     </span>
   </a>
@@ -1826,10 +1848,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#endpoint-and-mdm-journey" class="md-nav__link">
+  <a href="#live-acceptance-path" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Endpoint and MDM journey
+        Live acceptance path
       
     </span>
   </a>
@@ -1837,10 +1859,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#acceptance-evidence-and-remaining-work" class="md-nav__link">
+  <a href="#security-properties-demonstrated" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Acceptance evidence and remaining work
+        Security properties demonstrated
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleanup-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-production-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining production acceptance
       
     </span>
   </a>
@@ -1867,93 +1911,173 @@
   
 
 
-<h1 id="managed-package-distribution-design">Managed package distribution design</h1>
-<p>This design connects the canonical managed endpoint package to the enterprise
-control plane. It lets a central platform administrator publish one exact
-Claude Code or Codex package for a deployment and lets the enrolled endpoint
-retrieve it over its authenticated agent channel. The privileged installer
-remains the only component that writes administrator-owned host files.</p>
-<h2 id="security-boundary-and-threat-model">Security boundary and threat model</h2>
-<p>Package bytes, browser fields, deployment identifiers, revisions and endpoint
-requests are untrusted. An attacker may try to publish a package for another
-tenant, replace a hook prerequisite, race two publications, replay an old
-package, download a package with another agent bearer, or keep using a package
-after desired state changes.</p>
-<p>The control plane therefore:</p>
+<h1 id="aws-managed-github-discovery-acceptance-2026-07-30">AWS-managed GitHub discovery acceptance — 2026-07-30</h1>
+<h2 id="scope">Scope</h2>
+<p>This report records a live, bounded acceptance of the AWS-managed GitHub
+organization discovery connector. It proves provisioning, scheduling, secret
+isolation, fixed-destination provider access, controlled provider failure,
+redacted operator visibility, disablement, credential revocation and
+recoverable cleanup in the deployed AWS control plane. Every identity,
+repository mapping and credential used in this test was synthetic.</p>
+<p>This is not evidence of successful collection from a real GitHub organization
+or complete enterprise repository coverage. GitHub can return only repositories
+visible to the selected credential, so production acceptance must independently
+prove that the credential covers the agreed organization denominator.</p>
+<h2 id="tested-revisions">Tested revisions</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Revision</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SDK and AWS control plane</td>
+<td><code>60288a2ef04393d3c384c70da681872aff3ce3d4</code></td>
+<td>Merged pull request <a href="https://github.com/tommycharade/aai-sec-sdk/pull/67">#67</a></td>
+</tr>
+<tr>
+<td>Management UI</td>
+<td><code>5df6a54723b0fa43b98aa67337ef9a0186c2290d</code></td>
+<td>Merged pull request <a href="https://github.com/tommycharade/aai-sec-ui/pull/31">#31</a></td>
+</tr>
+<tr>
+<td>AWS stack</td>
+<td><code>AaiSecControlPlane</code></td>
+<td><code>UPDATE_COMPLETE</code> in account <code>396510133537</code>, region <code>eu-west-2</code></td>
+</tr>
+<tr>
+<td>Hosted UI</td>
+<td><code>https://d2ir54klde64bd.cloudfront.net</code></td>
+<td>CloudFront invalidation <code>I5QV1H9J0I8ITTL0KA36JKHCEZ</code> completed</td>
+</tr>
+</tbody>
+</table>
+<p>The SDK pull request passed Python 3.11, 3.12 and 3.13 quality gates,
+PostgreSQL integration, Docker isolation, strict documentation, dependency
+audit and the bounded mutation gate. The local quality gate passed 772 tests,
+one intentionally skipped external test, 90.18% coverage, package validation
+and dependency audits. The UI passed type checking, 114 tests, production build
+and desktop plus 390-pixel browser acceptance.</p>
+<h2 id="live-acceptance-path">Live acceptance path</h2>
+<p>The test registered <code>github-acceptance-20260730</code> for <code>tenant-demo</code>. Its
+deployment-owned provider secret contained one synthetic invalid token. The
+typed mapping contained one synthetic repository, one SHA-256 project-root
+digest, both supported hosts and one synthetic business unit.</p>
+<table>
+<thead>
+<tr>
+<th>Assertion</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Configure managed source</td>
+<td>HTTP 201; GitHub/source-control job revision 1; status <code>scheduled</code></td>
+</tr>
+<tr>
+<td>Scheduler target</td>
+<td>Enabled, service-derived <code>rate(60 minutes)</code> schedule targeting the fixed collector Lambda</td>
+</tr>
+<tr>
+<td>Schedule binding</td>
+<td>Event contained the live job revision plus configuration and provider-configuration digests; no repository map was copied into the event</td>
+</tr>
+<tr>
+<td>Browser exposure</td>
+<td>No provider token, connector bearer, secret ARN, schedule input, repository name or project-root digest was returned</td>
+</tr>
+<tr>
+<td>Controlled collection</td>
+<td>Fixed error <code>provider_authentication_failed</code>; provider response text was not persisted or displayed</td>
+</tr>
+<tr>
+<td>Durable job state</td>
+<td>Status <code>degraded</code>; <code>lastAttemptAt</code> set; no <code>lastSuccessAt</code></td>
+</tr>
+<tr>
+<td>Atomic evidence</td>
+<td>No <code>DISCOVERY_SOURCE</code> snapshot was created after failed authentication</td>
+</tr>
+<tr>
+<td>Hosted UI</td>
+<td>Authenticated Coverage view showed <code>DEGRADED</code>, the redacted organization, one mapped repository, fixed error and no committed generation</td>
+</tr>
+<tr>
+<td>Consequential change</td>
+<td>A separate <strong>Disable collector</strong> confirmation was required</td>
+</tr>
+<tr>
+<td>Disable result</td>
+<td>UI confirmed schedule removal and ingestion-authority revocation</td>
+</tr>
+<tr>
+<td>Durable disable state</td>
+<td>Job status <code>disabled</code>, job revision 2; connector status <code>revoked</code>, credential revision 2</td>
+</tr>
+<tr>
+<td>External cleanup</td>
+<td>Schedule absent; connector and provider secrets scheduled for recoverable deletion</td>
+</tr>
+<tr>
+<td>Audit evidence</td>
+<td>Hash-retained <code>managed_discovery_created</code> and <code>managed_discovery_disabled</code> records present</td>
+</tr>
+<tr>
+<td>Failure containment</td>
+<td>Collector dead-letter queue had zero visible, in-flight and delayed messages</td>
+</tr>
+</tbody>
+</table>
+<p>Three controlled authentication failures were recorded because both the live
+schedule and explicit acceptance invocations ran before disablement. Every run
+produced the same fixed code and none advanced evidence.</p>
+<h2 id="security-properties-demonstrated">Security properties demonstrated</h2>
 <ul>
-<li>derives tenant and operator identity from authenticated context;</li>
-<li>permits publication only through the managed-deployment administration
-  capability (initially platform administrator only in the AWS adapter);</li>
-<li>accepts canonical package bytes plus their SHA-256 and reparses them through
-  the SDK package validator;</li>
-<li>requires the package host, host version, platform, policy identity, policy
-  version and bundle digest to exactly match current server-owned desired
-  state;</li>
-<li>uses an expected revision for optimistic concurrency so publication is never
-  silent last-writer-wins;</li>
-<li>stores at most 280 KiB of canonical, credential-free package data so the
-  base64 representation remains below DynamoDB's item-size boundary;</li>
-<li>returns package content only to a live, project-bound agent session for the
-  exact deployment and agent identity;</li>
-<li>rechecks current desired state on every download, making a package
-  unavailable immediately when configuration changes; and</li>
-<li>audits only package digest, revision and target metadata, never embedded
-  configuration content.</li>
+<li>The browser supplied only a tenant-scoped, KMS-encrypted provider-secret ARN
+  and bounded non-secret mapping; it never received or submitted token bytes.</li>
+<li>GitHub access used the service-owned <code>api.github.com</code> organization repository
+  endpoint and fixed pagination/query contract.</li>
+<li>The collector revalidated the current job, schedule digest and mapping digest
+  before secret retrieval or provider network access.</li>
+<li>A failed provider request could lower assurance but could not enroll agents,
+  publish partial evidence or create an optimistic coverage percentage.</li>
+<li>Operator views retained only organization, repository count, operational
+  status, timestamps and fixed error codes.</li>
+<li>Disablement revoked ingestion authority before external cleanup. Secret
+  deletion used recovery windows; no force deletion was used.</li>
 </ul>
-<p>Package retrieval deliberately remains available when managed configuration is
-missing or conflicting. Requiring the endpoint to prove the package was already
-installed before it could download that package would create a repair
-deadlock. Retrieval still requires current runtime attestation and is denied by
-an emergency stop. Download is not enforcement evidence: only a subsequent
-administrator-owned measurement can move posture to <code>enforced</code>.</p>
-<h2 id="api-contract">API contract</h2>
-<p>An authenticated platform administrator publishes to:</p>
-<pre><code class="language-text">PUT /api/enterprise/deployments/{deploymentId}/managed-package
-</code></pre>
-<p>The bounded JSON body contains:</p>
-<pre><code class="language-json">{
-  &quot;expectedRevision&quot;: 0,
-  &quot;packageBase64&quot;: &quot;&lt;canonical package bytes&gt;&quot;,
-  &quot;packageSha256&quot;: &quot;&lt;lowercase SHA-256&gt;&quot;
-}
-</code></pre>
-<p>Revision <code>0</code> means no package has been published. A successful publication
-returns metadata only: revision, package and bundle digests, target, policy and
-publication time. The UI can read that metadata with an operator <code>GET</code> on the
-same route without exposing the package content to the browser.</p>
-<p>An enrolled endpoint retrieves its package from:</p>
-<pre><code class="language-text">GET /agent/{deploymentId}/{agentId}/managed-package
-</code></pre>
-<p>The response includes the canonical bytes as bounded base64 plus the same
-metadata. <code>ControlPlaneAgentClient.managed_deployment_package</code> decodes the
-response, verifies its SHA-256, reparses the canonical schema and checks the
-expected host, platform and bundle digest before returning a typed
-<code>ManagedDeploymentPackage</code>.</p>
-<h2 id="endpoint-and-mdm-journey">Endpoint and MDM journey</h2>
+<h2 id="cleanup-evidence">Cleanup evidence</h2>
+<p>After acceptance:</p>
+<ul>
+<li>the managed schedule was absent;</li>
+<li>the generated connector secret was under recoverable deletion;</li>
+<li>the synthetic provider secret was scheduled for deletion on 2026-08-06;</li>
+<li>the temporary Cognito platform-administrator user was deleted; and</li>
+<li>the collector dead-letter queue remained empty.</li>
+</ul>
+<p>The disabled job, revoked connector record and two audit records remain as
+redacted operational evidence. They contain no token, repository name or
+project-root digest in any operator-facing response.</p>
+<h2 id="remaining-production-acceptance">Remaining production acceptance</h2>
+<p>Before relying on GitHub discovery for an enterprise denominator:</p>
 <ol>
-<li>Compile a managed bundle and package from an approved immutable policy.</li>
-<li>Publish it with the currently displayed revision and review the returned
-   target metadata.</li>
-<li>Endpoint management installs the separately reviewed SDK, gateway and hook.</li>
-<li>The enrolled endpoint retrieves the package over its project-bound session,
-   or MDM obtains the same reviewed artifact through its administrator channel.</li>
-<li>Run installer <code>--check</code>, then the privileged <code>--install</code> transaction.</li>
-<li>Restart the host and heartbeat with a fresh managed-configuration
-   measurement.</li>
-<li>The UI reports download availability separately from observed enforcement.</li>
+<li>use an organization-approved, read-only credential with no code-content,
+   administration, Actions or write access;</li>
+<li>independently prove that it can enumerate every repository in the agreed
+   organization scope, including private repositories;</li>
+<li>complete one successful scheduled collection and verify numeric repository
+   IDs plus deployment-owned correlation are the only committed observations;</li>
+<li>reconcile the resulting expected Claude Code and Codex instances against a
+   separately agreed source-control denominator and reach the rollout target;</li>
+<li>test rotation, expiry, permission reduction and organization-access removal;
+   and</li>
+<li>replace the token with a centrally installed GitHub App when that credential
+   adapter is available.</li>
 </ol>
-<p>The control plane never executes package content, installs prerequisites,
-elevates the agent process or claims that publication/download proves the host
-loaded the configuration.</p>
-<h2 id="acceptance-evidence-and-remaining-work">Acceptance evidence and remaining work</h2>
-<p>Contract evidence must cover cross-tenant publication, stale revision,
-non-canonical or altered bytes, package/desired-state mismatch, cross-agent
-download, stale desired state, emergency stop, missing managed configuration
-repair, response tampering and exact typed client verification.</p>
-<p>This closes authenticated control-plane package distribution. It does not by
-itself complete P0-01 or P0-02. Real MDM delivery of the SDK, gateway and hook;
-approved-launch enforcement; a root-owned installation on supported endpoint
-images; and live Claude/Codex execution probes remain required.</p>
 
 
 

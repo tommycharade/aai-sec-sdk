@@ -1122,6 +1122,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#github-organization-discovery-pilot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub organization discovery pilot
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1248,6 +1259,33 @@
     
   
     AWS-managed Entra discovery acceptance — 2026-07-30
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../managed-github-discovery-acceptance-2026-07-30/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS-managed GitHub discovery acceptance — 2026-07-30
   
 
     
@@ -1871,6 +1909,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#github-organization-discovery-pilot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub organization discovery pilot
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2002,6 +2051,21 @@ Microsoft Intune, because Microsoft Entra ID is the first identity provider.</p>
 </ul>
 <p>These inputs are required to replace the deployed <code>not-configured</code> runtime
 attestation posture with release-bound enforcement evidence.</p>
+<h3 id="github-organization-discovery-pilot">GitHub organization discovery pilot</h3>
+<ul>
+<li>GitHub organization slug and an agreed complete repository denominator.</li>
+<li>An organization-approved read-only credential stored in the deployed AWS
+  Secrets Manager namespace; provide only its secret ARN to the control plane.</li>
+<li>Independent evidence that the credential can enumerate every repository in
+  scope, including private repositories.</li>
+<li>A reviewed repository-to-project-root mapping and expected Claude Code or
+  Codex host selection for each active repository.</li>
+<li>Approval to migrate from the initial token adapter to a centrally installed
+  GitHub App when that integration is implemented.</li>
+</ul>
+<p>These inputs are required to replace the synthetic failure-path acceptance
+with successful collection and measured source-control coverage. The current
+hosted connector and UI workflow are deployed and synthetically validated.</p>
 <h2 id="enterprise-operating-decisions">Enterprise operating decisions</h2>
 <p>The following decisions can be supplied progressively:</p>
 <ul>
