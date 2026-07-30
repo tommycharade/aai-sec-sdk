@@ -5888,6 +5888,53 @@ def test_discovery_source_authority_revision_and_fail_closed_completeness(
     ]
 
 
+def test_discovery_connector_cannot_reinterpret_legacy_source_kind(
+    monkeypatch: Any,
+) -> None:
+    """A snapshot-first source ID permanently establishes its evidence class."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-discovery-legacy-kind"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "DISCOVERY_SOURCE", "inventory-primary")
+        | {
+            "sourceId": "inventory-primary",
+            "sourceKind": "identity",
+            "generation": "legacy-generation",
+            "revision": 1,
+            "complete": True,
+            "observedAt": 1,
+            "expiresAt": 2,
+            "observations": [],
+            "contentHash": "a" * 64,
+        }
+    )
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+
+    response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/discovery/sources/inventory-primary/connector-credential",
+            "POST",
+            body={"sourceKind": "endpoint", "expectedRevision": 0},
+            claims=platform,
+        ),
+    )
+
+    assert response["statusCode"] == 409
+    assert "sourceKind is immutable" in response["body"]
+    assert (
+        table.get_item(
+            Key=module._item_key(tenant, "DISCOVERY_CONNECTOR", "inventory-primary")
+        ).get("Item")
+        is None
+    )
+
+
 def test_discovery_connector_commits_complete_paginated_generation_atomically(
     monkeypatch: Any,
 ) -> None:
@@ -5917,6 +5964,41 @@ def test_discovery_connector_commits_complete_paginated_generation_atomically(
     stored = table.get_item(Key=module._item_key(tenant, "DISCOVERY_CONNECTOR", "github"))["Item"]
     assert token not in json.dumps(stored)
     assert stored["tokenHash"] == hashlib.sha256(token.encode()).hexdigest()
+    directory_path = "/api/enterprise/discovery/sources"
+    directory = _invoke(module, _event(directory_path, "GET", claims=platform))
+    assert directory["statusCode"] == 200
+    registered = json.loads(directory["body"])
+    assert registered["nextCursor"] is None
+    assert registered["items"][0] | {
+        "credential": {
+            **registered["items"][0]["credential"],
+            "rotatedAt": 0,
+        }
+    } == {
+        "sourceId": "github",
+        "sourceKind": "source_control",
+        "credential": {
+            "status": "active",
+            "revision": 1,
+            "rotatedAt": 0,
+            "revokedAt": None,
+        },
+        "snapshot": None,
+    }
+    assert registered["items"][0]["credential"]["rotatedAt"] >= now
+    assert token not in directory["body"]
+    assert "tokenHash" not in directory["body"]
+    assert (
+        _invoke(
+            module,
+            _event(
+                directory_path,
+                "GET",
+                claims={"custom:tenant_id": tenant, "sub": "unprivileged-a"},
+            ),
+        )["statusCode"]
+        == 403
+    )
 
     base = f"/api/discovery-ingest/{tenant}/github/generations"
     generation = {
@@ -6009,6 +6091,14 @@ def test_discovery_connector_commits_complete_paginated_generation_atomically(
     assert current["sources"][0]["observationCount"] == 2
     assert current["summary"]["denominator"] == 2
     assert current["summary"]["coverageAvailable"] is False
+    current_directory = json.loads(
+        _invoke(module, _event(directory_path, "GET", claims=platform))["body"]
+    )
+    assert current_directory["items"][0]["snapshot"] == {
+        key: value
+        for key, value in current["sources"][0].items()
+        if key not in {"sourceId", "sourceKind"}
+    }
     assert (
         _invoke(
             module,
@@ -6106,6 +6196,11 @@ def test_discovery_connector_commits_complete_paginated_generation_atomically(
 
     revoked = _invoke(module, _event(credential_path, "DELETE", claims=platform))
     assert revoked["statusCode"] == 200
+    revoked_directory = json.loads(
+        _invoke(module, _event(directory_path, "GET", claims=platform))["body"]
+    )
+    assert revoked_directory["items"][0]["credential"]["status"] == "revoked"
+    assert revoked_directory["items"][0]["credential"]["revision"] == 2
     assert (
         _invoke(
             module,

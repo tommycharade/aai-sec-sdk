@@ -475,7 +475,13 @@ reconciling the expected Claude Code and Codex population with enrolled agents:
   `/api/enterprise/discovery/sources/{sourceId}/connector-credential` rotate or
   revoke a one-time-returned, digest-at-rest service credential scoped to that
   tenant and source.
-- `/api/discovery-ingest/{tenantId}/{sourceId}/generations/...` lets that
+- `GET /api/enterprise/discovery/sources` returns the operator-safe source
+  directory: stable ID/class, credential status/revision/timestamps, and the
+  latest committed snapshot's generation, revision, freshness, count and hash.
+  It deliberately excludes token material, token digests, observations and
+  provider payloads. Any authenticated tenant operator may read it; mutations
+  remain limited to `discovery_write`.
+- `/discovery-ingest/{tenantId}/{sourceId}/generations/...` lets that
   connector declare a bounded generation, upload immutable hash-addressed pages
   and atomically commit the complete generation. Partial uploads never affect
   the report.
