@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 import types
 import urllib.error
@@ -30,9 +31,13 @@ class FakeCollectorTable:
         *,
         Key: dict[str, str],
         UpdateExpression: str,
+        ConditionExpression: str,
         ExpressionAttributeValues: dict[str, Any],
         **_: Any,
     ) -> None:
+        referenced_values = set(re.findall(r":[A-Za-z][A-Za-z0-9_]*", UpdateExpression))
+        referenced_values.update(re.findall(r":[A-Za-z][A-Za-z0-9_]*", ConditionExpression))
+        assert set(ExpressionAttributeValues) == referenced_values
         item = self.items.get((Key["pk"], Key["sk"]))
         if (
             item is None

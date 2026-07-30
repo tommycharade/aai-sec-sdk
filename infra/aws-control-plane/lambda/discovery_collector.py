@@ -182,19 +182,21 @@ def _update_job_attempt(
         ":revision": configuration["jobRevision"],
         ":disabled": "disabled",
         ":status": status,
-        ":now": now,
-        ":zero": 0,
-        ":one": 1,
     }
     names = {"#status": "status", "#revision": "revision"}
     if status == "running":
+        values[":now"] = now
         expression = "SET #status = :status, lastAttemptAt = :now"
     elif status == "healthy":
+        values[":now"] = now
+        values[":zero"] = 0
         expression = (
             "SET #status = :status, lastSuccessAt = :now, "
             "consecutiveFailures = :zero REMOVE lastErrorCode"
         )
     else:
+        values[":zero"] = 0
+        values[":one"] = 1
         values[":error"] = error_code or "internal_error"
         expression = (
             "SET #status = :status, lastErrorCode = :error, "
