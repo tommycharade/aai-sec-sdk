@@ -10,6 +10,7 @@ import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as kms from "aws-cdk-lib/aws-kms";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
@@ -567,6 +568,113 @@ export class AwsControlPlaneStack extends cdk.Stack {
     api.addRoutes({ path: "/{proxy+}", methods: [apigwv2.HttpMethod.OPTIONS], integration: new integrations.HttpLambdaIntegration("OptionsIntegration", handler) });
     api.addRoutes({ path: "/{proxy+}", methods: [apigwv2.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration("ApiIntegration", handler), authorizer: jwt });
 
+    // Managed discovery separates provider credentials, source ingestion
+    // authority and schedule invocation. The browser receives only setup
+    // metadata; neither secret value is returned by the control plane.
+    const discoverySecretKey = new kms.Key(this, "DiscoverySecretKey", {
+      enableKeyRotation: true,
+      description: "Tenant-scoped managed discovery provider and connector secrets",
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    const discoveryCollectorDlq = new sqs.Queue(this, "DiscoveryCollectorDlq", {
+      encryption: sqs.QueueEncryption.KMS_MANAGED,
+      enforceSSL: true,
+      retentionPeriod: cdk.Duration.days(14),
+    });
+    const discoveryCollectorFunctionName = "aai-sec-managed-discovery-collector";
+    const discoveryCollectorArn = cdk.Stack.of(this).formatArn({
+      service: "lambda",
+      resource: "function",
+      resourceName: discoveryCollectorFunctionName,
+    });
+    const discoveryCollector = new lambda.Function(this, "DiscoveryCollector", {
+      functionName: discoveryCollectorFunctionName,
+      runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: lambda.Architecture.ARM_64,
+      handler: "discovery_collector.handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 512,
+      environment: {
+        CONTROL_TABLE: table.tableName,
+        CONTROL_PLANE_API_URL: api.apiEndpoint,
+      },
+      tracing: lambda.Tracing.PASS_THROUGH,
+    });
+    table.grantReadWriteData(discoveryCollector);
+    const providerSecretPrefix = "aai-sec/discovery/providers/";
+    const connectorSecretPrefix = "aai-sec/discovery/connectors/";
+    const providerSecretResources = [
+      `arn:${cdk.Aws.PARTITION}:secretsmanager:${this.region}:${this.account}:secret:${providerSecretPrefix}*`,
+    ];
+    const connectorSecretResources = [
+      `arn:${cdk.Aws.PARTITION}:secretsmanager:${this.region}:${this.account}:secret:${connectorSecretPrefix}*`,
+    ];
+    discoveryCollector.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["secretsmanager:GetSecretValue"],
+      resources: providerSecretResources,
+      conditions: {
+        StringEquals: { "secretsmanager:ResourceTag/aai-sec:purpose": "discovery-provider" },
+      },
+    }));
+    discoveryCollector.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["secretsmanager:GetSecretValue"],
+      resources: connectorSecretResources,
+      conditions: {
+        StringEquals: { "secretsmanager:ResourceTag/aai-sec:purpose": "discovery-connector" },
+      },
+    }));
+    discoverySecretKey.grantDecrypt(discoveryCollector);
+
+    const discoverySchedulerRole = new iam.Role(this, "DiscoverySchedulerRole", {
+      assumedBy: new iam.ServicePrincipal("scheduler.amazonaws.com"),
+      description: "Invokes only the AAI Security managed discovery collector",
+    });
+    discoveryCollector.grantInvoke(discoverySchedulerRole);
+    discoveryCollectorDlq.grantSendMessages(discoverySchedulerRole);
+
+    // Use the deterministic ARN rather than a Lambda Ref here. The collector
+    // needs the API endpoint, while the API integrates this handler; avoiding
+    // a handler-to-collector Ref prevents a CloudFormation dependency cycle.
+    handler.addEnvironment("DISCOVERY_COLLECTOR_ARN", discoveryCollectorArn);
+    handler.addEnvironment("DISCOVERY_SCHEDULER_ROLE_ARN", discoverySchedulerRole.roleArn);
+    handler.addEnvironment("DISCOVERY_COLLECTOR_DLQ_ARN", discoveryCollectorDlq.queueArn);
+    handler.addEnvironment("DISCOVERY_SECRET_KMS_KEY_ARN", discoverySecretKey.keyArn);
+    handler.addEnvironment("DISCOVERY_PROVIDER_SECRET_PREFIX", providerSecretPrefix);
+    handler.addEnvironment("DISCOVERY_CONNECTOR_SECRET_PREFIX", connectorSecretPrefix);
+    handler.addEnvironment("AWS_ACCOUNT_ID", this.account);
+    handler.addEnvironment("AWS_PARTITION", cdk.Aws.PARTITION);
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["secretsmanager:DescribeSecret"],
+      resources: providerSecretResources,
+      conditions: {
+        StringEquals: { "secretsmanager:ResourceTag/aai-sec:purpose": "discovery-provider" },
+      },
+    }));
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["secretsmanager:CreateSecret", "secretsmanager:DeleteSecret"],
+      resources: connectorSecretResources,
+    }));
+    // CreateSecret needs data-key/encrypt authority. The control-plane handler
+    // deliberately receives no decrypt grant or GetSecretValue permission.
+    discoverySecretKey.grantEncrypt(handler);
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        "scheduler:CreateSchedule",
+        "scheduler:GetSchedule",
+        "scheduler:UpdateSchedule",
+        "scheduler:DeleteSchedule",
+      ],
+      resources: [
+        `arn:${cdk.Aws.PARTITION}:scheduler:${this.region}:${this.account}:schedule/default/aai-sec-discovery-*`,
+      ],
+    }));
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["iam:PassRole"],
+      resources: [discoverySchedulerRole.roleArn],
+      conditions: { StringEquals: { "iam:PassedToService": "scheduler.amazonaws.com" } },
+    }));
+
     const controlPlaneErrors = new cloudwatch.Alarm(this, "ControlPlaneErrors", {
       metric: handler.metricErrors({ period: cdk.Duration.minutes(5), statistic: "Sum" }),
       threshold: 1,
@@ -575,6 +683,32 @@ export class AwsControlPlaneStack extends cdk.Stack {
       alarmDescription: "Control-plane errors require security-operator investigation.",
     });
     controlPlaneErrors.addAlarmAction(new cloudwatchActions.SnsAction(securityAlerts));
+    const discoveryCollectorErrors = new cloudwatch.Alarm(this, "DiscoveryCollectorErrors", {
+      metric: discoveryCollector.metricErrors({
+        period: cdk.Duration.minutes(5),
+        statistic: "Sum",
+      }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      alarmDescription: "Managed discovery collection failed and may reduce inventory freshness.",
+    });
+    discoveryCollectorErrors.addAlarmAction(new cloudwatchActions.SnsAction(securityAlerts));
+    const discoveryCollectorDeadLetters = new cloudwatch.Alarm(
+      this,
+      "DiscoveryCollectorDeadLetters",
+      {
+        metric: discoveryCollectorDlq.metricApproximateNumberOfMessagesVisible({
+          period: cdk.Duration.minutes(5),
+          statistic: "Maximum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        alarmDescription: "A managed discovery schedule exhausted bounded retries.",
+      },
+    );
+    discoveryCollectorDeadLetters.addAlarmAction(new cloudwatchActions.SnsAction(securityAlerts));
     const controlPlaneThrottles = new cloudwatch.Alarm(this, "ControlPlaneThrottles", {
       metric: handler.metricThrottles({ period: cdk.Duration.minutes(5), statistic: "Sum" }),
       threshold: 1,
@@ -609,6 +743,13 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "SecurityAlertsTopicArn", { value: securityAlerts.topicArn });
     new cdk.CfnOutput(this, "SecurityAlertsQueueArn", { value: securityAlertsQueue.queueArn });
     new cdk.CfnOutput(this, "SecurityAlertsDlqArn", { value: securityAlertsDlq.queueArn });
+    new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });
+    new cdk.CfnOutput(this, "DiscoveryProviderSecretNamePrefix", {
+      value: providerSecretPrefix,
+    });
+    new cdk.CfnOutput(this, "DiscoveryCollectorDlqArn", {
+      value: discoveryCollectorDlq.queueArn,
+    });
     new cdk.CfnOutput(this, "MicrosoftEntraIdStatus", {
       value: entraProvider ? "configured" : "not-configured",
     });

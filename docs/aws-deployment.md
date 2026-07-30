@@ -42,6 +42,8 @@ The stack creates:
   bearer resolved only by the SCIM Lambda from AWS Secrets Manager;
 - API Gateway HTTP API with Cognito JWT authorizer;
 - Lambda control-plane handler;
+- an AWS-managed Entra discovery collector, EventBridge Scheduler invocation
+  role, KMS key, connector dead-letter queue and collector alarms;
 - on-demand DynamoDB control and presence tables; the control table expires
   short-lived records by `ttl` and has a decision-timeline index for bounded
   reverse-chronological dashboard reads;
@@ -148,6 +150,49 @@ The current pilot's post-deployment result is recorded in
 [AWS pilot acceptance evidence](aws-pilot-acceptance-2026-07-29.md). Entra OIDC
 and SCIM are not configured in that environment, so the source contracts must
 not be presented as live federation acceptance.
+
+## AWS-managed Microsoft Entra discovery
+
+After deployment, CloudFormation outputs `DiscoverySecretKmsKeyArn` and
+`DiscoveryProviderSecretNamePrefix`. A platform administrator can also obtain
+these non-secret values from **Coverage → Inventory sources → Add source**.
+Create the Entra application with Microsoft Graph application permission
+`User.Read.All` only, grant tenant-admin consent, and store its credential as
+an exact JSON object:
+
+```json
+{
+  "tenantId": "<entra-directory-uuid>",
+  "clientId": "<entra-application-uuid>",
+  "clientSecret": "<secret>"
+}
+```
+
+Create the secret under
+`aai-sec/discovery/providers/{aaiTenantId}/`, encrypt it with the output KMS
+key, and apply exactly these tags:
+
+```text
+aai-sec:tenant-id={aaiTenantId}
+aai-sec:purpose=discovery-provider
+```
+
+Paste only the returned ARN into the UI and select a fixed interval. The
+control-plane Lambda can describe that secret but cannot read its value. It
+creates a separate connector credential directly in Secrets Manager and a
+delayed EventBridge schedule; neither secret is returned to the browser or
+included in source-directory responses. The dedicated collector can read only
+the tagged provider/connector namespaces, contacts fixed Entra/Graph/API hosts,
+and publishes through the same atomic generation contract as an external
+collector.
+
+Treat **Scheduled**, **Healthy** and **Current evidence** as distinct states.
+Only a successful collection plus atomic commit produces Current evidence.
+Disable revokes ingestion authority before schedule deletion. Investigate
+`cleanupRequired`, collector Lambda errors, and messages in
+`DiscoveryCollectorDlqArn`; follow
+[AWS-managed discovery connectors](scheduled-discovery-connectors-design.md)
+for fixed failure codes and non-guarantees.
 
 The authenticated `GET /enterprise/identity` route returns redaction-safe
 provider status, tenant hint, active roles and the enforced role matrix. It
