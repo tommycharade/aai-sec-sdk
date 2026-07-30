@@ -5,7 +5,8 @@
   `TagResource` remain connector-prefix scoped and tag constrained, while
   deletion is a separate prefix-scoped permission. The required KMS decrypt
   check is constrained to Secrets Manager requests and does not grant the
-  handler `GetSecretValue`.
+  handler `GetSecretValue`. The scheduler target now uses Lambda's required
+  colon-form resource ARN.
 - Added UI-first AWS-managed Microsoft Entra population discovery. Platform
   administrators provide only a tenant-tagged Secrets Manager ARN and fixed
   cadence; the control plane validates account, region, namespace, tags and KMS
