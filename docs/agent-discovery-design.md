@@ -95,13 +95,13 @@ evidence records only source metadata, count, revision, and hash.
 
 Production-shaped ingestion uses a source-scoped credential and three phases:
 
-1. `POST /api/discovery-ingest/{tenantId}/{sourceId}/generations` declares a
+1. `POST /discovery-ingest/{tenantId}/{sourceId}/generations` declares a
    generation, its expected source revision, observation/expiry times and a
    page count from 1 to 20.
-2. `PUT /api/discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/pages/{pageNumber}`
+2. `PUT /discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/pages/{pageNumber}`
    uploads one immutable page containing 1 to 100 normalized observations. The
    response returns the canonical page hash.
-3. `POST /api/discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/commit`
+3. `POST /discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/commit`
    supplies the ordered hash of every declared page. The control plane strongly
    reads and validates every page, rejects cross-page duplicate identities, and
    atomically advances both the source revision and generation state.
@@ -111,8 +111,18 @@ hash mismatches, duplicate observations, credential revocation, replay, or a
 concurrent source revision all fail closed. A committed generation supports up
 to 2,000 observations while retaining bounded Lambda and DynamoDB work.
 
+The deployed API Gateway deliberately exposes this connector-authenticated path
+without the operator `/api` prefix. Supplying `/api/discovery-ingest/...` enters
+the Cognito-protected operator route and is rejected. The reference publisher
+constructs the correct path from the API Gateway origin.
+
 Credential lifecycle is operator-owned:
 
+- `GET /api/enterprise/discovery/sources` lists the union of registered
+  credentials and committed snapshots for tenant operators. It returns only
+  source identity, credential lifecycle metadata, and redacted snapshot
+  freshness metadata; token digests, plaintext credentials, observations, and
+  raw provider data are excluded;
 - `POST /api/enterprise/discovery/sources/{sourceId}/connector-credential`
   creates or rotates a source credential using `sourceKind` and
   `expectedRevision`;
@@ -137,14 +147,28 @@ completeness and commit semantics must not change.
 
 ## Operator journey
 
-1. Deployment-owned connectors collect identity, endpoint, and repository
-   inventory and publish complete snapshots.
-2. The operator opens **Coverage** and first checks source confidence.
-3. If coverage is available, the operator reviews the denominator, unmanaged
+1. A platform administrator opens **Coverage → Inventory sources**, registers
+   a stable source ID and saves the one-time publisher credential in the
+   approved secret manager. Registration does not create evidence or authority.
+2. A deployment-owned scheduled job uses the appropriate reference collector
+   and the source-scoped publisher to commit a complete generation.
+3. The operator verifies that credential state is **Active** and independently
+   verifies that evidence state is **Current**. Either state can fail without
+   being cosmetically upgraded by the other.
+4. The operator opens **Coverage posture** and first checks source confidence.
+5. If coverage is available, the operator reviews the denominator, unmanaged
    targets, duplicates, leavers, orphans, and business-unit breakdown.
-4. The operator connects a missing agent or opens the Agents workspace for
+6. The operator connects a missing agent or opens the Agents workspace for
    lifecycle response.
-5. The operator exports the content-hashed report as assessment evidence.
+7. The operator exports the content-hashed report as assessment evidence.
+
+Rotation requires the current credential revision and invalidates the previous
+secret immediately. Revocation denies all subsequent ingestion while retaining
+the last committed snapshot until its declared expiry; the console states this
+impact before applying either change. The one-time credential exists only in
+the issuance response and transient browser component state. Closing the
+credential panel removes it from the rendered UI, and reloading cannot recover
+it.
 
 ## Reference collector workflow
 
@@ -198,6 +222,9 @@ history substitution.
 - Revision replay and malformed or over-broad input fail closed.
 - Connector credentials are source-scoped, digest-only at rest, returned once,
   revocable, and rejected on every mismatched route.
+- The operator source directory never returns credential material, token
+  digests, raw observations, or provider payloads, and is denied without a
+  tenant operator role.
 - Partial generations, missing pages, altered hashes, duplicate cross-page
   identities and concurrent source revisions never change the active source.
 - Raw paths and observation contents do not appear in publication audit events.

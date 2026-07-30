@@ -681,3 +681,12 @@ partial uploads, stale writers, or connector output from becoming authority.
 Application bearer theft remains a deployment risk, so production deployments
 must deliver it through a secret manager, rotate it, restrict connector egress,
 and may add cloud workload identity at the API gateway.
+
+The operator source directory is a separate read model, not a credential
+store. It strongly reads source and connector records, emits only lifecycle and
+freshness metadata, and excludes both the stored digest and observation
+content. A source ID's semantic class becomes immutable when either a legacy
+snapshot or connector registration establishes it, preventing later credential
+issuance from reinterpreting trusted source data. The UI holds a newly issued
+plaintext credential only until the operator acknowledges the one-time panel;
+it does not place it in fleet state or browser storage.

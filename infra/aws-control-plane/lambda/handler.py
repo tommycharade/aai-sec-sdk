@@ -3431,6 +3431,9 @@ def _rotate_discovery_connector(tenant, source_id, value, actor):
     expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision")
     key = _item_key(tenant, "DISCOVERY_CONNECTOR", source_id)
     existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    source = TABLE.get_item(
+        Key=_item_key(tenant, "DISCOVERY_SOURCE", source_id), ConsistentRead=True
+    ).get("Item")
     revision = int(existing.get("revision", 0)) if existing else 0
     if revision != expected:
         raise PolicyConflict("discovery connector revision changed")
@@ -3438,6 +3441,10 @@ def _rotate_discovery_connector(tenant, source_id, value, actor):
         # Rotation may replace secret material, never the semantic class whose
         # schema and coverage role were assigned to this stable source ID.
         raise PolicyConflict("discovery connector sourceKind is immutable")
+    if source and source.get("sourceKind") != source_kind:
+        # A legacy snapshot also establishes the semantic source class. A new
+        # credential cannot silently reinterpret its stable source identifier.
+        raise PolicyConflict("discovery sourceKind is immutable")
     token = secrets.token_urlsafe(32)
     record = {
         **key,
@@ -3517,6 +3524,92 @@ def _discovery_connector_identity(event, tenant, source_id):
     ):
         raise PermissionError("active discovery connector credential is required")
     return tenant, source_id, connector
+
+
+def _discovery_snapshot_metadata(source, *, now=None):
+    """Return redacted freshness metadata without loading observation content."""
+    if not source:
+        return None
+    current_time = int(time.time()) if now is None else int(now)
+    complete = source.get("complete") is True
+    fresh = int(source.get("expiresAt", 0)) > current_time
+    stored_count = source.get("observationCount")
+    observations = source.get("observations")
+    observation_count = (
+        int(stored_count)
+        if isinstance(stored_count, (int, Decimal)) and not isinstance(stored_count, bool)
+        else len(observations)
+        if isinstance(observations, list)
+        else 0
+    )
+    status = (
+        "current"
+        if complete and fresh and observation_count > 0
+        else "incomplete"
+        if not complete
+        else "stale"
+        if not fresh
+        else "empty"
+    )
+    return {
+        "generation": source.get("generation"),
+        "revision": int(source.get("revision", 0)),
+        "status": status,
+        "complete": complete,
+        "observedAt": int(source.get("observedAt", 0)),
+        "expiresAt": int(source.get("expiresAt", 0)),
+        "observationCount": observation_count,
+        "contentHash": source.get("contentHash"),
+    }
+
+
+def _discovery_source_directory(tenant, *, now=None):
+    """List registered source credentials and committed snapshot posture.
+
+    Secret digests, plaintext tokens and observation content never cross this
+    operator read boundary. Legacy snapshot-only sources remain visible so the
+    UI cannot mistake an unmanaged publication path for a missing source.
+    """
+    current_time = int(time.time()) if now is None else int(now)
+    connectors = {
+        item.get("sourceId"): item
+        for item in _list(tenant, "DISCOVERY_CONNECTOR", consistent_read=True)
+        if isinstance(item.get("sourceId"), str)
+    }
+    sources = {
+        item.get("sourceId"): item
+        for item in _list(tenant, "DISCOVERY_SOURCE", consistent_read=True)
+        if isinstance(item.get("sourceId"), str)
+    }
+    items = []
+    for source_id in sorted(set(connectors) | set(sources)):
+        connector = connectors.get(source_id)
+        source = sources.get(source_id)
+        source_kind = (connector or source or {}).get("sourceKind")
+        if source_kind not in _DISCOVERY_SOURCE_KINDS:
+            # Malformed server state must not be presented as configured.
+            continue
+        credential = (
+            {
+                "status": connector.get("status"),
+                "revision": int(connector.get("revision", 0)),
+                "rotatedAt": int(connector.get("rotatedAt", 0)),
+                "revokedAt": int(connector.get("revokedAt", 0))
+                if connector.get("revokedAt") is not None
+                else None,
+            }
+            if connector
+            else {"status": "not_configured", "revision": 0, "rotatedAt": 0, "revokedAt": None}
+        )
+        items.append(
+            {
+                "sourceId": source_id,
+                "sourceKind": source_kind,
+                "credential": credential,
+                "snapshot": _discovery_snapshot_metadata(source, now=current_time),
+            }
+        )
+    return {"items": items, "nextCursor": None}
 
 
 def _begin_discovery_generation(tenant, source_id, connector, value):
@@ -6641,6 +6734,13 @@ def handler(event, context):
                     else _discovery_report(tenant)
                 )
                 return _response(200, report)
+            if method == "GET" and parts == ["discovery", "sources"]:
+                if not _operator_roles(event):
+                    return _response(
+                        403,
+                        {"error": "discovery sources require a tenant operator role"},
+                    )
+                return _response(200, _discovery_source_directory(tenant))
             if (
                 method == "POST"
                 and len(parts) == 4

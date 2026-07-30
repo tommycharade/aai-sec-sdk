@@ -403,6 +403,12 @@ authorization.
 
 ## Unreleased
 
+- Added operator-safe discovery source management: tenant operators can list
+  redacted credential and snapshot posture, while platform administrators can
+  register, rotate, or revoke source-scoped publisher credentials. Source kind
+  is immutable even for legacy snapshot-first records, and contract tests prove
+  that directory responses exclude token material and observations.
+
 - Added tenant-scoped identity governance to the AWS control plane: emergency
   access requires recent MFA, a different approver, exact capabilities and a
   maximum 60-minute grant that is re-evaluated on every mutation. Auditors can

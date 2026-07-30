@@ -27,6 +27,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Enterprise rollout P0 and P1 requirements](enterprise-rollout-p0-p1-requirements.md)
 - [Enterprise P0 and P1 implementation status](p0-p1-implementation-status.md)
 - [AWS pilot acceptance evidence — 2026-07-29](aws-pilot-acceptance-2026-07-29.md)
+- [Discovery source management acceptance — 2026-07-30](discovery-source-management-acceptance-2026-07-30.md)
 - [Microsoft Entra SCIM lifecycle runbook](entra-scim-runbook.md)
 - [Emergency access and access certification runbook](access-governance-runbook.md)
 - [Delegated administration](delegated-administration.md)
