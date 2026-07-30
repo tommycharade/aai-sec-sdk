@@ -2120,6 +2120,11 @@ KMS key, have a name under
 <code>aai-sec:purpose=discovery-provider</code>. The control-plane Lambda may describe but
 cannot read provider values. Only the collector Lambda can call
 <code>GetSecretValue</code> for this bounded namespace.</p>
+<p>Secrets Manager requires a KMS decrypt check while creating a connector secret
+with the customer-managed key. The control-plane role's KMS decrypt permission
+is therefore constrained to requests routed through Secrets Manager. The role
+still has no <code>GetSecretValue</code> permission, so it cannot retrieve provider or
+connector secret bytes.</p>
 <p>The Entra application receives only Microsoft Graph application permission
 <code>User.Read.All</code>, with tenant-admin consent and no directory write permission.
 Production onboarding must retain evidence of that permission review.</p>
