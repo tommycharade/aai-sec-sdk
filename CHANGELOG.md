@@ -1,5 +1,12 @@
 # Changelog
 
+- Added tenant-wide asynchronous evidence assurance and export. Revision-bound
+  FIFO workers verify a fixed S3 snapshot in canonical hash-chained pages,
+  commit the final digest to retained audit evidence, and expose authenticated
+  progress/page APIs. Scheduled scans now detect evidence gaps, retain monitor
+  state, publish changed non-healthy states to the durable alert channel, and
+  surface queue/schedule failures through DLQ alarms.
+
 - Fixed durable-evidence assurance for legacy S3 versions that predate an
   explicit Object Lock retention or legal-hold property. Missing lock state is
   now reported as at risk; permission, service and integrity failures still

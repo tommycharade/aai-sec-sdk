@@ -171,9 +171,13 @@ may extend that floor to ten years but cannot shorten it through the control
 plane. Exact-version legal hold is tenant-prefix checked, and the operator's
 rationale is hashed rather than persisted as narrative. New records carry a
 creation-time SHA-256 metadata binding; assurance re-reads the immutable bytes
-and reports any mismatch as `at_risk`. Bounded export refuses truncation and the
-browser independently verifies the canonical manifest digest. This software
-assurance does not replace scheduled loss detection or live cross-region
+and reports any mismatch as `at_risk`. Bounded export refuses truncation.
+Tenant-wide work uses a revision-bound FIFO message, a fixed server cutoff and
+a separate derived-report bucket. The final index binds every canonical page
+through an ordered SHA-256 chain and is committed to retained audit evidence;
+the browser independently recalculates the same bindings. Scheduled scans
+persist changed gap states and publish non-healthy transitions to the durable
+alert channel. This software assurance does not replace live cross-region
 recovery proof. See [Durable evidence governance](durable-evidence-governance-design.md).
 
 Native host hooks are policy enforcement points, not deployment integrity

@@ -163,8 +163,13 @@ class FakeTable:
         if item is None:
             raise ConditionalFailure()
         if ":partition" in ExpressionAttributeValues and ":tenant" in ExpressionAttributeValues:
-            item["endpoint_detection_pk"] = ExpressionAttributeValues[":partition"]
-            item["endpoint_detection_sk"] = ExpressionAttributeValues[":tenant"]
+            update_expression = str(_.get("UpdateExpression", ""))
+            if "evidence_assurance_pk" in update_expression:
+                item["evidence_assurance_pk"] = ExpressionAttributeValues[":partition"]
+                item["evidence_assurance_sk"] = ExpressionAttributeValues[":tenant"]
+            else:
+                item["endpoint_detection_pk"] = ExpressionAttributeValues[":partition"]
+                item["endpoint_detection_sk"] = ExpressionAttributeValues[":tenant"]
             self.items[key] = item
             return {"Attributes": dict(item)}
         if ":active" in ExpressionAttributeValues and ":one" in ExpressionAttributeValues:
@@ -375,10 +380,23 @@ class FakeS3:
             for (key, version_id), record in sorted(self.objects.items())
             if key.startswith(prefix)
         ]
+        key_marker = value.get("KeyMarker")
+        version_marker = value.get("VersionIdMarker")
+        if key_marker is not None:
+            records = [
+                record
+                for record in records
+                if (record["Key"], record["VersionId"]) > (key_marker, version_marker or "")
+            ]
+        page = records[:maximum]
         return {
-            "Versions": records[:maximum],
+            "Versions": page,
             "DeleteMarkers": [],
             "IsTruncated": len(records) > maximum,
+            "NextKeyMarker": page[-1]["Key"] if len(records) > maximum and page else None,
+            "NextVersionIdMarker": (
+                page[-1]["VersionId"] if len(records) > maximum and page else None
+            ),
         }
 
     def head_object(self, **value: Any) -> dict[str, Any]:
@@ -386,7 +404,20 @@ class FakeS3:
         return {"Metadata": dict(record["Metadata"]), "ContentLength": len(record["Body"])}
 
     def get_object(self, **value: Any) -> dict[str, bytes]:
-        return {"Body": self.objects[(value["Key"], value["VersionId"])]["Body"]}
+        version_id = value.get("VersionId")
+        if version_id is None:
+            candidates = [
+                (candidate_version, record)
+                for (key, candidate_version), record in self.objects.items()
+                if key == value["Key"]
+            ]
+            if not candidates:
+                raise KeyError(value["Key"])
+            _selected_version, selected = max(
+                candidates, key=lambda item: int(item[0].removeprefix("version-"))
+            )
+            return {"Body": selected["Body"]}
+        return {"Body": self.objects[(value["Key"], version_id)]["Body"]}
 
     def get_object_retention(self, **value: Any) -> dict[str, Any]:
         retention = self.objects[(value["Key"], value["VersionId"])].get("Retention")
@@ -417,10 +448,25 @@ class FakeSns:
 
     def __init__(self) -> None:
         self.messages: list[dict[str, Any]] = []
+        self.failures_remaining = 0
 
     def publish(self, **value: Any) -> dict[str, str]:
+        if self.failures_remaining:
+            self.failures_remaining -= 1
+            raise RuntimeError("synthetic SNS outage")
         self.messages.append(dict(value))
         return {"MessageId": "synthetic-message"}
+
+
+class FakeSqs:
+    """Capture revision-bound FIFO evidence work without external delivery."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    def send_message(self, **value: Any) -> dict[str, str]:
+        self.messages.append(dict(value))
+        return {"MessageId": f"message-{len(self.messages)}"}
 
 
 class FakeKms:
@@ -469,6 +515,7 @@ def _load_handler(monkeypatch: Any) -> Any:
         lambda *_args, **_kwargs: types.SimpleNamespace(Table=lambda _name: table)
     )
     fake_sns = FakeSns()
+    fake_sqs = FakeSqs()
     fake_s3 = FakeS3()
     policy_key_id = "arn:aws:kms:eu-west-2:111111111111:key/12345678-1234-1234-1234-123456789abc"
     fake_kms = FakeKms(policy_key_id)
@@ -480,6 +527,8 @@ def _load_handler(monkeypatch: Any) -> Any:
             if service == "kms"
             else fake_sns
             if service == "sns"
+            else fake_sqs
+            if service == "sqs"
             else fake_s3
         )
     )
@@ -496,6 +545,8 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("PRESENCE_TABLE", "presence")
     monkeypatch.setenv("IDEMPOTENCY_TABLE", "idempotency")
     monkeypatch.setenv("AUDIT_BUCKET", "audit")
+    monkeypatch.setenv("EVIDENCE_REPORT_BUCKET", "evidence-reports")
+    monkeypatch.setenv("EVIDENCE_QUEUE_URL", "https://sqs.example.invalid/evidence.fifo")
     monkeypatch.setenv("ENTRA_PROVIDER_ENABLED", "false")
     monkeypatch.setenv("ENTRA_TENANT_ID", "")
     monkeypatch.setenv("ENTRA_AAI_TENANT_ID", "")
@@ -513,6 +564,8 @@ def _load_handler(monkeypatch: Any) -> Any:
     spec.loader.exec_module(module)
     cast(Any, module)._fake_kms = fake_kms
     cast(Any, module)._fake_s3 = fake_s3
+    cast(Any, module)._fake_sns = fake_sns
+    cast(Any, module)._fake_sqs = fake_sqs
     return module, table
 
 
@@ -868,6 +921,291 @@ def test_evidence_inventory_never_presents_a_bounded_sample_as_complete(monkeypa
         ),
     )
     assert update["statusCode"] == 409
+
+
+def test_async_evidence_job_completes_all_pages_and_binds_export(monkeypatch: Any) -> None:
+    """Scan beyond the synchronous bound and verify every derived export page."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "security-a",
+    }
+    for index in range(23):
+        module._audit(tenant, "async_evidence_probe", "test", {"index": index})
+    for (key, _version), record in module._fake_s3.objects.items():
+        if key.startswith(f"tenant={tenant}/"):
+            record["LastModified"] = datetime.now(UTC) - timedelta(seconds=10)
+
+    started = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/jobs",
+            "POST",
+            claims=claims,
+            body={
+                "requestId": "async-export-a",
+                "rationale": "Run complete synthetic tenant assurance and export.",
+            },
+        ),
+    )
+    assert started["statusCode"] == 202
+    job_id = json.loads(started["body"])["id"]
+    processed = 0
+    while module._fake_sqs.messages:
+        message = module._fake_sqs.messages.pop(0)
+        result = module.process_evidence_queue_event(
+            {
+                "Records": [
+                    {
+                        "eventSource": "aws:sqs",
+                        "body": message["MessageBody"],
+                        "attributes": {"ApproximateReceiveCount": "1"},
+                    }
+                ]
+            }
+        )
+        processed += 1
+        assert result["status"] in {"running", "completed"}
+        assert processed < 20
+
+    response = _invoke(
+        module,
+        _event(f"/api/enterprise/evidence/jobs/{job_id}", "GET", claims=claims),
+    )
+    assert response["statusCode"] == 200
+    job = json.loads(response["body"])
+    assert job["status"] == "completed"
+    assert job["recordCount"] == 23
+    assert job["verifiedCount"] == 23
+    assert job["atRiskCount"] == 0
+    assert job["pageCount"] >= 3
+
+    chain = module._EVIDENCE_INITIAL_CHAIN_HASH
+    exported_records = []
+    for page_number in range(1, job["pageCount"] + 1):
+        page_response = _invoke(
+            module,
+            _event(
+                f"/api/enterprise/evidence/jobs/{job_id}/pages/{page_number}",
+                "GET",
+                claims=claims,
+            ),
+        )
+        assert page_response["statusCode"] == 200
+        page = json.loads(page_response["body"])
+        page_hash = page.pop("contentSha256")
+        assert (
+            page_hash
+            == hashlib.sha256(
+                json.dumps(page, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+        )
+        chain = hashlib.sha256(f"{chain}:{page_hash}".encode()).hexdigest()
+        exported_records.extend(page["records"])
+    assert len(exported_records) == 23
+    assert chain == job["chainSha256"]
+    index = job["exportIndex"]
+    index_hash = index.pop("contentSha256")
+    assert (
+        index_hash
+        == hashlib.sha256(
+            json.dumps(index, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+    assert index_hash == job["contentSha256"]
+
+    assurance = json.loads(
+        _invoke(module, _event("/api/enterprise/evidence", "GET", claims=claims))["body"]
+    )
+    assert assurance["latestAsyncJob"]["id"] == job_id
+    assert assurance["monitor"]["status"] == "healthy"
+
+
+def test_async_evidence_job_denies_bypass_tamper_and_terminal_provider_failure(
+    monkeypatch: Any,
+) -> None:
+    """Deny weak roles/cross-tenant reads and expose no unverifiable derived page."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    security = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "security-a",
+    }
+    fleet = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-a",
+    }
+    denied = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/jobs",
+            "POST",
+            claims=fleet,
+            body={"requestId": "denied", "rationale": "Unauthorized synthetic request."},
+        ),
+    )
+    assert denied["statusCode"] == 403
+
+    module._audit(tenant, "async_tamper_probe", "test", {"synthetic": True})
+    for (key, _version), record in module._fake_s3.objects.items():
+        if key.startswith(f"tenant={tenant}/"):
+            record["LastModified"] = datetime.now(UTC) - timedelta(seconds=10)
+    started = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/jobs",
+            "POST",
+            claims=security,
+            body={
+                "requestId": "tamper-a",
+                "rationale": "Verify synthetic derived-page tamper detection.",
+            },
+        ),
+    )
+    job_id = json.loads(started["body"])["id"]
+    while module._fake_sqs.messages:
+        message = module._fake_sqs.messages.pop(0)
+        module.process_evidence_queue_event(
+            {
+                "Records": [
+                    {
+                        "eventSource": "aws:sqs",
+                        "body": message["MessageBody"],
+                        "attributes": {"ApproximateReceiveCount": "1"},
+                    }
+                ]
+            }
+        )
+    page_key = module._evidence_report_page_key(tenant, job_id, 1)
+    page_versions = [
+        record for (key, _version), record in module._fake_s3.objects.items() if key == page_key
+    ]
+    page_versions[-1]["Body"] += b"tampered"
+    tampered = _invoke(
+        module,
+        _event(f"/api/enterprise/evidence/jobs/{job_id}/pages/1", "GET", claims=security),
+    )
+    assert tampered["statusCode"] == 500
+    cross_tenant = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/evidence/jobs/{job_id}",
+            "GET",
+            claims={
+                "custom:tenant_id": "tenant-other",
+                "cognito:groups": ["security-operator"],
+                "sub": "security-other",
+            },
+        ),
+    )
+    assert cross_tenant["statusCode"] == 403
+
+    failed_start = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/jobs",
+            "POST",
+            claims=security,
+            body={
+                "requestId": "provider-failure-a",
+                "rationale": "Prove terminal provider failures remain visible.",
+            },
+        ),
+    )
+    assert json.loads(failed_start["body"])["status"] == "queued"
+    failed_message = module._fake_sqs.messages.pop(0)
+
+    def deny_inventory(**_value: Any) -> dict[str, Any]:
+        raise ObjectLockAccessDenied()
+
+    monkeypatch.setattr(module._fake_s3, "list_object_versions", deny_inventory)
+    failure = module.process_evidence_queue_event(
+        {
+            "Records": [
+                {
+                    "eventSource": "aws:sqs",
+                    "body": failed_message["MessageBody"],
+                    "attributes": {"ApproximateReceiveCount": "3"},
+                }
+            ]
+        }
+    )
+    assert failure["status"] == "failed"
+    assert failure["failureReason"] == "evidence_provider_access_denied"
+    monitor = module._evidence_monitor_view(module._evidence_monitor_record(tenant))
+    assert monitor["status"] == "critical"
+    assert monitor["alertDelivered"] is True
+
+
+def test_scheduled_evidence_assurance_starts_once_and_rejects_forged_events(
+    monkeypatch: Any,
+) -> None:
+    """Use the tenant index once per due window and validate internal event shape."""
+    module, _table = _load_handler(monkeypatch)
+    module._seed("tenant-demo")
+
+    first = module.handler({"source": "aai.evidence-assurance", "schemaVersion": 1}, None)
+    assert first == {"processedTenants": 1, "startedJobs": 1, "activeJobs": 0}
+    second = module.handler({"source": "aai.evidence-assurance", "schemaVersion": 1}, None)
+    assert second == {"processedTenants": 1, "startedJobs": 0, "activeJobs": 1}
+    assert len(module._fake_sqs.messages) == 1
+    with pytest.raises(ValueError, match="schedule event is invalid"):
+        module.handler(
+            {
+                "source": "aai.evidence-assurance",
+                "schemaVersion": 1,
+                "tenantId": "tenant-forged",
+            },
+            None,
+        )
+
+
+def test_evidence_monitor_retries_pending_delivery_and_preserves_receipt(
+    monkeypatch: Any,
+) -> None:
+    """An unchanged gap retries failed delivery and retains its acknowledgement."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    module._seed(tenant)
+    failed_job = {"id": "job-failed", "status": "failed", "failure_reason": "test_failure"}
+    module._fake_sns.failures_remaining = 1
+
+    pending = module._reconcile_evidence_monitor(tenant, failed_job)
+    assert pending["delivery_status"] == "pending"
+    delivered = module._reconcile_evidence_monitor(tenant, failed_job)
+    assert delivered["delivery_status"] == "delivered"
+    assert len(module._fake_sns.messages) == 1
+    receipt = delivered["delivered_at"]
+
+    unchanged = module._reconcile_evidence_monitor(tenant, failed_job)
+    assert unchanged["delivery_status"] == "delivered"
+    assert unchanged["delivered_at"] == receipt
+    assert len(module._fake_sns.messages) == 1
+
+    declining_tenant = "tenant-declining"
+    module._put(
+        declining_tenant,
+        "TENANT",
+        "root",
+        {"id": declining_tenant, "status": "active"},
+    )
+    declining = module._reconcile_evidence_monitor(
+        declining_tenant,
+        {
+            "id": "job-declining",
+            "status": "completed",
+            "record_count": 2,
+            "baseline_record_count": Decimal("3"),
+            "at_risk_count": 0,
+            "delete_marker_count": 0,
+        },
+    )
+    assert declining["status"] == "attention"
+    assert declining["reason_codes"] == ["retained_record_count_decreased"]
 
 
 def test_evidence_policy_rejects_non_integral_stored_authority(monkeypatch: Any) -> None:

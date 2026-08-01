@@ -184,13 +184,22 @@ policy version so operators can identify which change caused a failure.
 4. Select one retained version to place or release legal hold. Confirm the exact
    object version and provide the approved legal authority. The rationale is
    hashed rather than stored as case narrative.
-5. Choose **Export verified manifest**. The API refuses partial or mismatched
-   evidence, and the browser independently verifies the canonical digest before
-   download.
-6. Use **Decision evidence** below the assurance controls for redacted runtime
+5. If the fast-path inventory is incomplete, choose **Run full assurance** and
+   enter the approved case or change rationale. Leave the page open to see
+   queued/running page progress, or return later; the job is server-owned and
+   continues independently of the browser.
+6. When the job is complete, choose **Download verified export**. The browser
+   retrieves every page, verifies its canonical hash, recalculates the ordered
+   rolling chain and checks the final index digest before creating the file.
+   Any missing, reordered or substituted page blocks download.
+7. Review **Scheduled assurance**. `attention` or `critical` needs investigation;
+   `alert pending` means the gap is visible but durable alert delivery has not
+   been acknowledged.
+8. Use **Decision evidence** below the assurance controls for redacted runtime
    investigation. Tool arguments, credentials and sensitive output are not
    included.
 
-For more than 250 retained versions, the current synchronous path deliberately
-shows `incomplete` and blocks export/retention mutation. Never accept a sampled
-UI list as the complete tenant record.
+For more than 250 retained versions, the synchronous path deliberately shows
+`incomplete`. Use a completed tenant-wide job for export. Retention mutation
+remains blocked above this boundary until the asynchronous retention workflow
+is implemented. Never accept a sampled UI list as the complete tenant record.

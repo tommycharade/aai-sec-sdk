@@ -586,14 +586,20 @@ The AWS control plane exposes a tenant-bound records-management contract:
   tenant key/version after rejecting cross-tenant identity; and
 - `GET /api/enterprise/evidence/export` returns a canonical content-hashed
   complete manifest only when every record fits the 250-version synchronous
-  boundary and no content mismatch exists.
+  boundary and no content mismatch exists;
+- `POST /api/enterprise/evidence/jobs` accepts exactly `requestId` and
+  `rationale` and idempotently starts a tenant-wide point-in-time job;
+- `GET /api/enterprise/evidence/jobs` and
+  `GET /api/enterprise/evidence/jobs/{jobId}` expose server-owned progress and
+  the completed chain-bound export index; and
+- `GET /api/enterprise/evidence/jobs/{jobId}/pages/{page}` returns one completed
+  page only after tenant binding, closed-schema and canonical-digest checks.
 
 Security operators and platform administrators manage retention and legal hold.
 Auditors may read assurance and export evidence but cannot mutate it. Rationale
 text is content-hashed before audit persistence. See
-[Durable evidence governance](durable-evidence-governance-design.md) for trust
-boundaries, failure behavior and the production-scale asynchronous work that
-remains.
+[Durable evidence governance](durable-evidence-governance-design.md) for queue
+authority, snapshot, hash-chain, schedule, alert and failure behavior.
 
 ## Automatic response rules
 

@@ -33,6 +33,7 @@ SCIM = boto3.resource("dynamodb").Table(SCIM_TABLE_NAME) if SCIM_TABLE_NAME else
 DYNAMODB = boto3.client("dynamodb")
 S3 = boto3.client("s3")
 SNS = boto3.client("sns")
+SQS = boto3.client("sqs")
 KMS = boto3.client("kms")
 POLICY_SIGNING_KEY_ARN = os.environ.get("POLICY_SIGNING_KEY_ARN", "")
 
@@ -170,6 +171,8 @@ _ENDPOINT_EVIDENCE_FUTURE_SKEW_SECONDS = 5 * 60
 _ENDPOINT_DETECTION_INDEX = "EndpointDetectionTenants"
 _ENDPOINT_DETECTION_SHARDS = 16
 _ENDPOINT_DETECTION_TENANT_LIMIT = 2_000
+_EVIDENCE_ASSURANCE_INDEX = "EvidenceAssuranceTenants"
+_EVIDENCE_ASSURANCE_SHARDS = 16
 _CASE_STATUSES = frozenset({"open", "investigating", "contained", "resolved", "closed"})
 _CASE_EXPORT_ROLES = frozenset(
     {"platform-admin", "security-operator", "incident-responder", "auditor"}
@@ -179,6 +182,12 @@ _CASE_EXPORT_LOOKBACK_SECONDS = 24 * 60 * 60
 _EVIDENCE_RETENTION_MIN_DAYS = 365
 _EVIDENCE_RETENTION_MAX_DAYS = 3_650
 _EVIDENCE_RECORD_LIMIT = 250
+_EVIDENCE_ASYNC_PAGE_SIZE = 10
+_EVIDENCE_ASYNC_MAX_PAGES = 100_000
+_EVIDENCE_JOB_RETENTION_SECONDS = 30 * 24 * 60 * 60
+_EVIDENCE_JOB_FRESHNESS_SECONDS = 6 * 60 * 60
+_EVIDENCE_JOB_STALE_SECONDS = 30 * 60
+_EVIDENCE_INITIAL_CHAIN_HASH = "0" * 64
 _RESPONSE_RULE_VERSION_STATES = frozenset(
     {"draft", "review", "approved", "active", "superseded", "rejected"}
 )
@@ -6485,6 +6494,55 @@ def _evidence_object_lock_state(method, *, key, version_id, field):
         raise
 
 
+def _evidence_record(tenant, version):
+    """Verify and project one exact immutable audit-object version."""
+    prefix = f"tenant={tenant}/"
+    key = version.get("Key")
+    version_id = version.get("VersionId")
+    if not isinstance(key, str) or not key.startswith(prefix) or not isinstance(version_id, str):
+        raise RuntimeError("audit inventory returned an invalid tenant object identity")
+    head = S3.head_object(Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id)
+    body = _evidence_body_bytes(
+        S3.get_object(Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id)
+    )
+    content_hash = hashlib.sha256(body).hexdigest()
+    expected_hash = head.get("Metadata", {}).get("content-sha256")
+    retention = _evidence_object_lock_state(
+        S3.get_object_retention,
+        key=key,
+        version_id=version_id,
+        field="Retention",
+    )
+    hold = _evidence_object_lock_state(
+        S3.get_object_legal_hold,
+        key=key,
+        version_id=version_id,
+        field="LegalHold",
+    )
+    modified = version.get("LastModified")
+    return {
+        "key": key,
+        "versionId": version_id,
+        "size": int(version.get("Size", len(body))),
+        "lastModified": modified.isoformat() if hasattr(modified, "isoformat") else str(modified),
+        "contentSha256": content_hash,
+        "integrity": (
+            "verified"
+            if expected_hash and secrets.compare_digest(expected_hash, content_hash)
+            else "legacy_unbound"
+            if not expected_hash
+            else "mismatch"
+        ),
+        "retentionMode": retention.get("Mode"),
+        "retainUntil": (
+            retention.get("RetainUntilDate").isoformat()
+            if hasattr(retention.get("RetainUntilDate"), "isoformat")
+            else None
+        ),
+        "legalHold": hold.get("Status") == "ON",
+    }
+
+
 def _evidence_inventory(tenant):
     """Return a complete bounded manifest of immutable tenant audit versions.
 
@@ -6514,54 +6572,7 @@ def _evidence_inventory(tenant):
         }
     records = []
     for version in versions:
-        key = version.get("Key")
-        version_id = version.get("VersionId")
-        if (
-            not isinstance(key, str)
-            or not key.startswith(prefix)
-            or not isinstance(version_id, str)
-        ):
-            raise RuntimeError("audit inventory returned an invalid tenant object identity")
-        head = S3.head_object(Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id)
-        body = _evidence_body_bytes(
-            S3.get_object(Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id)
-        )
-        content_hash = hashlib.sha256(body).hexdigest()
-        expected_hash = head.get("Metadata", {}).get("content-sha256")
-        retention = _evidence_object_lock_state(
-            S3.get_object_retention,
-            key=key,
-            version_id=version_id,
-            field="Retention",
-        )
-        hold = _evidence_object_lock_state(
-            S3.get_object_legal_hold,
-            key=key,
-            version_id=version_id,
-            field="LegalHold",
-        )
-        modified = version.get("LastModified")
-        records.append(
-            {
-                "key": key,
-                "versionId": version_id,
-                "size": int(version.get("Size", len(body))),
-                "lastModified": modified.isoformat()
-                if hasattr(modified, "isoformat")
-                else str(modified),
-                "contentSha256": content_hash,
-                "integrity": "verified"
-                if expected_hash and secrets.compare_digest(expected_hash, content_hash)
-                else "legacy_unbound"
-                if not expected_hash
-                else "mismatch",
-                "retentionMode": retention.get("Mode"),
-                "retainUntil": retention.get("RetainUntilDate").isoformat()
-                if hasattr(retention.get("RetainUntilDate"), "isoformat")
-                else None,
-                "legalHold": hold.get("Status") == "ON",
-            }
-        )
+        records.append(_evidence_record(tenant, version))
     records.sort(key=lambda item: (item["lastModified"], item["key"], item["versionId"]))
     return {
         "records": records,
@@ -6576,6 +6587,7 @@ def _evidence_assurance(tenant):
     inventory = _evidence_inventory(tenant)
     records = inventory["records"]
     policy = _evidence_policy(tenant)
+    latest_job = _latest_evidence_job(tenant, statuses={"queued", "running", "completed", "failed"})
     now = datetime.now(UTC)
     at_risk = [
         item
@@ -6597,7 +6609,721 @@ def _evidence_assurance(tenant):
         "complete": inventory["complete"],
         "records": list(reversed(records[-100:])),
         "checkedAt": int(time.time()),
+        "latestAsyncJob": _evidence_job_view(latest_job) if latest_job else None,
+        "monitor": _evidence_monitor_view(_evidence_monitor_record(tenant)),
     }
+
+
+def _canonical_sha256(value):
+    """Return the SHA-256 digest of one canonical JSON-safe value."""
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _evidence_job_record(tenant, job_id):
+    """Load one exact tenant-bound asynchronous evidence job."""
+    item = TABLE.get_item(Key=_item_key(tenant, "EVIDENCE_JOB", job_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not item:
+        raise LookupError("evidence assurance job not found")
+    if item.get("tenant_id") != tenant or item.get("id") != job_id:
+        raise RuntimeError("evidence assurance job identity is malformed")
+    return item
+
+
+def _evidence_job_view(item):
+    """Project job progress without exposing S3 keys, cursors or rationale."""
+    view = {
+        "id": item.get("id"),
+        "mode": "assurance_export",
+        "source": item.get("source"),
+        "status": item.get("status"),
+        "revision": int(item.get("revision", 0)),
+        "snapshotCutoff": int(item.get("snapshot_cutoff", 0)),
+        "createdAt": int(item.get("created_at", 0)),
+        "startedAt": item.get("started_at"),
+        "updatedAt": int(item.get("updated_at", 0)),
+        "completedAt": item.get("completed_at"),
+        "recordCount": int(item.get("record_count", 0)),
+        "verifiedCount": int(item.get("verified_count", 0)),
+        "atRiskCount": int(item.get("at_risk_count", 0)),
+        "legalHoldCount": int(item.get("legal_hold_count", 0)),
+        "deleteMarkerCount": int(item.get("delete_marker_count", 0)),
+        "pageCount": int(item.get("page_count", 0)),
+        "contentSha256": item.get("content_sha256"),
+        "chainSha256": item.get("chain_sha256"),
+        "failureReason": item.get("failure_reason"),
+    }
+    if item.get("status") == "completed" and item.get("content_sha256"):
+        view["exportIndex"] = {
+            **_evidence_report_index_content(item),
+            "contentSha256": item["content_sha256"],
+        }
+    else:
+        view["exportIndex"] = None
+    return view
+
+
+def _evidence_jobs(tenant):
+    """Return recent tenant jobs in deterministic newest-first order."""
+    items = _list(tenant, "EVIDENCE_JOB", consistent_read=True)
+    items.sort(
+        key=lambda item: (int(item.get("created_at", 0)), str(item.get("id", ""))),
+        reverse=True,
+    )
+    return [_evidence_job_view(item) for item in items[:50]]
+
+
+def _latest_evidence_job(tenant, *, statuses=None, exclude_id=None):
+    """Return the newest job matching a bounded status set."""
+    allowed = set(statuses or {"queued", "running", "completed", "failed"})
+    candidates = [
+        item
+        for item in _list(tenant, "EVIDENCE_JOB", consistent_read=True)
+        if item.get("status") in allowed and item.get("id") != exclude_id
+    ]
+    return max(
+        candidates,
+        key=lambda item: (int(item.get("created_at", 0)), str(item.get("id", ""))),
+        default=None,
+    )
+
+
+def _enqueue_evidence_job(tenant, job_id, revision):
+    """Send one revision-bound FIFO work item without granting tenant authority."""
+    queue_url = os.environ.get("EVIDENCE_QUEUE_URL", "")
+    if not queue_url:
+        raise RuntimeError("asynchronous evidence queue is not configured")
+    body = {
+        "schemaVersion": 1,
+        "tenantId": tenant,
+        "jobId": job_id,
+        "expectedRevision": int(revision),
+    }
+    SQS.send_message(
+        QueueUrl=queue_url,
+        MessageBody=json.dumps(body, sort_keys=True, separators=(",", ":")),
+        MessageGroupId=job_id,
+        MessageDeduplicationId=f"{job_id}:{int(revision)}",
+    )
+
+
+def _create_evidence_job(tenant, request_id, actor, rationale, *, source):
+    """Create one idempotent point-in-time assurance/export job."""
+    if not isinstance(request_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id
+    ):
+        raise ValueError("requestId is invalid")
+    rationale = _case_reason(rationale)
+    if source not in {"operator", "schedule"}:
+        raise ValueError("evidence job source is invalid")
+    job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"aai:evidence:{tenant}:{request_id}"))
+    request_hash = _canonical_sha256(
+        {"requestId": request_id, "rationale": rationale, "source": source}
+    )
+    key = _item_key(tenant, "EVIDENCE_JOB", job_id)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if existing:
+        if not secrets.compare_digest(str(existing.get("request_hash", "")), request_hash):
+            raise PolicyConflict("evidence requestId was already used for different input")
+        return existing
+    now = int(time.time())
+    baseline = _latest_evidence_job(tenant, statuses={"completed"})
+    item = {
+        **key,
+        "tenant_id": tenant,
+        "id": job_id,
+        "request_id": request_id,
+        "request_hash": request_hash,
+        "source": source,
+        "status": "queued",
+        "revision": 1,
+        # A two-second boundary plus strongly consistent S3 LIST semantics
+        # prevents writes racing the request from being represented as part of
+        # this point-in-time snapshot.
+        "snapshot_cutoff": now - 2,
+        "created_at": now,
+        "updated_at": now,
+        "created_by": actor,
+        "rationale_hash": hashlib.sha256(rationale.encode()).hexdigest(),
+        "record_count": 0,
+        "verified_count": 0,
+        "at_risk_count": 0,
+        "legal_hold_count": 0,
+        "delete_marker_count": 0,
+        "page_count": 0,
+        "chain_sha256": _EVIDENCE_INITIAL_CHAIN_HASH,
+        "baseline_record_count": int(baseline.get("record_count", 0)) if baseline else None,
+        "ttl": now + _EVIDENCE_JOB_RETENTION_SECONDS,
+    }
+    try:
+        TABLE.put_item(Item=item, ConditionExpression="attribute_not_exists(pk)")
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            concurrent = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+            if concurrent and secrets.compare_digest(
+                str(concurrent.get("request_hash", "")), request_hash
+            ):
+                return concurrent
+            raise PolicyConflict("evidence assurance job changed concurrently") from error
+        raise
+    try:
+        _enqueue_evidence_job(tenant, job_id, 1)
+    except Exception:
+        failed = {
+            **item,
+            "status": "failed",
+            "revision": 2,
+            "failure_reason": "queue_unavailable",
+            "updated_at": int(time.time()),
+        }
+        TABLE.put_item(
+            Item=failed,
+            ConditionExpression="revision = :revision",
+            ExpressionAttributeValues={":revision": 1},
+        )
+        _audit(
+            tenant,
+            "evidence_assurance_job_failed",
+            actor,
+            {"job_id": job_id, "reason_code": "queue_unavailable"},
+        )
+        _reconcile_evidence_monitor(tenant, failed)
+        raise
+    _audit(
+        tenant,
+        "evidence_assurance_job_started",
+        actor,
+        {"job_id": job_id, "source": source, "snapshot_cutoff": item["snapshot_cutoff"]},
+    )
+    return item
+
+
+def _start_evidence_job(tenant, body, actor):
+    """Validate an operator request and return its idempotent job projection."""
+    if not isinstance(body, dict) or set(body) != {"requestId", "rationale"}:
+        raise ValueError("evidence assurance job request has an invalid schema")
+    return _evidence_job_view(
+        _create_evidence_job(
+            tenant,
+            body.get("requestId"),
+            actor,
+            body.get("rationale"),
+            source="operator",
+        )
+    )
+
+
+def _evidence_record_at_risk(record, *, now):
+    """Return whether one verified version lacks integrity or live retention."""
+    if record.get("integrity") != "verified" or record.get("retentionMode") != "COMPLIANCE":
+        return True
+    retain_until = record.get("retainUntil")
+    if not isinstance(retain_until, str):
+        return True
+    try:
+        return datetime.fromisoformat(retain_until) <= now
+    except ValueError:
+        return True
+
+
+def _evidence_report_page_key(tenant, job_id, page_number):
+    """Return a deterministic tenant/job report key for one bounded page."""
+    return f"tenant={tenant}/job={job_id}/page={int(page_number):06d}.json"
+
+
+def _write_evidence_report_page(tenant, job_id, page_number, cutoff, records):
+    """Persist one content-bound derived page in the private report bucket."""
+    content = {
+        "schemaVersion": 1,
+        "tenantId": tenant,
+        "jobId": job_id,
+        "pageNumber": int(page_number),
+        "snapshotCutoff": int(cutoff),
+        "records": records,
+    }
+    content_hash = _canonical_sha256(content)
+    body = json.dumps(
+        {**content, "contentSha256": content_hash},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    if len(body) > 512_000:
+        raise RuntimeError("evidence report page exceeds its safe bound")
+    response = S3.put_object(
+        Bucket=os.environ["EVIDENCE_REPORT_BUCKET"],
+        Key=_evidence_report_page_key(tenant, job_id, page_number),
+        Body=body,
+        ContentType="application/json",
+        Metadata={"content-sha256": hashlib.sha256(body).hexdigest(), "schema-version": "1"},
+    )
+    if not isinstance(response.get("VersionId"), str):
+        raise RuntimeError("evidence report bucket did not return a version identity")
+    return content_hash
+
+
+def _evidence_report_index_content(job):
+    """Return the canonical chain-bound export index content."""
+    return {
+        "schemaVersion": 1,
+        "tenantId": job["tenant_id"],
+        "jobId": job["id"],
+        "snapshotCutoff": int(job["snapshot_cutoff"]),
+        "generatedAt": int(job["completed_at"]),
+        "recordCount": int(job["record_count"]),
+        "verifiedCount": int(job["verified_count"]),
+        "atRiskCount": int(job["at_risk_count"]),
+        "legalHoldCount": int(job["legal_hold_count"]),
+        "deleteMarkerCount": int(job["delete_marker_count"]),
+        "pageCount": int(job["page_count"]),
+        "chainSha256": job["chain_sha256"],
+        "retentionPolicy": job["retention_policy"],
+    }
+
+
+def _write_evidence_report_index(job):
+    """Persist the chain-bound completion index and return its canonical digest."""
+    content = _evidence_report_index_content(job)
+    content_hash = _canonical_sha256(content)
+    body = json.dumps(
+        {**content, "contentSha256": content_hash},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    response = S3.put_object(
+        Bucket=os.environ["EVIDENCE_REPORT_BUCKET"],
+        Key=f"tenant={job['tenant_id']}/job={job['id']}/index.json",
+        Body=body,
+        ContentType="application/json",
+        Metadata={"content-sha256": hashlib.sha256(body).hexdigest(), "schema-version": "1"},
+    )
+    if not isinstance(response.get("VersionId"), str):
+        raise RuntimeError("evidence report index has no immutable version identity")
+    return content_hash
+
+
+def _evidence_monitor_record(tenant):
+    """Return the latest scheduled assurance posture when it exists."""
+    return TABLE.get_item(
+        Key=_item_key(tenant, "EVIDENCE_MONITOR", "current"), ConsistentRead=True
+    ).get("Item")
+
+
+def _evidence_monitor_view(item):
+    """Project content-minimised evidence monitoring state."""
+    if not item:
+        return {
+            "status": "not_run",
+            "reasonCodes": ["scheduled_assurance_not_run"],
+            "jobId": None,
+            "checkedAt": None,
+            "alertDelivered": False,
+        }
+    return {
+        "status": item.get("status"),
+        "reasonCodes": list(item.get("reason_codes", [])),
+        "jobId": item.get("job_id"),
+        "checkedAt": item.get("checked_at"),
+        "alertDelivered": item.get("delivery_status") == "delivered",
+    }
+
+
+def _publish_evidence_monitor_alert(tenant, monitor):
+    """Publish one normalized evidence-gap transition to the durable AWS channel."""
+    topic_arn = os.environ.get("SECURITY_ALERTS_TOPIC_ARN", "")
+    if not topic_arn:
+        return False
+    SNS.publish(
+        TopicArn=topic_arn,
+        Subject="AAI evidence assurance alert",
+        Message=json.dumps(
+            {
+                "schemaVersion": 1,
+                "tenantId": tenant,
+                "source": "evidence_assurance",
+                "status": monitor["status"],
+                "reasonCodes": monitor["reason_codes"],
+                "jobId": monitor["job_id"],
+                "observedAt": int(monitor["checked_at"]),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        MessageAttributes={
+            "tenantId": {"DataType": "String", "StringValue": tenant},
+            "severity": {
+                "DataType": "String",
+                "StringValue": "critical" if monitor["status"] == "critical" else "high",
+            },
+            "source": {"DataType": "String", "StringValue": "evidence_assurance"},
+        },
+    )
+    return True
+
+
+def _reconcile_evidence_monitor(tenant, job):
+    """Persist and deliver a deduplicated assurance/gap state transition."""
+    reasons = []
+    if job.get("status") == "failed":
+        reasons.append(str(job.get("failure_reason", "assurance_job_failed")))
+    else:
+        if int(job.get("record_count", 0)) == 0:
+            reasons.append("no_retained_evidence")
+        baseline_count = job.get("baseline_record_count")
+        if baseline_count is not None:
+            baseline_count = _discovery_integer(baseline_count, "baselineRecordCount", minimum=0)
+            if int(job.get("record_count", 0)) < baseline_count:
+                reasons.append("retained_record_count_decreased")
+        if int(job.get("at_risk_count", 0)) > 0:
+            reasons.append("integrity_or_retention_gap")
+        if int(job.get("delete_marker_count", 0)) > 0:
+            reasons.append("delete_markers_observed")
+    status = (
+        "healthy" if not reasons else "critical" if job.get("status") == "failed" else "attention"
+    )
+    now = int(time.time())
+    key = _item_key(tenant, "EVIDENCE_MONITOR", "current")
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    state_hash = _canonical_sha256({"status": status, "reasonCodes": reasons})
+    changed = not existing or not secrets.compare_digest(
+        str(existing.get("state_hash", "")), state_hash
+    )
+    previous_delivery = str(existing.get("delivery_status", "")) if existing else ""
+    should_deliver = bool(reasons) and (changed or previous_delivery == "pending")
+    delivery_status = (
+        "pending"
+        if changed and reasons
+        else previous_delivery
+        if reasons and previous_delivery in {"pending", "delivered"}
+        else "not_required"
+    )
+    monitor = {
+        **key,
+        "tenant_id": tenant,
+        "status": status,
+        "reason_codes": reasons,
+        "state_hash": state_hash,
+        "job_id": job["id"],
+        "checked_at": now,
+        "delivery_status": delivery_status,
+        "revision": int(existing.get("revision", 0)) + 1 if existing else 1,
+    }
+    if existing and existing.get("delivered_at") and delivery_status == "delivered":
+        monitor["delivered_at"] = existing["delivered_at"]
+    if should_deliver:
+        try:
+            if _publish_evidence_monitor_alert(tenant, monitor):
+                monitor["delivery_status"] = "delivered"
+                monitor["delivered_at"] = now
+        except Exception:
+            # The monitor remains visible and pending. A later scheduled cycle
+            # retries without treating a delivery outage as healthy evidence.
+            monitor["delivery_status"] = "pending"
+    arguments = {"Item": monitor}
+    if existing:
+        arguments.update(
+            {
+                "ConditionExpression": "revision = :revision",
+                "ExpressionAttributeValues": {":revision": int(existing.get("revision", 0))},
+            }
+        )
+    else:
+        arguments["ConditionExpression"] = "attribute_not_exists(pk)"
+    TABLE.put_item(**arguments)
+    if changed:
+        _audit(
+            tenant,
+            "evidence_monitor_state_changed",
+            "system:evidence-assurance",
+            {"status": status, "reason_codes": reasons, "job_id": job["id"]},
+        )
+    return monitor
+
+
+def _process_evidence_job(tenant, job_id, expected_revision):
+    """Process one revision-bound page and enqueue only the next exact revision."""
+    job = _evidence_job_record(tenant, job_id)
+    if int(job.get("revision", 0)) != int(expected_revision):
+        return {"status": "stale_message"}
+    if job.get("status") not in {"queued", "running"}:
+        return {"status": str(job.get("status"))}
+    page_number = int(job.get("page_count", 0)) + 1
+    if page_number > _EVIDENCE_ASYNC_MAX_PAGES:
+        raise RuntimeError("evidence assurance job exceeds its maximum page bound")
+    arguments = {
+        "Bucket": os.environ["AUDIT_BUCKET"],
+        "Prefix": f"tenant={tenant}/",
+        "MaxKeys": _EVIDENCE_ASYNC_PAGE_SIZE,
+    }
+    if job.get("next_key_marker"):
+        arguments["KeyMarker"] = job["next_key_marker"]
+    if job.get("next_version_id_marker"):
+        arguments["VersionIdMarker"] = job["next_version_id_marker"]
+    response = S3.list_object_versions(**arguments)
+    cutoff = datetime.fromtimestamp(int(job["snapshot_cutoff"]), UTC)
+    versions = []
+    for version in response.get("Versions", []):
+        modified = version.get("LastModified")
+        if not hasattr(modified, "timestamp"):
+            raise RuntimeError("audit inventory version timestamp is malformed")
+        if modified <= cutoff:
+            versions.append(version)
+    delete_markers = 0
+    for marker in response.get("DeleteMarkers", []):
+        modified = marker.get("LastModified")
+        if not hasattr(modified, "timestamp"):
+            raise RuntimeError("audit delete-marker timestamp is malformed")
+        if modified <= cutoff:
+            delete_markers += 1
+    records = [_evidence_record(tenant, version) for version in versions]
+    records.sort(key=lambda item: (item["lastModified"], item["key"], item["versionId"]))
+    page_hash = _write_evidence_report_page(
+        tenant, job_id, page_number, job["snapshot_cutoff"], records
+    )
+    now = datetime.now(UTC)
+    at_risk = sum(1 for record in records if _evidence_record_at_risk(record, now=now))
+    updated = {
+        **job,
+        "status": "running",
+        "revision": int(expected_revision) + 1,
+        "started_at": job.get("started_at") or int(time.time()),
+        "updated_at": int(time.time()),
+        "record_count": int(job.get("record_count", 0)) + len(records),
+        "verified_count": int(job.get("verified_count", 0)) + len(records) - at_risk,
+        "at_risk_count": int(job.get("at_risk_count", 0)) + at_risk,
+        "legal_hold_count": int(job.get("legal_hold_count", 0))
+        + sum(1 for record in records if record["legalHold"]),
+        "delete_marker_count": int(job.get("delete_marker_count", 0)) + delete_markers,
+        "page_count": page_number,
+        "chain_sha256": hashlib.sha256(
+            f"{job.get('chain_sha256', _EVIDENCE_INITIAL_CHAIN_HASH)}:{page_hash}".encode()
+        ).hexdigest(),
+    }
+    truncated = response.get("IsTruncated") is True
+    if truncated:
+        next_key = response.get("NextKeyMarker")
+        next_version = response.get("NextVersionIdMarker")
+        if not isinstance(next_key, str):
+            raise RuntimeError("audit inventory pagination marker is missing")
+        updated["next_key_marker"] = next_key
+        if isinstance(next_version, str):
+            updated["next_version_id_marker"] = next_version
+        else:
+            updated.pop("next_version_id_marker", None)
+    else:
+        updated.pop("next_key_marker", None)
+        updated.pop("next_version_id_marker", None)
+        updated["status"] = "completed"
+        updated["completed_at"] = int(time.time())
+        updated["retention_policy"] = _evidence_policy(tenant)
+        updated["content_sha256"] = _write_evidence_report_index(updated)
+    TABLE.put_item(
+        Item=updated,
+        ConditionExpression="revision = :revision",
+        ExpressionAttributeValues={":revision": int(expected_revision)},
+    )
+    if truncated:
+        _enqueue_evidence_job(tenant, job_id, updated["revision"])
+    else:
+        _audit(
+            tenant,
+            "evidence_assurance_job_completed",
+            "system:evidence-assurance",
+            {
+                "job_id": job_id,
+                "record_count": updated["record_count"],
+                "at_risk_count": updated["at_risk_count"],
+                "delete_marker_count": updated["delete_marker_count"],
+                "content_hash": updated["content_sha256"],
+            },
+        )
+        _reconcile_evidence_monitor(tenant, updated)
+    return _evidence_job_view(updated)
+
+
+def _evidence_failure_reason(error):
+    """Map provider errors to a small non-sensitive operator reason code."""
+    code = getattr(error, "response", {}).get("Error", {}).get("Code")
+    if code in {"AccessDenied", "UnauthorizedOperation"}:
+        return "evidence_provider_access_denied"
+    if code in {"SlowDown", "ServiceUnavailable", "InternalError", "RequestTimeout"}:
+        return "evidence_provider_unavailable"
+    return "evidence_assurance_job_failed"
+
+
+def _fail_evidence_job(tenant, job_id, expected_revision, reason):
+    """Persist a terminal fail-closed job and reconcile its durable alert."""
+    job = _evidence_job_record(tenant, job_id)
+    if int(job.get("revision", 0)) != int(expected_revision):
+        return job
+    if job.get("status") not in {"queued", "running"}:
+        return job
+    failed = {
+        **job,
+        "status": "failed",
+        "revision": int(expected_revision) + 1,
+        "failure_reason": reason,
+        "updated_at": int(time.time()),
+        "completed_at": int(time.time()),
+    }
+    TABLE.put_item(
+        Item=failed,
+        ConditionExpression="revision = :revision",
+        ExpressionAttributeValues={":revision": int(expected_revision)},
+    )
+    _audit(
+        tenant,
+        "evidence_assurance_job_failed",
+        "system:evidence-assurance",
+        {"job_id": job_id, "reason_code": reason},
+    )
+    _reconcile_evidence_monitor(tenant, failed)
+    return failed
+
+
+def process_evidence_queue_event(event):
+    """Process one Lambda/SQS event with bounded retry and no browser authority.
+
+    The SQS event-source mapping is the invocation authority. Tenant and job
+    identifiers in the message are lookup keys only; the worker reloads the
+    exact server-owned job and compares its optimistic revision before every
+    S3 or DynamoDB mutation.
+    """
+    records = event.get("Records") if isinstance(event, dict) else None
+    if not isinstance(records, list) or len(records) != 1:
+        raise ValueError("evidence worker requires exactly one SQS record")
+    record = records[0]
+    if record.get("eventSource") not in {"aws:sqs", None}:
+        raise ValueError("evidence worker event source is invalid")
+    try:
+        body = json.loads(record.get("body", ""))
+    except (TypeError, json.JSONDecodeError) as error:
+        raise ValueError("evidence worker message is invalid") from error
+    if not isinstance(body, dict) or set(body) != {
+        "schemaVersion",
+        "tenantId",
+        "jobId",
+        "expectedRevision",
+    }:
+        raise ValueError("evidence worker message schema is invalid")
+    if body.get("schemaVersion") != 1:
+        raise ValueError("evidence worker schema version is unsupported")
+    tenant = _bounded_identifier(body.get("tenantId"), "tenantId")
+    job_id = _bounded_identifier(body.get("jobId"), "jobId")
+    expected = _discovery_integer(body.get("expectedRevision"), "expectedRevision", minimum=1)
+    receive_count = int(record.get("attributes", {}).get("ApproximateReceiveCount", "1"))
+    try:
+        return _process_evidence_job(tenant, job_id, expected)
+    except Exception as error:
+        if receive_count < 3:
+            raise
+        return _evidence_job_view(
+            _fail_evidence_job(tenant, job_id, expected, _evidence_failure_reason(error))
+        )
+
+
+def _evidence_job_page(tenant, job_id, page_number):
+    """Load and independently verify one completed derived export page."""
+    job = _evidence_job_record(tenant, job_id)
+    if job.get("status") != "completed":
+        raise PolicyConflict("evidence assurance job is not complete")
+    if not isinstance(page_number, str) or not page_number.isdigit():
+        raise ValueError("pageNumber is invalid")
+    page = _discovery_integer(
+        int(page_number), "pageNumber", minimum=1, maximum=int(job.get("page_count", 0))
+    )
+    response = S3.get_object(
+        Bucket=os.environ["EVIDENCE_REPORT_BUCKET"],
+        Key=_evidence_report_page_key(tenant, job_id, page),
+    )
+    body = _evidence_body_bytes(response)
+    try:
+        value = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("evidence report page is malformed") from error
+    if not isinstance(value, dict) or set(value) != {
+        "schemaVersion",
+        "tenantId",
+        "jobId",
+        "pageNumber",
+        "snapshotCutoff",
+        "records",
+        "contentSha256",
+    }:
+        raise RuntimeError("evidence report page schema is invalid")
+    supplied = value.pop("contentSha256")
+    if (
+        value.get("schemaVersion") != 1
+        or value.get("tenantId") != tenant
+        or value.get("jobId") != job_id
+        or value.get("pageNumber") != page
+        or not isinstance(supplied, str)
+        or not secrets.compare_digest(supplied, _canonical_sha256(value))
+    ):
+        raise RuntimeError("evidence report page integrity verification failed")
+    return {**value, "contentSha256": supplied}
+
+
+def _evidence_schedule_cycle():
+    """Start due tenant scans and fail stale jobs on the internal schedule."""
+    tenants = []
+    for shard in range(_EVIDENCE_ASSURANCE_SHARDS):
+        result = TABLE.query(
+            IndexName=_EVIDENCE_ASSURANCE_INDEX,
+            KeyConditionExpression=Key("evidence_assurance_pk").eq(
+                f"EVIDENCE_ASSURANCE#{shard:02d}"
+            ),
+            Limit=250,
+        )
+        if result.get("LastEvaluatedKey"):
+            raise RuntimeError("evidence assurance tenant shard exceeds its safe bound")
+        tenants.extend(result.get("Items", []))
+        if len(tenants) > _ENDPOINT_DETECTION_TENANT_LIMIT:
+            raise RuntimeError("evidence assurance tenant inventory exceeds its safe bound")
+    now = int(time.time())
+    started = 0
+    active = 0
+    failed = 0
+    for registration in tenants:
+        tenant = registration.get("evidence_assurance_sk")
+        if not isinstance(tenant, str) or registration.get("pk") != f"TENANT#{tenant}":
+            failed += 1
+            continue
+        try:
+            running = _latest_evidence_job(tenant, statuses={"queued", "running"})
+            if running and now - int(running.get("updated_at", 0)) > _EVIDENCE_JOB_STALE_SECONDS:
+                _fail_evidence_job(
+                    tenant,
+                    running["id"],
+                    int(running["revision"]),
+                    "evidence_assurance_job_stale",
+                )
+                running = None
+            if running:
+                active += 1
+                continue
+            latest = _latest_evidence_job(tenant, statuses={"completed"})
+            if (
+                latest
+                and now - int(latest.get("completed_at", 0)) < _EVIDENCE_JOB_FRESHNESS_SECONDS
+            ):
+                continue
+            slot = now // _EVIDENCE_JOB_FRESHNESS_SECONDS
+            _create_evidence_job(
+                tenant,
+                f"schedule-{slot}",
+                "system:evidence-assurance",
+                "Scheduled tenant-wide evidence assurance and gap detection.",
+                source="schedule",
+            )
+            started += 1
+        except Exception:
+            failed += 1
+    if failed:
+        raise RuntimeError("one or more tenant evidence assurance schedules failed")
+    return {"processedTenants": len(tenants), "startedJobs": started, "activeJobs": active}
 
 
 def _set_evidence_retention(tenant, body, actor):
@@ -7672,7 +8398,16 @@ def _seed(tenant):
     # Signup provisioning creates the tenant root before the first console
     # request. Never replace that server-owned record with demo data: doing so
     # would erase trial status and its expiry metadata at the API boundary.
-    if TABLE.get_item(Key=_item_key(tenant, "TENANT", "root"), ConsistentRead=True).get("Item"):
+    tenant_root = TABLE.get_item(Key=_item_key(tenant, "TENANT", "root"), ConsistentRead=True).get(
+        "Item"
+    )
+    if tenant_root:
+        expected_pk, expected_sk = _evidence_assurance_registration(tenant)
+        if (
+            tenant_root.get("evidence_assurance_pk") != expected_pk
+            or tenant_root.get("evidence_assurance_sk") != expected_sk
+        ):
+            _register_evidence_assurance_tenant(tenant)
         return
     if TABLE.get_item(Key=_item_key(tenant, "ORG", "org-demo")).get("Item"):
         now = int(time.time())
@@ -7721,6 +8456,7 @@ def _seed(tenant):
         return
     now = int(time.time())
     _put(tenant, "TENANT", "root", {"id": tenant, "status": "active", "created_at": now})
+    _register_evidence_assurance_tenant(tenant)
     _put(
         tenant,
         "ORG",
@@ -7934,6 +8670,34 @@ def _register_endpoint_detection_tenant(tenant):
     except Exception as error:
         if _is_conditional_conflict(error):
             raise PermissionError("tenant is not provisioned for endpoint detection") from error
+        raise
+
+
+def _evidence_assurance_registration(tenant):
+    """Return the deterministic schedule-index values for one tenant."""
+    digest = hashlib.sha256(tenant.encode()).digest()
+    shard = digest[1] % _EVIDENCE_ASSURANCE_SHARDS
+    return f"EVIDENCE_ASSURANCE#{shard:02d}", tenant
+
+
+def _register_evidence_assurance_tenant(tenant):
+    """Put one provisioned tenant in the bounded evidence schedule index."""
+    partition, sort_key = _evidence_assurance_registration(tenant)
+    try:
+        TABLE.update_item(
+            Key=_item_key(tenant, "TENANT", "root"),
+            UpdateExpression=(
+                "SET evidence_assurance_pk = :partition, evidence_assurance_sk = :tenant"
+            ),
+            ConditionExpression="attribute_exists(pk)",
+            ExpressionAttributeValues={
+                ":partition": partition,
+                ":tenant": sort_key,
+            },
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PermissionError("tenant is not provisioned for evidence assurance") from error
         raise
 
 
@@ -11814,6 +12578,10 @@ def handler(event, context):
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("rollout reconciliation schedule event is invalid")
         return _rollout_reconciliation_cycle()
+    if isinstance(event, dict) and event.get("source") == "aai.evidence-assurance":
+        if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
+            raise ValueError("evidence assurance schedule event is invalid")
+        return _evidence_schedule_cycle()
     try:
         method, path = _method_path(event)
         if method == "OPTIONS":
@@ -12198,6 +12966,23 @@ def handler(event, context):
                 return _response(200, _set_evidence_retention(tenant, _body(event), actor))
             if method == "POST" and parts == ["evidence", "legal-hold"]:
                 return _response(200, _set_evidence_legal_hold(tenant, _body(event), actor))
+            if parts[:2] == ["evidence", "jobs"]:
+                if method == "POST" and len(parts) == 2:
+                    return _response(202, _start_evidence_job(tenant, _body(event), actor))
+                if method == "GET":
+                    if not _operator_authorized(event, "evidence_read", tenant):
+                        return _response(
+                            403,
+                            {"error": "evidence assurance requires an authorized evidence role"},
+                        )
+                    if len(parts) == 2:
+                        return _response(200, {"items": _evidence_jobs(tenant)})
+                    if len(parts) == 3:
+                        return _response(
+                            200, _evidence_job_view(_evidence_job_record(tenant, parts[2]))
+                        )
+                    if len(parts) == 5 and parts[3] == "pages":
+                        return _response(200, _evidence_job_page(tenant, parts[2], parts[4]))
             if method == "GET" and parts == ["policy-trust"]:
                 return _response(200, _policy_trust_metadata())
             if (
