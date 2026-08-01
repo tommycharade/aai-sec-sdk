@@ -171,6 +171,11 @@ _CASE_EXPORT_ROLES = frozenset(
 )
 _CASE_EXPORT_RECORD_LIMIT = 500
 _CASE_EXPORT_LOOKBACK_SECONDS = 24 * 60 * 60
+_RESPONSE_RULE_VERSION_STATES = frozenset(
+    {"draft", "review", "approved", "active", "superseded", "rejected"}
+)
+_RESPONSE_RULE_PENDING_STATES = frozenset({"draft", "review", "approved"})
+_RESPONSE_RULE_PREVIEW_LIMIT = 100
 _ENDPOINT_EVENT_REASONS = frozenset({"signature_invalid", "report_replayed"})
 _ENDPOINT_ALERT_DEFINITIONS = {
     "credential_not_configured": (
@@ -286,7 +291,14 @@ _CANONICAL_OPERATOR_ROLES = frozenset(
 )
 _ROLE_CAPABILITIES = {
     "platform-admin": frozenset({"*"}),
-    "security-operator": frozenset({"approval_decision", "incident_response"}),
+    "security-operator": frozenset(
+        {
+            "approval_decision",
+            "incident_response",
+            "response_rule_approval",
+            "response_rule_write",
+        }
+    ),
     "policy-author": frozenset({"policy_write"}),
     "policy-approver": frozenset({"approval_decision", "policy_approval"}),
     "fleet-operator": frozenset({"fleet_write"}),
@@ -926,6 +938,13 @@ def _required_mutation_capability(path):
         return "incident_response"
     if normalized.startswith("/enterprise/cases"):
         return "incident_response"
+    if re.fullmatch(
+        r"/enterprise/response-rules/[^/]+/versions/[1-9][0-9]*/(decision|activate)",
+        normalized,
+    ) or re.fullmatch(r"/enterprise/response-rules/[^/]+/(disable|rollback)", normalized):
+        return "response_rule_approval"
+    if normalized.startswith("/enterprise/response-rules"):
+        return "response_rule_write"
     if normalized.startswith("/enterprise/approvals/"):
         return "approval_decision"
     if normalized.startswith("/enterprise/identity/scim"):
@@ -3303,7 +3322,7 @@ def _agent_ownership_view(agent, *, now=None):
     }
 
 
-def _discovery_integer(value, field, *, minimum=0):
+def _discovery_integer(value, field, *, minimum=0, maximum=None):
     """Normalize one exact bounded integer from JSON or DynamoDB."""
     if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
         raise ValueError(f"{field} must be an integer")
@@ -3312,6 +3331,8 @@ def _discovery_integer(value, field, *, minimum=0):
     result = int(value)
     if result < minimum:
         raise ValueError(f"{field} must be at least {minimum}")
+    if maximum is not None and result > maximum:
+        raise ValueError(f"{field} must be at most {maximum}")
     return result
 
 
@@ -6423,8 +6444,8 @@ def _open_endpoint_alert(tenant, device_id, reason_code, *, now, reopen_acknowle
     return record
 
 
-def _reconcile_endpoint_alerts(tenant, health, *, now=None):
-    """Materialize current server-derived endpoint health as durable alerts."""
+def _reconcile_endpoint_alerts(tenant, health, *, now=None, automatic_response=False):
+    """Materialize endpoint health and optionally run scheduled response authority."""
     current_time = int(time.time()) if now is None else int(now)
     active_keys = set()
     for device in health.get("items", []):
@@ -6472,6 +6493,11 @@ def _reconcile_endpoint_alerts(tenant, health, *, now=None):
             "system:endpoint-detection",
             {"alert_id": alert.get("id"), "device_id": alert.get("deviceId")},
         )
+    # Consequential automatic response is reached only from the scheduled
+    # detector or an authenticated security-event write. Operator GET routes
+    # may reconcile display evidence but cannot trigger containment by reading.
+    if automatic_response:
+        _evaluate_response_rules(tenant, now=current_time)
     _deliver_pending_endpoint_alerts(tenant)
     return [
         _endpoint_alert_view(item)
@@ -6494,6 +6520,7 @@ def _record_endpoint_event_alert(tenant, device_id, reason_code):
             now=int(time.time()),
             reopen_acknowledged=True,
         )
+        _evaluate_response_rules(tenant)
         _deliver_pending_endpoint_alerts(tenant)
     except Exception:
         print(json.dumps({"warning": "endpoint security event alert persistence failed"}))
@@ -6996,6 +7023,1006 @@ def _case_export(tenant, case_id, actor):
     }
 
 
+def _response_rule_version_identifier(rule_id, version):
+    """Return one unambiguous immutable response-rule version identifier."""
+    return f"{rule_id}:v{int(version):08d}"
+
+
+def _response_rule_configuration(value):
+    """Validate and normalize the closed automatic-response rule language."""
+    if not isinstance(value, dict) or set(value) != {
+        "match",
+        "action",
+        "safeguards",
+        "priority",
+    }:
+        raise ValueError("response rule configuration has an invalid schema")
+    match = value.get("match")
+    action = value.get("action")
+    safeguards = value.get("safeguards")
+    if not isinstance(match, dict) or set(match) != {
+        "source",
+        "reasonCodes",
+        "severities",
+        "hosts",
+    }:
+        raise ValueError("response rule match has an invalid schema")
+    if match.get("source") != "endpoint_evidence":
+        raise ValueError("response rule source must be endpoint_evidence")
+    reason_codes = match.get("reasonCodes")
+    if (
+        not isinstance(reason_codes, list)
+        or not reason_codes
+        or len(reason_codes) > len(_ENDPOINT_ALERT_DEFINITIONS)
+        or any(
+            not isinstance(item, str) or item not in _ENDPOINT_ALERT_DEFINITIONS
+            for item in reason_codes
+        )
+    ):
+        raise ValueError("response rule reasonCodes are unsupported")
+    severities = match.get("severities")
+    if (
+        not isinstance(severities, list)
+        or not severities
+        or len(severities) > 3
+        or any(item not in {"medium", "high", "critical"} for item in severities)
+    ):
+        raise ValueError("response rule severities are unsupported")
+    hosts = match.get("hosts")
+    if (
+        not isinstance(hosts, list)
+        or not hosts
+        or len(hosts) > 2
+        or any(item not in {"claude-code", "codex"} for item in hosts)
+    ):
+        raise ValueError("response rule hosts are unsupported")
+    if action != {"type": "quarantine_agent"}:
+        raise ValueError("response rule action must be quarantine_agent")
+    if not isinstance(safeguards, dict) or set(safeguards) != {
+        "maxActionsPerHour",
+        "agentCooldownSeconds",
+    }:
+        raise ValueError("response rule safeguards have an invalid schema")
+    maximum = _discovery_integer(
+        safeguards.get("maxActionsPerHour"),
+        "maxActionsPerHour",
+        minimum=1,
+        maximum=25,
+    )
+    cooldown = _discovery_integer(
+        safeguards.get("agentCooldownSeconds"),
+        "agentCooldownSeconds",
+        minimum=300,
+        maximum=86_400,
+    )
+    priority = _discovery_integer(value.get("priority"), "priority", minimum=1, maximum=1_000)
+    return {
+        "match": {
+            "source": "endpoint_evidence",
+            "reasonCodes": sorted(set(reason_codes)),
+            "severities": sorted(set(severities)),
+            "hosts": sorted(set(hosts)),
+        },
+        "action": {"type": "quarantine_agent"},
+        "safeguards": {
+            "maxActionsPerHour": maximum,
+            "agentCooldownSeconds": cooldown,
+        },
+        "priority": priority,
+    }
+
+
+def _response_rule_versions(tenant, rule_id, *, consistent_read=False):
+    """Return every bounded immutable version for one tenant response rule."""
+    versions = [
+        item
+        for item in _list(tenant, "RESPONSE_RULE_VERSION", consistent_read=consistent_read)
+        if item.get("rule_id") == rule_id
+    ]
+    if any(item.get("state") not in _RESPONSE_RULE_VERSION_STATES for item in versions):
+        raise RuntimeError("response rule version state is malformed")
+    return sorted(versions, key=lambda item: int(item.get("version", 0)), reverse=True)
+
+
+def _response_rule_version_view(record):
+    """Project one immutable rule version into the operator API contract."""
+    return {
+        "ruleId": record.get("rule_id"),
+        "version": int(record.get("version", 0)),
+        "baseVersion": int(record.get("base_version", 0)),
+        "name": record.get("name"),
+        "description": record.get("description"),
+        "configuration": _json(record.get("configuration", {})),
+        "contentHash": record.get("content_hash"),
+        "state": record.get("state"),
+        "author": record.get("author"),
+        "createdAt": int(record.get("created_at", 0)),
+        "submittedBy": record.get("submitted_by"),
+        "submittedAt": record.get("submitted_at"),
+        "decidedBy": record.get("decided_by"),
+        "decidedAt": record.get("decided_at"),
+        "decision": record.get("decision"),
+        "decisionReason": record.get("decision_reason"),
+        "activatedBy": record.get("activated_by"),
+        "activatedAt": record.get("activated_at"),
+    }
+
+
+def _response_rule_summary(rule, versions=None):
+    """Return active automatic authority separately from pending governance."""
+    all_versions = versions if versions is not None else []
+    pending = next(
+        (item for item in all_versions if item.get("state") in _RESPONSE_RULE_PENDING_STATES),
+        None,
+    )
+    return {
+        "id": rule.get("id"),
+        "name": rule.get("name"),
+        "description": rule.get("description"),
+        "configuration": _json(rule.get("configuration", {})),
+        "contentHash": rule.get("content_hash"),
+        "activeVersion": int(rule.get("active_version", 0)) or None,
+        "latestVersion": int(rule.get("latest_version", 0)),
+        "enabled": rule.get("enabled") is True,
+        "governanceState": pending.get("state")
+        if pending
+        else ("active" if int(rule.get("active_version", 0)) else "draft"),
+        "pendingVersion": int(pending.get("version", 0)) if pending else None,
+        "pendingAuthor": pending.get("author") if pending else None,
+        "createdAt": int(rule.get("created_at", 0)),
+        "createdBy": rule.get("created_by"),
+        "updatedAt": int(rule.get("updated_at", rule.get("created_at", 0))),
+        "disabledAt": rule.get("disabled_at"),
+        "disabledBy": rule.get("disabled_by"),
+        "revision": int(rule.get("revision", 1)),
+    }
+
+
+def _create_response_rule(tenant, body, actor):
+    """Atomically create a rule shell and its first inactive draft."""
+    if not isinstance(body, dict) or set(body) != {
+        "ruleId",
+        "name",
+        "description",
+        "configuration",
+    }:
+        raise ValueError("response rule request has an invalid schema")
+    rule_id = _bounded_identifier(body.get("ruleId"), "ruleId")
+    name = _bounded_text(body.get("name"), "name", 120)
+    description = _case_reason(body.get("description"))
+    configuration = _response_rule_configuration(body.get("configuration"))
+    now = int(time.time())
+    content_hash = _configuration_hash(configuration)
+    rule = {
+        **_item_key(tenant, "RESPONSE_RULE", rule_id),
+        "tenant_id": tenant,
+        "id": rule_id,
+        "name": name,
+        "description": description,
+        "configuration": {},
+        "content_hash": None,
+        "active_version": 0,
+        "latest_version": 1,
+        "enabled": False,
+        "revision": 1,
+        "created_at": now,
+        "created_by": actor,
+        "updated_at": now,
+    }
+    version = {
+        **_item_key(
+            tenant,
+            "RESPONSE_RULE_VERSION",
+            _response_rule_version_identifier(rule_id, 1),
+        ),
+        "tenant_id": tenant,
+        "id": _response_rule_version_identifier(rule_id, 1),
+        "rule_id": rule_id,
+        "version": 1,
+        "base_version": 0,
+        "name": name,
+        "description": description,
+        "configuration": configuration,
+        "content_hash": content_hash,
+        "state": "draft",
+        "author": actor,
+        "created_at": now,
+    }
+    _transact_policy_records(
+        [
+            _transaction_put(rule, condition="attribute_not_exists(pk)"),
+            _transaction_put(version, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _audit(tenant, "response_rule_draft_created", actor, {"rule_id": rule_id, "version": 1})
+    return _response_rule_summary(rule, [version])
+
+
+def _response_rule_record(tenant, rule_id):
+    """Load one tenant rule summary with a strongly consistent read."""
+    rule_id = _bounded_identifier(rule_id, "ruleId")
+    record = TABLE.get_item(
+        Key=_item_key(tenant, "RESPONSE_RULE", rule_id), ConsistentRead=True
+    ).get("Item")
+    if not record:
+        raise LookupError("response rule not found")
+    return record
+
+
+def _response_rule_version_record(tenant, rule_id, version):
+    """Load one exact immutable response-rule version."""
+    record = TABLE.get_item(
+        Key=_item_key(
+            tenant,
+            "RESPONSE_RULE_VERSION",
+            _response_rule_version_identifier(rule_id, version),
+        ),
+        ConsistentRead=True,
+    ).get("Item")
+    if not record or record.get("rule_id") != rule_id:
+        raise LookupError("response rule version not found")
+    return record
+
+
+def _create_response_rule_draft(tenant, rule_id, body, actor):
+    """Append one governed draft without changing automatic authority."""
+    if not isinstance(body, dict) or set(body) != {"name", "description", "configuration"}:
+        raise ValueError("response rule draft has an invalid schema")
+    rule = _response_rule_record(tenant, rule_id)
+    versions = _response_rule_versions(tenant, rule_id, consistent_read=True)
+    if any(item.get("state") in _RESPONSE_RULE_PENDING_STATES for item in versions):
+        raise PolicyConflict("response rule already has a pending version")
+    version_number = int(rule.get("latest_version", 0)) + 1
+    name = _bounded_text(body.get("name"), "name", 120)
+    description = _case_reason(body.get("description"))
+    configuration = _response_rule_configuration(body.get("configuration"))
+    now = int(time.time())
+    version = {
+        **_item_key(
+            tenant,
+            "RESPONSE_RULE_VERSION",
+            _response_rule_version_identifier(rule_id, version_number),
+        ),
+        "tenant_id": tenant,
+        "id": _response_rule_version_identifier(rule_id, version_number),
+        "rule_id": rule_id,
+        "version": version_number,
+        "base_version": int(rule.get("active_version", 0)),
+        "name": name,
+        "description": description,
+        "configuration": configuration,
+        "content_hash": _configuration_hash(configuration),
+        "state": "draft",
+        "author": actor,
+        "created_at": now,
+    }
+    updated = {
+        **rule,
+        "latest_version": version_number,
+        "revision": int(rule.get("revision", 1)) + 1,
+        "updated_at": now,
+    }
+    _transact_policy_records(
+        [
+            _transaction_put(version, condition="attribute_not_exists(pk)"),
+            _transaction_put(
+                updated,
+                condition="latest_version = :latest AND active_version = :active",
+                values={
+                    ":latest": int(rule.get("latest_version", 0)),
+                    ":active": int(rule.get("active_version", 0)),
+                },
+            ),
+        ]
+    )
+    _audit(
+        tenant,
+        "response_rule_draft_created",
+        actor,
+        {"rule_id": rule_id, "version": version_number},
+    )
+    return _response_rule_version_view(version)
+
+
+def _put_response_rule_transition(tenant, record, expected_state, event_type, actor):
+    """Commit one exact-state response-rule lifecycle transition."""
+    try:
+        TABLE.put_item(
+            Item=record,
+            ConditionExpression="#state = :expected",
+            ExpressionAttributeNames={"#state": "state"},
+            ExpressionAttributeValues={":expected": expected_state},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict(
+                f"response rule version must be {expected_state} before this transition"
+            ) from error
+        raise
+    _audit(
+        tenant,
+        event_type,
+        actor,
+        {"rule_id": record["rule_id"], "version": int(record["version"])},
+    )
+    return _response_rule_version_view(record)
+
+
+def _submit_response_rule_version(tenant, rule_id, version, actor):
+    """Freeze a rule draft and submit it for independent review."""
+    record = _response_rule_version_record(tenant, rule_id, version)
+    if record.get("state") != "draft":
+        raise PolicyConflict("response rule version is not a draft")
+    updated = {
+        **record,
+        "state": "review",
+        "submitted_by": actor,
+        "submitted_at": int(time.time()),
+    }
+    return _put_response_rule_transition(tenant, updated, "draft", "response_rule_submitted", actor)
+
+
+def _decide_response_rule_version(tenant, rule_id, version, body, actor):
+    """Approve or reject one rule version with two-subject separation."""
+    if not isinstance(body, dict) or set(body) != {"decision", "reason"}:
+        raise ValueError("response rule decision has an invalid schema")
+    decision = body.get("decision")
+    if decision not in {"approved", "rejected"}:
+        raise ValueError("response rule decision must be approved or rejected")
+    reason = _case_reason(body.get("reason"))
+    record = _response_rule_version_record(tenant, rule_id, version)
+    if record.get("state") != "review":
+        raise PolicyConflict("response rule version is not awaiting review")
+    if decision == "approved" and secrets.compare_digest(str(record.get("author", "")), actor):
+        raise PermissionError("response rule authors cannot approve their own version")
+    now = int(time.time())
+    updated = {
+        **record,
+        "state": decision,
+        "decision": decision,
+        "decided_by": actor,
+        "decided_at": now,
+        "decision_reason": reason,
+    }
+    return _put_response_rule_transition(tenant, updated, "review", "response_rule_decided", actor)
+
+
+def _activate_response_rule_version(tenant, rule_id, version, body, actor):
+    """Atomically activate an independently approved immutable rule version."""
+    if not isinstance(body, dict) or set(body) != {"expectedActiveVersion"}:
+        raise ValueError("response rule activation has an invalid schema")
+    expected = _discovery_integer(
+        body.get("expectedActiveVersion"), "expectedActiveVersion", minimum=0
+    )
+    rule = _response_rule_record(tenant, rule_id)
+    record = _response_rule_version_record(tenant, rule_id, version)
+    if record.get("state") != "approved":
+        raise PolicyConflict("response rule version is not approved")
+    if not record.get("decided_by") or record.get("decided_by") == record.get("author"):
+        raise PermissionError("response rule version lacks independent approval")
+    if int(rule.get("active_version", 0)) != expected:
+        raise PolicyConflict("response rule active version changed")
+    if int(record.get("base_version", -1)) != expected:
+        raise PolicyConflict("response rule version was reviewed against another active version")
+    now = int(time.time())
+    active_version = {
+        **record,
+        "state": "active",
+        "activated_by": actor,
+        "activated_at": now,
+    }
+    updated_rule = {
+        **rule,
+        "name": record["name"],
+        "description": record["description"],
+        "configuration": _json(record["configuration"]),
+        "content_hash": record["content_hash"],
+        "active_version": int(record["version"]),
+        "enabled": True,
+        "disabled_at": None,
+        "disabled_by": None,
+        "revision": int(rule.get("revision", 1)) + 1,
+        "updated_at": now,
+    }
+    operations = [
+        _transaction_put(
+            active_version,
+            condition="#state = :approved",
+            names={"#state": "state"},
+            values={":approved": "approved"},
+        ),
+        _transaction_put(
+            updated_rule,
+            condition="active_version = :active AND latest_version = :latest",
+            values={
+                ":active": expected,
+                ":latest": int(rule.get("latest_version", 0)),
+            },
+        ),
+    ]
+    if expected:
+        previous = _response_rule_version_record(tenant, rule_id, expected)
+        if previous.get("state") != "active":
+            raise PolicyConflict("current response rule version is not active")
+        operations.append(
+            _transaction_put(
+                {**previous, "state": "superseded", "superseded_at": now},
+                condition="#state = :active",
+                names={"#state": "state"},
+                values={":active": "active"},
+            )
+        )
+    _transact_policy_records(operations)
+    _audit(
+        tenant,
+        "response_rule_activated",
+        actor,
+        {
+            "rule_id": rule_id,
+            "version": int(record["version"]),
+            "content_hash": record["content_hash"],
+        },
+    )
+    return _response_rule_summary(updated_rule, [active_version])
+
+
+def _disable_response_rule(tenant, rule_id, body, actor):
+    """Immediately remove automatic authority without mutating its version."""
+    if not isinstance(body, dict) or set(body) != {"expectedActiveVersion", "reason"}:
+        raise ValueError("response rule disable request has an invalid schema")
+    expected = _discovery_integer(
+        body.get("expectedActiveVersion"), "expectedActiveVersion", minimum=1
+    )
+    reason = _case_reason(body.get("reason"))
+    rule = _response_rule_record(tenant, rule_id)
+    if int(rule.get("active_version", 0)) != expected or rule.get("enabled") is not True:
+        raise PolicyConflict("response rule is not active at the expected version")
+    now = int(time.time())
+    updated = {
+        **rule,
+        "enabled": False,
+        "disabled_at": now,
+        "disabled_by": actor,
+        "disable_reason": reason,
+        "revision": int(rule.get("revision", 1)) + 1,
+        "updated_at": now,
+    }
+    try:
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="active_version = :active AND enabled = :enabled",
+            ExpressionAttributeValues={":active": expected, ":enabled": True},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("response rule authority changed before disable") from error
+        raise
+    _audit(
+        tenant,
+        "response_rule_disabled",
+        actor,
+        {"rule_id": rule_id, "version": expected, "reason": reason},
+    )
+    return _response_rule_summary(updated, _response_rule_versions(tenant, rule_id))
+
+
+def _rollback_response_rule(tenant, rule_id, body, actor):
+    """Atomically restore an independently approved superseded rule version."""
+    if not isinstance(body, dict) or set(body) != {
+        "expectedActiveVersion",
+        "targetVersion",
+        "reason",
+    }:
+        raise ValueError("response rule rollback request has an invalid schema")
+    expected = _discovery_integer(
+        body.get("expectedActiveVersion"), "expectedActiveVersion", minimum=1
+    )
+    target = _discovery_integer(body.get("targetVersion"), "targetVersion", minimum=1)
+    if target == expected:
+        raise ValueError("response rule rollback target must differ from the active version")
+    reason = _case_reason(body.get("reason"))
+    rule = _response_rule_record(tenant, rule_id)
+    if int(rule.get("active_version", 0)) != expected or rule.get("enabled") is not True:
+        raise PolicyConflict("response rule is not active at the expected version")
+    current = _response_rule_version_record(tenant, rule_id, expected)
+    restored = _response_rule_version_record(tenant, rule_id, target)
+    if current.get("state") != "active":
+        raise PolicyConflict("current response rule version is not active")
+    if restored.get("state") != "superseded":
+        raise PolicyConflict("rollback target is not a superseded version")
+    if (
+        restored.get("decision") != "approved"
+        or not restored.get("decided_by")
+        or restored.get("decided_by") == restored.get("author")
+    ):
+        raise PermissionError("rollback target lacks independent approval")
+    configuration = _response_rule_configuration(restored.get("configuration"))
+    if _configuration_hash(configuration) != restored.get("content_hash"):
+        raise RuntimeError("rollback target integrity is invalid")
+    now = int(time.time())
+    restored_active = {
+        **restored,
+        "state": "active",
+        "activated_by": actor,
+        "activated_at": now,
+        "rollback_from_version": expected,
+        "rollback_reason": reason,
+    }
+    updated_rule = {
+        **rule,
+        "name": restored["name"],
+        "description": restored["description"],
+        "configuration": configuration,
+        "content_hash": restored["content_hash"],
+        "active_version": target,
+        "revision": int(rule.get("revision", 1)) + 1,
+        "updated_at": now,
+    }
+    _transact_policy_records(
+        [
+            _transaction_put(
+                {
+                    **current,
+                    "state": "superseded",
+                    "superseded_at": now,
+                    "superseded_by_rollback": target,
+                },
+                condition="#state = :active",
+                names={"#state": "state"},
+                values={":active": "active"},
+            ),
+            _transaction_put(
+                restored_active,
+                condition="#state = :superseded",
+                names={"#state": "state"},
+                values={":superseded": "superseded"},
+            ),
+            _transaction_put(
+                updated_rule,
+                condition="active_version = :active AND enabled = :enabled",
+                values={":active": expected, ":enabled": True},
+            ),
+        ]
+    )
+    _audit(
+        tenant,
+        "response_rule_rolled_back",
+        actor,
+        {
+            "rule_id": rule_id,
+            "from_version": expected,
+            "target_version": target,
+            "reason": reason,
+            "content_hash": restored["content_hash"],
+        },
+    )
+    return _response_rule_summary(updated_rule, [restored_active])
+
+
+def _response_rule_matches(configuration, alert, binding=None):
+    """Return whether fixed alert and host facts match a normalized rule."""
+    matcher = configuration["match"]
+    if alert.get("source") != "endpoint_evidence":
+        return False
+    if alert.get("reasonCode") not in matcher["reasonCodes"]:
+        return False
+    if alert.get("severity") not in matcher["severities"]:
+        return False
+    return binding is None or binding.get("host") in matcher["hosts"]
+
+
+def _response_rule_execution_view(item):
+    """Project one content-minimised automatic-response outcome."""
+    return {
+        "id": item.get("id"),
+        "ruleId": item.get("rule_id"),
+        "ruleVersion": int(item.get("rule_version", 0)),
+        "alertId": item.get("alert_id"),
+        "alertOccurrence": int(item.get("alert_occurrence", 0)),
+        "caseId": item.get("case_id"),
+        "agentKey": item.get("agent_key"),
+        "outcome": item.get("outcome"),
+        "reasonCode": item.get("reason_code"),
+        "occurredAt": int(item.get("occurred_at", 0)),
+        "contentHash": item.get("content_hash"),
+    }
+
+
+def _response_execution_id(tenant, rule_id, version, alert):
+    """Bind one idempotent outcome to a rule version and alert occurrence."""
+    occurrence = int(alert.get("occurrenceCount", 0))
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"aai-response:{tenant}:{rule_id}:{version}:{alert.get('id')}:{occurrence}",
+        )
+    )
+
+
+def _response_rule_limit_reason(tenant, rule, binding, now):
+    """Return a denial from the atomic action-reservation ledger or None."""
+    configuration = _json(rule.get("configuration", {}))
+    rate = TABLE.get_item(
+        Key=_item_key(tenant, "RESPONSE_RATE", rule.get("id", "")),
+        ConsistentRead=True,
+    ).get("Item")
+    action_times = rate.get("action_times", []) if rate else []
+    if not isinstance(action_times, list) or any(
+        not isinstance(item, (int, Decimal)) for item in action_times
+    ):
+        raise RuntimeError("automatic response rate evidence is malformed")
+    current_actions = [int(item) for item in action_times if int(item) >= now - 3_600]
+    maximum = int(configuration["safeguards"]["maxActionsPerHour"])
+    if len(current_actions) >= maximum:
+        return "hourly_limit"
+    cooldown = int(configuration["safeguards"]["agentCooldownSeconds"])
+    cooldown_record = TABLE.get_item(
+        Key=_item_key(tenant, "RESPONSE_COOLDOWN", binding.get("agentKey", "")),
+        ConsistentRead=True,
+    ).get("Item")
+    if cooldown_record and int(cooldown_record.get("last_action_at", 0)) >= now - cooldown:
+        return "agent_cooldown"
+    return None
+
+
+def _reserve_response_rule_action(tenant, rule, alert, binding, now):
+    """Atomically reserve bounded rate and cooldown authority for one trigger.
+
+    A reservation is conservative: dependency failure after this point still
+    consumes capacity and cooldown. This can reduce automatic authority but a
+    race or retry can never increase it beyond the approved safeguards.
+    """
+    version = int(rule.get("active_version", 0))
+    execution_id = _response_execution_id(tenant, rule["id"], version, alert)
+    lease_key = _item_key(tenant, "RESPONSE_LEASE", execution_id)
+    if TABLE.get_item(Key=lease_key, ConsistentRead=True).get("Item"):
+        return None
+    for _attempt in range(3):
+        reason = _response_rule_limit_reason(tenant, rule, binding, now)
+        if reason:
+            return reason
+        rate_key = _item_key(tenant, "RESPONSE_RATE", rule["id"])
+        rate = TABLE.get_item(Key=rate_key, ConsistentRead=True).get("Item")
+        action_times = [
+            int(item)
+            for item in (rate.get("action_times", []) if rate else [])
+            if int(item) >= now - 3_600
+        ]
+        cooldown_key = _item_key(tenant, "RESPONSE_COOLDOWN", binding["agentKey"])
+        cooldown = TABLE.get_item(Key=cooldown_key, ConsistentRead=True).get("Item")
+        rate_revision = int(rate.get("revision", 0)) if rate else 0
+        cooldown_revision = int(cooldown.get("revision", 0)) if cooldown else 0
+        rate_record = {
+            **rate_key,
+            "tenant_id": tenant,
+            "id": rule["id"],
+            "rule_id": rule["id"],
+            "action_times": [*action_times, now],
+            "revision": rate_revision + 1,
+            "updated_at": now,
+        }
+        cooldown_record = {
+            **cooldown_key,
+            "tenant_id": tenant,
+            "id": binding["agentKey"],
+            "agent_key": binding["agentKey"],
+            "last_action_at": now,
+            "revision": cooldown_revision + 1,
+            "updated_at": now,
+        }
+        lease = {
+            **lease_key,
+            "tenant_id": tenant,
+            "id": execution_id,
+            "rule_id": rule["id"],
+            "rule_version": version,
+            "alert_id": alert.get("id"),
+            "alert_occurrence": int(alert.get("occurrenceCount", 0)),
+            "agent_key": binding["agentKey"],
+            "reserved_at": now,
+            "ttl": now + 86_400,
+        }
+        operations = [_transaction_put(lease, condition="attribute_not_exists(pk)")]
+        operations.append(
+            _transaction_put(
+                rate_record,
+                condition="revision = :revision" if rate else "attribute_not_exists(pk)",
+                values={":revision": rate_revision} if rate else None,
+            )
+        )
+        operations.append(
+            _transaction_put(
+                cooldown_record,
+                condition="revision = :revision" if cooldown else "attribute_not_exists(pk)",
+                values={":revision": cooldown_revision} if cooldown else None,
+            )
+        )
+        try:
+            _transact_policy_records(operations)
+            return None
+        except PolicyConflict:
+            if TABLE.get_item(Key=lease_key, ConsistentRead=True).get("Item"):
+                return None
+    raise RuntimeError("automatic response reservation changed concurrently")
+
+
+def _record_response_execution(
+    tenant,
+    rule,
+    alert,
+    *,
+    outcome,
+    reason_code,
+    case_id=None,
+    agent_key=None,
+    now=None,
+):
+    """Persist one idempotent content-minimised automatic-response outcome."""
+    occurred_at = int(time.time()) if now is None else int(now)
+    version = int(rule.get("active_version", 0))
+    execution_id = _response_execution_id(tenant, rule["id"], version, alert)
+    content = {
+        "ruleId": rule["id"],
+        "ruleVersion": version,
+        "alertId": alert.get("id"),
+        "alertOccurrence": int(alert.get("occurrenceCount", 0)),
+        "caseId": case_id,
+        "agentKey": agent_key,
+        "outcome": outcome,
+        "reasonCode": reason_code,
+        "occurredAt": occurred_at,
+    }
+    item = {
+        **_item_key(tenant, "RESPONSE_EXECUTION", execution_id),
+        "tenant_id": tenant,
+        "id": execution_id,
+        "rule_id": rule["id"],
+        "rule_version": version,
+        "alert_id": alert.get("id"),
+        "alert_occurrence": int(alert.get("occurrenceCount", 0)),
+        "case_id": case_id,
+        "agent_key": agent_key,
+        "outcome": outcome,
+        "reason_code": reason_code,
+        "occurred_at": occurred_at,
+        "content_hash": _configuration_hash(content),
+    }
+    try:
+        TABLE.put_item(Item=item, ConditionExpression="attribute_not_exists(pk)")
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            existing = TABLE.get_item(
+                Key=_item_key(tenant, "RESPONSE_EXECUTION", execution_id),
+                ConsistentRead=True,
+            ).get("Item")
+            return _response_rule_execution_view(existing or item)
+        raise
+    _audit(
+        tenant,
+        "automatic_response_evaluated",
+        f"system:response-rule:{rule['id']}:v{version}",
+        {
+            "execution_id": execution_id,
+            "rule_id": rule["id"],
+            "rule_version": version,
+            "alert_id": alert.get("id"),
+            "case_id": case_id,
+            "agent_key": agent_key,
+            "outcome": outcome,
+            "reason_code": reason_code,
+            "content_hash": item["content_hash"],
+        },
+    )
+    return _response_rule_execution_view(item)
+
+
+def _response_rule_preview(tenant, configuration):
+    """Preview current alerts without creating cases or response authority."""
+    normalized = _response_rule_configuration(configuration)
+    alerts = [
+        item
+        for item in _list(tenant, "ALERT", consistent_read=True)
+        if item.get("source") == "endpoint_evidence" and item.get("status") != "resolved"
+    ]
+    matches = []
+    synthetic_rule = {"id": "preview", "configuration": normalized}
+    now = int(time.time())
+    for alert in sorted(alerts, key=lambda item: str(item.get("id", ""))):
+        if not _response_rule_matches(normalized, alert):
+            continue
+        binding = _endpoint_agent_binding(tenant, alert.get("deviceId", ""), now=now)
+        if not _response_rule_matches(normalized, alert, binding):
+            reason_code = (
+                "host_not_selected" if binding.get("status") == "bound" else "binding_unavailable"
+            )
+        elif alert.get("caseId"):
+            reason_code = "already_cased"
+        elif binding.get("status") != "bound":
+            reason_code = "binding_unavailable"
+        else:
+            reason_code = _response_rule_limit_reason(tenant, synthetic_rule, binding, now)
+            reason_code = reason_code or "would_contain"
+        matches.append(
+            {
+                "alertId": alert.get("id"),
+                "deviceId": alert.get("deviceId"),
+                "reasonCode": alert.get("reasonCode"),
+                "severity": alert.get("severity"),
+                "bindingStatus": binding.get("status"),
+                "agentKey": binding.get("agentKey"),
+                "outcome": reason_code,
+            }
+        )
+        if len(matches) > _RESPONSE_RULE_PREVIEW_LIMIT:
+            raise RuntimeError("response rule preview exceeds its safe bound")
+    return {"matches": matches, "count": len(matches), "mutated": False}
+
+
+def _evaluate_response_rules(tenant, *, now=None):
+    """Evaluate approved active rules against retained endpoint alerts."""
+    current_time = int(time.time()) if now is None else int(now)
+    rules = [
+        item
+        for item in _list(tenant, "RESPONSE_RULE", consistent_read=True)
+        if item.get("enabled") is True and int(item.get("active_version", 0)) > 0
+    ]
+    rules.sort(
+        key=lambda item: (
+            int(item.get("configuration", {}).get("priority", 1_000)),
+            str(item.get("id", "")),
+        )
+    )
+    alerts = [
+        item
+        for item in _list(tenant, "ALERT", consistent_read=True)
+        if item.get("source") == "endpoint_evidence" and item.get("status") != "resolved"
+    ]
+    outcomes = []
+    for rule in rules:
+        version = int(rule.get("active_version", 0))
+        try:
+            version_record = _response_rule_version_record(tenant, rule["id"], version)
+            configuration = _response_rule_configuration(rule.get("configuration"))
+            if (
+                version_record.get("state") != "active"
+                or version_record.get("content_hash") != rule.get("content_hash")
+                or _configuration_hash(configuration) != rule.get("content_hash")
+            ):
+                raise RuntimeError("active response rule integrity is invalid")
+        except Exception:
+            print(json.dumps({"warning": "automatic response rule failed closed"}))
+            continue
+        for alert in alerts:
+            if not _response_rule_matches(configuration, alert):
+                continue
+            execution_id = _response_execution_id(tenant, rule["id"], version, alert)
+            existing = TABLE.get_item(
+                Key=_item_key(tenant, "RESPONSE_EXECUTION", execution_id),
+                ConsistentRead=True,
+            ).get("Item")
+            if existing:
+                outcomes.append(_response_rule_execution_view(existing))
+                continue
+            binding = _endpoint_agent_binding(tenant, alert.get("deviceId", ""), now=current_time)
+            if binding.get("status") != "bound" or not _response_rule_matches(
+                configuration, alert, binding
+            ):
+                outcomes.append(
+                    _record_response_execution(
+                        tenant,
+                        rule,
+                        alert,
+                        outcome="skipped",
+                        reason_code="binding_unavailable"
+                        if binding.get("status") != "bound"
+                        else "host_not_selected",
+                        agent_key=binding.get("agentKey"),
+                        now=current_time,
+                    )
+                )
+                continue
+            limit_reason = _reserve_response_rule_action(
+                tenant,
+                rule,
+                alert,
+                binding,
+                current_time,
+            )
+            if limit_reason:
+                outcomes.append(
+                    _record_response_execution(
+                        tenant,
+                        rule,
+                        alert,
+                        outcome="skipped",
+                        reason_code=limit_reason,
+                        agent_key=binding["agentKey"],
+                        now=current_time,
+                    )
+                )
+                continue
+            actor = f"system:response-rule:{rule['id']}:v{version}"
+            case = None
+            try:
+                if alert.get("caseId"):
+                    case = _case_record(tenant, alert["caseId"])
+                    if case.get("ownerId") != actor:
+                        raise PolicyConflict("alert is owned by another case")
+                else:
+                    case = _create_case(
+                        tenant,
+                        {
+                            "alertId": alert["id"],
+                            "expectedAlertRevision": int(alert.get("revision", 0)),
+                            "reason": (
+                                f"Approved automatic response rule {rule['id']} version "
+                                f"{version} matched this endpoint detection."
+                            ),
+                        },
+                        actor,
+                    )
+                if case.get("status") == "contained":
+                    containment = case.get("containment") or {}
+                    if containment.get("activatedBy") != actor:
+                        raise PolicyConflict("case containment is owned by another actor")
+                else:
+                    case = _contain_case(
+                        tenant,
+                        case["id"],
+                        {
+                            "expectedCaseRevision": int(case.get("revision", 0)),
+                            "expectedBindingDigest": binding["bindingDigest"],
+                            "reason": (
+                                f"Approved automatic response rule {rule['id']} version "
+                                f"{version} quarantined the exactly bound agent."
+                            ),
+                        },
+                        actor,
+                    )
+                outcomes.append(
+                    _record_response_execution(
+                        tenant,
+                        rule,
+                        alert,
+                        outcome="contained",
+                        reason_code="approved_rule_matched",
+                        case_id=case["id"],
+                        agent_key=binding["agentKey"],
+                        now=current_time,
+                    )
+                )
+            except PolicyConflict:
+                # A concurrent rule or responder may have claimed the alert
+                # after this evaluator loaded it. Re-read authority instead of
+                # inferring ownership from an exception string.
+                current_alert = TABLE.get_item(
+                    Key=_item_key(tenant, "ALERT", alert["id"]),
+                    ConsistentRead=True,
+                ).get("Item")
+                reason_code = (
+                    "alert_already_owned"
+                    if (current_alert or {}).get("caseId")
+                    else "containment_precondition_failed"
+                )
+                outcomes.append(
+                    _record_response_execution(
+                        tenant,
+                        rule,
+                        alert,
+                        outcome="skipped",
+                        reason_code=reason_code,
+                        case_id=case.get("id") if isinstance(case, dict) else None,
+                        agent_key=binding.get("agentKey"),
+                        now=current_time,
+                    )
+                )
+            except Exception:
+                # A transient dependency or audit failure cannot widen agent
+                # authority. Leave the idempotent trigger eligible for retry.
+                print(json.dumps({"warning": "automatic response evaluation will retry"}))
+    return outcomes
+
+
 def _create_case(tenant, body, actor):
     """Create one deterministic case from a live endpoint alert."""
     if not isinstance(body, dict) or set(body) != {"alertId", "expectedAlertRevision", "reason"}:
@@ -7482,7 +8509,7 @@ def _endpoint_detection_cycle():
             continue
         try:
             health = _endpoint_evidence_health(tenant)
-            _reconcile_endpoint_alerts(tenant, health)
+            _reconcile_endpoint_alerts(tenant, health, automatic_response=True)
             processed += 1
         except Exception:
             failed += 1
@@ -9074,6 +10101,7 @@ def handler(event, context):
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
             capability = _required_mutation_capability(path)
             is_break_glass_governance = "/enterprise/identity/break-glass/requests" in path
+            is_response_rule_governance = "/enterprise/response-rules" in path
             is_identity_governance = is_break_glass_governance or any(
                 marker in path
                 for marker in (
@@ -9085,9 +10113,9 @@ def handler(event, context):
                 event,
                 capability,
                 tenant,
-                include_break_glass=not is_break_glass_governance,
+                include_break_glass=not (is_break_glass_governance or is_response_rule_governance),
                 resource_scope=_mutation_resource_scope(tenant, event, path),
-                include_delegated=not is_identity_governance,
+                include_delegated=not (is_identity_governance or is_response_rule_governance),
             ):
                 return _response(
                     403,
@@ -9135,6 +10163,8 @@ def handler(event, context):
                     "slo",
                     "alerts",
                     "cases",
+                    "response-rules",
+                    "response-executions",
                     "audit",
                     "approvals",
                 }
@@ -9155,6 +10185,8 @@ def handler(event, context):
                     "slo": "SLO",
                     "alerts": "ALERT",
                     "cases": "CASE",
+                    "response-rules": "RESPONSE_RULE",
+                    "response-executions": "RESPONSE_EXECUTION",
                     "audit": "AUDIT",
                     "approvals": "APPROVAL",
                 }[parts[0]]
@@ -9179,6 +10211,30 @@ def handler(event, context):
                     ]
                     items.sort(
                         key=lambda item: (int(item.get("updatedAt", 0)), str(item.get("id", ""))),
+                        reverse=True,
+                    )
+                elif parts[0] == "response-rules":
+                    items = [
+                        _response_rule_summary(
+                            item,
+                            _response_rule_versions(tenant, item["id"]),
+                        )
+                        for item in _list(tenant, "RESPONSE_RULE", consistent_read=True)
+                    ]
+                    items.sort(
+                        key=lambda item: (int(item.get("updatedAt", 0)), item.get("id", "")),
+                        reverse=True,
+                    )
+                elif parts[0] == "response-executions":
+                    items = [
+                        _response_rule_execution_view(item)
+                        for item in _list(tenant, "RESPONSE_EXECUTION", consistent_read=True)
+                    ]
+                    items.sort(
+                        key=lambda item: (
+                            int(item.get("occurredAt", 0)),
+                            item.get("id", ""),
+                        ),
                         reverse=True,
                     )
                 else:
@@ -9243,6 +10299,102 @@ def handler(event, context):
                 health = _endpoint_evidence_health(tenant)
                 _reconcile_endpoint_alerts(tenant, health)
                 return _response(200, health)
+            if method == "POST" and parts == ["response-rules", "preview"]:
+                body = _body(event)
+                if not isinstance(body, dict) or set(body) != {"configuration"}:
+                    raise ValueError("response rule preview request has an invalid schema")
+                return _response(
+                    200,
+                    _response_rule_preview(tenant, body.get("configuration")),
+                )
+            if method == "POST" and parts == ["response-rules"]:
+                return _response(201, _create_response_rule(tenant, _body(event), actor))
+            if method == "GET" and len(parts) == 2 and parts[0] == "response-rules":
+                rule = _response_rule_record(tenant, parts[1])
+                versions = _response_rule_versions(tenant, parts[1], consistent_read=True)
+                executions = [
+                    _response_rule_execution_view(item)
+                    for item in _list(tenant, "RESPONSE_EXECUTION", consistent_read=True)
+                    if item.get("rule_id") == parts[1]
+                ]
+                executions.sort(
+                    key=lambda item: (int(item.get("occurredAt", 0)), item.get("id", "")),
+                    reverse=True,
+                )
+                return _response(
+                    200,
+                    {
+                        **_response_rule_summary(rule, versions),
+                        "versions": [_response_rule_version_view(item) for item in versions],
+                        "executions": executions,
+                    },
+                )
+            if (
+                method == "GET"
+                and len(parts) == 3
+                and parts[0] == "response-rules"
+                and parts[2] == "versions"
+            ):
+                _response_rule_record(tenant, parts[1])
+                return _response(
+                    200,
+                    {
+                        "items": [
+                            _response_rule_version_view(item)
+                            for item in _response_rule_versions(
+                                tenant, parts[1], consistent_read=True
+                            )
+                        ],
+                        "nextCursor": None,
+                    },
+                )
+            if (
+                method == "POST"
+                and len(parts) == 3
+                and parts[0] == "response-rules"
+                and parts[2] == "versions"
+            ):
+                return _response(
+                    201,
+                    _create_response_rule_draft(tenant, parts[1], _body(event), actor),
+                )
+            if (
+                method == "POST"
+                and len(parts) == 5
+                and parts[0] == "response-rules"
+                and parts[2] == "versions"
+            ):
+                version = _discovery_integer(int(parts[3]), "version", minimum=1)
+                if parts[4] == "submit":
+                    return _response(
+                        200,
+                        _submit_response_rule_version(tenant, parts[1], version, actor),
+                    )
+                if parts[4] == "decision":
+                    return _response(
+                        200,
+                        _decide_response_rule_version(
+                            tenant, parts[1], version, _body(event), actor
+                        ),
+                    )
+                if parts[4] == "activate":
+                    return _response(
+                        200,
+                        _activate_response_rule_version(
+                            tenant, parts[1], version, _body(event), actor
+                        ),
+                    )
+            if method == "POST" and len(parts) == 3 and parts[0] == "response-rules":
+                if parts[2] == "disable":
+                    return _response(
+                        200,
+                        _disable_response_rule(tenant, parts[1], _body(event), actor),
+                    )
+                if parts[2] == "rollback":
+                    return _response(
+                        200,
+                        _rollback_response_rule(tenant, parts[1], _body(event), actor),
+                    )
             if method == "POST" and parts == ["cases"]:
                 return _response(201, _create_case(tenant, _body(event), actor))
             if method == "GET" and len(parts) == 3 and parts[0] == "cases" and parts[2] == "export":

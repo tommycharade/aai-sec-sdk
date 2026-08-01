@@ -776,6 +776,18 @@ revision fails closed. Release requires a current binding and independently
 derived recovery evidence. This is SDK/control-plane containment, not an MDM,
 EDR, operating-system process kill or network-isolation claim.
 
+Automatic response does not let a detection choose authority. A rule uses a
+closed typed language, an immutable content hash and two-subject approval. The
+scheduled detector re-derives the unique current endpoint-to-agent binding for
+every alert occurrence, then applies rule-level hourly limits and a fleet-wide
+per-agent cooldown before creating a rule-owned case. Unknown rules, malformed
+versions, stale evidence, ambiguous bindings, prior case ownership and
+concurrent state fail closed. GET requests cannot invoke this consequential
+evaluation. Disabling removes future automatic authority immediately; rollback
+can select only an independently approved superseded version. Response records
+contain hashes and identifiers, not tool content or credentials. See
+[Approved automatic response rules](automatic-response-rules-design.md).
+
 Case export is a separate read authority available only to canonical evidence
 roles. The server, never the browser, assembles a complete bounded snapshot,
 rechecks case and source-alert revisions, removes raw content, credentials and

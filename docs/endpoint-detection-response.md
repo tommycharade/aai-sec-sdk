@@ -117,10 +117,29 @@ bodies and credential-shaped rationale fail closed.
 6. Restore service only after a new signed report and current MDM inventory
    clear the condition.
 
+## Approved automatic response
+
+The **Incidents → Response rules** workspace can establish narrowly bounded
+automatic containment for these server-derived detections. A typed rule fixes
+the reason codes, severities, Claude Code/Codex host scope, hourly action limit,
+per-agent cooldown and priority. Its only action is SDK quarantine of the exact
+agent identified by a fresh unique server-derived binding.
+
+Saving creates a draft, not authority. The author submits an immutable version;
+a different subject approves it; and activation compares the exact current
+active version. Operators can preview current matches without mutation,
+immediately disable automatic authority, or atomically restore an independently
+approved superseded version. Each match or safe skip has an idempotent,
+content-hashed response record. Merely reading alerts cannot run containment.
+
+See [Approved automatic response rules](automatic-response-rules-design.md) for
+the rule language, governance lifecycle, non-guarantees and acceptance model.
+
 ## Limitations
 
-This tranche provides detections, durable local delivery and response
-ownership. It does not yet provide a general case-management object, automated
-agent quarantine, MDM device isolation, endpoint-to-agent authoritative
-identity binding, maintenance windows, anomaly analytics or a production SIEM
-adapter. Those remain explicit P1 work.
+This tranche provides detections, durable local delivery, revisioned incident
+cases, authoritative endpoint-to-agent binding and approved automatic SDK
+quarantine. It does not provide MDM/EDR device isolation, process termination,
+network isolation, automatic third-party credential revocation, maintenance
+windows, anomaly baselines or a production SIEM adapter. Those remain explicit
+P1 work.

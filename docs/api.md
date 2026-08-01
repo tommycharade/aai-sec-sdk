@@ -556,3 +556,32 @@ containment request. See
 [Incident case and containment design](incident-case-containment-design.md).
 Artifact schema, refusal bounds and offline verification are specified in
 [Audit-ready incident case export](incident-case-export-design.md).
+
+## Automatic response rules
+
+The hosted adapter exposes an independently governed automatic-response API:
+
+- `GET /enterprise/response-rules` lists active authority separately from a
+  pending version; `GET /enterprise/response-rules/{ruleId}` includes immutable
+  versions and content-minimised execution outcomes.
+- `POST /enterprise/response-rules/preview` evaluates one typed configuration
+  against current retained alerts without creating a case or changing agent
+  authority.
+- `POST /enterprise/response-rules` creates a rule shell and version-1 draft;
+  `POST /enterprise/response-rules/{ruleId}/versions` appends a draft based on
+  the current active version.
+- version `submit`, `decision` and `activate` routes enforce exact lifecycle
+  state, independent approval, immutable content hash and optimistic active-
+  version comparison.
+- `POST /enterprise/response-rules/{ruleId}/disable` immediately removes new
+  automatic authority; `rollback` atomically restores only an independently
+  approved superseded version.
+- `GET /enterprise/response-executions` returns idempotent outcomes for matched,
+  contained and safely skipped alert occurrences without prompts, arguments,
+  results, credentials or raw endpoint payloads.
+
+The closed schema permits endpoint-evidence reason codes, medium/high/critical
+severity, `claude-code`/`codex` host scope, fixed `quarantine_agent` action,
+1–25 successful actions per hour, a 300–86,400 second per-agent cooldown and
+priority 1–1,000. Unknown fields and empty selections are rejected. See
+[Approved automatic response rules](automatic-response-rules-design.md).
