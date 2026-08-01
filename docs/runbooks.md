@@ -238,23 +238,30 @@ Review the desired configuration hash and ensure the deployment authority is
 connected. Never put bearer tokens, credentials, or raw tool arguments into a
 template or ticket.
 
-**Stage safely:** assign the reviewed template, use a staged or canary rollout,
-and start with a small percentage. Confirm agent heartbeats, health, alerts,
-policy decisions, audit replication, and representative synthetic actions
-before increasing the percentage. The UI's Enterprise fleet page is an
-operator view; the API remains the authoritative control boundary.
+**Stage safely:** assign the reviewed template and publish the exact canonical
+managed package that matches its desired host identity. Open **Deployments →
+Manage rollout**, select a deterministic canary of at most 25%, set explicit
+unavailable/drift thresholds, minimum sample, grace period and operator
+rationale. Use a time-zone maintenance window when required. Confirm measured
+endpoint convergence, health, alerts, policy decisions, audit replication and
+representative synthetic actions before expanding the percentage. The browser
+cannot submit applied hashes, endpoint membership or health results.
 
-**Detect drift:** treat a desired/applied hash mismatch as an operational
-condition, not as permission to continue. Inspect the deployment's version,
-authority response, and audit trail. Reconcile through the deployment
-authority or reapply the reviewed template. Do not edit the database directly
-to hide drift.
+**Detect drift:** treat stale, missing or conflicting authenticated endpoint
+evidence as an operational condition, not as permission to continue. The
+scheduled reconciler pauses after grace when drift or unavailable percentage
+exceeds the configured threshold, and pauses at deadline when convergence is
+incomplete. Inspect desired configuration version, bound package revision,
+selected population, blockers and audit trail. Never edit the database or
+browser payload to claim convergence.
 
-**Rollback:** select a known-good configuration history version and invoke the
-fleet rollback endpoint. The authority is called before the control plane
-claims the rollback. If the authority rejects it, the desired state remains
-unchanged and the action must be escalated. Validate health and drift after
-rollback, then record the decision and evidence.
+**Rollback:** use the rollout workspace only when a last-known-good
+configuration and package pair exists. Supply the current rollout revision and
+a retained rationale. The control plane creates a new immutable configuration
+version from that exact pair, selects the retained package revision, and does
+not call it converged until all active endpoints provide fresh exact evidence.
+Validate convergence, health and audit after rollback; a browser success
+response is not endpoint enforcement evidence.
 
 **Emergency stop:** use the deployment-scoped stop control for a localized
 incident or the tenant-wide stop for a wider incident. The hosted fleet stop is

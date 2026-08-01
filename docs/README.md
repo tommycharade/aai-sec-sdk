@@ -37,6 +37,8 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Runtime attestation design](runtime-attestation-design.md)
 - [Managed endpoint deployment design](managed-endpoint-deployment-design.md)
 - [Managed package distribution design](managed-package-distribution-design.md)
+- [Measured managed-configuration rollout design](measured-managed-rollout-design.md)
+- [Measured managed-rollout acceptance — 2026-08-01](measured-managed-rollout-acceptance-2026-08-01.md)
 - [Enterprise user journeys](enterprise-user-journeys.md)
 - [Enterprise rollout P0 and P1 requirements](enterprise-rollout-p0-p1-requirements.md)
 - [Enterprise P0 and P1 implementation status](p0-p1-implementation-status.md)
@@ -82,6 +84,10 @@ Copilot CLI/cloud agent, and Codex CLI; see [Agent integrations](integrations.md
 The enterprise fleet layer adds tenant-scoped organization, project,
 deployment, agent, rollout, drift, health, alert, and emergency-stop controls;
 see [Enterprise fleet control plane](enterprise-fleet.md).
+Managed rollouts bind immutable desired configuration and package revisions,
+select deterministic canary rings, enforce maintenance windows and health
+thresholds, and accept convergence only from fresh exact endpoint evidence;
+see [Measured managed-configuration rollouts](measured-managed-rollout-design.md).
 AWS policy activation freezes registry-resolved Skills and MCP servers and
 signs the exact tenant, policy version and effective configuration with a
 non-exportable asymmetric KMS key. Claude Code and Codex verify that bundle

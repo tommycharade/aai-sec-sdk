@@ -351,6 +351,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
+    const rolloutReconciliationDlq = new sqs.Queue(this, "RolloutReconciliationDlq", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
     securityAlerts.addSubscription(
       new subscriptions.SqsSubscription(securityAlertsQueue, {
         deadLetterQueue: securityAlertsDlq,
@@ -569,6 +574,22 @@ export class AwsControlPlaneStack extends cdk.Stack {
           schemaVersion: 1,
         }),
         deadLetterQueue: endpointDetectionDlq,
+        maxEventAge: cdk.Duration.hours(1),
+        retryAttempts: 2,
+      }),
+    );
+    const rolloutReconciliationRule = new events.Rule(this, "RolloutReconciliationSchedule", {
+      description: "Measure managed rollout convergence and pause unhealthy deployment rings",
+      schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+      enabled: true,
+    });
+    rolloutReconciliationRule.addTarget(
+      new eventTargets.LambdaFunction(handler, {
+        event: events.RuleTargetInput.fromObject({
+          source: "aai.rollout-reconciliation",
+          schemaVersion: 1,
+        }),
+        deadLetterQueue: rolloutReconciliationDlq,
         maxEventAge: cdk.Duration.hours(1),
         retryAttempts: 2,
       }),
@@ -799,6 +820,23 @@ export class AwsControlPlaneStack extends cdk.Stack {
       },
     );
     endpointDetectionDeadLetters.addAlarmAction(new cloudwatchActions.SnsAction(securityAlerts));
+    const rolloutReconciliationDeadLetters = new cloudwatch.Alarm(
+      this,
+      "RolloutReconciliationDeadLetters",
+      {
+        metric: rolloutReconciliationDlq.metricApproximateNumberOfMessagesVisible({
+          period: cdk.Duration.minutes(5),
+          statistic: "Maximum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        alarmDescription: "Managed rollout reconciliation exhausted bounded retries.",
+      },
+    );
+    rolloutReconciliationDeadLetters.addAlarmAction(
+      new cloudwatchActions.SnsAction(securityAlerts),
+    );
     const controlPlaneThrottles = new cloudwatch.Alarm(this, "ControlPlaneThrottles", {
       metric: handler.metricThrottles({ period: cdk.Duration.minutes(5), statistic: "Sum" }),
       threshold: 1,
@@ -834,6 +872,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "SecurityAlertsQueueArn", { value: securityAlertsQueue.queueArn });
     new cdk.CfnOutput(this, "SecurityAlertsDlqArn", { value: securityAlertsDlq.queueArn });
     new cdk.CfnOutput(this, "EndpointDetectionDlqArn", { value: endpointDetectionDlq.queueArn });
+    new cdk.CfnOutput(this, "RolloutReconciliationDlqArn", {
+      value: rolloutReconciliationDlq.queueArn,
+    });
     new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });
     new cdk.CfnOutput(this, "PolicySigningKeyArn", { value: policySigningKey.keyArn });
     new cdk.CfnOutput(this, "DiscoveryProviderSecretNamePrefix", {

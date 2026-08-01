@@ -18,6 +18,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -1114,6 +1115,11 @@ def _mutation_resource_scope(tenant, event, path):
             return _delegated_scope_lineage(tenant, "deployment", body.get("deploymentId"))
         except (ValueError, LookupError):
             return None
+    if len(parts) == 3 and parts[0] == "deployment-config" and parts[2] == "pause":
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", parts[1])
+        except (ValueError, LookupError):
+            return None
     if parts == ["deployment-config", "batch-rollout"]:
         deployment_ids = body.get("deploymentIds")
         if not isinstance(deployment_ids, list) or not 1 <= len(deployment_ids) <= 200:
@@ -2198,6 +2204,30 @@ _MANAGED_PACKAGE_FIELDS = {
     "artifacts",
     "requiredExecutables",
 }
+_ROLLOUT_STATES = frozenset(
+    {
+        "staged",
+        "scheduled",
+        "canary",
+        "active",
+        "paused",
+        "rolling_back",
+        "converged",
+        "drifted",
+    }
+)
+_ROLLOUT_ACTIVE_STATES = frozenset({"canary", "active", "rolling_back"})
+_ROLLOUT_CHANNELS = frozenset({"stable", "preview", "emergency"})
+_ROLLOUT_RINGS = frozenset({"canary", "broad"})
+_ROLLOUT_BATCH_LIMIT = 20
+_ROLLOUT_CONFIGURATION_LIMIT = 5_000
+_ROLLOUT_MAX_SCHEDULE_SECONDS = 30 * 24 * 60 * 60
+_ROLLOUT_DEFAULT_CRITERIA = {
+    "maxUnavailablePercent": 10,
+    "maxDriftPercent": 10,
+    "minSampleSize": 1,
+    "gracePeriodSeconds": 600,
+}
 
 
 class ManagedPackageConflict(RuntimeError):
@@ -2497,19 +2527,22 @@ def _publish_managed_package(tenant, deployment_id, body, actor):
         "publishedBy": actor,
         "artifactCount": len(package_value["artifacts"]),
     }
-    try:
-        if current is None:
-            TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
-        else:
-            TABLE.put_item(
-                Item=record,
-                ConditionExpression="revision = :expected_revision",
-                ExpressionAttributeValues={":expected_revision": expected_revision},
-            )
-    except Exception as error:
-        if _is_conditional_conflict(error):
-            raise ManagedPackageConflict("managed package revision is stale") from error
-        raise
+    revision_id = f"{deployment_id}:{record['revision']:020d}"
+    immutable = {
+        **record,
+        **_item_key(tenant, "MANAGED_PACKAGE_VERSION", revision_id),
+        "id": revision_id,
+    }
+    current_condition = (
+        "attribute_not_exists(pk)" if current is None else "revision = :expected_revision"
+    )
+    current_values = None if current is None else {":expected_revision": expected_revision}
+    _transact_policy_records(
+        [
+            _transaction_put(record, condition=current_condition, values=current_values),
+            _transaction_put(immutable, condition="attribute_not_exists(pk)"),
+        ]
+    )
     metadata = _managed_package_metadata(tenant, deployment_id, record)
     _audit(
         tenant,
@@ -2539,13 +2572,18 @@ def _agent_managed_package(tenant, deployment_id, agent_id, agent):
     percentage = _managed_integer(
         configuration.get("rolloutPercentage", 0), "managed package rollout percentage"
     )
-    if state not in {"canary", "active", "rollback"}:
+    if state not in {"canary", "active", "rolling_back", "converged", "drifted"}:
         raise ManagedPackageConflict("managed package rollout is not active")
-    bucket = int(hashlib.sha256(agent_key.encode()).hexdigest()[:8], 16) % 100
-    if percentage > 100 or percentage <= bucket:
+    if not _rollout_agent_selected(tenant, agent_key, percentage):
         raise ManagedPackageConflict("agent is not selected for managed package rollout")
+    package_revision = _managed_integer(
+        configuration.get("rolloutPackageRevision", 0),
+        "managed package rollout revision",
+    )
+    package_kind = "MANAGED_PACKAGE_VERSION" if package_revision else "MANAGED_PACKAGE"
+    package_id = f"{deployment_id}:{package_revision:020d}" if package_revision else deployment_id
     package = TABLE.get_item(
-        Key=_item_key(tenant, "MANAGED_PACKAGE", deployment_id), ConsistentRead=True
+        Key=_item_key(tenant, package_kind, package_id), ConsistentRead=True
     ).get("Item")
     metadata = _managed_package_metadata(tenant, deployment_id, package)
     if metadata["status"] != "current" or metadata["host"] != agent.get("host"):
@@ -2598,6 +2636,699 @@ def _managed_configuration_posture(tenant, agent, *, now=None):
             else "enforced"
         )
     return {"status": status, "desired": desired, "observed": observed}
+
+
+def _rollout_agent_selected(tenant, agent_key, percentage):
+    """Deterministically select one endpoint without trusting browser membership."""
+    value = _managed_integer(percentage, "rollout percentage")
+    if value > 100:
+        raise ValueError("rollout percentage must not exceed 100")
+    bucket = int(hashlib.sha256(f"{tenant}:{agent_key}".encode()).hexdigest()[:8], 16) % 100
+    return value > bucket
+
+
+def _configuration_version_identifier(deployment_id, version):
+    """Return one ordered immutable deployment-configuration version ID."""
+    deployment_id = _bounded_identifier(deployment_id, "deploymentId")
+    version = _managed_integer(version, "configuration version", positive=True)
+    return f"{deployment_id}:{version:020d}"
+
+
+def _configuration_version_document(record):
+    """Project immutable desired authority fields for hashing and rollback."""
+    return {
+        "deploymentId": record.get("deploymentId"),
+        "version": int(record.get("version", 0)),
+        "templateId": record.get("templateId"),
+        "desiredConfiguration": _json(record.get("desiredConfiguration", {})),
+        "desiredHash": record.get("desiredHash"),
+    }
+
+
+def _configuration_version_record(tenant, record, actor):
+    """Build one immutable desired-state version with an integrity digest."""
+    document = _configuration_version_document(record)
+    if document["desiredHash"] != _configuration_hash(document["desiredConfiguration"]):
+        raise RuntimeError("deployment configuration desired-state integrity failed")
+    identifier = _configuration_version_identifier(document["deploymentId"], document["version"])
+    return {
+        **_item_key(tenant, "CONFIGURATION_VERSION", identifier),
+        "tenant_id": tenant,
+        "id": identifier,
+        **document,
+        "contentHash": _configuration_hash(document),
+        "createdAt": int(record.get("updatedAt", time.time())),
+        "createdBy": actor,
+    }
+
+
+def _configuration_version(tenant, deployment_id, version):
+    """Load and verify one tenant-scoped immutable desired-state version."""
+    identifier = _configuration_version_identifier(deployment_id, version)
+    record = TABLE.get_item(
+        Key=_item_key(tenant, "CONFIGURATION_VERSION", identifier), ConsistentRead=True
+    ).get("Item")
+    if not record:
+        raise LookupError("deployment configuration version not found")
+    document = _configuration_version_document(record)
+    if not secrets.compare_digest(
+        str(record.get("contentHash", "")), _configuration_hash(document)
+    ):
+        raise RuntimeError("deployment configuration version integrity failed")
+    return record
+
+
+def _rollout_health_criteria(value):
+    """Validate closed, bounded automatic-pause criteria."""
+    if not isinstance(value, dict) or set(value) != set(_ROLLOUT_DEFAULT_CRITERIA):
+        raise ValueError("rollout health criteria have an invalid schema")
+    result = {
+        field: _managed_integer(value.get(field), f"rollout {field}")
+        for field in _ROLLOUT_DEFAULT_CRITERIA
+    }
+    if result["maxUnavailablePercent"] > 100 or result["maxDriftPercent"] > 100:
+        raise ValueError("rollout health percentages must not exceed 100")
+    if not 1 <= result["minSampleSize"] <= 100:
+        raise ValueError("rollout minimum sample size must be between 1 and 100")
+    if not 300 <= result["gracePeriodSeconds"] <= 3_600:
+        raise ValueError("rollout grace period must be between 300 and 3600 seconds")
+    return result
+
+
+def _rollout_schedule(value, now):
+    """Validate one absolute window with an explicit operator time zone."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"notBefore", "deadline", "timeZone"}:
+        raise ValueError("rollout schedule has an invalid schema")
+    not_before = _managed_integer(value.get("notBefore"), "rollout notBefore")
+    deadline = _managed_integer(value.get("deadline"), "rollout deadline")
+    zone = _bounded_text(value.get("timeZone"), "rollout timeZone", 64)
+    try:
+        ZoneInfo(zone)
+    except ZoneInfoNotFoundError as error:
+        raise ValueError("rollout timeZone is not recognized") from error
+    if not_before < now - 60 or not_before > now + _ROLLOUT_MAX_SCHEDULE_SECONDS:
+        raise ValueError("rollout notBefore is outside the 30-day scheduling bound")
+    if deadline <= max(now, not_before) or deadline > not_before + (7 * 24 * 60 * 60):
+        raise ValueError("rollout deadline must follow start within seven days")
+    return {"notBefore": not_before, "deadline": deadline, "timeZone": zone}
+
+
+def _ensure_configuration_governance(tenant, record):
+    """Migrate a legacy rollout without trusting its claimed applied state."""
+    if not record:
+        raise LookupError("deployment configuration not found")
+    deployment_id = record.get("deploymentId")
+    if not deployment_id and isinstance(record.get("sk"), str):
+        deployment_id = record["sk"].removeprefix("CONFIGURATION#")
+    deployment_id = _bounded_identifier(deployment_id, "deploymentId")
+    version = _managed_integer(record.get("version", 1), "configuration version", positive=True)
+    governed = record
+    if int(record.get("governanceSchemaVersion", 0)) != 1:
+        state = str(record.get("rolloutState", "staged")).lower()
+        if state == "rollback":
+            state = "rolling_back"
+        if state not in _ROLLOUT_STATES:
+            state = "staged"
+        governed = {
+            **record,
+            "deploymentId": deployment_id,
+            "templateId": record.get("templateId", "legacy-migration"),
+            "desiredHash": record.get("desiredHash")
+            or _configuration_hash(record.get("desiredConfiguration", {})),
+            "governanceSchemaVersion": 1,
+            "rolloutRevision": 1,
+            "rolloutState": state,
+            "requestedState": state if state in _ROLLOUT_ACTIVE_STATES else None,
+            "rolloutPercentage": int(record.get("rolloutPercentage", 0)),
+            "rolloutChannel": "stable",
+            "rolloutRing": "canary" if state == "canary" else "broad",
+            "healthCriteria": _json(_ROLLOUT_DEFAULT_CRITERIA),
+            "schedule": None,
+            "rolloutPackageRevision": 0,
+            "lastKnownGoodVersion": None,
+            "lastKnownGoodPackageRevision": None,
+            # Legacy presentation state is not evidence that any endpoint
+            # applied the desired bytes.
+            "appliedHash": None,
+            "drifted": True,
+            "version": version,
+        }
+        try:
+            TABLE.put_item(
+                Item=governed,
+                ConditionExpression="attribute_not_exists(governanceSchemaVersion)",
+            )
+        except Exception as error:
+            if not _is_conditional_conflict(error):
+                raise
+            governed = TABLE.get_item(
+                Key=_item_key(tenant, "CONFIGURATION", deployment_id), ConsistentRead=True
+            ).get("Item")
+            if not governed:
+                raise LookupError(
+                    "deployment configuration disappeared during migration"
+                ) from error
+    identifier = _configuration_version_identifier(deployment_id, version)
+    existing = TABLE.get_item(
+        Key=_item_key(tenant, "CONFIGURATION_VERSION", identifier), ConsistentRead=True
+    ).get("Item")
+    if not existing:
+        version_record = _configuration_version_record(
+            tenant, governed, str(governed.get("updatedBy", "legacy-migration"))
+        )
+        try:
+            TABLE.put_item(Item=version_record, ConditionExpression="attribute_not_exists(pk)")
+        except Exception as error:
+            if not _is_conditional_conflict(error):
+                raise
+    return governed
+
+
+def _rollout_bound_package(tenant, configuration):
+    """Load an immutable rollout package or report a content-free blocker."""
+    deployment_id = configuration.get("deploymentId", "")
+    revision = int(configuration.get("rolloutPackageRevision", 0))
+    if revision <= 0:
+        return None, "managed_package_not_bound"
+    identifier = f"{deployment_id}:{revision:020d}"
+    package = TABLE.get_item(
+        Key=_item_key(tenant, "MANAGED_PACKAGE_VERSION", identifier), ConsistentRead=True
+    ).get("Item")
+    if not package:
+        return None, "managed_package_revision_missing"
+    try:
+        _value, target, _encoded = _managed_package(
+            package.get("packageBase64"), package.get("packageSha256")
+        )
+        desired = _managed_host(configuration.get("desiredConfiguration", {}).get("managedHost"))
+    except ValueError:
+        return None, "managed_package_integrity_invalid"
+    if target != desired:
+        return None, "managed_package_target_mismatch"
+    return package, None
+
+
+def _rollout_convergence(tenant, configuration, *, now=None):
+    """Measure selected endpoints from live server-owned state."""
+    current = int(time.time()) if now is None else int(now)
+    deployment_id = configuration.get("deploymentId", "")
+    percentage = int(configuration.get("rolloutPercentage", 0))
+    agents = [
+        agent
+        for agent in _all_agents(tenant)
+        if agent.get("deployment_id") == deployment_id and _agent_lifecycle_state(agent) == "active"
+    ]
+    selected = [
+        agent
+        for agent in agents
+        if _rollout_agent_selected(
+            tenant, f"{agent.get('deployment_id')}:{agent.get('id')}", percentage
+        )
+    ]
+    desired_host = configuration.get("desiredConfiguration", {}).get("managedHost", {}).get("host")
+    blockers = []
+    if not agents:
+        blockers.append("no_active_agents")
+    if any(agent.get("host") != desired_host for agent in agents):
+        blockers.append("incompatible_agent_host")
+    _package, package_blocker = _rollout_bound_package(tenant, configuration)
+    if package_blocker:
+        blockers.append(package_blocker)
+    healthy = []
+    converged = []
+    unavailable = []
+    drifted = []
+    pending = []
+    for agent in selected:
+        is_healthy = (
+            agent.get("status") == "connected" and int(agent.get("expires_at", 0)) > current
+        )
+        posture = agent.get("managed_configuration", {})
+        if not is_healthy:
+            unavailable.append(agent)
+        elif posture.get("status") == "enforced":
+            healthy.append(agent)
+            converged.append(agent)
+        elif posture.get("status") in {"conflict", "stale"}:
+            healthy.append(agent)
+            drifted.append(agent)
+        else:
+            healthy.append(agent)
+            pending.append(agent)
+
+    def measured(count):
+        return round((100 * count) / len(selected), 1) if selected else None
+
+    schedule = configuration.get("schedule") or {}
+    # Scheduled records deliberately carry a null start instant until the
+    # maintenance window opens. Treating that sentinel as an integer would
+    # turn a safe scheduled rollout into a control-plane failure.
+    started_at_value = configuration.get("startedAt")
+    started_at = int(started_at_value) if started_at_value is not None else 0
+    criteria = configuration.get("healthCriteria") or _ROLLOUT_DEFAULT_CRITERIA
+    grace_until = started_at + int(criteria.get("gracePeriodSeconds", 600)) if started_at else 0
+    return {
+        "measuredAt": current,
+        "totalAgents": len(agents),
+        "selectedAgents": len(selected),
+        "healthyAgents": len(healthy),
+        "convergedAgents": len(converged),
+        "pendingAgents": len(pending),
+        "unavailableAgents": len(unavailable),
+        "driftedAgents": len(drifted),
+        "convergedPercent": measured(len(converged)),
+        "unavailablePercent": measured(len(unavailable)),
+        "driftPercent": measured(len(drifted)),
+        "canaryConverged": bool(selected) and len(converged) == len(selected),
+        "fullConverged": bool(agents)
+        and percentage == 100
+        and len(selected) == len(agents)
+        and len(converged) == len(selected),
+        "graceUntil": grace_until or None,
+        "inGracePeriod": bool(grace_until and current < grace_until),
+        "deadline": schedule.get("deadline"),
+        "blockers": sorted(set(blockers)),
+        "ready": not blockers,
+    }
+
+
+def _put_reconciled_rollout(tenant, record, updated, event_type, reason):
+    """CAS one server-derived rollout transition and emit exact audit evidence."""
+    expected = int(record.get("rolloutRevision", 0))
+    updated = {**updated, "rolloutRevision": expected + 1, "updatedAt": int(time.time())}
+    try:
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="rolloutRevision = :expected_revision",
+            ExpressionAttributeValues={":expected_revision": expected},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            return TABLE.get_item(
+                Key=_item_key(tenant, "CONFIGURATION", record["deploymentId"]),
+                ConsistentRead=True,
+            ).get("Item")
+        raise
+    _audit(
+        tenant,
+        event_type,
+        "system:rollout-reconciler",
+        {
+            "deployment_id": record["deploymentId"],
+            "configuration_version": int(record.get("version", 0)),
+            "rollout_revision": expected + 1,
+            "reason": reason,
+        },
+    )
+    return updated
+
+
+def _reconcile_deployment_rollout(tenant, record, *, now=None):
+    """Apply due schedules, automatic pause and evidence-only convergence."""
+    current = int(time.time()) if now is None else int(now)
+    governed = _ensure_configuration_governance(tenant, record)
+    state = governed.get("rolloutState")
+    if state not in _ROLLOUT_STATES:
+        raise RuntimeError("deployment rollout state is invalid")
+    schedule = governed.get("schedule") or {}
+    if state == "scheduled" and int(schedule.get("notBefore", 0)) <= current:
+        requested = governed.get("requestedState")
+        if requested not in {"canary", "active"}:
+            raise RuntimeError("scheduled rollout target state is invalid")
+        governed = _put_reconciled_rollout(
+            tenant,
+            governed,
+            {**governed, "rolloutState": requested, "startedAt": current},
+            "deployment_rollout_started",
+            "maintenance window opened",
+        )
+        state = governed.get("rolloutState")
+    convergence = _rollout_convergence(tenant, governed, now=current)
+    criteria = governed.get("healthCriteria") or _ROLLOUT_DEFAULT_CRITERIA
+    if state in _ROLLOUT_ACTIVE_STATES:
+        pause_reason = None
+        deadline = schedule.get("deadline")
+        if deadline and current >= int(deadline) and not convergence["fullConverged"]:
+            pause_reason = "rollout deadline elapsed before convergence"
+        elif not convergence["inGracePeriod"] and convergence["selectedAgents"] >= int(
+            criteria.get("minSampleSize", 1)
+        ):
+            if (convergence["unavailablePercent"] or 0) > int(
+                criteria.get("maxUnavailablePercent", 10)
+            ):
+                pause_reason = "unavailable endpoint threshold exceeded"
+            elif (convergence["driftPercent"] or 0) > int(criteria.get("maxDriftPercent", 10)):
+                pause_reason = "managed-configuration drift threshold exceeded"
+        if pause_reason:
+            governed = _put_reconciled_rollout(
+                tenant,
+                governed,
+                {
+                    **governed,
+                    "rolloutState": "paused",
+                    "pauseReason": pause_reason,
+                    "pausedAt": current,
+                    "drifted": True,
+                    "appliedHash": None,
+                },
+                "deployment_rollout_auto_paused",
+                pause_reason,
+            )
+        elif state in {"active", "rolling_back"} and convergence["fullConverged"]:
+            governed = _put_reconciled_rollout(
+                tenant,
+                governed,
+                {
+                    **governed,
+                    "rolloutState": "converged",
+                    "convergedAt": current,
+                    "appliedHash": governed.get("desiredHash"),
+                    "drifted": False,
+                    "lastKnownGoodVersion": int(governed.get("version", 0)),
+                    "lastKnownGoodPackageRevision": int(governed.get("rolloutPackageRevision", 0)),
+                },
+                "deployment_rollout_converged",
+                "all selected endpoints reported exact current evidence",
+            )
+    elif state == "converged" and not convergence["fullConverged"]:
+        governed = _put_reconciled_rollout(
+            tenant,
+            governed,
+            {**governed, "rolloutState": "drifted", "drifted": True},
+            "deployment_rollout_drift_detected",
+            "endpoint evidence no longer matches the known-good configuration",
+        )
+    elif state == "drifted" and convergence["fullConverged"]:
+        governed = _put_reconciled_rollout(
+            tenant,
+            governed,
+            {**governed, "rolloutState": "converged", "drifted": False},
+            "deployment_rollout_drift_remediated",
+            "all endpoints returned to exact known-good evidence",
+        )
+    return {**governed, "convergence": _rollout_convergence(tenant, governed, now=current)}
+
+
+def _deployment_configurations(tenant):
+    """Return bounded, reconciled configuration and rollout evidence."""
+    return [
+        _reconcile_deployment_rollout(tenant, record)
+        for record in _list(tenant, "CONFIGURATION", consistent_read=True)
+    ]
+
+
+def _bind_current_managed_package(tenant, configuration):
+    """Bind and retain the exact package currently matching desired state."""
+    deployment_id = configuration.get("deploymentId", "")
+    package = TABLE.get_item(
+        Key=_item_key(tenant, "MANAGED_PACKAGE", deployment_id), ConsistentRead=True
+    ).get("Item")
+    metadata = _managed_package_metadata(tenant, deployment_id, package)
+    if metadata["status"] != "current":
+        raise PolicyConflict("managed package does not match deployment desired state")
+    revision = int(metadata["revision"])
+    identifier = f"{deployment_id}:{revision:020d}"
+    immutable_key = _item_key(tenant, "MANAGED_PACKAGE_VERSION", identifier)
+    immutable = TABLE.get_item(Key=immutable_key, ConsistentRead=True).get("Item")
+    if not immutable:
+        immutable = {**package, **immutable_key, "id": identifier}
+        try:
+            TABLE.put_item(Item=immutable, ConditionExpression="attribute_not_exists(pk)")
+        except Exception as error:
+            if not _is_conditional_conflict(error):
+                raise
+    return revision
+
+
+def _start_managed_rollouts(tenant, body, actor):
+    """Start or expand a bounded all-or-none evidence-led rollout batch."""
+    required = {
+        "deploymentIds",
+        "expectedRevisions",
+        "targetState",
+        "percentage",
+        "channel",
+        "ring",
+        "reason",
+        "healthCriteria",
+        "schedule",
+    }
+    if not isinstance(body, dict) or set(body) != required:
+        raise ValueError("managed rollout request has an invalid schema")
+    raw_ids = body.get("deploymentIds")
+    if (
+        not isinstance(raw_ids, list)
+        or not 1 <= len(raw_ids) <= _ROLLOUT_BATCH_LIMIT
+        or len(raw_ids) != len(set(raw_ids))
+    ):
+        raise ValueError("managed rollout requires 1 to 20 unique deployments")
+    deployment_ids = [_bounded_identifier(value, "deploymentId") for value in raw_ids]
+    expected = body.get("expectedRevisions")
+    if not isinstance(expected, dict) or set(expected) != set(deployment_ids):
+        raise ValueError("managed rollout expected revisions must match deployments exactly")
+    expected_revisions = {
+        deployment_id: _managed_integer(
+            expected.get(deployment_id), "rollout expected revision", positive=True
+        )
+        for deployment_id in deployment_ids
+    }
+    target_state = body.get("targetState")
+    percentage = _managed_integer(body.get("percentage"), "rollout percentage", positive=True)
+    channel = body.get("channel")
+    ring = body.get("ring")
+    reason = _case_reason(body.get("reason"), "rollout reason")
+    criteria = _rollout_health_criteria(body.get("healthCriteria"))
+    now = int(time.time())
+    schedule = _rollout_schedule(body.get("schedule"), now)
+    if target_state not in {"canary", "active"}:
+        raise ValueError("managed rollout target must be canary or active")
+    if channel not in _ROLLOUT_CHANNELS or ring not in _ROLLOUT_RINGS:
+        raise ValueError("managed rollout channel or ring is invalid")
+    if percentage > 100:
+        raise ValueError("managed rollout percentage must not exceed 100")
+    if target_state == "canary" and (ring != "canary" or percentage > 25):
+        raise ValueError("canary rollouts require the canary ring at 1 to 25 percent")
+    if target_state == "active" and ring != "broad":
+        raise ValueError("active rollouts require the broad ring")
+
+    records = []
+    operations = []
+    for deployment_id in deployment_ids:
+        current = TABLE.get_item(
+            Key=_item_key(tenant, "CONFIGURATION", deployment_id), ConsistentRead=True
+        ).get("Item")
+        current = _ensure_configuration_governance(tenant, current)
+        revision = int(current.get("rolloutRevision", 0))
+        if revision != expected_revisions[deployment_id]:
+            raise PolicyConflict("deployment rollout revision changed")
+        if current.get("rolloutState") in {"rolling_back"}:
+            raise PolicyConflict("rollback must converge or pause before a new rollout")
+        if percentage < int(current.get("rolloutPercentage", 0)):
+            raise PolicyConflict("rollout percentage cannot decrease outside rollback")
+        deployment = TABLE.get_item(
+            Key=_item_key(tenant, "DEPLOYMENT", deployment_id), ConsistentRead=True
+        ).get("Item")
+        if not deployment:
+            raise LookupError("deployment not found")
+        desired = _managed_host(current.get("desiredConfiguration", {}).get("managedHost"))
+        agents = [
+            item
+            for item in _all_agents(tenant)
+            if item.get("deployment_id") == deployment_id
+            and _agent_lifecycle_state(item) == "active"
+        ]
+        if not agents:
+            raise PolicyConflict("managed rollout requires at least one active enrolled agent")
+        if any(agent.get("host") != desired["host"] for agent in agents):
+            raise PolicyConflict("managed rollout contains an incompatible agent host")
+        package_revision = _bind_current_managed_package(tenant, current)
+        state = (
+            "scheduled"
+            if schedule is not None and int(schedule["notBefore"]) > now
+            else target_state
+        )
+        updated = {
+            **current,
+            "rolloutState": state,
+            "requestedState": target_state,
+            "rolloutPercentage": percentage,
+            "rolloutChannel": channel,
+            "rolloutRing": ring,
+            "rolloutReason": reason,
+            "rolloutPackageRevision": package_revision,
+            "healthCriteria": criteria,
+            "schedule": schedule,
+            "startedAt": None if state == "scheduled" else now,
+            "startedBy": actor,
+            "pauseReason": None,
+            "pausedAt": None,
+            "convergedAt": None,
+            "appliedHash": None,
+            "drifted": True,
+            "rolloutRevision": revision + 1,
+            "updatedAt": now,
+            "updatedBy": actor,
+        }
+        operations.append(
+            _transaction_put(
+                updated,
+                condition="rolloutRevision = :expected_revision",
+                values={":expected_revision": revision},
+            )
+        )
+        records.append(updated)
+    _transact_policy_records(operations)
+    _audit(
+        tenant,
+        "managed_rollout_started",
+        actor,
+        {
+            "deployment_ids": deployment_ids,
+            "target_state": target_state,
+            "percentage": percentage,
+            "channel": channel,
+            "ring": ring,
+            "reason": reason,
+        },
+    )
+    return [_reconcile_deployment_rollout(tenant, record, now=now) for record in records]
+
+
+def _pause_managed_rollout(tenant, deployment_id, body, actor):
+    """Pause one exact rollout without accepting browser-authored health state."""
+    if not isinstance(body, dict) or set(body) != {"expectedRevision", "reason"}:
+        raise ValueError("managed rollout pause request has an invalid schema")
+    expected = _managed_integer(
+        body.get("expectedRevision"), "rollout expected revision", positive=True
+    )
+    reason = _case_reason(body.get("reason"), "rollout pause reason")
+    current = TABLE.get_item(
+        Key=_item_key(tenant, "CONFIGURATION", deployment_id), ConsistentRead=True
+    ).get("Item")
+    current = _ensure_configuration_governance(tenant, current)
+    if int(current.get("rolloutRevision", 0)) != expected:
+        raise PolicyConflict("deployment rollout revision changed")
+    if current.get("rolloutState") not in _ROLLOUT_ACTIVE_STATES | {"scheduled"}:
+        raise PolicyConflict("deployment rollout is not pausable")
+    now = int(time.time())
+    updated = {
+        **current,
+        "rolloutState": "paused",
+        "pauseReason": reason,
+        "pausedAt": now,
+        "rolloutRevision": expected + 1,
+        "updatedAt": now,
+        "updatedBy": actor,
+        "drifted": True,
+        "appliedHash": None,
+    }
+    try:
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="rolloutRevision = :expected_revision",
+            ExpressionAttributeValues={":expected_revision": expected},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("deployment rollout revision changed") from error
+        raise
+    _audit(
+        tenant,
+        "managed_rollout_paused",
+        actor,
+        {"deployment_id": deployment_id, "reason": reason, "rollout_revision": expected + 1},
+    )
+    return _reconcile_deployment_rollout(tenant, updated, now=now)
+
+
+def _rollback_managed_configuration(tenant, deployment_id, body, actor):
+    """Create a new rollout from the exact last-known-good desired version."""
+    if not isinstance(body, dict) or set(body) != {
+        "targetVersion",
+        "expectedRevision",
+        "reason",
+    }:
+        raise ValueError("managed rollback request has an invalid schema")
+    target_version = _managed_integer(
+        body.get("targetVersion"), "rollback target version", positive=True
+    )
+    expected = _managed_integer(
+        body.get("expectedRevision"), "rollout expected revision", positive=True
+    )
+    reason = _case_reason(body.get("reason"), "rollback reason")
+    current = TABLE.get_item(
+        Key=_item_key(tenant, "CONFIGURATION", deployment_id), ConsistentRead=True
+    ).get("Item")
+    current = _ensure_configuration_governance(tenant, current)
+    if int(current.get("rolloutRevision", 0)) != expected:
+        raise PolicyConflict("deployment rollout revision changed")
+    if target_version != int(current.get("lastKnownGoodVersion") or 0):
+        raise PolicyConflict("rollback target is not the last known-good version")
+    package_revision = int(current.get("lastKnownGoodPackageRevision") or 0)
+    if package_revision <= 0:
+        raise PolicyConflict("last known-good package evidence is unavailable")
+    target = _configuration_version(tenant, deployment_id, target_version)
+    package_id = f"{deployment_id}:{package_revision:020d}"
+    if not TABLE.get_item(
+        Key=_item_key(tenant, "MANAGED_PACKAGE_VERSION", package_id), ConsistentRead=True
+    ).get("Item"):
+        raise PolicyConflict("last known-good package revision is unavailable")
+    now = int(time.time())
+    new_version = int(current.get("version", 0)) + 1
+    updated = {
+        **current,
+        "templateId": target.get("templateId"),
+        "desiredConfiguration": _json(target.get("desiredConfiguration", {})),
+        "desiredHash": target.get("desiredHash"),
+        "version": new_version,
+        "rolloutState": "rolling_back",
+        "requestedState": "rolling_back",
+        "rolloutPercentage": 100,
+        "rolloutChannel": "emergency",
+        "rolloutRing": "broad",
+        "rolloutReason": reason,
+        "rolloutPackageRevision": package_revision,
+        "schedule": None,
+        "startedAt": now,
+        "startedBy": actor,
+        "pauseReason": None,
+        "pausedAt": None,
+        "convergedAt": None,
+        "appliedHash": None,
+        "drifted": True,
+        "rolloutRevision": expected + 1,
+        "rollbackFromVersion": int(current.get("version", 0)),
+        "rollbackTargetVersion": target_version,
+        "updatedAt": now,
+        "updatedBy": actor,
+    }
+    version_record = _configuration_version_record(tenant, updated, actor)
+    _transact_policy_records(
+        [
+            _transaction_put(
+                updated,
+                condition="rolloutRevision = :expected_revision",
+                values={":expected_revision": expected},
+            ),
+            _transaction_put(version_record, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _audit(
+        tenant,
+        "managed_rollout_rollback_started",
+        actor,
+        {
+            "deployment_id": deployment_id,
+            "from_version": int(current.get("version", 0)),
+            "target_version": target_version,
+            "new_version": new_version,
+            "package_revision": package_revision,
+            "reason": reason,
+        },
+    )
+    return _reconcile_deployment_rollout(tenant, updated, now=now)
 
 
 def _key(kind, identifier):
@@ -9450,6 +10181,49 @@ def _endpoint_detection_cycle():
     return {"processedTenants": processed, "failedTenants": 0}
 
 
+def _rollout_reconciliation_cycle():
+    """Reconcile bounded rollout state on the five-minute internal schedule."""
+    tenants = []
+    for shard in range(_ENDPOINT_DETECTION_SHARDS):
+        result = TABLE.query(
+            IndexName=_ENDPOINT_DETECTION_INDEX,
+            KeyConditionExpression=Key("endpoint_detection_pk").eq(
+                f"ENDPOINT_DETECTION#{shard:02d}"
+            ),
+            Limit=250,
+        )
+        if result.get("LastEvaluatedKey"):
+            raise RuntimeError("rollout tenant shard exceeds its safe bound")
+        tenants.extend(result.get("Items", []))
+        if len(tenants) > _ENDPOINT_DETECTION_TENANT_LIMIT:
+            raise RuntimeError("rollout tenant inventory exceeds its safe bound")
+    processed_tenants = 0
+    processed_rollouts = 0
+    failed = 0
+    for registration in tenants:
+        tenant = registration.get("endpoint_detection_sk")
+        if not isinstance(tenant, str) or registration.get("pk") != f"TENANT#{tenant}":
+            failed += 1
+            continue
+        try:
+            configurations = _list(tenant, "CONFIGURATION", consistent_read=True)
+            processed_rollouts += len(configurations)
+            if processed_rollouts > _ROLLOUT_CONFIGURATION_LIMIT:
+                raise RuntimeError("scheduled rollout inventory exceeds its safe bound")
+            for configuration in configurations:
+                _reconcile_deployment_rollout(tenant, configuration)
+            processed_tenants += 1
+        except Exception:
+            failed += 1
+    if failed:
+        raise RuntimeError("one or more tenant rollout reconciliation cycles failed")
+    return {
+        "processedTenants": processed_tenants,
+        "processedRollouts": processed_rollouts,
+        "failedTenants": 0,
+    }
+
+
 def _discovery_counts(instances):
     """Count target posture without allowing duplicates to inflate coverage."""
     denominator = len(instances)
@@ -9820,20 +10594,21 @@ def _fleet(tenant):
         if not versions:
             versions = _policy_versions(tenant, governed["id"])
         policies.append(_policy_summary(tenant, governed, versions))
+    configurations = _deployment_configurations(tenant)
     return {
         "organizations": _list(tenant, "ORG"),
         "projects": _list(tenant, "PROJECT"),
         "deployments": _list(tenant, "DEPLOYMENT"),
         "agents": agents,
         "sessions": [],
-        "drift": [item for item in _list(tenant, "CONFIGURATION") if item.get("drifted")],
+        "drift": [item for item in configurations if item.get("drifted")],
         "templates": _list(tenant, "TEMPLATE"),
         "policies": policies,
         "groups": groups,
         "skills": _list(tenant, "SKILL"),
         "mcpServers": _list(tenant, "MCP"),
-        "configurations": _list(tenant, "CONFIGURATION"),
-        "configurationHistory": [],
+        "configurations": configurations,
+        "configurationHistory": _list(tenant, "CONFIGURATION_VERSION"),
         "health": [
             {
                 "deploymentId": d["id"],
@@ -10707,6 +11482,10 @@ def handler(event, context):
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("endpoint detection schedule event is invalid")
         return _endpoint_detection_cycle()
+    if isinstance(event, dict) and event.get("source") == "aai.rollout-reconciliation":
+        if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
+            raise ValueError("rollout reconciliation schedule event is invalid")
+        return _rollout_reconciliation_cycle()
     try:
         method, path = _method_path(event)
         if method == "OPTIONS":
@@ -11649,9 +12428,15 @@ def handler(event, context):
                 ["deployment-config"],
                 ["deployment-config", "history"],
             ):
-                items = _filter_enterprise_items(
-                    tenant, event, "CONFIGURATION", _list(tenant, "CONFIGURATION")
+                kind = (
+                    "CONFIGURATION" if parts == ["deployment-config"] else "CONFIGURATION_VERSION"
                 )
+                source_items = (
+                    _deployment_configurations(tenant)
+                    if kind == "CONFIGURATION"
+                    else _list(tenant, kind, consistent_read=True)
+                )
+                items = _filter_enterprise_items(tenant, event, "CONFIGURATION", source_items)
                 return _response(200, {"items": items, "nextCursor": None})
             if method == "POST" and parts == ["templates"]:
                 body = _body(event)
@@ -11682,33 +12467,78 @@ def handler(event, context):
                 return _response(201, item)
             if method == "POST" and parts == ["deployment-config"]:
                 body = _body(event)
+                if not isinstance(body, dict) or set(body) != {"deploymentId", "templateId"}:
+                    raise ValueError("deployment configuration request has an invalid schema")
                 deployment_id = body.get("deploymentId")
                 template_id = body.get("templateId")
                 template = TABLE.get_item(Key=_item_key(tenant, "TEMPLATE", template_id or "")).get(
                     "Item"
                 )
-                if not isinstance(deployment_id, str) or not deployment_id or not template:
+                deployment = TABLE.get_item(
+                    Key=_item_key(tenant, "DEPLOYMENT", deployment_id or ""),
+                    ConsistentRead=True,
+                ).get("Item")
+                if (
+                    not isinstance(deployment_id, str)
+                    or not deployment_id
+                    or not template
+                    or not deployment
+                ):
                     return _response(
                         400, {"error": "deploymentId and an existing templateId are required"}
                     )
                 configuration = _json(template.get("configuration", {}))
+                if not isinstance(configuration.get("managedHost"), dict):
+                    raise ValueError("managed rollout template requires managedHost desired state")
+                _managed_host(configuration["managedHost"])
                 desired_hash = _configuration_hash(configuration)
-                item = _put(
-                    tenant,
-                    "CONFIGURATION",
-                    deployment_id,
-                    {
-                        "deploymentId": deployment_id,
-                        "templateId": template_id,
-                        "desiredConfiguration": configuration,
-                        "desiredHash": desired_hash,
-                        "appliedHash": None,
-                        "drifted": True,
-                        "rolloutState": "staged",
-                        "rolloutPercentage": 0,
-                        "version": 1,
-                        "updatedAt": int(time.time()),
-                    },
+                current = TABLE.get_item(
+                    Key=_item_key(tenant, "CONFIGURATION", deployment_id), ConsistentRead=True
+                ).get("Item")
+                current = _ensure_configuration_governance(tenant, current) if current else None
+                current_revision = int(current.get("rolloutRevision", 0)) if current else 0
+                now = int(time.time())
+                item = {
+                    **_item_key(tenant, "CONFIGURATION", deployment_id),
+                    "tenant_id": tenant,
+                    "deploymentId": deployment_id,
+                    "templateId": template_id,
+                    "desiredConfiguration": configuration,
+                    "desiredHash": desired_hash,
+                    "appliedHash": None,
+                    "drifted": True,
+                    "rolloutState": "staged",
+                    "requestedState": None,
+                    "rolloutPercentage": 0,
+                    "rolloutChannel": "stable",
+                    "rolloutRing": "canary",
+                    "healthCriteria": _json(_ROLLOUT_DEFAULT_CRITERIA),
+                    "schedule": None,
+                    "rolloutPackageRevision": 0,
+                    "lastKnownGoodVersion": current.get("lastKnownGoodVersion")
+                    if current
+                    else None,
+                    "lastKnownGoodPackageRevision": current.get("lastKnownGoodPackageRevision")
+                    if current
+                    else None,
+                    "governanceSchemaVersion": 1,
+                    "rolloutRevision": current_revision + 1,
+                    "version": int(current.get("version", 0)) + 1 if current else 1,
+                    "updatedAt": now,
+                    "updatedBy": actor,
+                }
+                version_record = _configuration_version_record(tenant, item, actor)
+                condition = (
+                    "attribute_not_exists(pk)"
+                    if current is None
+                    else "rolloutRevision = :expected_revision"
+                )
+                values = None if current is None else {":expected_revision": current_revision}
+                _transact_policy_records(
+                    [
+                        _transaction_put(item, condition=condition, values=values),
+                        _transaction_put(version_record, condition="attribute_not_exists(pk)"),
+                    ]
                 )
                 _audit(
                     tenant,
@@ -11718,74 +12548,44 @@ def handler(event, context):
                         "deployment_id": deployment_id,
                         "template_id": template_id,
                         "desired_hash": desired_hash,
+                        "configuration_version": item["version"],
+                        "rollout_revision": item["rolloutRevision"],
                     },
                 )
-                return _response(201, item)
+                return _response(201, _reconcile_deployment_rollout(tenant, item, now=now))
             if method == "POST" and parts == ["deployment-config", "batch-rollout"]:
-                body = _body(event)
-                state = body.get("state")
-                percentage = body.get("percentage")
-                deployment_ids = body.get("deploymentIds")
-                if (
-                    state not in {"staged", "canary", "active", "paused", "rollback"}
-                    or not isinstance(percentage, (int, float))
-                    or isinstance(percentage, bool)
-                    or not 0 <= percentage <= 100
-                    or not isinstance(deployment_ids, list)
-                ):
-                    raise ValueError("rollout state, percentage and deploymentIds are invalid")
-                updated = []
-                for deployment_id in deployment_ids[:200]:
-                    item = TABLE.get_item(
-                        Key=_item_key(tenant, "CONFIGURATION", deployment_id)
-                    ).get("Item")
-                    if not item:
-                        continue
-                    item.update(
-                        {
-                            "rolloutState": state,
-                            "rolloutPercentage": percentage,
-                            "updatedAt": int(time.time()),
-                        }
-                    )
-                    if state == "active" and percentage == 100:
-                        item.update({"appliedHash": item.get("desiredHash"), "drifted": False})
-                    TABLE.put_item(Item=item)
-                    updated.append(item)
-                _audit(
-                    tenant,
-                    "deployment_configuration_rollout",
-                    actor,
-                    {
-                        "deployment_ids": deployment_ids[:200],
-                        "state": state,
-                        "percentage": percentage,
-                    },
+                return _response(
+                    200, {"items": _start_managed_rollouts(tenant, _body(event), actor)}
                 )
-                return _response(200, {"items": updated})
+            if (
+                method == "POST"
+                and len(parts) == 3
+                and parts[0] == "deployment-config"
+                and parts[2] == "pause"
+            ):
+                return _response(
+                    200,
+                    _pause_managed_rollout(tenant, parts[1], _body(event), actor),
+                )
             if method == "POST" and parts == ["deployment-config", "rollback"]:
                 body = _body(event)
-                item = TABLE.get_item(
-                    Key=_item_key(tenant, "CONFIGURATION", body.get("deploymentId", ""))
-                ).get("Item")
-                if not item:
-                    return _response(404, {"error": "deployment configuration not found"})
-                item.update(
-                    {
-                        "rolloutState": "rollback",
-                        "rolloutPercentage": 0,
-                        "drifted": True,
-                        "updatedAt": int(time.time()),
-                    }
+                if not isinstance(body, dict) or set(body) != {
+                    "deploymentId",
+                    "targetVersion",
+                    "expectedRevision",
+                    "reason",
+                }:
+                    raise ValueError("managed rollback request has an invalid schema")
+                deployment_id = _bounded_identifier(body.get("deploymentId"), "deploymentId")
+                return _response(
+                    200,
+                    _rollback_managed_configuration(
+                        tenant,
+                        deployment_id,
+                        {key: value for key, value in body.items() if key != "deploymentId"},
+                        actor,
+                    ),
                 )
-                TABLE.put_item(Item=item)
-                _audit(
-                    tenant,
-                    "deployment_configuration_rollback",
-                    actor,
-                    {"deployment_id": item["deploymentId"], "version": body.get("version")},
-                )
-                return _response(200, item)
             if method == "POST" and parts == ["emergency-stop"]:
                 body = _body(event)
                 deployment_id = _bounded_identifier(body.get("deploymentId"), "deploymentId")

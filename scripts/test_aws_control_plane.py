@@ -11,6 +11,7 @@ services.  The synthetic records are removed before exit.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -224,6 +225,8 @@ def main() -> int:
             ManagedConfigurationCompiler,
             ManagedConfigurationEvidence,
             ManagedConfigurationSource,
+            ManagedDeploymentPackage,
+            ManagedExecutableRequirement,
             ManagedPlatform,
             ManagedPolicyIntent,
             NativeActionDecision,
@@ -256,6 +259,16 @@ def main() -> int:
             "policyId": managed_bundle.policy_id,
             "policyVersion": managed_bundle.policy_version,
         }
+        hook_path = "/opt/aai-security/hooks/claude-policy"
+        managed_package = ManagedDeploymentPackage.from_bundle(
+            managed_bundle,
+            required_executables=(
+                ManagedExecutableRequirement(
+                    hook_path,
+                    hashlib.sha256(b"synthetic deployed hook").hexdigest(),
+                ),
+            ),
+        )
         deployment = _invoke(
             lambda_client,
             arguments.function_name,
@@ -305,6 +318,23 @@ def main() -> int:
         )
         if staged["statusCode"] != 201:
             raise RuntimeError(f"managed deployment staging failed: {staged}")
+        staged_body = json.loads(staged["body"])
+        published_package = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                f"/enterprise/deployments/{deployment_id}/managed-package",
+                "PUT",
+                {
+                    "expectedRevision": 0,
+                    "packageBase64": base64.b64encode(managed_package.to_json()).decode(),
+                    "packageSha256": managed_package.package_sha256,
+                },
+                arguments.tenant,
+            ),
+        )
+        if published_package["statusCode"] != 201:
+            raise RuntimeError(f"managed package publication failed: {published_package}")
 
         registered = _invoke(
             lambda_client,
@@ -333,6 +363,46 @@ def main() -> int:
         )
         if registered["statusCode"] != 201:
             raise RuntimeError(f"agent registration failed: {registered}")
+        rollout_request = {
+            "deploymentIds": [deployment_id],
+            "expectedRevisions": {
+                deployment_id: staged_body.get("rolloutRevision"),
+            },
+            "targetState": "active",
+            "percentage": 100,
+            "channel": "stable",
+            "ring": "broad",
+            "reason": "Prove deployed measured rollout authority with synthetic endpoint evidence.",
+            "healthCriteria": {
+                "maxUnavailablePercent": 100,
+                "maxDriftPercent": 100,
+                "minSampleSize": 1,
+                "gracePeriodSeconds": 600,
+            },
+            "schedule": None,
+        }
+        started_rollout = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/deployment-config/batch-rollout",
+                "POST",
+                rollout_request,
+                arguments.tenant,
+            ),
+        )
+        started_items = json.loads(started_rollout["body"]).get("items", [])
+        if (
+            started_rollout["statusCode"] != 200
+            or len(started_items) != 1
+            or started_items[0].get("rolloutState") != "active"
+            or started_items[0].get("appliedHash") is not None
+            or started_items[0].get("rolloutPackageRevision") != 1
+        ):
+            raise RuntimeError(
+                "operator rollout write claimed convergence or omitted package binding: "
+                f"{started_rollout}"
+            )
         registered_body = json.loads(registered["body"])
         registered_ownership = registered_body.get("ownership", {})
         if (
@@ -683,6 +753,32 @@ def main() -> int:
         )
         if managed_client.heartbeat(session_token).get("status") != "connected":
             raise RuntimeError("AWS managed-host evidence heartbeat failed")
+        reconciled_rollout = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event("/enterprise/deployment-config", "GET", {}, arguments.tenant),
+        )
+        rollout_configuration = next(
+            (
+                item
+                for item in json.loads(reconciled_rollout["body"]).get("items", [])
+                if item.get("deploymentId") == deployment_id
+            ),
+            None,
+        )
+        if (
+            reconciled_rollout["statusCode"] != 200
+            or not rollout_configuration
+            or rollout_configuration.get("rolloutState") != "converged"
+            or rollout_configuration.get("appliedHash") != rollout_configuration.get("desiredHash")
+            or rollout_configuration.get("lastKnownGoodVersion") != 1
+            or rollout_configuration.get("lastKnownGoodPackageRevision") != 1
+            or rollout_configuration.get("convergence", {}).get("fullConverged") is not True
+        ):
+            raise RuntimeError(
+                "fresh exact endpoint evidence did not produce measured convergence: "
+                f"{reconciled_rollout}"
+            )
         effective_status, effective_body = _request(
             f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/effective-policy",
             "GET",
@@ -1318,7 +1414,8 @@ def main() -> int:
         print(
             "AWS control-plane smoke passed: auth, enrollment, accountable ownership/CAS, "
             "bulk group preview/partial apply/replay/audit, "
-            "heartbeat, managed-host "
+            "heartbeat, immutable package-bound measured rollout and endpoint-only convergence, "
+            "managed-host "
             "missing/conflict enforcement, policy, agent verification, "
             "approval replay, emergency-stop enforcement/recovery, and "
             "multi-process/runtime-connected durable idempotency, and WORM audit "
@@ -1423,6 +1520,9 @@ def main() -> int:
         )
         for kind, item_id in (
             ("CONFIGURATION", deployment_id),
+            ("CONFIGURATION_VERSION", f"{deployment_id}:{1:020d}"),
+            ("MANAGED_PACKAGE", deployment_id),
+            ("MANAGED_PACKAGE_VERSION", f"{deployment_id}:{1:020d}"),
             ("TEMPLATE", template_id),
             ("DEPLOYMENT", deployment_id),
         ):

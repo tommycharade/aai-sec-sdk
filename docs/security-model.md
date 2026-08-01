@@ -570,6 +570,17 @@ short-lived, scoped to one deployment, agent and canonical project root, and
 excluded from inventory responses. Every lifecycle and rollout mutation is auditable. Provider-backed
 authentication, policy, IAM, approval, audit retention, isolation, and runtime
 activation remain explicit adapters and are not simulated by the UI.
+Managed rollout requests are also untrusted proposals. The API derives
+eligible active endpoints from server inventory, selects canaries from a
+stable tenant/agent hash, binds an immutable desired configuration and managed
+package revision, and rejects stale optimistic revisions, malformed schedules,
+percentage reduction and incompatible hosts. The browser cannot submit an
+applied hash, endpoint health, convergence, selected membership or
+last-known-good target. A scheduled reconciler may only start a due rollout,
+remove rollout authority by pausing, or record convergence from fresh exact
+endpoint evidence. Rollback can reference only the retained known-good
+configuration/package pair and creates a new immutable version; it never
+rewrites history.
 Central approval requests cross two distinct trust boundaries. The agent
 session authenticates the deployment and agent, but request metadata is still
 untrusted and grants no authority. The operator API authenticates and
