@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/managed-host-configuration/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/endpoint-evidence-publisher-design/">
       
       
-        <link rel="prev" href="../runtime-attestation-design/">
+        <link rel="prev" href="../scheduled-discovery-connectors-design/">
       
       
-        <link rel="next" href="../managed-endpoint-deployment-design/">
+        <link rel="next" href="../endpoint-evidence-acceptance-2026-08-01/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Managed host configuration - Agentic AI Security SDK</title>
+        <title>Endpoint evidence publisher - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#managed-host-configuration" class="md-skip">
+        <a href="#endpoint-installation-and-process-evidence-publisher" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Managed host configuration
+              Endpoint evidence publisher
             
           </span>
         </div>
@@ -664,10 +664,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../endpoint-evidence-publisher-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint evidence publisher
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -683,6 +710,114 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-and-trust-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture and trust boundaries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sensor-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sensor contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fleet-assembly-and-atomic-publication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fleet assembly and atomic publication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#platform-and-microsoft-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platform and Microsoft constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-acceptance-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security acceptance criteria
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-production-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining production acceptance
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -907,37 +1042,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Managed host configuration
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../managed-host-configuration/" class="md-nav__link">
         
   
   
@@ -953,81 +1061,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#security-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Security contract
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#claude-code-output" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Claude Code output
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#codex-output" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Codex output
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#example" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#deployment-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deployment verification
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1896,10 +1929,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#security-contract" class="md-nav__link">
+  <a href="#purpose" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Security contract
+        Purpose
       
     </span>
   </a>
@@ -1907,10 +1940,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#claude-code-output" class="md-nav__link">
+  <a href="#architecture-and-trust-boundaries" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Claude Code output
+        Architecture and trust boundaries
       
     </span>
   </a>
@@ -1918,10 +1951,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#codex-output" class="md-nav__link">
+  <a href="#sensor-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Codex output
+        Sensor contract
       
     </span>
   </a>
@@ -1929,10 +1962,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#example" class="md-nav__link">
+  <a href="#fleet-assembly-and-atomic-publication" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example
+        Fleet assembly and atomic publication
       
     </span>
   </a>
@@ -1940,10 +1973,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#deployment-verification" class="md-nav__link">
+  <a href="#deployment-journey" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Deployment verification
+        Deployment journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#platform-and-microsoft-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platform and Microsoft constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-acceptance-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security acceptance criteria
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-production-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining production acceptance
       
     </span>
   </a>
@@ -1970,197 +2036,161 @@
   
 
 
-<h1 id="managed-host-configuration">Managed host configuration</h1>
-<p>Project files are useful for evaluation, but they are not an enterprise
-enforcement boundary. A user or process with repository access can remove
-them, and an alternate launch can avoid them. The managed-configuration API
-compiles one typed policy intent into administrator-owned Claude Code or Codex
-configuration and keeps desired state separate from observed state.</p>
-<h2 id="security-contract">Security contract</h2>
-<p><code>ManagedConfigurationCompiler.compile</code> is a pure operation. It returns:</p>
-<ul>
-<li>deterministic files and SHA-256 digests;</li>
-<li>the target host, version, operating system, policy ID, and policy version;</li>
-<li>allowed, denied, and approval-required action summaries;</li>
-<li>capability-level coverage identifying native versus SDK enforcement; and</li>
-<li>a bundle digest binding the complete intent and every artifact.</li>
-</ul>
-<p>It does <strong>not</strong> install privileged files or prove that a host loaded them.
-Endpoint management, MDM, or a separately authenticated host service must
-deploy the artifacts atomically and protect them from modification.</p>
-<p>The optional <a href="../managed-endpoint-deployment-design/">managed endpoint deployment</a>
-package binds those artifacts to exact administrator-installed executables and
-provides preflight, restrictive atomic replacement and complete rollback. The
-package is authoritative only when its expected digest, bundle, host and
-platform arrive through authenticated endpoint management.</p>
-<p><code>reconcile_effective_authority</code> accepts endpoint-owned evidence only. Missing,
-expired, future-dated, wrong-host, or mismatched evidence produces no effective
-allows. Duplicate action expressions resolve in this order:</p>
-<pre><code class="language-text">deny &gt; approval required &gt; allow
+<h1 id="endpoint-installation-and-process-evidence-publisher">Endpoint installation and process evidence publisher</h1>
+<h2 id="purpose">Purpose</h2>
+<p>Intune establishes the managed-device population, but device enrollment and
+software inventory do not prove that Claude Code or Codex is running for a
+particular governed project. This design adds a separate endpoint evidence
+path. An administrator-run sensor measures configured installations on each
+device, signs a content-minimised report with a per-device credential, and a
+fleet job joins current reports to the authoritative MDM device export before
+using the existing atomic discovery publisher.</p>
+<p>This is an observational control. It can lower coverage assurance and create a
+finding; it cannot enroll an agent, grant policy authority, approve an action,
+or execute a model-requested command.</p>
+<h2 id="architecture-and-trust-boundaries">Architecture and trust boundaries</h2>
+<pre><code class="language-mermaid">flowchart LR
+    MDM[&quot;Intune or another MDM&quot;] --&gt;|&quot;root/admin deployment + device ID&quot;| S[&quot;Endpoint sensor&quot;]
+    K[&quot;Per-device secret delivery&quot;] --&gt; S
+    S --&gt;|&quot;signed, path-free report&quot;| X[&quot;MDM collection or protected staging&quot;]
+    X --&gt; A[&quot;Fleet assembler&quot;]
+    MDM --&gt;|&quot;authoritative device snapshot&quot;| A
+    KR[&quot;Key references + injected secrets&quot;] --&gt; A
+    A --&gt;|&quot;complete normalized fleet inventory&quot;| P[&quot;Atomic discovery publisher&quot;]
+    P --&gt; C[&quot;AAI Security control plane&quot;]
 </code></pre>
-<p>Conflicts remain visible for operator resolution even though execution fails
-closed.</p>
-<h2 id="claude-code-output">Claude Code output</h2>
-<p>For Claude Code 2.1.191 or later, the compiler emits:</p>
+<p>The sensor configuration, filesystem, process table, device identifier,
+project paths, report transport and key identifier are untrusted. Endpoint
+management must run the sensor as root or an administrator, protect its exact
+configuration, inject the device secret outside command arguments, and deliver
+reports through an authenticated management channel. The sensor never accepts
+credentials, identity, policy state or approval state from model output.</p>
+<p>Each sensor report is HMAC-SHA-256 signed over canonical JSON with a secret
+unique to the device. The fleet key map binds a key identifier to exactly one
+device and names the environment variable containing its secret. Secrets are
+never stored in the map, report, command line, normalized inventory, logs or
+control-plane payload. HMAC proves possession of a software credential; it is
+not hardware attestation. A production rollout should prefer MDM-managed secret
+delivery and rotate or revoke a key when device custody changes.</p>
+<h2 id="sensor-contract">Sensor contract</h2>
+<p><code>scripts/collect_endpoint_evidence.py</code> reads a root-owned schema-1 manifest. It
+contains one managed device and one or more expected installations. Each
+installation names:</p>
 <ul>
-<li>endpoint-managed <code>managed-settings.json</code> with managed-only permission rules,
-  bypass mode disabled, fail-closed remote refresh, and a managed <code>PreToolUse</code>
-  hook; and</li>
-<li>exclusive <code>managed-mcp.json</code> containing only reviewed, credential-free MCP
-  definitions.</li>
+<li>a stable installation ID and supported host (<code>claude-code</code> or <code>codex-cli</code>);</li>
+<li>an absolute project root whose UTF-8 path is reduced to SHA-256 before output;</li>
+<li>an absolute binary path and optional expected binary SHA-256;</li>
+<li>one or more absolute process executable paths; and</li>
+<li>optional opaque user, repository and business-unit correlation identifiers.</li>
 </ul>
-<p>Documented paths are:</p>
-<table>
-<thead>
-<tr>
-<th>Platform</th>
-<th>Managed settings directory</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>macOS</td>
-<td><code>/Library/Application Support/ClaudeCode/</code></td>
-</tr>
-<tr>
-<td>Linux/WSL</td>
-<td><code>/etc/claude-code/</code></td>
-</tr>
-<tr>
-<td>Windows</td>
-<td><code>C:\Program Files\ClaudeCode\</code></td>
-</tr>
-</tbody>
-</table>
-<p>Claude server-managed settings currently apply uniformly to the organization,
-not per AAI group, and cannot distribute <code>managed-mcp.json</code>. Use endpoint
-management when per-device/group assignment or exclusive MCP deployment is
-required. The control plane must display the effective source because
-server-managed and endpoint-managed sources occupy the same highest tier but
-do not merge. See the <a href="https://code.claude.com/docs/en/server-managed-settings">Claude managed-settings precedence and fail-closed
-behavior</a> and
-<a href="https://code.claude.com/docs/en/managed-mcp">managed MCP deployment</a>.</p>
-<h2 id="codex-output">Codex output</h2>
-<p>For Codex 0.138.0 or later, the compiler emits system <code>requirements.toml</code> with:</p>
-<ul>
-<li>allowed approval and permission profiles;</li>
-<li>a conservative managed default profile;</li>
-<li>hooks pinned on and unmanaged hooks excluded;</li>
-<li>a managed <code>PreToolUse</code> hook at an absolute deployment-owned path;</li>
-<li>restrictive command rules;</li>
-<li>MCP server name-and-identity allowlists;</li>
-<li>filesystem deny-read requirements;</li>
-<li>browser, computer-use, and plugin controls; and</li>
-<li>an experimental managed network-domain allowlist when domains are supplied.</li>
-</ul>
-<p>The requirements file belongs at <code>/etc/codex/requirements.toml</code> on Unix or
-<code>%ProgramData%\OpenAI\Codex\requirements.toml</code> on Windows. Codex enforces the
-requirements but does not distribute hook executables. Endpoint management
-must install the referenced hook and verify its digest. See the <a href="https://learn.chatgpt.com/docs/enterprise/managed-configuration">Codex managed
-configuration reference</a>.</p>
-<p>The Codex network requirement is explicitly experimental. Roll it out to a
-version- and OS-pinned canary before broad use. On native Windows, managed
-deny-read does not cover shell subprocess reads; use OS isolation and an
-approved launch profile as additional boundaries.</p>
-<h2 id="example">Example</h2>
-<pre><code class="language-python">from agentic_security import (
-    AgentHost,
-    ControlPlaneAgentClient,
-    ManagedConfigurationCompiler,
-    ManagedConfigurationSource,
-    ManagedMcpServer,
-    ManagedPlatform,
-    ManagedPolicyIntent,
-    NativeActionDecision,
-    NativeActionRule,
-    ObservedManagedConfiguration,
-    measure_managed_configuration,
-    reconcile_effective_authority,
-)
-
-intent = ManagedPolicyIntent(
-    policy_id=&quot;engineering-safe&quot;,
-    policy_version=4,
-    action_rules=(
-        NativeActionRule(&quot;Read&quot;, NativeActionDecision.ALLOW, &quot;repository reads&quot;),
-        NativeActionRule(&quot;Bash(rm *)&quot;, NativeActionDecision.DENY, &quot;destructive command&quot;),
-    ),
-    mcp_servers=(
-        ManagedMcpServer(&quot;github&quot;, url=&quot;https://api.githubcopilot.com/mcp/&quot;),
-    ),
-)
-bundle = ManagedConfigurationCompiler().compile(
-    intent,
-    host=AgentHost.CLAUDE_CODE,
-    host_version=&quot;2.1.211&quot;,
-    platform=ManagedPlatform.MACOS,
-    hook_command=&quot;/opt/aai-security/hooks/claude-policy&quot;,
-)
-
-# Deployment writes the files with administrator ownership, then the endpoint
-# reports what the running host actually loaded. Desired state is not enough.
-observed = ObservedManagedConfiguration(
-    host=AgentHost.CLAUDE_CODE,
-    bundle_hash=bundle.bundle_hash,
-    source=ManagedConfigurationSource.ENDPOINT_MANAGED_FILE,
-    verified_at=100.0,
-    expires_at=400.0,
-)
-authority = reconcile_effective_authority(bundle, observed, now=120.0)
-assert authority.allowed_actions == (&quot;Read&quot;,)
-</code></pre>
-<p>For an enrolled AWS agent, report only freshly measured protected files:</p>
-<pre><code class="language-python">import time
-
-client = ControlPlaneAgentClient(
-    &quot;https://control-plane.example&quot;,
-    &quot;synthetic-short-lived-agent-session&quot;,
-    agent_id=&quot;claude-example&quot;,
-    project_root=&quot;/workspace/example&quot;,
-    deployment_id=&quot;deployment-example&quot;,
-    aws_agent_session=True,
-    managed_configuration_provider=lambda: measure_managed_configuration(
-        bundle,
-        source=ManagedConfigurationSource.MDM,
-        now=time.time(),
-    ),
-)
-client.heartbeat(&quot;synthetic-short-lived-agent-session&quot;)
-</code></pre>
-<p>The verifier is read-only and supports root-owned macOS/Linux managed files.
-It opens files without following symlinks, verifies regular-file type, root
-ownership, restrictive write permissions, a one-megabyte bound and exact
-reviewed bytes. Windows requires an ACL-aware deployment adapter and therefore
-fails closed in this provider-neutral verifier. File equality still does not
-prove that the host process loaded the file; the live action tests below remain
-mandatory.</p>
-<p>Never put credentials in an MCP definition. Use per-user OAuth, environment
-expansion, a credential helper, or the SDK credential broker. The generated
-MCP identity does not inspect arbitrary environment variables, so deployment
-policy must constrain those separately.</p>
-<h2 id="deployment-verification">Deployment verification</h2>
-<p>For each managed endpoint:</p>
+<p>The collector rejects unknown fields, duplicate identifiers, relative paths,
+symlinked binaries, non-regular binaries, oversized files, invalid digests,
+unsupported hosts, non-administrator execution and unavailable process
+inspection. A real POSIX run additionally requires the manifest to be a
+root-owned regular file with no group/world write bit. It uses the optional
+<code>endpoint</code> dependency (<code>psutil</code>) to inspect exact executable and working-
+directory pairs without invoking a shell. <code>processActive</code> is true only when
+both the executable and configured project root match. Access-denied or
+incomplete process enumeration fails the entire report rather than recording
+an unsafe false negative.</p>
+<p>Install the process adapter on sensor devices with
+<code>pip install 'agentic-security-sdk[endpoint]'</code>. The fleet job may use the core
+package because it verifies reports but does not inspect a local process table.</p>
+<p>Windows manifest ACL verification remains fail-closed until a dedicated ACL
+adapter can prove owner SID and write access. The current production reference
+sensor is therefore macOS/Linux; Intune may still deploy it to managed macOS
+devices and supply the device denominator for mixed fleets.</p>
+<p>Output contains only the canonical payload, key identifier and signature. Raw
+paths, process arguments, environment, usernames, prompts, commands and tool
+content are never emitted. <code>binaryPresent</code> is true only for a regular,
+executable, non-symlink file that matches the configured digest when one is
+present. <code>processActive</code> is true only when an inspected process has exact
+resolved executable-path and project-working-directory matches.</p>
+<h2 id="fleet-assembly-and-atomic-publication">Fleet assembly and atomic publication</h2>
+<p><code>scripts/assemble_endpoint_inventory.py</code> consumes:</p>
 <ol>
-<li>install every generated artifact and hook using an administrator-owned
-   channel;</li>
-<li>protect file ownership and permissions;</li>
-<li>restart the host and inspect its effective managed source;</li>
-<li>calculate the bundle hash from the exact installed bytes;</li>
-<li>send short-lived, authenticated evidence to the control plane;</li>
-<li>test an allowed action, a denied action, an approval-required action, and an
-   unapproved MCP server; and</li>
-<li>delete or weaken a local project file and prove effective authority does not
-   change.</li>
+<li>a current normalized Intune/MDM inventory containing only <code>device</code>
+   observations;</li>
+<li>a directory of signed endpoint reports; and</li>
+<li>a schema-1 key map whose entries bind <code>keyId</code>, <code>deviceId</code> and <code>secretEnv</code>.</li>
 </ol>
-<p>The SDK supplies compilation, protected-file measurement, authenticated
-heartbeat ingestion and desired-versus-observed reconciliation. It does not
-write privileged files or control host launch. The separate operator CLI can
-perform an explicit root installation after deployment-owned digest and hook
-verification; it is not invoked by the SDK or agent. When a managed bundle is
-assigned, the control plane blocks effective-policy and other governed agent
-routes until exact fresh evidence arrives. The UI must continue to label the
-deployment blocked until live action probes additionally prove that the host
-loaded and enforced the managed source.</p>
+<p>Every report must have an exact schema, a known non-revoked key, a matching
+device identity, a valid signature and a bounded age. Duplicate device reports,
+duplicate installation identities, reports for devices outside the
+authoritative inventory, missing secrets and malformed content fail the whole
+assembly. The job emits every authoritative device plus installations from all
+current authenticated reports. It does not silently drop a bad report and does
+not claim that a device record is installation evidence.</p>
+<p>The resulting file is passed to <code>publish_discovery_generation.py</code>, which
+commits all pages under one expected revision. Independent devices never write
+the endpoint source directly, avoiding last-writer-wins loss of the fleet.</p>
+<h2 id="deployment-journey">Deployment journey</h2>
+<ol>
+<li>Create a dedicated endpoint discovery source and store its one-time
+   publisher credential in the fleet job's secret manager.</li>
+<li>Export the current Intune device inventory with the managed Intune collector
+   or the standalone fixed-query adapter:</li>
+</ol>
+<p><code>bash
+   AZURE_GRAPH_TOKEN='&lt;from-secret-manager&gt;' \
+     python scripts/collect_discovery_inventory.py intune \
+     --mapping /secure-input/intune-business-units.json \
+     &gt; /secure-input/intune-devices.json</code></p>
+<p>The application credential needs only
+   <code>DeviceManagementManagedDevices.Read.All</code>; omit <code>--mapping</code> when business-
+   unit attribution is not required.
+3. Generate a unique random sensor secret per device. Deliver the manifest,
+   key identifier and secret with root/admin MDM controls. Do not use one fleet
+   shared secret.
+4. Run the sensor on a schedule shorter than the configured report maximum age
+   and collect its stdout as a protected artifact.
+5. Run the fleet assembler in an isolated job with key secrets injected as the
+   environment names declared by the key map.
+6. Review the path-free normalized inventory, publish one atomic generation,
+   and verify source freshness and Coverage posture separately.
+7. Rotate or revoke a device key on reassignment, loss or offboarding. Remove
+   stale reports under the enterprise retention policy.</p>
+<h2 id="platform-and-microsoft-constraints">Platform and Microsoft constraints</h2>
+<p>Microsoft Intune Discovered Apps and its v1.0 Graph <code>detectedApps</code> relationship
+can corroborate an installed application, but refresh timing varies and the
+record does not establish an active process or governed project root. Windows
+App inventory provides richer and faster installation metadata but still does
+not supply the required runtime/project evidence. Intune Remediations can run a
+detection script and export bounded output, but its Graph device-run-state API
+is beta. The reference publisher therefore keeps endpoint evidence
+provider-neutral and does not make beta Graph behavior a trust dependency.</p>
+<p>Official references:</p>
+<ul>
+<li><a href="https://learn.microsoft.com/en-us/intune/app-management/discovered-apps">Intune discovered apps</a></li>
+<li><a href="https://learn.microsoft.com/en-us/graph/api/resources/intune-devices-detectedapp?view=graph-rest-1.0">Microsoft Graph detectedApp v1.0</a></li>
+<li><a href="https://learn.microsoft.com/en-us/intune/app-management/deployment/enhanced-app-inventory">Windows app inventory</a></li>
+<li><a href="https://learn.microsoft.com/en-us/intune/device-management/tools/deploy-remediations">Intune Remediations</a></li>
+<li><a href="https://learn.microsoft.com/en-us/graph/api/resources/intune-devices-devicehealthscriptdevicestate?view=graph-rest-beta">deviceHealthScriptDeviceState beta API</a></li>
+</ul>
+<h2 id="security-acceptance-criteria">Security acceptance criteria</h2>
+<ul>
+<li>A sensor cannot run without administrator identity, a known device key and a
+  complete process view.</li>
+<li>Unknown manifest/report/key-map fields, duplicate identities and unsafe paths
+  fail closed.</li>
+<li>Binary evidence rejects symlinks, non-regular files, non-executable files and
+  configured digest mismatches.</li>
+<li>Process evidence binds exact executable and working-directory paths and never
+  invokes a shell.</li>
+<li>A changed payload, wrong key, cross-device report, revoked key, stale report,
+  unknown device or duplicate report makes fleet assembly fail.</li>
+<li>No raw path, secret, process argument, prompt, command or tool content reaches
+  normalized inventory or control-plane telemetry.</li>
+<li>The fleet assembler emits one complete snapshot input; only the existing
+  atomic generation commit can make it current.</li>
+</ul>
+<h2 id="remaining-production-acceptance">Remaining production acceptance</h2>
+<p>The implementation provides a deployable reference sensor and fleet assembly
+contract, not hardware-backed attestation or an MDM product package. Enterprise
+acceptance still requires root/admin rollout through the customer's Intune or
+Jamf tenant, independent verification of file ownership and secret delivery,
+successful reports from at least 95% of the agreed pilot, explicit review of
+the remaining devices, and UI health visibility for sensor/report freshness.</p>
 
 
 

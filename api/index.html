@@ -667,6 +667,60 @@
   
   
     <li class="md-nav__item">
+      <a href="../endpoint-evidence-publisher-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint evidence publisher
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint evidence publisher acceptance — 2026-08-01
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dynamic-groups-design/" class="md-nav__link">
         
   
@@ -52255,8 +52309,17 @@ reconciling the expected Claude Code and Codex population with enrolled agents:<
 current. See <a href="../agent-discovery-design/">Agent population discovery</a> for exact
 schemas, limits, credential handling, commit semantics, and trust boundaries.
 The repository's <code>collect_discovery_inventory.py</code> reference adapters normalize
-Entra Graph, deployment-owned endpoint exports, and GitHub repository inventory;
-<code>publish_discovery_generation.py</code> performs the bounded three-phase upload.</p>
+Entra Graph, deployment-owned endpoint exports, and GitHub repository inventory.
+For endpoint fleets, <code>collect_endpoint_evidence.py</code> produces a path-free,
+per-device signed installation/process report and
+<code>assemble_endpoint_inventory.py</code> validates every current report against the
+authoritative MDM device inventory before producing one complete endpoint
+export. The <code>intune</code> mode of <code>collect_discovery_inventory.py</code> obtains that
+device file from the fixed Microsoft Graph v1.0 managed-devices query with only
+opaque device/user IDs and optional reviewed business-unit mappings.
+<code>publish_discovery_generation.py</code> performs the bounded three-phase upload. See
+<a href="../endpoint-evidence-publisher-design/">Endpoint evidence publisher</a> for the
+manifest, key, privilege and freshness boundaries.</p>
 
 
 

@@ -747,6 +747,60 @@
   
   
     <li class="md-nav__item">
+      <a href="../endpoint-evidence-publisher-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint evidence publisher
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint evidence publisher acceptance — 2026-08-01
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dynamic-groups-design/" class="md-nav__link">
         
   
@@ -1925,6 +1979,20 @@ administrator checks, exact restrictive files, hook tamper denial, symlink
 denial and reverse-order restoration after an injected second-file failure.
 Real root-owned host loading and MDM acceptance remain separate evidence; see
 <a href="../managed-endpoint-deployment-design/">Managed endpoint deployment</a>.</p>
+<p><code>tests/test_endpoint_evidence_publisher.py</code> covers the production-shaped
+endpoint discovery handoff. It proves administrator-only collection, exact
+binary/process measurement, path and secret minimisation, symlink and binary
+tamper behavior, per-device signature binding, stale/revoked/cross-device and
+duplicate-report rejection, unknown-field denial, exact MDM metadata matching,
+and compatibility with the existing endpoint normalizer. Real MDM rollout and
+95% pilot report freshness remain deployment acceptance; see
+<a href="../endpoint-evidence-publisher-design/">Endpoint evidence publisher</a>.
+<code>scripts/test_endpoint_evidence.py</code> is the isolated root/admin acceptance
+command. With the <code>endpoint</code> extra installed, it measures the live Python
+process and executable, proves that temporary paths and the synthetic secret do
+not enter the signed report, assembles against an authoritative synthetic
+device inventory, passes the existing endpoint normalizer, and rejects a
+changed signed report.</p>
 <p><code>scripts/test_aws_entra_scim.py</code> is the live Microsoft Entra provisioning
 acceptance command. It discovers Entra and SCIM status from the selected
 CloudFormation stack, resolves the dedicated bearer directly from Secrets
