@@ -7263,6 +7263,16 @@ def test_aws_endpoint_detection_is_scheduled_bounded_and_monitored() -> None:
     assert "SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn" in stack
 
 
+def test_aws_evidence_worker_declares_its_bounded_recursive_queue_workflow() -> None:
+    """Lambda recursion protection must not truncate intentional paginated work."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    assert "recursiveLoop: lambda.RecursiveLoop.ALLOW" in stack
+    assert "reservedConcurrentExecutions: 5" in stack
+    assert "deadLetterQueue: { queue: evidenceWorkerDlq, maxReceiveCount: 3 }" in stack
+
+
 def test_agent_replacement_rolls_back_when_group_membership_changes_concurrently(
     monkeypatch: Any,
 ) -> None:

@@ -625,6 +625,13 @@ export class AwsControlPlaneStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
       timeout: cdk.Duration.seconds(60),
       memorySize: 1024,
+      // This worker intentionally advances one revision-bound page by sending
+      // the next exact revision to its dedicated FIFO queue. Lambda otherwise
+      // terminates that valid chain after roughly 16 invocations. Application
+      // page limits, optimistic revisions, FIFO deduplication, reserved
+      // concurrency, retries, the DLQ and alarms remain the runaway controls.
+      recursiveLoop: lambda.RecursiveLoop.ALLOW,
+      reservedConcurrentExecutions: 5,
       environment: controlPlaneEnvironment,
       tracing: lambda.Tracing.PASS_THROUGH,
     });
