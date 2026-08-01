@@ -3027,7 +3027,7 @@ def _ensure_active_policy_signature(tenant, policy):
         raise PolicyConflict("active policy has no valid version")
     record = _policy_version_record(tenant, policy["id"], version)
     try:
-        bundle_from_record(tenant, policy["id"], version, record)
+        bundle_from_record(tenant, policy["id"], version, _json(record))
         return policy
     except RuntimeError:
         pass
@@ -3062,7 +3062,7 @@ def _ensure_active_policy_signature(tenant, policy):
         if not _is_conditional_conflict(error):
             raise
         current = _policy_version_record(tenant, policy["id"], version)
-        bundle_from_record(tenant, policy["id"], version, current)
+        bundle_from_record(tenant, policy["id"], version, _json(current))
     return policy
 
 
@@ -3072,7 +3072,7 @@ def _active_policy_bundle(tenant, policy):
     governed = _ensure_active_policy_signature(tenant, governed)
     version = int(governed.get("version", 0))
     record = _policy_version_record(tenant, governed["id"], version)
-    return bundle_from_record(tenant, governed["id"], version, record)
+    return bundle_from_record(tenant, governed["id"], version, _json(record))
 
 
 def _policy_trust_metadata():
