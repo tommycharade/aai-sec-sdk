@@ -189,6 +189,14 @@ and denied authority cannot become execution. The enrolled AWS client treats a
 missing or false `controlState.executionAllowed` as a dependency failure after
 submitting heartbeat evidence.
 
+Case-export contracts additionally prove canonical evidence-role enforcement,
+exact captured-binding correlation, strong bounded reads, no raw project paths
+or approval narrative, deterministic package hashes and immutable-audit
+receipt binding. The offline verifier accepts an unchanged synthetic artifact
+and rejects changed outer content, invalid per-event hashes, unsafe capture
+flags and rehashed free-form approval text. UI tests prove cryptographic
+verification happens before the browser creates a download.
+
 The local contract suite uses synthetic fakes for OPA, Cedar, approval, IAM,
 idempotency, remote audit, and isolation boundaries. These tests verify request
 shape, binding, malformed-response handling, and fail-closed behavior. They do

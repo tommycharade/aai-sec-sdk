@@ -1,5 +1,10 @@
 # Changelog
 
+- Added audit-ready incident case export with canonical SHA-256 content
+  integrity, immutable audit-receipt binding, refusal rather than evidence
+  truncation, free-form narrative exclusion, an offline verifier and a
+  browser workflow that verifies before download.
+
 - Added revisioned incident cases with authoritative endpoint-to-agent
   correlation, evidence-preserving quarantine, independent response scopes,
   session-authority revocation, guarded recovery/release and content-minimised
