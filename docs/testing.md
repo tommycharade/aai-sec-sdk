@@ -60,6 +60,21 @@ denial and reverse-order restoration after an injected second-file failure.
 Real root-owned host loading and MDM acceptance remain separate evidence; see
 [Managed endpoint deployment](managed-endpoint-deployment-design.md).
 
+`tests/test_endpoint_evidence_publisher.py` covers the production-shaped
+endpoint discovery handoff. It proves administrator-only collection, exact
+binary/process measurement, path and secret minimisation, symlink and binary
+tamper behavior, per-device signature binding, stale/revoked/cross-device and
+duplicate-report rejection, unknown-field denial, exact MDM metadata matching,
+and compatibility with the existing endpoint normalizer. Real MDM rollout and
+95% pilot report freshness remain deployment acceptance; see
+[Endpoint evidence publisher](endpoint-evidence-publisher-design.md).
+`scripts/test_endpoint_evidence.py` is the isolated root/admin acceptance
+command. With the `endpoint` extra installed, it measures the live Python
+process and executable, proves that temporary paths and the synthetic secret do
+not enter the signed report, assembles against an authoritative synthetic
+device inventory, passes the existing endpoint normalizer, and rejects a
+changed signed report.
+
 `scripts/test_aws_entra_scim.py` is the live Microsoft Entra provisioning
 acceptance command. It discovers Entra and SCIM status from the selected
 CloudFormation stack, resolves the dedicated bearer directly from Secrets

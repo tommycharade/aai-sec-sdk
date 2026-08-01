@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import ssl
 import sys
 import urllib.error
@@ -27,6 +28,9 @@ import certifi
 _MAX_PROVIDER_PAGES = 100
 _TIMEOUT_SECONDS = 15.0
 _SUPPORTED_HOSTS = frozenset({"claude-code", "codex-cli"})
+_UUID_PATTERN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+)
 
 
 class DiscoveryCollectionError(RuntimeError):
@@ -113,6 +117,113 @@ def collect_entra_users(
             raise DiscoveryCollectionError("Entra pagination link is invalid")
         url = next_url
     raise DiscoveryCollectionError("Entra pagination exceeded the 100-page bound")
+
+
+def _intune_url(value: str) -> str:
+    """Constrain Intune pagination to the selected managed-device fields."""
+    parsed = urllib.parse.urlsplit(value)
+    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "graph.microsoft.com"
+        or parsed.path != "/v1.0/deviceManagement/managedDevices"
+        or parsed.fragment
+        or set(query) - {"$select", "$top", "$skiptoken"}
+        or query.get("$select") != ["id,userId"]
+        or query.get("$top") != ["100"]
+        or len(query.get("$skiptoken", [])) > 1
+        or any(len(item) > 1_024 for item in query.get("$skiptoken", []))
+    ):
+        raise DiscoveryCollectionError("Intune pagination escaped the managed-device query")
+    return value
+
+
+def _intune_business_units(path: Path | None) -> dict[str, str]:
+    """Read an optional exact map from opaque Entra user ID to reporting label."""
+    if path is None:
+        return {}
+    value = _read_json(path, "Intune business-unit mapping")
+    rows = (
+        value.get("userBusinessUnits")
+        if isinstance(value, dict) and set(value) == {"userBusinessUnits"}
+        else None
+    )
+    if not isinstance(rows, list) or len(rows) > 500:
+        raise DiscoveryCollectionError("Intune business-unit mapping has an invalid schema")
+    result: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"userId", "businessUnit"}:
+            raise DiscoveryCollectionError("Intune business-unit mapping row is invalid")
+        user_id = row.get("userId")
+        business_unit = row.get("businessUnit")
+        if (
+            not isinstance(user_id, str)
+            or _UUID_PATTERN.fullmatch(user_id) is None
+            or user_id in result
+            or not isinstance(business_unit, str)
+            or not business_unit.strip()
+            or len(business_unit.strip()) > 128
+        ):
+            raise DiscoveryCollectionError("Intune business-unit mapping row is invalid")
+        result[user_id] = business_unit.strip()
+    return result
+
+
+def collect_intune_devices(
+    token: str,
+    mapping_path: Path | None = None,
+    *,
+    get_json: Callable[..., Any] = _get_json,
+) -> list[dict[str, Any]]:
+    """Collect opaque managed-device and optional user IDs from Intune v1.0."""
+    business_units = _intune_business_units(mapping_path)
+    url: str | None = (
+        "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices"
+        "?$select=id,userId&$top=100"
+    )
+    observations: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for _ in range(_MAX_PROVIDER_PAGES):
+        if url is None:
+            return observations
+        page = get_json(_intune_url(url), token, allowed_host="graph.microsoft.com")
+        if not isinstance(page, dict) or set(page) - {
+            "value",
+            "@odata.nextLink",
+            "@odata.context",
+        }:
+            raise DiscoveryCollectionError("Intune returned an invalid managed-devices page")
+        devices = page.get("value")
+        if not isinstance(devices, list) or len(devices) > 100:
+            raise DiscoveryCollectionError("Intune returned an invalid managed-devices page")
+        for device in devices:
+            if not isinstance(device, dict) or set(device) - {"id", "userId"}:
+                raise DiscoveryCollectionError("Intune device record has an unexpected schema")
+            identifier = device.get("id")
+            user_id = device.get("userId")
+            if (
+                not isinstance(identifier, str)
+                or _UUID_PATTERN.fullmatch(identifier) is None
+                or identifier in seen
+                or user_id not in (None, "")
+                and (not isinstance(user_id, str) or _UUID_PATTERN.fullmatch(user_id) is None)
+            ):
+                raise DiscoveryCollectionError("Intune device identity is invalid")
+            seen.add(identifier)
+            observation: dict[str, Any] = {
+                "kind": "device",
+                "id": identifier,
+                "managed": True,
+                "userIds": [user_id] if user_id else [],
+            }
+            if user_id in business_units:
+                observation["businessUnit"] = business_units[user_id]
+            observations.append(observation)
+        next_url = page.get("@odata.nextLink")
+        if next_url is not None and not isinstance(next_url, str):
+            raise DiscoveryCollectionError("Intune pagination link is invalid")
+        url = next_url
+    raise DiscoveryCollectionError("Intune pagination exceeded the 100-page bound")
 
 
 def _read_json(path: Path, label: str) -> Any:
@@ -245,6 +356,9 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="source", required=True)
     entra = subparsers.add_parser("entra")
     entra.add_argument("--token-env", default="AZURE_GRAPH_TOKEN")
+    intune = subparsers.add_parser("intune")
+    intune.add_argument("--mapping", type=Path)
+    intune.add_argument("--token-env", default="AZURE_GRAPH_TOKEN")
     github = subparsers.add_parser("github")
     github.add_argument("--organization", required=True)
     github.add_argument("--mapping", required=True, type=Path)
@@ -260,6 +374,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if arguments.source == "entra":
             observations = collect_entra_users(os.environ.get(arguments.token_env, ""))
+        elif arguments.source == "intune":
+            observations = collect_intune_devices(
+                os.environ.get(arguments.token_env, ""), arguments.mapping
+            )
         elif arguments.source == "github":
             observations = collect_github_repositories(
                 arguments.organization,

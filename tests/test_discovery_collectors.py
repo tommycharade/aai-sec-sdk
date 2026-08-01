@@ -52,6 +52,81 @@ def test_entra_collector_rejects_unrequested_sensitive_fields() -> None:
         )
 
 
+def test_intune_collector_is_path_bounded_and_content_minimised(tmp_path: Path) -> None:
+    module = _module()
+    mapping = tmp_path / "mapping.json"
+    mapping.write_text(
+        json.dumps(
+            {
+                "userBusinessUnits": [
+                    {
+                        "userId": "33333333-3333-4333-8333-333333333333",
+                        "businessUnit": "Platform",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    pages = iter(
+        [
+            {
+                "value": [
+                    {
+                        "id": "11111111-1111-4111-8111-111111111111",
+                        "userId": "33333333-3333-4333-8333-333333333333",
+                    }
+                ],
+                "@odata.nextLink": (
+                    "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices"
+                    "?$select=id,userId&$top=100&$skiptoken=synthetic"
+                ),
+            },
+            {"value": []},
+        ]
+    )
+    result = module.collect_intune_devices(
+        "synthetic-graph-token",  # noqa: S106
+        mapping,
+        get_json=lambda *_args, **_kwargs: next(pages),
+    )
+    assert result == [
+        {
+            "kind": "device",
+            "id": "11111111-1111-4111-8111-111111111111",
+            "managed": True,
+            "userIds": ["33333333-3333-4333-8333-333333333333"],
+            "businessUnit": "Platform",
+        }
+    ]
+    assert "deviceName" not in json.dumps(result)
+
+
+def test_intune_collector_rejects_broader_pagination_and_sensitive_fields() -> None:
+    module = _module()
+    with pytest.raises(module.DiscoveryCollectionError, match="escaped"):
+        module.collect_intune_devices(
+            "synthetic-graph-token",  # noqa: S106
+            get_json=lambda *_args, **_kwargs: {
+                "value": [],
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/users?$top=100",
+            },
+        )
+    with pytest.raises(module.DiscoveryCollectionError, match="unexpected schema"):
+        module.collect_intune_devices(
+            "synthetic-graph-token",  # noqa: S106
+            get_json=lambda *_args, **_kwargs: {
+                "value": [
+                    {
+                        "id": "11111111-1111-4111-8111-111111111111",
+                        "userId": None,
+                        "deviceName": "sensitive",
+                    }
+                ]
+            },
+        )
+
+
 def test_github_collector_requires_deployment_owned_project_mapping(tmp_path: Path) -> None:
     module = _module()
     mapping = tmp_path / "mapping.json"

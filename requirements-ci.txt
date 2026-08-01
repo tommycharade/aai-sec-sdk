@@ -10,6 +10,7 @@ opentelemetry-api==1.42.1
 pip-audit==2.10.1
 mutmut==3.6.0
 pre-commit==4.6.1
+psutil==7.2.2
 pytest==9.0.3
 pytest-cov==7.1.0
 ruff==0.15.17

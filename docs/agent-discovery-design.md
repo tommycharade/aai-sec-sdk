@@ -188,9 +188,34 @@ never command arguments or output.
 AZURE_GRAPH_TOKEN='<from-secret-manager>' \
   python scripts/collect_discovery_inventory.py entra > /tmp/entra-inventory.json
 
-# Endpoint inventory uses an exact deployment-owned JSON export schema.
+# For a small pilot, endpoint inventory accepts an exact deployment-owned export.
 python scripts/collect_discovery_inventory.py endpoint \
   --input /path/to/synthetic-or-managed-endpoint-export.json \
+  > /tmp/endpoint-inventory.json
+
+# For a managed fleet, run the endpoint sensor as root/admin on each device.
+# The key value is injected by MDM and never supplied as a command argument.
+AAI_ENDPOINT_EVIDENCE_KEY='<per-device-secret>' \
+  python scripts/collect_endpoint_evidence.py \
+  --manifest /var/lib/aai-security/endpoint-evidence-manifest.json \
+  --key-id device-a-2026-08 \
+  > /protected-reports/device-a.json
+
+# In one isolated central job, join all authenticated reports to the current
+# normalized MDM device inventory. Key-map entries name injected secret env vars.
+AZURE_GRAPH_TOKEN='<from-secret-manager>' \
+  python scripts/collect_discovery_inventory.py intune \
+  --mapping /protected-input/intune-business-units.json \
+  > /protected-input/intune-devices.json
+
+python scripts/assemble_endpoint_inventory.py \
+  --device-inventory /protected-input/intune-devices.json \
+  --reports-directory /protected-reports \
+  --key-map /protected-input/endpoint-key-map.json \
+  > /tmp/endpoint-fleet-export.json
+
+python scripts/collect_discovery_inventory.py endpoint \
+  --input /tmp/endpoint-fleet-export.json \
   > /tmp/endpoint-inventory.json
 
 # GitHub requires a reviewed map from repository full name to a SHA-256 project
@@ -217,6 +242,10 @@ store them in an access-controlled temporary location and remove them under the
 deployment retention policy. For scheduled operation, run collection and
 publication in one isolated job with a secret-manager injection and no shell
 history substitution.
+
+See [Endpoint evidence publisher](endpoint-evidence-publisher-design.md) for
+the exact sensor manifest, fleet key map, MDM deployment and remaining
+hardware-attestation limitations.
 
 ## Security acceptance criteria
 
