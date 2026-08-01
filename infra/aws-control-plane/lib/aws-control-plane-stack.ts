@@ -21,6 +21,8 @@ import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as subscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as events from "aws-cdk-lib/aws-events";
+import * as eventTargets from "aws-cdk-lib/aws-events-targets";
 
 const runtimeManifestFields = new Set([
   "schemaVersion",
@@ -222,6 +224,14 @@ export class AwsControlPlaneStack extends cdk.Stack {
       sortKey: { name: "timeline_sk", type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     });
+    table.addGlobalSecondaryIndex({
+      indexName: "EndpointDetectionTenants",
+      partitionKey: { name: "endpoint_detection_pk", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "endpoint_detection_sk", type: dynamodb.AttributeType.STRING },
+      // Only tenant registration fields are needed to schedule reconciliation.
+      // Endpoint reports and credentials remain outside this cross-tenant index.
+      projectionType: dynamodb.ProjectionType.KEYS_ONLY,
+    });
 
     const presence = new dynamodb.Table(this, "PresenceTable", {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
@@ -334,6 +344,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
       visibilityTimeout: cdk.Duration.seconds(60),
       retentionPeriod: cdk.Duration.days(14),
       deadLetterQueue: { queue: securityAlertsDlq, maxReceiveCount: 5 },
+      enforceSSL: true,
+    });
+    const endpointDetectionDlq = new sqs.Queue(this, "EndpointDetectionDlq", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     securityAlerts.addSubscription(
@@ -508,6 +523,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
         SCIM_ENABLED: entraScimTokenSecretName ? "true" : "false",
         SCIM_TABLE: scim.tableName,
         SPLUNK_STUB_ENABLED: "true",
+        SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn,
         RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
         RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
       },
@@ -522,7 +538,25 @@ export class AwsControlPlaneStack extends cdk.Stack {
     idempotency.grantReadWriteData(handler);
     scim.grantReadWriteData(handler);
     audit.grantPut(handler);
+    securityAlerts.grantPublish(handler);
     handler.addToRolePolicy(new iam.PolicyStatement({ actions: ["sts:AssumeRole"], resources: [scopedToolRole.roleArn] }));
+
+    const endpointDetectionRule = new events.Rule(this, "EndpointDetectionSchedule", {
+      description: "Reconcile tenant endpoint evidence and persist actionable detections",
+      schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+      enabled: true,
+    });
+    endpointDetectionRule.addTarget(
+      new eventTargets.LambdaFunction(handler, {
+        event: events.RuleTargetInput.fromObject({
+          source: "aai.endpoint-detection",
+          schemaVersion: 1,
+        }),
+        deadLetterQueue: endpointDetectionDlq,
+        maxEventAge: cdk.Duration.hours(1),
+        retryAttempts: 2,
+      }),
+    );
 
     const api = new apigwv2.HttpApi(this, "ControlPlaneApi", {
       apiName: "aai-sec-control-plane",
@@ -734,6 +768,21 @@ export class AwsControlPlaneStack extends cdk.Stack {
       },
     );
     discoveryCollectorDeadLetters.addAlarmAction(new cloudwatchActions.SnsAction(securityAlerts));
+    const endpointDetectionDeadLetters = new cloudwatch.Alarm(
+      this,
+      "EndpointDetectionDeadLetters",
+      {
+        metric: endpointDetectionDlq.metricApproximateNumberOfMessagesVisible({
+          period: cdk.Duration.minutes(5),
+          statistic: "Maximum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        alarmDescription: "Endpoint detection reconciliation exhausted bounded retries.",
+      },
+    );
+    endpointDetectionDeadLetters.addAlarmAction(new cloudwatchActions.SnsAction(securityAlerts));
     const controlPlaneThrottles = new cloudwatch.Alarm(this, "ControlPlaneThrottles", {
       metric: handler.metricThrottles({ period: cdk.Duration.minutes(5), statistic: "Sum" }),
       threshold: 1,
@@ -768,6 +817,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "SecurityAlertsTopicArn", { value: securityAlerts.topicArn });
     new cdk.CfnOutput(this, "SecurityAlertsQueueArn", { value: securityAlertsQueue.queueArn });
     new cdk.CfnOutput(this, "SecurityAlertsDlqArn", { value: securityAlertsDlq.queueArn });
+    new cdk.CfnOutput(this, "EndpointDetectionDlqArn", { value: endpointDetectionDlq.queueArn });
     new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });
     new cdk.CfnOutput(this, "DiscoveryProviderSecretNamePrefix", {
       value: providerSecretPrefix,

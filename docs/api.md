@@ -509,3 +509,10 @@ manifest, key, privilege and freshness boundaries, and
 [hosted endpoint evidence](hosted-endpoint-evidence.md) for credential,
 ingestion and health APIs. The service derives health; endpoint reports never
 carry authority or a submitted health label.
+
+`GET /enterprise/alerts` reconciles and returns content-minimised endpoint
+detections to authorized security operators. `POST
+/enterprise/alerts/{alertId}/acknowledge` requires `incident_response`, an exact
+live revision and a redaction-safe investigation rationale. Acknowledgement is
+ownership evidence, not remediation. See [Endpoint detection and
+response](endpoint-detection-response.md).

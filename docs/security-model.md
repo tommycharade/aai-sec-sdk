@@ -754,3 +754,7 @@ See [Endpoint evidence publisher](endpoint-evidence-publisher-design.md).
 The [hosted endpoint evidence channel](hosted-endpoint-evidence.md) stores only
 credential digests, binds reports to current MDM devices, rejects altered,
 stale, replayed and cross-tenant evidence, and derives health server-side.
+Endpoint detections are also server-derived. A device cannot choose severity,
+alert state, acknowledgement or containment. Scheduled reconciliation uses a
+deployment-owned sharded tenant index. Notification failure leaves a durable
+pending alert for retry; it never converts the health condition into success.

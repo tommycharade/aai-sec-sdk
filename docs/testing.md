@@ -79,7 +79,13 @@ changed signed report.
 in `tests/test_aws_lambda_contract.py` prove HTTPS-only secret-safe transport,
 MDM-bound issuance, HMAC verification, idempotent retry, cross-tenant denial,
 tamper denial and server-derived stale posture. They are software/API evidence;
-real MDM rollout remains separate acceptance.
+real MDM rollout remains separate acceptance. The hosted contracts also cover
+scheduled tenant discovery, bounded failure propagation to EventBridge,
+root-cause alert deduplication, signature/replay event alerts, normalized SNS
+delivery, incident-response RBAC, optimistic acknowledgement,
+credential-shaped rationale rejection and automatic health-alert resolution.
+The Splunk status remains a non-delivering stub and is not accepted as SIEM
+evidence.
 
 `scripts/test_aws_entra_scim.py` is the live Microsoft Entra provisioning
 acceptance command. It discovers Entra and SCIM status from the selected

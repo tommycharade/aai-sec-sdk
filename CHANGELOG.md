@@ -1,5 +1,10 @@
 # Changelog
 
+- Added scheduled, tenant-isolated endpoint detections with deduplicated
+  durable alert lifecycle, SNS/SQS delivery, audited incident-response
+  acknowledgement, monitored retry exhaustion and an operator-first
+  investigation workflow while keeping Splunk explicitly stubbed.
+
 - Added hosted, tenant-isolated endpoint evidence ingestion with per-device
   credential rotation/revocation, HMAC verification, replay protection,
   server-derived freshness, a secret-safe publisher and operator UI.

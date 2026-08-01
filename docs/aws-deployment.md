@@ -454,6 +454,12 @@ checks the deployed audit bucket's compliance retention, versioning, and
 inability to delete a retained object version, and publishes a synthetic alert
 through SNS to verify delivery into the durable SQS operations queue.
 
+Endpoint detection adds a five-minute EventBridge rule, a sharded tenant GSI,
+a dedicated retry-exhaustion DLQ and a CloudWatch alarm. New endpoint alerts
+are normalized onto the existing SNS/SQS operations channel. This is a real
+AWS operations path; the separately displayed Splunk integration remains a
+non-delivering stub.
+
 The first deployment is verified by:
 
 1. CloudFront returning the hosted UI with HTTP 200.

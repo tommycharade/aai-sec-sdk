@@ -86,6 +86,11 @@ class FakeTable:
         item = self.items.get(key)
         if item is None:
             raise ConditionalFailure()
+        if ":partition" in ExpressionAttributeValues and ":tenant" in ExpressionAttributeValues:
+            item["endpoint_detection_pk"] = ExpressionAttributeValues[":partition"]
+            item["endpoint_detection_sk"] = ExpressionAttributeValues[":tenant"]
+            self.items[key] = item
+            return {"Attributes": dict(item)}
         if ":active" in ExpressionAttributeValues and ":one" in ExpressionAttributeValues:
             if "lifecycle_state" in item or "lifecycle_revision" in item:
                 raise ConditionalFailure()
@@ -269,6 +274,17 @@ class FakeS3:
         return None
 
 
+class FakeSns:
+    """Capture normalized alert notifications without external delivery."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    def publish(self, **value: Any) -> dict[str, str]:
+        self.messages.append(dict(value))
+        return {"MessageId": "synthetic-message"}
+
+
 class FakeCondition:
     """Composable placeholder for boto3 key expressions ignored by FakeTable."""
 
@@ -288,9 +304,14 @@ def _load_handler(monkeypatch: Any) -> Any:
     boto3.resource = (  # type: ignore[attr-defined]
         lambda *_args, **_kwargs: types.SimpleNamespace(Table=lambda _name: table)
     )
+    fake_sns = FakeSns()
     boto3.client = (  # type: ignore[attr-defined]
         lambda service, *_args, **_kwargs: (
-            FakeDynamoClient(table) if service == "dynamodb" else FakeS3()
+            FakeDynamoClient(table)
+            if service == "dynamodb"
+            else fake_sns
+            if service == "sns"
+            else FakeS3()
         )
     )
     dynamodb = types.ModuleType("boto3.dynamodb")
@@ -313,6 +334,7 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("SCIM_ENABLED", "false")
     monkeypatch.setenv("SCIM_TABLE", "")
     monkeypatch.setenv("SPLUNK_STUB_ENABLED", "true")
+    monkeypatch.setenv("SECURITY_ALERTS_TOPIC_ARN", "arn:aws:sns:eu-west-2:111111111111:test")
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/handler.py"
     spec = importlib.util.spec_from_file_location("aai_lambda_handler", path)
     assert spec and spec.loader
@@ -4342,6 +4364,26 @@ def test_hosted_endpoint_evidence_is_tenant_bound_signed_and_server_derived(
         ]
         == 403
     )
+    replayed = json.loads(json.dumps(tampered))
+    replayed["signature"] = hmac.new(
+        issued["secret"].encode(),
+        json.dumps(replayed["payload"], sort_keys=True, separators=(",", ":")).encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    assert (
+        _invoke(module, _event(ingest_path, "POST", body=replayed, token=issued["secret"]))[
+            "statusCode"
+        ]
+        == 409
+    )
+    security_alerts = json.loads(
+        _invoke(module, _event("/api/enterprise/alerts", "GET", claims=platform))["body"]
+    )["items"]
+    assert {item["reasonCode"] for item in security_alerts} == {
+        "signature_invalid",
+        "report_replayed",
+    }
+    assert all(item["status"] == "open" for item in security_alerts)
     assert (
         _invoke(
             module,
@@ -4441,6 +4483,281 @@ def test_endpoint_credential_requires_current_managed_inventory(monkeypatch: Any
         ]
         == 409
     )
+
+
+def test_endpoint_alerts_are_deduplicated_delivered_acknowledged_and_resolved(
+    monkeypatch: Any,
+) -> None:
+    """One health condition has durable lifecycle, delivery and audited ownership."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-endpoint-alerts"
+    now = 2_100_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-endpoint-alerts",
+    }
+    responder = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["incident-responder"],
+        "sub": "responder-endpoint-alerts",
+    }
+    snapshot = _discovery_snapshot(
+        "endpoint", [{"kind": "device", "id": "device-a", "managed": True}], now=now
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/discovery/sources/intune/snapshots",
+                "POST",
+                body=snapshot,
+                claims=platform,
+            ),
+        )["statusCode"]
+        == 201
+    )
+    listed = _invoke(module, _event("/api/enterprise/alerts", "GET", claims=responder))
+    assert listed["statusCode"] == 200
+    alerts = json.loads(listed["body"])["items"]
+    assert len(alerts) == 1
+    alert = alerts[0]
+    assert alert["type"] == "endpoint_sensor_not_enrolled"
+    assert alert["status"] == "open"
+    assert alert["deliveryStatus"] == "delivered"
+    assert alert["occurrenceCount"] == 1
+    assert len(module.SNS.messages) == 1
+    notification = json.dumps(module.SNS.messages[0])
+    assert "device-a" in notification
+    assert "secret" not in notification.lower()
+    repeated = json.loads(
+        _invoke(module, _event("/api/enterprise/alerts", "GET", claims=responder))["body"]
+    )["items"]
+    assert repeated[0]["revision"] == alert["revision"]
+    assert repeated[0]["occurrenceCount"] == 1
+    assert len(module.SNS.messages) == 1
+    fleet_operator = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-endpoint-alerts",
+    }
+    path = f"/api/enterprise/alerts/{alert['id']}/acknowledge"
+    denied = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={"expectedRevision": alert["revision"], "reason": "Synthetic response owned."},
+            claims=fleet_operator,
+        ),
+    )
+    assert denied["statusCode"] == 403
+    secret_reason = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                "expectedRevision": alert["revision"],
+                "reason": "Investigating with token=synthetic-sensitive-value",
+            },
+            claims=responder,
+        ),
+    )
+    assert secret_reason["statusCode"] == 400
+    assert "credential material" in json.loads(secret_reason["body"])["error"]
+    acknowledged = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                "expectedRevision": alert["revision"],
+                "reason": "Investigating missing enrollment with endpoint engineering.",
+            },
+            claims=responder,
+        ),
+    )
+    assert acknowledged["statusCode"] == 200
+    acknowledged_body = json.loads(acknowledged["body"])
+    assert acknowledged_body["status"] == "acknowledged"
+    assert acknowledged_body["acknowledgedBy"] == responder["sub"]
+    stale_ack = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                "expectedRevision": alert["revision"],
+                "reason": "Duplicate acknowledgement must fail closed safely.",
+            },
+            claims=responder,
+        ),
+    )
+    assert stale_ack["statusCode"] == 409
+
+    credential_path = "/api/enterprise/endpoint-evidence/devices/device-a/credential"
+    issued_response = _invoke(
+        module,
+        _event(credential_path, "POST", body={"expectedRevision": 0}, claims=platform),
+    )
+    issued = json.loads(issued_response["body"])
+    payload = {
+        "schemaVersion": 1,
+        "observedAt": now,
+        "device": {"id": "device-a", "managed": True},
+        "installations": [
+            {
+                "id": "installation-a",
+                "deviceId": "device-a",
+                "host": "claude-code",
+                "projectRootDigest": "a" * 64,
+                "binaryPresent": True,
+                "processActive": True,
+            }
+        ],
+    }
+    report = {
+        "keyId": issued["keyId"],
+        "payload": payload,
+        "signature": hmac.new(
+            issued["secret"].encode(),
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
+            hashlib.sha256,
+        ).hexdigest(),
+    }
+    assert (
+        _invoke(
+            module,
+            _event(
+                f"/api/endpoint-evidence/{tenant}/device-a",
+                "POST",
+                body=report,
+                token=issued["secret"],
+            ),
+        )["statusCode"]
+        == 202
+    )
+    assert (
+        _invoke(module, _event("/api/enterprise/endpoint-evidence", "GET", claims=responder))[
+            "statusCode"
+        ]
+        == 200
+    )
+    resolved = json.loads(
+        _invoke(module, _event("/api/enterprise/alerts", "GET", claims=responder))["body"]
+    )["items"]
+    assert resolved[0]["status"] == "resolved"
+    assert resolved[0]["resolvedAt"] == now
+
+
+def test_endpoint_detection_schedule_materializes_stale_health(monkeypatch: Any) -> None:
+    """The bounded scheduled path finds registered tenants without a browser poll."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-endpoint-schedule"
+    now = 2_200_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-endpoint-schedule",
+    }
+    snapshot = _discovery_snapshot(
+        "endpoint", [{"kind": "device", "id": "device-a", "managed": True}], now=now
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/discovery/sources/intune/snapshots",
+                "POST",
+                body=snapshot,
+                claims=platform,
+            ),
+        )["statusCode"]
+        == 201
+    )
+    registration = table.items[(f"TENANT#{tenant}", "TENANT#root")]
+    assert registration["endpoint_detection_pk"].startswith("ENDPOINT_DETECTION#")
+    monkeypatch.setattr(module.time, "time", lambda: now + 301)
+    result = module.handler({"source": "aai.endpoint-detection", "schemaVersion": 1}, None)
+    assert result == {"processedTenants": 1, "failedTenants": 0}
+    alerts = [value for value in table.items.values() if value.get("source") == "endpoint_evidence"]
+    assert {alert["reasonCode"] for alert in alerts} == {
+        "credential_not_configured",
+        "inventory_stale",
+    }
+    assert all(alert["deliveryStatus"] == "delivered" for alert in alerts)
+    assert len(module.SNS.messages) == 2
+    monkeypatch.setattr(
+        module,
+        "_endpoint_detection_cycle",
+        lambda: (_ for _ in ()).throw(RuntimeError("synthetic scheduled failure")),
+    )
+    with pytest.raises(RuntimeError, match="synthetic scheduled failure"):
+        module.handler({"source": "aai.endpoint-detection", "schemaVersion": 1}, None)
+
+
+def test_endpoint_alert_delivery_failure_remains_pending_and_retries(monkeypatch: Any) -> None:
+    """A provider outage cannot erase an alert or falsely mark it delivered."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-endpoint-delivery-retry"
+    now = 2_300_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-endpoint-delivery",
+    }
+    snapshot = _discovery_snapshot(
+        "endpoint", [{"kind": "device", "id": "device-a", "managed": True}], now=now
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/discovery/sources/intune/snapshots",
+                "POST",
+                body=snapshot,
+                claims=claims,
+            ),
+        )["statusCode"]
+        == 201
+    )
+    publisher = module.SNS.publish
+    monkeypatch.setattr(
+        module.SNS,
+        "publish",
+        lambda **_value: (_ for _ in ()).throw(OSError("synthetic provider outage")),
+    )
+    pending = json.loads(
+        _invoke(module, _event("/api/enterprise/alerts", "GET", claims=claims))["body"]
+    )["items"]
+    assert pending[0]["deliveryStatus"] == "pending"
+    monkeypatch.setattr(module.SNS, "publish", publisher)
+    delivered = json.loads(
+        _invoke(module, _event("/api/enterprise/alerts", "GET", claims=claims))["body"]
+    )["items"]
+    assert delivered[0]["deliveryStatus"] == "delivered"
+    assert len(module.SNS.messages) == 1
+
+
+def test_aws_endpoint_detection_is_scheduled_bounded_and_monitored() -> None:
+    """Infrastructure must proactively reconcile health and surface exhaustion."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    assert 'indexName: "EndpointDetectionTenants"' in stack
+    assert "schedule: events.Schedule.rate(cdk.Duration.minutes(5))" in stack
+    assert 'source: "aai.endpoint-detection"' in stack
+    assert "deadLetterQueue: endpointDetectionDlq" in stack
+    assert '"EndpointDetectionDeadLetters"' in stack
+    assert "securityAlerts.grantPublish(handler)" in stack
+    assert "SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn" in stack
 
 
 def test_agent_replacement_rolls_back_when_group_membership_changes_concurrently(
