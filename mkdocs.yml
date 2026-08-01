@@ -59,6 +59,7 @@ nav:
   - Dynamic policy groups: dynamic-groups-design.md
   - Policy editor: policy-editor.md
   - Policy governance design: policy-governance-design.md
+  - Policy change assurance: policy-change-assurance-design.md
   - Managed Claude resources: claude-managed-resources.md
   - Wider enterprise UI: enterprise-ui.md
   - Enterprise integration design: enterprise-integration-design.md

@@ -137,10 +137,8 @@ Engineering can continue autonomously on:
 - production identity, endpoint and source-control connector packaging for the
   implemented orphan/leaver reconciler;
 - managed upgrades and expiring exceptions;
-- policy simulation, semantic diff, inheritance, scheduling and signed
-  bundles;
-- security cases, quarantine, automatic containment and credential-revocation
-  workflows;
+- policy inheritance, scheduling and signed bundles;
+- credential-revocation workflows and broader tool/MCP anomaly response;
 - executive and auditor reporting;
 - Terraform deployment support;
 - customer-managed key, residency and private-access implementation;

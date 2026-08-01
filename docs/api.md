@@ -517,6 +517,22 @@ live revision and a redaction-safe investigation rationale. Acknowledgement is
 ownership evidence, not remediation. See [Endpoint detection and
 response](endpoint-detection-response.md).
 
+## Policy change assurance
+
+`GET /enterprise/policies/{policyId}/versions/{version}` returns a typed
+`changeSummary` comparing the candidate with its immutable base version. The
+summary identifies individual authority expansions/restrictions, approval and
+limit changes, credential/isolation requirements and data-capture changes.
+
+`POST /enterprise/policies/{policyId}/versions/{version}/simulate` accepts only
+`{"lookbackDays": N}`, where `N` is 1–90. A policy author, policy approver or
+platform administrator can evaluate a pending version against at most 250
+recent redacted decisions for that policy and tenant. The result is read-only,
+content-hash bound and contains explicit indeterminate outcomes where command
+text or MCP server identity was not retained. It never executes actions or
+changes policy authority. See
+[Policy change assurance](policy-change-assurance-design.md).
+
 ## Incident cases and response authority
 
 The hosted AWS adapter exposes a revisioned case API for endpoint detections:

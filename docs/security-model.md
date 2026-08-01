@@ -788,6 +788,16 @@ can select only an independently approved superseded version. Response records
 contain hashes and identifiers, not tool content or credentials. See
 [Approved automatic response rules](automatic-response-rules-design.md).
 
+Policy simulation is not execution and does not grant authority. The control
+plane evaluates only a pending immutable version against a bounded tenant- and
+policy-scoped window of redacted decision evidence. It reports missing command
+content and MCP server identity as indeterminate instead of reconstructing or
+guessing them. The result hash binds the candidate and exact sample, but does
+not prove unseen behavior, endpoint convergence or policy safety. Semantic
+diffs highlight expansions, restrictions and data-capture changes without
+turning reviewer judgement into an automated allow decision. See
+[Policy change assurance](policy-change-assurance-design.md).
+
 Case export is a separate read authority available only to canonical evidence
 roles. The server, never the browser, assembles a complete bounded snapshot,
 rechecks case and source-alert revisions, removes raw content, credentials and

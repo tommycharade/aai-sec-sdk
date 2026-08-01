@@ -82,12 +82,16 @@ creates a draft; no policy-write route directly mutates active authority.
 ## Operator journey
 
 1. An author edits a typed policy form and saves a draft.
-2. The review screen shows active-versus-draft semantic changes, affected
-   groups and agents, and the immutable content hash.
-3. The author submits the version. The editor becomes read-only.
-4. Another authenticated subject approves or rejects it with a rationale.
-5. An approver stages the approved version after confirming the active base.
-6. Activation atomically changes fleet authority; agent convergence remains a
+2. The review screen shows active-versus-draft semantic authority changes,
+   affected groups and agents, and the immutable content hash.
+3. The operator runs a bounded historical simulation. Redacted commands and
+   missing MCP server identity remain explicitly indeterminate.
+4. The author submits the version. The editor becomes read-only.
+5. Another authenticated subject approves or rejects it with a rationale.
+6. An approver stages the approved version after confirming the active base.
+7. The UI requires a current simulation bound to the staged content hash before
+   opening activation confirmation.
+8. Activation atomically changes fleet authority; agent convergence remains a
    separate rollout and enforcement measurement.
 
 The UI must not imply that approval, staging or activation proves endpoint
@@ -104,6 +108,7 @@ UI state. The AWS adapter uses conditional writes for lifecycle steps and one
 DynamoDB transaction for activation, so a concurrent activation cannot
 partially update the candidate, retired predecessor, or active policy snapshot.
 
-Historical simulation, signed policy bundles, scheduling, inheritance,
-time-limited exceptions and measured endpoint convergence remain separate P1
-requirements and are not claimed by this lifecycle foundation.
+The historical-simulation and semantic-diff contract is defined in
+[Policy change assurance](policy-change-assurance-design.md). Signed policy
+bundles, scheduling, inheritance, time-limited exceptions and measured endpoint
+convergence remain separate P1 requirements.
