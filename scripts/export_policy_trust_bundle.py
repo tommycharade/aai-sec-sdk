@@ -54,7 +54,12 @@ def export_trust_bundle(
     ):
         raise RuntimeError("KMS returned incompatible policy verification key metadata")
     key = serialization.load_der_public_key(public_der)
-    if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(key.curve, ec.SECP256R1):
+    curve = getattr(key, "curve", None)
+    if (
+        not isinstance(key, ec.EllipticCurvePublicKey)
+        or getattr(curve, "name", None) != "secp256r1"
+        or getattr(curve, "key_size", None) != 256
+    ):
         raise RuntimeError("KMS policy verification key is not P-256")
     public_pem = key.public_bytes(
         serialization.Encoding.PEM,

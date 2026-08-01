@@ -116,8 +116,13 @@ only_mutate = [
 ]
 pytest_add_cli_args_test_selection = ["tests"]
 pytest_add_cli_args = [
+  # These cryptography suites remain in every normal test matrix. Mutmut does
+  # not mutate their source modules and its copied namespace breaks native
+  # cryptography enum/class identity, so running them here adds no evidence.
+  "--ignore=tests/test_export_policy_trust_bundle.py",
+  "--ignore=tests/test_signed_policy.py",
   "-k",
-  "not test_handler_completion_is_local_and_stress_timeouts_do_not_retain_registry and not test_onboarding_script_imports_adjacent_checkout_without_install",
+  "not test_handler_completion_is_local_and_stress_timeouts_do_not_retain_registry and not test_onboarding_script_imports_adjacent_checkout_without_install and not test_agent_client_sends_bounded_authenticated_registration_and_heartbeat and not test_aws_agent_client_rejects_unsigned_or_cross_tenant_policy",
 ]
 also_copy = [
   "examples/",
