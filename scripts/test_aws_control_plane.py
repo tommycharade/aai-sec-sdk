@@ -117,6 +117,24 @@ def _request(
         return error.code, json.loads(error.read())
 
 
+def _agent_stop_is_enforced(status: int, payload: Mapping[str, Any]) -> bool:
+    """Return whether the live response proves agent-scoped execution withholding.
+
+    The control plane owns this authority.  The smoke test therefore requires
+    the complete typed response-control contract instead of accepting the
+    retired presentation-only ``emergencyStop`` flag.
+    """
+    control_state = payload.get("controlState")
+    return (
+        status == 409
+        and isinstance(control_state, Mapping)
+        and control_state.get("executionAllowed") is False
+        and control_state.get("evidenceAllowed") is True
+        and isinstance(control_state.get("activeStopScopes"), list)
+        and "agent" in control_state["activeStopScopes"]
+    )
+
+
 def main() -> int:
     """Run the smoke test and return a shell-friendly status code."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -713,7 +731,7 @@ def main() -> int:
             token=session_token,
             project_root_digest=project_root_digest,
         )
-        if stopped_policy_status != 409 or stopped_policy.get("emergencyStop") is not True:
+        if not _agent_stop_is_enforced(stopped_policy_status, stopped_policy):
             raise RuntimeError(
                 "agent emergency stop was not enforced by effective-policy: "
                 f"{stopped_policy_status} {stopped_policy}"

@@ -6,6 +6,10 @@
   investigation timelines. The enrolled AWS client now fails closed when the
   server omits or denies execution authority.
 
+- Updated the deployed AWS acceptance harness to verify the typed,
+  server-owned response-control state and reject the retired emergency-stop
+  presentation flag or an incomplete stop scope.
+
 - Added scheduled, tenant-isolated endpoint detections with deduplicated
   durable alert lifecycle, SNS/SQS delivery, audited incident-response
   acknowledgement, monitored retry exhaustion and an operator-first
