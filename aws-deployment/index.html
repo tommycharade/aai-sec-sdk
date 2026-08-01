@@ -802,6 +802,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../durable-evidence-governance-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durable evidence governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../automatic-response-rules-design/" class="md-nav__link">
         
   
@@ -1980,6 +2007,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Important production limitations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tenant-evidence-governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenant evidence governance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -2459,6 +2503,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Important production limitations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tenant-evidence-governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tenant evidence governance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -3058,6 +3119,19 @@ by an administrative workflow before operators can access them.</p>
 <p>The browser still requires an operator to complete the first-login password
 change before the authenticated UI can be exercised interactively.</p>
 <h2 id="important-production-limitations">Important production limitations</h2>
+<h3 id="tenant-evidence-governance">Tenant evidence governance</h3>
+<p>The hosted <strong>Evidence</strong> workspace and <code>/api/enterprise/evidence</code> routes inspect
+live retained object versions. New audit objects explicitly apply the tenant's
+365–3,650-day COMPLIANCE retention and carry a creation-time SHA-256 metadata
+binding. Security operators can only increase tenant retention and can place or
+release legal hold on one exact tenant object version. Auditors can verify and
+export but cannot mutate.</p>
+<p>The current synchronous assurance/export boundary is 250 versions. It returns
+<code>incomplete</code> and refuses retention mutation or export above that bound. This is
+a pilot-safe fail-closed limit; deploy asynchronous S3 Inventory/Batch
+Operations before production scale. Follow
+<a href="../durable-evidence-governance-design/">Durable evidence governance</a> and retain
+separate live cross-region recovery evidence.</p>
 <p>This is the first AWS deployment slice, not a production security
 certification. Before production use:</p>
 <ul>

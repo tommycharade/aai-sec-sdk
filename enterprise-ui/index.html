@@ -802,6 +802,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../durable-evidence-governance-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durable evidence governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../automatic-response-rules-design/" class="md-nav__link">
         
   
@@ -1226,6 +1253,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Operational safeguards">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#evidence-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evidence workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2304,6 +2348,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Operational safeguards">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#evidence-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evidence workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -2570,6 +2631,22 @@ Overlap blocks apply. Once enabled, the group is labelled <strong>Dynamic</stron
 assignment/removal controls disappear, and <strong>Review rule</strong> opens the current
 human-readable rule for deterministic reevaluation.</p>
 <h2 id="operational-safeguards">Operational safeguards</h2>
+<h3 id="evidence-workspace">Evidence workspace</h3>
+<p><strong>Evidence</strong> replaces a decision-only audit page with an assurance-first
+records-management journey. The page verifies the live immutable inventory
+before displaying a positive state, clearly distinguishes incomplete and
+at-risk posture, and exposes:</p>
+<ul>
+<li>integrity-verified versus total retained versions;</li>
+<li>increase-only tenant retention;</li>
+<li>exact-version legal hold with hashed rationale;</li>
+<li>delete-marker visibility;</li>
+<li>complete digest-bound manifest export; and</li>
+<li>redacted runtime and lifecycle decision evidence.</li>
+</ul>
+<p>The browser cannot submit tenant identity, integrity status or completeness.
+It cannot shorten retention or bypass the 365-day COMPLIANCE floor. A failed or
+truncated assurance request remains visibly failed closed.</p>
 <p>Enterprise actions should require role-based authorization, use explicit
 confirmation for emergency operations, produce audit events, and expose
 health/error state rather than silently accepting configuration. Secrets should

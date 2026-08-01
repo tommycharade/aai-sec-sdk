@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/code-owned-controls/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/durable-evidence-governance-design/">
       
       
-        <link rel="prev" href="../aws-deployment/">
+        <link rel="prev" href="../incident-case-export-design/">
       
       
-        <link rel="next" href="../end-to-end-example/">
+        <link rel="next" href="../automatic-response-rules-design/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Code-owned controls - Agentic AI Security SDK</title>
+        <title>Durable evidence governance - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#code-owned-and-deployment-owned-controls" class="md-skip">
+        <a href="#durable-evidence-governance" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Code-owned controls
+              Durable evidence governance
             
           </span>
         </div>
@@ -799,10 +799,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../durable-evidence-governance-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durable evidence governance
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -818,6 +845,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#threat-and-trust-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threat and trust boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operator-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator API
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-behavior-and-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure behavior and limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1852,37 +1954,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Code-owned controls
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../code-owned-controls/" class="md-nav__link">
         
   
   
@@ -1898,59 +1973,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#sdk-invariants-and-developer-owned-apis" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SDK invariants and developer-owned APIs
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#integration-and-deployment-responsibilities" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Integration and deployment responsibilities
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#why-these-controls-are-protected" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why these controls are protected
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2279,10 +2301,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#sdk-invariants-and-developer-owned-apis" class="md-nav__link">
+  <a href="#threat-and-trust-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SDK invariants and developer-owned APIs
+        Threat and trust boundary
       
     </span>
   </a>
@@ -2290,10 +2312,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#integration-and-deployment-responsibilities" class="md-nav__link">
+  <a href="#invariants" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Integration and deployment responsibilities
+        Invariants
       
     </span>
   </a>
@@ -2301,10 +2323,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#why-these-controls-are-protected" class="md-nav__link">
+  <a href="#operator-api" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why these controls are protected
+        Operator API
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-behavior-and-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure behavior and limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
       
     </span>
   </a>
@@ -2331,158 +2375,93 @@
   
 
 
-<h1 id="code-owned-and-deployment-owned-controls">Code-owned and deployment-owned controls</h1>
-<p>Some SDK features should not be configurable by an administrator in either the
-Policy editor or the ordinary enterprise UI. They are security invariants,
-typed API contracts or development/deployment responsibilities. They may be
-visible as immutable capability information, health status or evidence.</p>
-<h2 id="sdk-invariants-and-developer-owned-apis">SDK invariants and developer-owned APIs</h2>
-<table>
-<thead>
-<tr>
-<th>Feature</th>
-<th>Ownership and UI treatment</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Typed action proposals</td>
-<td>Application integration; expose as a typed API, not a UI setting.</td>
-</tr>
-<tr>
-<td>Structured execution results</td>
-<td>Runtime contract consumed by application code.</td>
-</tr>
-<tr>
-<td>Fail-closed authorization</td>
-<td>Immutable runtime behaviour; never offer a disable switch.</td>
-</tr>
-<tr>
-<td>Tool registry</td>
-<td>Explicit code-owned registration of executable tools.</td>
-</tr>
-<tr>
-<td>Tool validators</td>
-<td>Code-owned argument validation for each tool.</td>
-</tr>
-<tr>
-<td>JSON Schema tool contracts</td>
-<td>Code-owned contracts published to MCP hosts and UI clients.</td>
-</tr>
-<tr>
-<td>Output validation</td>
-<td>Code-owned validation and constraining of tool output.</td>
-</tr>
-<tr>
-<td>Reconciliation handlers</td>
-<td>Application-owned handling of uncertain or interrupted side effects.</td>
-</tr>
-<tr>
-<td>Cancellation tokens</td>
-<td>Runtime/application control for cooperative cancellation.</td>
-</tr>
-<tr>
-<td>Phase-specific timeout outcomes</td>
-<td>Immutable result semantics that identify the timeout phase.</td>
-</tr>
-<tr>
-<td>Approval replay protection</td>
-<td>Mandatory runtime protection; no separate toggle.</td>
-</tr>
-<tr>
-<td>Credential scope enforcement</td>
-<td>Runtime invariant checked against live action facts.</td>
-</tr>
-<tr>
-<td>Credential TTL and revocation implementation</td>
-<td>Broker/IAM responsibility; UI may show status and configure references.</td>
-</tr>
-<tr>
-<td>Callback isolation verifier</td>
-<td>Application-provided code adapter.</td>
-</tr>
-<tr>
-<td>Composite audit sink</td>
-<td>Code/deployment composition of multiple sinks.</td>
-</tr>
-<tr>
-<td>Audit replication failure handling</td>
-<td>Runtime/adapter behaviour; failures must be visible and safe.</td>
-</tr>
-<tr>
-<td>Terminal recording</td>
-<td>Bounded application/runtime diagnostic behaviour.</td>
-</tr>
-<tr>
-<td>Authenticated identity binding</td>
-<td>Mandatory binding between authenticated identity and registered agent.</td>
-</tr>
-</tbody>
-</table>
-<p>These controls should be displayed in an “SDK guarantees” or “security
-invariants” panel, with their implementation version and test/evidence status.</p>
-<h2 id="integration-and-deployment-responsibilities">Integration and deployment responsibilities</h2>
-<table>
-<thead>
-<tr>
-<th>Feature</th>
-<th>Ownership and UI treatment</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>MCP HTTP application</td>
-<td>Application deployment, hosting and network configuration.</td>
-</tr>
-<tr>
-<td>MCP session store</td>
-<td>Application infrastructure and session persistence.</td>
-</tr>
-<tr>
-<td>Custom host integration</td>
-<td>Developer implementation translating host calls into <code>ActionProposal</code>.</td>
-</tr>
-<tr>
-<td>In-memory credential broker</td>
-<td>Synthetic/local development adapter; not an enterprise policy setting.</td>
-</tr>
-<tr>
-<td>In-memory audit sink</td>
-<td>Test/local-development adapter; show as non-production status.</td>
-</tr>
-<tr>
-<td>Configuration backups</td>
-<td>Onboarding/deployment script behaviour and storage operations.</td>
-</tr>
-<tr>
-<td>Generated README</td>
-<td>Documentation build workflow.</td>
-</tr>
-<tr>
-<td>MkDocs documentation site</td>
-<td>Documentation publishing workflow.</td>
-</tr>
-<tr>
-<td>Guardrail and quality checks</td>
-<td>CI/development workflow, including tests, coverage, docs and dependency checks.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="why-these-controls-are-protected">Why these controls are protected</h2>
-<p>Making these behaviours configurable would allow a well-meaning administrator
-or a compromised control-plane credential to weaken the execution boundary.
-The correct approach is to make them:</p>
+<h1 id="durable-evidence-governance">Durable evidence governance</h1>
+<p>This design advances P0-08 by turning the AWS Object Lock foundation into a
+tenant-visible records-management control. It covers tenant retention,
+exact-version legal hold, live integrity assurance and complete bounded export.
+It does <strong>not</strong> claim that cross-region recovery or evidence-loss monitoring has
+passed for a customer environment.</p>
+<h2 id="threat-and-trust-boundary">Threat and trust boundary</h2>
+<p>The browser, operator-entered object identity and audit payload are untrusted.
+The API derives the tenant from the verified operator token and permits evidence
+reads only to security operators, auditors and platform administrators. Evidence
+mutations require <code>evidence_admin</code>; fleet and policy roles cannot acquire it by
+supplying request content.</p>
+<p>S3 Object Lock in <code>COMPLIANCE</code> mode is the enforcement boundary. DynamoDB stores
+the tenant policy and optimistic revision, but cannot shorten the bucket's
+365-day default. The Lambda receives only exact-version S3 permissions needed to
+read retention/legal-hold state and extend retention or change legal hold.</p>
+<h2 id="invariants">Invariants</h2>
 <ul>
-<li>explicit in the public API;</li>
-<li>documented with trust-boundary and failure-mode explanations;</li>
-<li>covered by positive and adversarial tests;</li>
-<li>visible as immutable capabilities or health evidence;</li>
-<li>changeable only through reviewed code, deployment configuration or governed
-  infrastructure changes.</li>
+<li>Tenant retention is 365–3,650 days and can only increase through this API.</li>
+<li>Existing versions are extended before the new future-record policy is stored.
+  A concurrent failure may retain data longer, never for less time.</li>
+<li>Every new audit object explicitly carries COMPLIANCE retention plus a SHA-256
+  content binding in S3 metadata.</li>
+<li>Legal hold addresses an exact key and version under <code>tenant=&lt;token tenant&gt;/</code>.
+  Cross-tenant keys fail before an S3 mutation.</li>
+<li>Rationale text is never written to evidence; only its SHA-256 digest is kept.</li>
+<li>Assurance hashes the retained bytes again and compares the result with the
+  creation-time binding. A mismatch is <code>at_risk</code>, not healthy.</li>
+<li>The synchronous inventory is complete only at 250 versions or fewer. A larger
+  tenant receives <code>incomplete</code>, and retention update/export fails closed rather
+  than returning a partial artifact.</li>
+<li>Export verifies every bounded version, orders records deterministically and
+  binds the complete manifest with a canonical SHA-256 digest. The browser
+  independently verifies that digest before download.</li>
 </ul>
-<p>The policy and enterprise UIs may configure requirements and references around
-these mechanisms, but they must not be able to bypass the mechanisms
-themselves.</p>
+<h2 id="operator-api">Operator API</h2>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Authority</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/enterprise/evidence</code></td>
+<td><code>evidence_read</code></td>
+<td>Live policy, integrity, retention, legal-hold and completeness posture</td>
+</tr>
+<tr>
+<td><code>PUT /api/enterprise/evidence/retention</code></td>
+<td><code>evidence_admin</code></td>
+<td>Optimistic, increase-only retention update applied to existing and future records</td>
+</tr>
+<tr>
+<td><code>POST /api/enterprise/evidence/legal-hold</code></td>
+<td><code>evidence_admin</code></td>
+<td>Legal-hold change for one exact tenant object version</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/evidence/export</code></td>
+<td><code>evidence_read</code></td>
+<td>Complete integrity-bound manifest, or a fail-closed conflict/error</td>
+</tr>
+</tbody>
+</table>
+<p>The hosted <strong>Evidence</strong> workspace leads with assurance instead of a raw audit
+table. It shows verified versions, retention, legal holds and delete markers;
+then offers increase-only retention, exact-version preservation, verified export
+and the existing redacted decision timeline.</p>
+<h2 id="failure-behavior-and-limitations">Failure behavior and limitations</h2>
+<p>An unavailable S3 version, malformed tenant policy, mismatched content hash,
+truncated inventory, stale policy revision or unauthorized role never produces a
+positive assurance result. Audit writes also resolve the live tenant retention
+policy before persisting the object.</p>
+<p>The 250-version synchronous path is intentionally a pilot boundary, not the
+long-term export architecture. Production-scale tenants need asynchronous S3
+Inventory/Batch Operations, a monitored assurance schedule, explicit evidence-
+gap alerts and replay, and a new live cross-region recovery exercise proving
+count, ordering, hashes and retention. Those items remain open in the P0 ledger.</p>
+<h2 id="verification">Verification</h2>
+<p>Contract tests cover the complete positive journey plus weak-role access,
+retention reduction, stale revision, cross-tenant legal hold and post-write byte
+tampering. CDK synthesis proves the least-privilege S3 permissions are
+deployable. UI tests and desktop/mobile browser exercises cover assurance,
+retention and legal-hold journeys without representing fixture data as live.</p>
 
 
 

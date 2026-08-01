@@ -802,6 +802,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../durable-evidence-governance-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durable evidence governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../automatic-response-rules-design/" class="md-nav__link">
         
   
@@ -6077,6 +6104,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Incident cases and response authority">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#durable-evidence-governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Durable evidence governance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -10502,6 +10546,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Incident cases and response authority">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#durable-evidence-governance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Durable evidence governance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -53012,6 +53073,26 @@ containment request. See
 <a href="../incident-case-containment-design/">Incident case and containment design</a>.
 Artifact schema, refusal bounds and offline verification are specified in
 <a href="../incident-case-export-design/">Audit-ready incident case export</a>.</p>
+<h3 id="durable-evidence-governance">Durable evidence governance</h3>
+<p>The AWS control plane exposes a tenant-bound records-management contract:</p>
+<ul>
+<li><code>GET /api/enterprise/evidence</code> verifies the live bounded S3 version inventory
+  and returns retention, legal-hold, delete-marker and content-integrity posture;</li>
+<li><code>PUT /api/enterprise/evidence/retention</code> accepts exactly
+  <code>expectedRevision</code>, <code>retentionDays</code> and <code>rationale</code>, permits 365–3,650 days,
+  and never permits a reduction;</li>
+<li><code>POST /api/enterprise/evidence/legal-hold</code> sets or clears hold for one exact
+  tenant key/version after rejecting cross-tenant identity; and</li>
+<li><code>GET /api/enterprise/evidence/export</code> returns a canonical content-hashed
+  complete manifest only when every record fits the 250-version synchronous
+  boundary and no content mismatch exists.</li>
+</ul>
+<p>Security operators and platform administrators manage retention and legal hold.
+Auditors may read assurance and export evidence but cannot mutate it. Rationale
+text is content-hashed before audit persistence. See
+<a href="../durable-evidence-governance-design/">Durable evidence governance</a> for trust
+boundaries, failure behavior and the production-scale asynchronous work that
+remains.</p>
 <h2 id="automatic-response-rules">Automatic response rules</h2>
 <p>The hosted adapter exposes an independently governed automatic-response API:</p>
 <ul>
