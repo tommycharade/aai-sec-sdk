@@ -9031,6 +9031,25 @@ def _seed(tenant):
         return
     if TABLE.get_item(Key=_item_key(tenant, "ORG", "org-demo")).get("Item"):
         now = int(time.time())
+        # Older demo deployments predate the provisioned tenant-root record.
+        # Recover that server-owned schedule anchor exactly once; without it,
+        # asynchronous work can be committed but no scheduled worker can
+        # discover the tenant.  The legacy organization is the migration
+        # authority and the conditional put prevents concurrent replacement.
+        try:
+            TABLE.put_item(
+                Item={
+                    **_item_key(tenant, "TENANT", "root"),
+                    "id": tenant,
+                    "status": "active",
+                    "created_at": now,
+                },
+                ConditionExpression="attribute_not_exists(pk)",
+            )
+        except Exception as error:
+            if not _is_conditional_conflict(error):
+                raise
+        _register_evidence_assurance_tenant(tenant)
         if not TABLE.get_item(Key=_item_key(tenant, "SKILL", "skill-repository-review")).get(
             "Item"
         ):

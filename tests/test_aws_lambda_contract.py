@@ -9532,6 +9532,49 @@ def test_demo_seed_uses_the_same_narrow_native_read_commands(monkeypatch: Any) -
     ]
 
 
+def test_demo_seed_migrates_legacy_organization_into_the_schedule_index(
+    monkeypatch: Any,
+) -> None:
+    """A legacy provisioned demo tenant must not strand asynchronous jobs."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    module._put(
+        tenant,
+        "ORG",
+        "org-demo",
+        {"id": "org-demo", "name": "Example enterprise", "created_at": 1},
+    )
+    monkeypatch.setattr(module, "_EVIDENCE_RETENTION_CUTOVER_SECONDS", 0)
+    job = module._create_retention_job(
+        tenant,
+        {
+            "requestId": "legacy-schedule-recovery",
+            "expectedRevision": 0,
+            "retentionDays": 730,
+            "rationale": "Approved synthetic legacy schedule recovery exercise.",
+        },
+        "security-operator",
+    )
+
+    module._seed(tenant)
+    module._seed(tenant)
+
+    root = table.items[(f"TENANT#{tenant}", "TENANT#root")]
+    expected_partition, expected_sort_key = module._evidence_assurance_registration(tenant)
+    assert root["status"] == "active"
+    assert root["evidence_assurance_pk"] == expected_partition
+    assert root["evidence_assurance_sk"] == expected_sort_key
+    scheduled = module._evidence_retention_schedule_cycle()
+    assert scheduled == {"processedTenants": 1, "dispatchedJobs": 1, "activeJobs": 0}
+    message = json.loads(module._fake_sqs.messages[-1]["MessageBody"])
+    assert message == {
+        "schemaVersion": 1,
+        "tenantId": tenant,
+        "jobId": job["id"],
+        "expectedRevision": 1,
+    }
+
+
 def test_discovery_reconciles_population_without_inflating_duplicate_coverage(
     monkeypatch: Any,
 ) -> None:

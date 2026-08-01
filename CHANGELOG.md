@@ -1,5 +1,10 @@
 # Changelog
 
+- Fixed migration of legacy demo tenants that predate the tenant-root schedule
+  index. The first authenticated request now creates the missing root once from
+  the existing provisioned organization and registers asynchronous assurance
+  and retention work, preventing a committed job from remaining undiscoverable.
+
 - Added revision-bound asynchronous mass retention above the 250-version fast
   path. The control plane atomically protects future writes with the longer
   policy, waits for old-policy writers to drain, then uses a dedicated bounded
