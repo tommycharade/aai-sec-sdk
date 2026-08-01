@@ -67,6 +67,7 @@ nav:
   - Discovery source management acceptance — 2026-07-30: discovery-source-management-acceptance-2026-07-30.md
   - AWS-managed Entra discovery acceptance — 2026-07-30: managed-discovery-acceptance-2026-07-30.md
   - AWS-managed GitHub discovery acceptance — 2026-07-30: managed-github-discovery-acceptance-2026-07-30.md
+  - AWS-managed Intune discovery acceptance — 2026-08-01: managed-intune-discovery-acceptance-2026-08-01.md
   - Microsoft Entra SCIM lifecycle runbook: entra-scim-runbook.md
   - Emergency access and access certification runbook: access-governance-runbook.md
   - Delegated administration: delegated-administration.md
