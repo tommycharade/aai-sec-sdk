@@ -8,7 +8,9 @@
 
 - Updated the deployed AWS acceptance harness to verify the typed,
   server-owned response-control state and reject the retired emergency-stop
-  presentation flag or an incomplete stop scope.
+  presentation flag or an incomplete stop scope. Synthetic acceptance cleanup
+  now removes the independent response-control record even when a run aborts
+  while the stop remains active.
 
 - Added scheduled, tenant-isolated endpoint detections with deduplicated
   durable alert lifecycle, SNS/SQS delivery, audited incident-response

@@ -135,6 +135,14 @@ def _agent_stop_is_enforced(status: int, payload: Mapping[str, Any]) -> bool:
     )
 
 
+def _agent_stop_record_key(tenant: str, deployment_id: str, agent_id: str) -> dict[str, str]:
+    """Return the exact server-owned agent-stop key created by this smoke run."""
+    return {
+        "pk": f"TENANT#{tenant}",
+        "sk": f"CONTROL#emergency-stop:agent:{deployment_id}:{agent_id}",
+    }
+
+
 def main() -> int:
     """Run the smoke test and return a shell-friendly status code."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1178,6 +1186,12 @@ def main() -> int:
                 "pk": f"TENANT#{arguments.tenant}",
                 "sk": f"AGENT#{deployment_id}:{replacement_agent_id}",
             }
+        )
+        # Response controls are independent records, so deleting the synthetic
+        # agent cannot clean them implicitly.  Remove the exact generated key
+        # even after an earlier assertion aborts while the stop is still active.
+        control_table.delete_item(
+            Key=_agent_stop_record_key(arguments.tenant, deployment_id, agent_id)
         )
         control_table.delete_item(
             Key={"pk": f"TENANT#{arguments.tenant}", "sk": f"APPROVAL#{approval_id}"}
