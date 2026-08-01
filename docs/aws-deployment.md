@@ -594,28 +594,61 @@ AWS_PROFILE=p1 AWS_REGION=eu-west-2 python3 scripts/test_aws_alert_recovery.py \
 
 ### Cross-region audit recovery
 
-Deploy the immutable replica stack in the recovery region first, then pass its
-bucket ARN when deploying the primary stack:
+Deploy the immutable replica stack in the recovery region first. Copy the
+example manifest to a protected location, record the exact bucket ARN and
+review reference, then validate and persist it:
 
 ```bash
 AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy:replica
-AWS_PROFILE=p1 AWS_REGION=eu-west-2 \
-  AUDIT_REPLICA_BUCKET_ARN=arn:aws:s3:::<replica-bucket> \
-  AUDIT_REPLICA_REGION=eu-west-1 npm run deploy
+
+python3 scripts/deploy_aws_control_plane.py check-recovery \
+  --config /secure/path/audit-recovery.json \
+  --profile p1 --region eu-west-2
+
+python3 scripts/deploy_aws_control_plane.py configure-recovery \
+  --config /secure/path/audit-recovery.json \
+  --confirm-recovery-controls \
+  --profile p1 --region eu-west-2
+
+cd infra/aws-control-plane
+AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 ```
 
-The replica bucket is versioned and uses S3 Object Lock compliance retention.
-The repeatable verification command is:
+Do not pass replica settings directly as shell environment variables. The
+deployer discards ambient values and uses only the persisted reviewed manifest.
+Once configured, a missing manifest blocks deployment so a routine release
+cannot silently disable recovery.
+
+The replication rule enables S3 replication metrics and routes failed or
+untracked replication operations to the durable security-alert SNS/SQS channel.
+Monitor that queue alongside the Batch Operations completion report; do not use
+the CloudWatch metric alone as proof that every version recovered.
+
+Live replication does not repair older versions. After a new destination or a
+configuration outage, run the bounded Batch Replication repair using the stack
+outputs `AuditBucketName`, `EvidenceReportBucketName` and
+`AuditBatchReplicationRoleArn`:
 
 ```bash
-AWS_PROFILE=p1 python3 scripts/test_aws_audit_replication.py \
+AWS_PROFILE=p1 python3 scripts/backfill_aws_audit_replication.py \
+  --source-bucket <primary-audit-bucket> \
+  --report-bucket <evidence-report-bucket> \
+  --role-arn <audit-batch-replication-role-arn> \
+  --region eu-west-2 --profile p1
+```
+
+Then independently verify every retained object version:
+
+```bash
+AWS_PROFILE=p1 python3 scripts/verify_aws_audit_recovery.py \
   --source-bucket <primary-audit-bucket> --source-region eu-west-2 \
   --replica-bucket <replica-bucket> --replica-region eu-west-1 \
   --profile p1
 ```
 
-The 2026-07-27 pilot test received a replica with `ReplicationStatus=REPLICA`,
-preserved synthetic metadata, and `COMPLIANCE` Object Lock retention.
+Use `scripts/test_aws_audit_replication.py` as the smaller live-write smoke test.
+See the [persistent audit-recovery deployment guard](audit-recovery-deployment-guard-design.md)
+for its guarantees and failure posture.
 
 The Lambda also rejects a validly signed operator token when its tenant has no
 independent provisioning record. The development `tenant-demo` record is

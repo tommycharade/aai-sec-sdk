@@ -1,5 +1,11 @@
 # Changelog
 
+- Persisted cross-region audit-recovery authority now survives routine AWS
+  deployments, fails closed if its manifest is lost, verifies destination
+  Object Lock posture, supports bounded S3 Batch Replication of historical
+  versions, routes failed/not-tracked operations to durable security alerts and
+  independently verifies count, identity, hashes and retention.
+
 - Fixed migration of legacy demo tenants that predate the tenant-root schedule
   index. The first authenticated request now creates the missing root once from
   the existing provisioned organization and registers asynchronous assurance

@@ -5,7 +5,9 @@ tenant-visible records-management control. It covers tenant retention,
 exact-version legal hold, live integrity assurance, asynchronous tenant-wide
 export, mass-retention extension and scheduled evidence-gap monitoring. It does
 **not** claim that
-cross-region recovery has passed for a customer environment.
+cross-region recovery has passed for a customer environment. Replica authority
+must use the [persistent recovery deployment guard](audit-recovery-deployment-guard-design.md);
+an ephemeral deployment variable is not an acceptable recovery control.
 
 ## Threat and trust boundary
 

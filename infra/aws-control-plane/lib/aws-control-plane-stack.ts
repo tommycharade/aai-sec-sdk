@@ -14,6 +14,7 @@ import * as lambdaEventSources from "aws-cdk-lib/aws-lambda-event-sources";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as s3Notifications from "aws-cdk-lib/aws-s3-notifications";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
@@ -295,6 +296,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       autoDeleteObjects: false,
     });
     const auditReplicaArn = process.env.AUDIT_REPLICA_BUCKET_ARN;
+    let auditBatchReplicationRole: iam.Role | undefined;
     if (auditReplicaArn) {
       const replicationRole = new iam.Role(this, "AuditReplicationRole", {
         assumedBy: new iam.ServicePrincipal("s3.amazonaws.com"),
@@ -331,10 +333,41 @@ export class AwsControlPlaneStack extends cdk.Stack {
           {
             id: "replicate-audit-to-recovery-region",
             status: "Enabled",
-            destination: { bucket: auditReplicaArn, storageClass: "STANDARD" },
+            destination: {
+              bucket: auditReplicaArn,
+              storageClass: "STANDARD",
+              metrics: { status: "Enabled" },
+            },
           },
         ],
       };
+
+      // S3 Batch Operations starts replication for historical versions, while
+      // the replication role above remains the only principal that can copy
+      // immutable bytes to the recovery bucket. The manifest/report bucket is
+      // deliberately separate from the WORM audit namespace.
+      auditBatchReplicationRole = new iam.Role(this, "AuditBatchReplicationRole", {
+        assumedBy: new iam.ServicePrincipal("batchoperations.s3.amazonaws.com"),
+        description: "Initiate bounded historical audit replication jobs",
+      });
+      auditBatchReplicationRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: ["s3:GetReplicationConfiguration", "s3:PutInventoryConfiguration"],
+          resources: [audit.bucketArn],
+        }),
+      );
+      auditBatchReplicationRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: ["s3:PutObject"],
+          resources: [evidenceReports.arnForObjects("replication-reports/*")],
+        }),
+      );
+      auditBatchReplicationRole.addToPolicy(
+        new iam.PolicyStatement({
+          actions: ["s3:InitiateReplication"],
+          resources: [audit.arnForObjects("*")],
+        }),
+      );
     }
 
     const scopedToolRole = new iam.Role(this, "ScopedToolRole", {
@@ -355,6 +388,20 @@ export class AwsControlPlaneStack extends cdk.Stack {
       displayName: "AAI Security control-plane alerts",
       enforceSSL: true,
     });
+    if (auditReplicaArn) {
+      // Replication metrics make these object-level failure events available.
+      // Route them through the same durable SNS/SQS channel as other security
+      // failures so a provider-side copy failure cannot remain console-only.
+      const destination = new s3Notifications.SnsDestination(securityAlerts);
+      audit.addEventNotification(
+        s3.EventType.REPLICATION_OPERATION_FAILED_REPLICATION,
+        destination,
+      );
+      audit.addEventNotification(
+        s3.EventType.REPLICATION_OPERATION_NOT_TRACKED,
+        destination,
+      );
+    }
     const securityAlertsDlq = new sqs.Queue(this, "SecurityAlertsDlq", {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       retentionPeriod: cdk.Duration.days(14),
@@ -1080,6 +1127,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "CognitoDomain", { value: userPoolDomain.baseUrl() });
     new cdk.CfnOutput(this, "UiUrl", { value: `https://${distribution.domainName}` });
     new cdk.CfnOutput(this, "UiBucketName", { value: uiBucket.bucketName });
+    new cdk.CfnOutput(this, "AuditBucketName", { value: audit.bucketName });
     new cdk.CfnOutput(this, "ControlTableName", { value: table.tableName });
     new cdk.CfnOutput(this, "IdempotencyTableName", { value: idempotency.tableName });
     new cdk.CfnOutput(this, "ScimLifecycleTableName", { value: scim.tableName });
@@ -1123,6 +1171,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     if (auditReplicaArn) {
       new cdk.CfnOutput(this, "AuditReplicaBucketArn", { value: auditReplicaArn });
       new cdk.CfnOutput(this, "AuditReplicaRegion", { value: process.env.AUDIT_REPLICA_REGION ?? "eu-west-1" });
+      new cdk.CfnOutput(this, "AuditBatchReplicationRoleArn", {
+        value: auditBatchReplicationRole!.roleArn,
+      });
     }
   }
 }

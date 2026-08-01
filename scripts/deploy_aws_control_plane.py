@@ -39,6 +39,12 @@ _MANIFEST_FIELDS = {
     "strongAuthenticationEnforced",
     "conditionalAccessEvidenceRef",
 }
+_RECOVERY_MANIFEST_FIELDS = {
+    "schemaVersion",
+    "replicaBucketArn",
+    "replicaRegion",
+    "recoveryEvidenceRef",
+}
 _AWS_SECRET_NAME = re.compile(r"^[A-Za-z0-9/_+=.@-]{1,512}$")
 _AAI_TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _EVIDENCE_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,511}$")
@@ -52,6 +58,8 @@ _ENTRA_ENVIRONMENT_FIELDS = (
     "ENTRA_SCIM_TOKEN_SECRET_NAME",
     "ENTRA_STRONG_AUTH_ENFORCED",
 )
+_RECOVERY_ENVIRONMENT_FIELDS = ("AUDIT_REPLICA_BUCKET_ARN", "AUDIT_REPLICA_REGION")
+_S3_BUCKET_ARN = re.compile(r"^arn:(aws|aws-us-gov|aws-cn):s3:::[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -174,6 +182,70 @@ class EntraDeploymentManifest:
         }
 
 
+@dataclass(frozen=True)
+class AuditRecoveryManifest:
+    """Typed, secret-free configuration for immutable cross-region audit recovery."""
+
+    replica_bucket_arn: str
+    replica_region: str
+    recovery_evidence_ref: str
+
+    @classmethod
+    def parse(cls, payload: str) -> AuditRecoveryManifest:
+        """Parse one exact recovery manifest and reject ambiguous bucket authority."""
+        if len(payload.encode("utf-8")) > 16_384:
+            raise DeploymentConfigurationError("recovery manifest exceeds the 16 KiB bound")
+        try:
+            value = json.loads(payload, object_pairs_hook=_strict_object)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise DeploymentConfigurationError("recovery manifest is not valid JSON") from error
+        if not isinstance(value, dict) or set(value) != _RECOVERY_MANIFEST_FIELDS:
+            raise DeploymentConfigurationError(
+                "recovery manifest fields do not exactly match schema version 1"
+            )
+        if value["schemaVersion"] != 1:
+            raise DeploymentConfigurationError("recovery manifest schemaVersion must be 1")
+        bucket_arn = _bounded_string(value["replicaBucketArn"], "replicaBucketArn")
+        if not _S3_BUCKET_ARN.fullmatch(bucket_arn):
+            raise DeploymentConfigurationError("replicaBucketArn must be one exact S3 bucket ARN")
+        replica_region = _bounded_string(value["replicaRegion"], "replicaRegion", maximum=32)
+        if not _AWS_REGION.fullmatch(replica_region):
+            raise DeploymentConfigurationError("replicaRegion is malformed")
+        evidence_ref = _bounded_string(
+            value["recoveryEvidenceRef"], "recoveryEvidenceRef", maximum=512
+        )
+        if not _EVIDENCE_REFERENCE.fullmatch(evidence_ref):
+            raise DeploymentConfigurationError(
+                "recoveryEvidenceRef must be an opaque non-secret reference"
+            )
+        return cls(bucket_arn, replica_region, evidence_ref)
+
+    @property
+    def replica_bucket_name(self) -> str:
+        """Return the validated destination bucket name without accepting an object ARN."""
+        return self.replica_bucket_arn.rsplit(":::", 1)[1]
+
+    def canonical_json(self) -> str:
+        """Return the deterministic representation stored in Parameter Store."""
+        return json.dumps(
+            {
+                "recoveryEvidenceRef": self.recovery_evidence_ref,
+                "replicaBucketArn": self.replica_bucket_arn,
+                "replicaRegion": self.replica_region,
+                "schemaVersion": 1,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def deployment_environment(self) -> dict[str, str]:
+        """Return the exact CDK variables authorized by the persisted manifest."""
+        return {
+            "AUDIT_REPLICA_BUCKET_ARN": self.replica_bucket_arn,
+            "AUDIT_REPLICA_REGION": self.replica_region,
+        }
+
+
 def _aws(
     arguments: Sequence[str],
     *,
@@ -207,6 +279,13 @@ def parameter_name(stack_name: str) -> str:
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack_name):
         raise DeploymentConfigurationError("stack name is invalid")
     return f"/aai-sec/{stack_name}/entra-deployment"
+
+
+def recovery_parameter_name(stack_name: str) -> str:
+    """Return the stack-specific encrypted audit-recovery configuration path."""
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack_name):
+        raise DeploymentConfigurationError("stack name is invalid")
+    return f"/aai-sec/{stack_name}/audit-recovery"
 
 
 def stack_outputs(
@@ -279,6 +358,43 @@ def load_persisted_manifest(
     if not isinstance(payload, str):
         raise DeploymentConfigurationError("persisted Entra manifest is not text")
     return EntraDeploymentManifest.parse(payload)
+
+
+def load_persisted_recovery_manifest(
+    stack_name: str, *, profile: str, region: str, runner: Runner = subprocess.run
+) -> AuditRecoveryManifest | None:
+    """Load immutable-recovery authority, returning None only when never configured."""
+    result = runner(
+        [
+            "aws",
+            "ssm",
+            "get-parameter",
+            "--name",
+            recovery_parameter_name(stack_name),
+            "--with-decryption",
+            "--profile",
+            profile,
+            "--region",
+            region,
+            "--output",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        if "ParameterNotFound" in result.stderr:
+            return None
+        raise DeploymentConfigurationError((result.stderr.strip() or "SSM lookup failed")[-500:])
+    try:
+        payload = json.loads(result.stdout)["Parameter"]["Value"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise DeploymentConfigurationError("persisted recovery manifest is malformed") from error
+    if not isinstance(payload, str):
+        raise DeploymentConfigurationError("persisted recovery manifest is not text")
+    return AuditRecoveryManifest.parse(payload)
 
 
 def _secret_value(name: str, *, profile: str, region: str, runner: Runner = subprocess.run) -> str:
@@ -443,6 +559,77 @@ def persist_manifest(
     )
 
 
+def verify_recovery_destination(
+    manifest: AuditRecoveryManifest,
+    *,
+    profile: str,
+    source_region: str,
+    runner: Runner = subprocess.run,
+) -> None:
+    """Require a distinct, versioned destination with compliance-mode Object Lock."""
+    if manifest.replica_region == source_region:
+        raise DeploymentConfigurationError("replicaRegion must differ from the primary region")
+    versioning = _aws(
+        ["s3api", "get-bucket-versioning", "--bucket", manifest.replica_bucket_name],
+        profile=profile,
+        region=manifest.replica_region,
+        runner=runner,
+    )
+    if versioning.get("Status") != "Enabled":
+        raise DeploymentConfigurationError("replica bucket versioning is not enabled")
+    lock = _aws(
+        ["s3api", "get-object-lock-configuration", "--bucket", manifest.replica_bucket_name],
+        profile=profile,
+        region=manifest.replica_region,
+        runner=runner,
+    )
+    configuration = lock.get("ObjectLockConfiguration")
+    default = (
+        configuration.get("Rule", {}).get("DefaultRetention", {})
+        if isinstance(configuration, dict)
+        else {}
+    )
+    if (
+        not isinstance(configuration, dict)
+        or configuration.get("ObjectLockEnabled") != "Enabled"
+        or default.get("Mode") != "COMPLIANCE"
+        or not isinstance(default.get("Days"), int)
+        or default["Days"] < 365
+    ):
+        raise DeploymentConfigurationError(
+            "replica bucket must default to at least 365 days of COMPLIANCE Object Lock"
+        )
+
+
+def persist_recovery_manifest(
+    manifest: AuditRecoveryManifest,
+    stack_name: str,
+    *,
+    profile: str,
+    region: str,
+    runner: Runner = subprocess.run,
+) -> None:
+    """Persist reviewed recovery authority without storing credentials or evidence content."""
+    _aws(
+        [
+            "ssm",
+            "put-parameter",
+            "--name",
+            recovery_parameter_name(stack_name),
+            "--type",
+            "SecureString",
+            "--overwrite",
+            "--value",
+            manifest.canonical_json(),
+            "--description",
+            "Persistent AAI Security immutable audit recovery references",
+        ],
+        profile=profile,
+        region=region,
+        runner=runner,
+    )
+
+
 def deploy(
     stack_name: str,
     *,
@@ -452,6 +639,9 @@ def deploy(
 ) -> EntraDeploymentManifest | None:
     """Deploy with persisted identity configuration or refuse destructive omission."""
     manifest = load_persisted_manifest(stack_name, profile=profile, region=region, runner=runner)
+    recovery = load_persisted_recovery_manifest(
+        stack_name, profile=profile, region=region, runner=runner
+    )
     outputs = stack_outputs(
         stack_name,
         profile=profile,
@@ -463,10 +653,14 @@ def deploy(
         raise DeploymentConfigurationError(
             "stack has Entra configured but its persistent deployment manifest is missing"
         )
+    if recovery is None and outputs.get("AuditReplicaBucketArn"):
+        raise DeploymentConfigurationError(
+            "stack has audit replication configured but its persistent recovery manifest is missing"
+        )
     environment = os.environ.copy()
     # Ambient shell state is not deployment authority. Remove every legacy
     # identity field before optionally loading the persisted reviewed manifest.
-    for field in _ENTRA_ENVIRONMENT_FIELDS:
+    for field in (*_ENTRA_ENVIRONMENT_FIELDS, *_RECOVERY_ENVIRONMENT_FIELDS):
         environment.pop(field, None)
     environment.update({"AWS_PROFILE": profile, "AWS_REGION": region})
     if manifest is not None:
@@ -478,6 +672,9 @@ def deploy(
             runner=runner,
         )
         environment.update(manifest.deployment_environment())
+    if recovery is not None:
+        verify_recovery_destination(recovery, profile=profile, source_region=region, runner=runner)
+        environment.update(recovery.deployment_environment())
     root = Path(__file__).resolve().parents[1]
     infrastructure = root / "infra" / "aws-control-plane"
     for command in (
@@ -494,13 +691,22 @@ def deploy(
         or not post.get("MicrosoftEntraScimEndpoint", "").startswith("https://")
     ):
         raise DeploymentConfigurationError("deployed Entra/SCIM posture is incomplete")
+    if recovery is not None and (
+        post.get("AuditReplicaBucketArn") != recovery.replica_bucket_arn
+        or post.get("AuditReplicaRegion") != recovery.replica_region
+        or not post.get("AuditBatchReplicationRoleArn", "").startswith("arn:")
+    ):
+        raise DeploymentConfigurationError("deployed audit-recovery posture is incomplete")
     return manifest
 
 
 def _parser() -> argparse.ArgumentParser:
     """Build the intentionally small deployment command surface."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("check", "configure", "deploy", "status"))
+    parser.add_argument(
+        "command",
+        choices=("check", "configure", "check-recovery", "configure-recovery", "deploy", "status"),
+    )
     parser.add_argument("--config", type=Path)
     parser.add_argument("--profile", default=os.environ.get("AWS_PROFILE", "p1"))
     parser.add_argument("--region", default=os.environ.get("AWS_REGION", "eu-west-2"))
@@ -509,6 +715,11 @@ def _parser() -> argparse.ArgumentParser:
         "--confirm-conditional-access",
         action="store_true",
         help="Confirm the evidence reference points to an MFA-enforcing Conditional Access review",
+    )
+    parser.add_argument(
+        "--confirm-recovery-controls",
+        action="store_true",
+        help="Confirm the recovery evidence reference records an approved cross-region review",
     )
     return parser
 
@@ -543,6 +754,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"Entra deployment {arguments.command} passed for stack "
                 f"{arguments.stack_name}; no secret values were emitted."
             )
+        elif arguments.command in {"check-recovery", "configure-recovery"}:
+            if arguments.config is None:
+                raise DeploymentConfigurationError("--config is required")
+            candidate_recovery = AuditRecoveryManifest.parse(
+                arguments.config.read_text(encoding="utf-8")
+            )
+            verify_recovery_destination(
+                candidate_recovery,
+                profile=arguments.profile,
+                source_region=arguments.region,
+            )
+            if arguments.command == "configure-recovery":
+                if not arguments.confirm_recovery_controls:
+                    raise DeploymentConfigurationError(
+                        "--confirm-recovery-controls is required before persistence"
+                    )
+                persist_recovery_manifest(
+                    candidate_recovery,
+                    arguments.stack_name,
+                    profile=arguments.profile,
+                    region=arguments.region,
+                )
+            print(
+                f"Audit recovery {arguments.command} passed for stack "
+                f"{arguments.stack_name}; destination controls were verified."
+            )
         elif arguments.command == "deploy":
             active_manifest = deploy(
                 arguments.stack_name, profile=arguments.profile, region=arguments.region
@@ -551,6 +788,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"AWS control-plane deployment completed; Entra is {state}.")
         else:
             deployed_manifest = load_persisted_manifest(
+                arguments.stack_name, profile=arguments.profile, region=arguments.region
+            )
+            deployed_recovery = load_persisted_recovery_manifest(
                 arguments.stack_name, profile=arguments.profile, region=arguments.region
             )
             outputs = stack_outputs(
@@ -565,6 +805,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "strongAuthentication": (
                             "declared-reviewed" if deployed_manifest else "not-configured"
                         ),
+                        "auditRecovery": ("configured" if deployed_recovery else "not-configured"),
                     },
                     sort_keys=True,
                 )

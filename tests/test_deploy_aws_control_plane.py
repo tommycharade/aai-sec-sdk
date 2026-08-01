@@ -37,6 +37,17 @@ def _manifest(**updates: Any) -> dict[str, Any]:
     return value
 
 
+def _recovery_manifest(**updates: Any) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "schemaVersion": 1,
+        "replicaBucketArn": "arn:aws:s3:::synthetic-audit-replica",
+        "replicaRegion": "eu-west-1",
+        "recoveryEvidenceRef": "DR-REVIEW-1234",
+    }
+    value.update(updates)
+    return value
+
+
 def _completed(stdout: str = "{}", *, returncode: int = 0, stderr: str = "") -> Any:
     return subprocess.CompletedProcess([], returncode, stdout, stderr)
 
@@ -103,6 +114,27 @@ def test_manifest_is_strict_canonical_and_never_contains_secret_values() -> None
     with pytest.raises(module.DeploymentConfigurationError, match="opaque non-secret"):
         module.EntraDeploymentManifest.parse(
             json.dumps(_manifest(conditionalAccessEvidenceRef="CAB 1234\nsecret"))
+        )
+
+
+def test_recovery_manifest_is_strict_canonical_and_bucket_scoped() -> None:
+    module = _load()
+    manifest = module.AuditRecoveryManifest.parse(json.dumps(_recovery_manifest()))
+    assert manifest.replica_bucket_name == "synthetic-audit-replica"
+    assert json.loads(manifest.canonical_json()) == _recovery_manifest()
+    assert manifest.deployment_environment() == {
+        "AUDIT_REPLICA_BUCKET_ARN": "arn:aws:s3:::synthetic-audit-replica",
+        "AUDIT_REPLICA_REGION": "eu-west-1",
+    }
+    with pytest.raises(module.DeploymentConfigurationError, match="duplicate"):
+        module.AuditRecoveryManifest.parse('{"schemaVersion":1,"schemaVersion":1}')
+    with pytest.raises(module.DeploymentConfigurationError, match="exact S3 bucket ARN"):
+        module.AuditRecoveryManifest.parse(
+            json.dumps(_recovery_manifest(replicaBucketArn="arn:aws:s3:::bucket/prefix"))
+        )
+    with pytest.raises(module.DeploymentConfigurationError, match="replicaRegion"):
+        module.AuditRecoveryManifest.parse(
+            json.dumps(_recovery_manifest(replicaRegion="eu-west-1; unsafe"))
         )
 
 
@@ -236,6 +268,70 @@ def test_missing_or_malformed_persistent_configuration_fails_closed() -> None:
             "AaiSecControlPlane", profile="synthetic", region="eu-west-2", runner=malformed
         )
 
+    assert (
+        module.load_persisted_recovery_manifest(
+            "AaiSecControlPlane", profile="synthetic", region="eu-west-2", runner=missing
+        )
+        is None
+    )
+    with pytest.raises(module.DeploymentConfigurationError, match="recovery manifest fields"):
+        module.load_persisted_recovery_manifest(
+            "AaiSecControlPlane", profile="synthetic", region="eu-west-2", runner=malformed
+        )
+
+
+def test_recovery_preflight_requires_distinct_versioned_compliance_destination() -> None:
+    module = _load()
+    manifest = module.AuditRecoveryManifest.parse(json.dumps(_recovery_manifest()))
+
+    def runner(command: list[str], **_: Any) -> Any:
+        if "get-bucket-versioning" in command:
+            return _completed(json.dumps({"Status": "Enabled"}))
+        if "get-object-lock-configuration" in command:
+            return _completed(
+                json.dumps(
+                    {
+                        "ObjectLockConfiguration": {
+                            "ObjectLockEnabled": "Enabled",
+                            "Rule": {"DefaultRetention": {"Mode": "COMPLIANCE", "Days": 365}},
+                        }
+                    }
+                )
+            )
+        raise AssertionError(command)
+
+    module.verify_recovery_destination(
+        manifest, profile="synthetic", source_region="eu-west-2", runner=runner
+    )
+    with pytest.raises(module.DeploymentConfigurationError, match="must differ"):
+        module.verify_recovery_destination(
+            module.AuditRecoveryManifest.parse(
+                json.dumps(_recovery_manifest(replicaRegion="eu-west-2"))
+            ),
+            profile="synthetic",
+            source_region="eu-west-2",
+            runner=runner,
+        )
+
+    def unlocked(command: list[str], **_: Any) -> Any:
+        if "get-bucket-versioning" in command:
+            return _completed(json.dumps({"Status": "Enabled"}))
+        return _completed(
+            json.dumps(
+                {
+                    "ObjectLockConfiguration": {
+                        "ObjectLockEnabled": "Enabled",
+                        "Rule": {"DefaultRetention": {"Mode": "GOVERNANCE", "Days": 365}},
+                    }
+                }
+            )
+        )
+
+    with pytest.raises(module.DeploymentConfigurationError, match="COMPLIANCE"):
+        module.verify_recovery_destination(
+            manifest, profile="synthetic", source_region="eu-west-2", runner=unlocked
+        )
+
 
 def test_first_deployment_may_start_without_an_entra_manifest() -> None:
     module = _load()
@@ -264,6 +360,7 @@ def test_first_deployment_may_start_without_an_entra_manifest() -> None:
 def test_configured_stack_cannot_be_deployed_after_manifest_loss(monkeypatch: Any) -> None:
     module = _load()
     monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         module,
         "stack_outputs",
@@ -273,10 +370,27 @@ def test_configured_stack_cannot_be_deployed_after_manifest_loss(monkeypatch: An
         module.deploy("AaiSecControlPlane", profile="synthetic", region="eu-west-2")
 
 
+def test_configured_replication_cannot_be_deployed_after_manifest_loss(monkeypatch: Any) -> None:
+    module = _load()
+    monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module,
+        "stack_outputs",
+        lambda *_args, **_kwargs: {
+            "MicrosoftEntraIdStatus": "not-configured",
+            "AuditReplicaBucketArn": "arn:aws:s3:::configured-replica",
+        },
+    )
+    with pytest.raises(module.DeploymentConfigurationError, match="recovery manifest is missing"):
+        module.deploy("AaiSecControlPlane", profile="synthetic", region="eu-west-2")
+
+
 def test_deploy_injects_only_manifest_references_and_verifies_posture(monkeypatch: Any) -> None:
     module = _load()
     manifest = module.EntraDeploymentManifest.parse(json.dumps(_manifest()))
     monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: manifest)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
     output_sequence = iter(
         [
             {"MicrosoftEntraIdStatus": "not-configured"},
@@ -326,6 +440,40 @@ def test_deploy_injects_only_manifest_references_and_verifies_posture(monkeypatc
     assert "ambient-secret-must-not-survive" not in repr(deploy_environment)
 
 
+def test_deploy_uses_only_persisted_recovery_authority(monkeypatch: Any) -> None:
+    module = _load()
+    recovery = module.AuditRecoveryManifest.parse(json.dumps(_recovery_manifest()))
+    monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: recovery
+    )
+    output_sequence = iter(
+        [
+            {"MicrosoftEntraIdStatus": "not-configured"},
+            {
+                "MicrosoftEntraIdStatus": "not-configured",
+                "AuditReplicaBucketArn": recovery.replica_bucket_arn,
+                "AuditReplicaRegion": recovery.replica_region,
+                "AuditBatchReplicationRoleArn": "arn:aws:iam::111122223333:role/batch",
+            },
+        ]
+    )
+    monkeypatch.setattr(module, "stack_outputs", lambda *_args, **_kwargs: next(output_sequence))
+    monkeypatch.setattr(module, "verify_recovery_destination", lambda *_args, **_kwargs: None)
+    monkeypatch.setenv("AUDIT_REPLICA_BUCKET_ARN", "arn:aws:s3:::ambient-unsafe")
+    commands: list[tuple[list[str], dict[str, str]]] = []
+
+    def runner(command: list[str], **kwargs: Any) -> Any:
+        commands.append((command, kwargs.get("env", {})))
+        return _completed()
+
+    module.deploy("AaiSecControlPlane", profile="synthetic", region="eu-west-2", runner=runner)
+    environment = commands[-1][1]
+    assert environment["AUDIT_REPLICA_BUCKET_ARN"] == recovery.replica_bucket_arn
+    assert environment["AUDIT_REPLICA_REGION"] == recovery.replica_region
+    assert "ambient-unsafe" not in repr(environment)
+
+
 def test_persistence_requires_explicit_conditional_access_confirmation(
     tmp_path: Path, monkeypatch: Any, capsys: Any
 ) -> None:
@@ -347,6 +495,36 @@ def test_persistence_requires_explicit_conditional_access_confirmation(
                 "--config",
                 str(config),
                 "--confirm-conditional-access",
+            ]
+        )
+        == 0
+    )
+    assert len(persisted) == 1
+
+
+def test_recovery_persistence_requires_explicit_review_confirmation(
+    tmp_path: Path, monkeypatch: Any, capsys: Any
+) -> None:
+    module = _load()
+    config = tmp_path / "recovery.json"
+    config.write_text(json.dumps(_recovery_manifest()), encoding="utf-8")
+    monkeypatch.setattr(module, "verify_recovery_destination", lambda *_args, **_kwargs: None)
+    persisted: list[Any] = []
+    monkeypatch.setattr(
+        module,
+        "persist_recovery_manifest",
+        lambda *args, **kwargs: persisted.append((args, kwargs)),
+    )
+    assert module.main(["configure-recovery", "--config", str(config)]) == 1
+    assert not persisted
+    assert "--confirm-recovery-controls is required" in capsys.readouterr().err
+    assert (
+        module.main(
+            [
+                "configure-recovery",
+                "--config",
+                str(config),
+                "--confirm-recovery-controls",
             ]
         )
         == 0

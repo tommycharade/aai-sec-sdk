@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "replicaBucketArn": "arn:aws:s3:::replace-with-immutable-recovery-bucket",
+  "replicaRegion": "eu-west-1",
+  "recoveryEvidenceRef": "DR-REVIEW-0001"
+}
