@@ -9,6 +9,7 @@ import re
 import sys
 import time
 import types
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -324,10 +325,73 @@ class FakeDynamoClient:
 
 
 class FakeS3:
-    """Capture audit writes without retaining sensitive test material."""
+    """Model bounded versioned Object Lock behavior with synthetic bytes only."""
 
-    def put_object(self, **_: Any) -> None:
-        return None
+    def __init__(self) -> None:
+        self.objects: dict[tuple[str, str], dict[str, Any]] = {}
+        self.counter = 0
+
+    def put_object(self, **value: Any) -> dict[str, str]:
+        self.counter += 1
+        version_id = f"version-{self.counter}"
+        body = value.get("Body", b"")
+        assert isinstance(body, bytes)
+        self.objects[(value["Key"], version_id)] = {
+            "Body": body,
+            "Metadata": dict(value.get("Metadata", {})),
+            "Retention": {
+                "Mode": value.get("ObjectLockMode", "COMPLIANCE"),
+                "RetainUntilDate": value.get(
+                    "ObjectLockRetainUntilDate", datetime.now(UTC) + timedelta(days=365)
+                ),
+            },
+            "LegalHold": {"Status": "OFF"},
+            "LastModified": datetime.now(UTC),
+        }
+        return {"VersionId": version_id}
+
+    def list_object_versions(self, **value: Any) -> dict[str, Any]:
+        prefix = value.get("Prefix", "")
+        maximum = int(value.get("MaxKeys", 1_000))
+        records = [
+            {
+                "Key": key,
+                "VersionId": version_id,
+                "Size": len(record["Body"]),
+                "LastModified": record["LastModified"],
+            }
+            for (key, version_id), record in sorted(self.objects.items())
+            if key.startswith(prefix)
+        ]
+        return {
+            "Versions": records[:maximum],
+            "DeleteMarkers": [],
+            "IsTruncated": len(records) > maximum,
+        }
+
+    def head_object(self, **value: Any) -> dict[str, Any]:
+        record = self.objects[(value["Key"], value["VersionId"])]
+        return {"Metadata": dict(record["Metadata"]), "ContentLength": len(record["Body"])}
+
+    def get_object(self, **value: Any) -> dict[str, bytes]:
+        return {"Body": self.objects[(value["Key"], value["VersionId"])]["Body"]}
+
+    def get_object_retention(self, **value: Any) -> dict[str, Any]:
+        return {"Retention": dict(self.objects[(value["Key"], value["VersionId"])]["Retention"])}
+
+    def put_object_retention(self, **value: Any) -> None:
+        record = self.objects[(value["Key"], value["VersionId"])]
+        current = record["Retention"]["RetainUntilDate"]
+        requested = value["Retention"]["RetainUntilDate"]
+        if requested < current:
+            raise ConditionalFailure()
+        record["Retention"] = dict(value["Retention"])
+
+    def get_object_legal_hold(self, **value: Any) -> dict[str, Any]:
+        return {"LegalHold": dict(self.objects[(value["Key"], value["VersionId"])]["LegalHold"])}
+
+    def put_object_legal_hold(self, **value: Any) -> None:
+        self.objects[(value["Key"], value["VersionId"])]["LegalHold"] = dict(value["LegalHold"])
 
 
 class FakeSns:
@@ -387,6 +451,7 @@ def _load_handler(monkeypatch: Any) -> Any:
         lambda *_args, **_kwargs: types.SimpleNamespace(Table=lambda _name: table)
     )
     fake_sns = FakeSns()
+    fake_s3 = FakeS3()
     policy_key_id = "arn:aws:kms:eu-west-2:111111111111:key/12345678-1234-1234-1234-123456789abc"
     fake_kms = FakeKms(policy_key_id)
     boto3.client = (  # type: ignore[attr-defined]
@@ -397,7 +462,7 @@ def _load_handler(monkeypatch: Any) -> Any:
             if service == "kms"
             else fake_sns
             if service == "sns"
-            else FakeS3()
+            else fake_s3
         )
     )
     dynamodb = types.ModuleType("boto3.dynamodb")
@@ -429,6 +494,7 @@ def _load_handler(monkeypatch: Any) -> Any:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     cast(Any, module)._fake_kms = fake_kms
+    cast(Any, module)._fake_s3 = fake_s3
     return module, table
 
 
@@ -520,6 +586,245 @@ def _runtime_manifest(host: str = "claude-code") -> dict[str, Any]:
         "hookDigest": "e" * 64,
         "host": host,
     }
+
+
+def test_evidence_assurance_retention_legal_hold_and_export(monkeypatch: Any) -> None:
+    """Exercise the complete tenant records-management journey with immutable versions."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    security = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "security-a",
+    }
+    auditor = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["auditor"],
+        "sub": "auditor-a",
+    }
+
+    initial = _invoke(module, _event("/api/enterprise/evidence", "GET", claims=auditor))
+    assert initial["statusCode"] == 200
+    initial_body = json.loads(initial["body"])
+    assert initial_body["status"] == "verified"
+    assert initial_body["policy"]["retentionDays"] == 365
+    assert initial_body["recordCount"] > 0
+
+    updated = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention",
+            "PUT",
+            claims=security,
+            body={
+                "expectedRevision": 0,
+                "retentionDays": 730,
+                "rationale": "Customer records schedule requires two years.",
+            },
+        ),
+    )
+    assert updated["statusCode"] == 200
+    assert json.loads(updated["body"])["revision"] == 1
+    assert all(
+        record["Retention"]["RetainUntilDate"] > datetime.now(UTC) + timedelta(days=729)
+        for record in module._fake_s3.objects.values()
+    )
+
+    current = json.loads(
+        _invoke(module, _event("/api/enterprise/evidence", "GET", claims=auditor))["body"]
+    )
+    target = current["records"][0]
+    held = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/legal-hold",
+            "POST",
+            claims=security,
+            body={
+                "key": target["key"],
+                "versionId": target["versionId"],
+                "active": True,
+                "rationale": "Synthetic investigation preservation.",
+            },
+        ),
+    )
+    assert held["statusCode"] == 200
+    after_hold = json.loads(
+        _invoke(module, _event("/api/enterprise/evidence", "GET", claims=auditor))["body"]
+    )
+    assert after_hold["legalHoldCount"] == 1
+
+    exported = _invoke(module, _event("/api/enterprise/evidence/export", "GET", claims=auditor))
+    assert exported["statusCode"] == 200
+    artifact = json.loads(exported["body"])
+    digest = artifact.pop("contentSha256")
+    assert (
+        digest
+        == hashlib.sha256(
+            json.dumps(artifact, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+    assert artifact["recordCount"] == len(artifact["records"])
+
+
+def test_evidence_governance_fails_closed_on_bypass_and_tamper(monkeypatch: Any) -> None:
+    """Deny weak roles, retention reduction, stale writes, cross-tenant holds and altered bytes."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    security = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "security-a",
+    }
+    fleet = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-a",
+    }
+    denied_read = _invoke(module, _event("/api/enterprise/evidence", "GET", claims=fleet))
+    assert denied_read["statusCode"] == 403
+    denied_write = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention",
+            "PUT",
+            claims=fleet,
+            body={"expectedRevision": 0, "retentionDays": 730, "rationale": "No authority."},
+        ),
+    )
+    assert denied_write["statusCode"] == 403
+
+    accepted = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention",
+            "PUT",
+            claims=security,
+            body={
+                "expectedRevision": 0,
+                "retentionDays": 730,
+                "rationale": "Approved customer retention schedule.",
+            },
+        ),
+    )
+    assert accepted["statusCode"] == 200, accepted
+    stale = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention",
+            "PUT",
+            claims=security,
+            body={
+                "expectedRevision": 0,
+                "retentionDays": 900,
+                "rationale": "Intentionally stale retention update.",
+            },
+        ),
+    )
+    assert stale["statusCode"] == 409
+    reduction = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention",
+            "PUT",
+            claims=security,
+            body={
+                "expectedRevision": 1,
+                "retentionDays": 365,
+                "rationale": "Attempt to shorten immutable retention.",
+            },
+        ),
+    )
+    assert reduction["statusCode"] == 400
+    cross_tenant = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/legal-hold",
+            "POST",
+            claims=security,
+            body={
+                "key": "tenant=other/year=2026/record.json",
+                "versionId": "version-1",
+                "active": True,
+                "rationale": "Cross-tenant attempt.",
+            },
+        ),
+    )
+    assert cross_tenant["statusCode"] == 403
+
+    object_record = next(iter(module._fake_s3.objects.values()))
+    object_record["Body"] += b"tampered"
+    assurance = _invoke(module, _event("/api/enterprise/evidence", "GET", claims=security))
+    assert assurance["statusCode"] == 200
+    assert json.loads(assurance["body"])["status"] == "at_risk"
+    failed_export = _invoke(
+        module, _event("/api/enterprise/evidence/export", "GET", claims=security)
+    )
+    assert failed_export["statusCode"] == 500
+
+
+def test_evidence_inventory_never_presents_a_bounded_sample_as_complete(monkeypatch: Any) -> None:
+    """Refuse synchronous export and retention mutation above the explicit pilot bound."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    security = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "security-a",
+    }
+    for index in range(module._EVIDENCE_RECORD_LIMIT + 1):
+        module._audit(tenant, "synthetic_bound_probe", "test", {"index": index})
+
+    assurance = _invoke(module, _event("/api/enterprise/evidence", "GET", claims=security))
+    assert assurance["statusCode"] == 200
+    body = json.loads(assurance["body"])
+    assert body["status"] == "incomplete"
+    assert body["complete"] is False
+    assert body["recordCount"] == module._EVIDENCE_RECORD_LIMIT
+    export = _invoke(module, _event("/api/enterprise/evidence/export", "GET", claims=security))
+    assert export["statusCode"] == 409
+    update = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention",
+            "PUT",
+            claims=security,
+            body={
+                "expectedRevision": 0,
+                "retentionDays": 730,
+                "rationale": "Approved two-year synthetic records schedule.",
+            },
+        ),
+    )
+    assert update["statusCode"] == 409
+
+
+def test_evidence_policy_rejects_non_integral_stored_authority(monkeypatch: Any) -> None:
+    """Malformed DynamoDB numeric authority cannot be truncated into a valid policy."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    module._seed(tenant)
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "EVIDENCE_POLICY", "retention"),
+            "tenant_id": tenant,
+            "retention_days": Decimal("365.5"),
+            "revision": Decimal("1.1"),
+        }
+    )
+    response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence",
+            "GET",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["auditor"],
+                "sub": "auditor-a",
+            },
+        ),
+    )
+    assert response["statusCode"] == 500
 
 
 def _bound_endpoint_alert(

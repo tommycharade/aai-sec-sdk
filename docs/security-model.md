@@ -165,6 +165,17 @@ durable remote acceptance; export failure raises and the runtime fails closed.
 tamper-proof forensic storage. Follow the [operational runbooks](runbooks.md)
 for outages, corruption, rotation, and evidence preservation.
 
+The hosted AWS adapter adds tenant-governed S3 Object Lock evidence. The bucket
+enforces a 365-day COMPLIANCE floor independently of DynamoDB. A tenant policy
+may extend that floor to ten years but cannot shorten it through the control
+plane. Exact-version legal hold is tenant-prefix checked, and the operator's
+rationale is hashed rather than persisted as narrative. New records carry a
+creation-time SHA-256 metadata binding; assurance re-reads the immutable bytes
+and reports any mismatch as `at_risk`. Bounded export refuses truncation and the
+browser independently verifies the canonical manifest digest. This software
+assurance does not replace scheduled loss detection or live cross-region
+recovery proof. See [Durable evidence governance](durable-evidence-governance-design.md).
+
 Native host hooks are policy enforcement points, not deployment integrity
 controls. Claude and Codex project hook files can be changed or disabled by a
 user who controls the project. Codex additionally requires explicit trust for

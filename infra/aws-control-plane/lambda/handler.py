@@ -15,7 +15,7 @@ import re
 import secrets
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -176,6 +176,9 @@ _CASE_EXPORT_ROLES = frozenset(
 )
 _CASE_EXPORT_RECORD_LIMIT = 500
 _CASE_EXPORT_LOOKBACK_SECONDS = 24 * 60 * 60
+_EVIDENCE_RETENTION_MIN_DAYS = 365
+_EVIDENCE_RETENTION_MAX_DAYS = 3_650
+_EVIDENCE_RECORD_LIMIT = 250
 _RESPONSE_RULE_VERSION_STATES = frozenset(
     {"draft", "review", "approved", "active", "superseded", "rejected"}
 )
@@ -302,13 +305,15 @@ _ROLE_CAPABILITIES = {
             "incident_response",
             "response_rule_approval",
             "response_rule_write",
+            "evidence_admin",
+            "evidence_read",
         }
     ),
     "policy-author": frozenset({"policy_write", "policy_simulation"}),
     "policy-approver": frozenset({"approval_decision", "policy_approval", "policy_simulation"}),
     "fleet-operator": frozenset({"fleet_write"}),
     "incident-responder": frozenset({"incident_response"}),
-    "auditor": frozenset({"access_certification_read"}),
+    "auditor": frozenset({"access_certification_read", "evidence_read"}),
 }
 _DELEGATABLE_OPERATOR_ROLES = frozenset(_CANONICAL_OPERATOR_ROLES - {"platform-admin"})
 _DELEGATED_SCOPE_TYPES = frozenset({"organization", "project", "deployment"})
@@ -960,6 +965,8 @@ def _required_mutation_capability(path):
         return "identity_admin"
     if normalized.startswith("/enterprise/identity/delegated-grants"):
         return "identity_admin"
+    if normalized.startswith("/enterprise/evidence"):
+        return "evidence_admin"
     if normalized.startswith("/enterprise/discovery/sources/"):
         # Population evidence can lower measured coverage and create leaver or
         # orphan findings. Until scoped service identities are implemented,
@@ -6409,6 +6416,282 @@ def _set_fleet_emergency_stop(tenant, active, actor):
     return _set_scope_emergency_stop(tenant, "fleet", "all", active, actor)
 
 
+def _evidence_policy(tenant):
+    """Return the tenant's future-record retention policy or a safe default.
+
+    The bucket-level 365-day COMPLIANCE policy is the hard floor. Tenant state
+    may only extend that floor; missing or malformed state never shortens it.
+    """
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "EVIDENCE_POLICY", "retention"), ConsistentRead=True
+    ).get("Item")
+    if not item:
+        return {
+            "retentionDays": _EVIDENCE_RETENTION_MIN_DAYS,
+            "revision": 0,
+            "updatedAt": None,
+            "updatedBy": None,
+        }
+    days = item.get("retention_days")
+    revision = item.get("revision")
+    if (
+        isinstance(days, bool)
+        or not isinstance(days, (int, Decimal))
+        or (isinstance(days, Decimal) and days != days.to_integral_value())
+        or int(days) < _EVIDENCE_RETENTION_MIN_DAYS
+        or int(days) > _EVIDENCE_RETENTION_MAX_DAYS
+        or isinstance(revision, bool)
+        or not isinstance(revision, (int, Decimal))
+        or (isinstance(revision, Decimal) and revision != revision.to_integral_value())
+        or int(revision) < 1
+    ):
+        raise RuntimeError("tenant evidence retention policy is malformed")
+    return {
+        "retentionDays": int(days),
+        "revision": int(revision),
+        "updatedAt": int(item.get("updated_at", 0)) or None,
+        "updatedBy": item.get("updated_by"),
+    }
+
+
+def _evidence_body_bytes(response):
+    """Read one bounded S3 body into bytes for integrity verification."""
+    body = response.get("Body")
+    value = body.read() if hasattr(body, "read") else body
+    if not isinstance(value, bytes) or len(value) > 1_048_576:
+        raise RuntimeError("retained evidence body is missing or exceeds the verification bound")
+    return value
+
+
+def _evidence_inventory(tenant):
+    """Return a complete bounded manifest of immutable tenant audit versions.
+
+    The route refuses to call a truncated list complete. Larger tenants must use
+    the future asynchronous inventory/export path rather than receive a partial
+    browser artifact that looks authoritative.
+    """
+    prefix = f"tenant={tenant}/"
+    response = S3.list_object_versions(
+        Bucket=os.environ["AUDIT_BUCKET"], Prefix=prefix, MaxKeys=_EVIDENCE_RECORD_LIMIT + 1
+    )
+    versions = response.get("Versions", [])
+    delete_markers = response.get("DeleteMarkers", [])
+    complete = not response.get("IsTruncated", False) and len(versions) <= _EVIDENCE_RECORD_LIMIT
+    if len(versions) > _EVIDENCE_RECORD_LIMIT:
+        versions = versions[:_EVIDENCE_RECORD_LIMIT]
+    records = []
+    for version in versions:
+        key = version.get("Key")
+        version_id = version.get("VersionId")
+        if (
+            not isinstance(key, str)
+            or not key.startswith(prefix)
+            or not isinstance(version_id, str)
+        ):
+            raise RuntimeError("audit inventory returned an invalid tenant object identity")
+        head = S3.head_object(Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id)
+        body = _evidence_body_bytes(
+            S3.get_object(Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id)
+        )
+        content_hash = hashlib.sha256(body).hexdigest()
+        expected_hash = head.get("Metadata", {}).get("content-sha256")
+        retention = S3.get_object_retention(
+            Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id
+        ).get("Retention", {})
+        hold = S3.get_object_legal_hold(
+            Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id
+        ).get("LegalHold", {})
+        modified = version.get("LastModified")
+        records.append(
+            {
+                "key": key,
+                "versionId": version_id,
+                "size": int(version.get("Size", len(body))),
+                "lastModified": modified.isoformat()
+                if hasattr(modified, "isoformat")
+                else str(modified),
+                "contentSha256": content_hash,
+                "integrity": "verified"
+                if expected_hash and secrets.compare_digest(expected_hash, content_hash)
+                else "legacy_unbound"
+                if not expected_hash
+                else "mismatch",
+                "retentionMode": retention.get("Mode"),
+                "retainUntil": retention.get("RetainUntilDate").isoformat()
+                if hasattr(retention.get("RetainUntilDate"), "isoformat")
+                else None,
+                "legalHold": hold.get("Status") == "ON",
+            }
+        )
+    records.sort(key=lambda item: (item["lastModified"], item["key"], item["versionId"]))
+    return {
+        "records": records,
+        "complete": complete,
+        "deleteMarkerCount": len(delete_markers),
+    }
+
+
+def _evidence_assurance(tenant):
+    """Derive tenant evidence posture from live object versions and lock state."""
+    inventory = _evidence_inventory(tenant)
+    records = inventory["records"]
+    policy = _evidence_policy(tenant)
+    now = datetime.now(UTC)
+    at_risk = [
+        item
+        for item in records
+        if item["integrity"] != "verified"
+        or item["retentionMode"] != "COMPLIANCE"
+        or not item["retainUntil"]
+        or datetime.fromisoformat(item["retainUntil"]) <= now
+    ]
+    status = "incomplete" if not inventory["complete"] else "at_risk" if at_risk else "verified"
+    return {
+        "schemaVersion": 1,
+        "status": status,
+        "policy": policy,
+        "recordCount": len(records),
+        "verifiedCount": len(records) - len(at_risk),
+        "legalHoldCount": sum(1 for item in records if item["legalHold"]),
+        "deleteMarkerCount": inventory["deleteMarkerCount"],
+        "complete": inventory["complete"],
+        "records": list(reversed(records[-100:])),
+        "checkedAt": int(time.time()),
+    }
+
+
+def _set_evidence_retention(tenant, body, actor):
+    """Increase future and existing bounded tenant retention atomically enough to fail safe."""
+    if not isinstance(body, dict) or set(body) != {
+        "expectedRevision",
+        "retentionDays",
+        "rationale",
+    }:
+        raise ValueError("evidence retention request has an invalid schema")
+    expected = _discovery_integer(body.get("expectedRevision"), "expectedRevision", minimum=0)
+    days = _discovery_integer(
+        body.get("retentionDays"),
+        "retentionDays",
+        minimum=_EVIDENCE_RETENTION_MIN_DAYS,
+        maximum=_EVIDENCE_RETENTION_MAX_DAYS,
+    )
+    rationale = _case_reason(body.get("rationale"))
+    current = _evidence_policy(tenant)
+    if current["revision"] != expected:
+        raise PolicyConflict("evidence retention policy changed before update")
+    if days < current["retentionDays"]:
+        raise ValueError("evidence retention cannot be shortened through the control plane")
+    inventory = _evidence_inventory(tenant)
+    if not inventory["complete"]:
+        raise PolicyConflict(
+            "existing evidence inventory is too large for synchronous retention update"
+        )
+    retain_until = datetime.now(UTC) + timedelta(days=days)
+    # Extend retained versions before publishing the policy. A concurrent policy
+    # conflict can leave evidence retained longer, which is the safe direction.
+    for record in inventory["records"]:
+        S3.put_object_retention(
+            Bucket=os.environ["AUDIT_BUCKET"],
+            Key=record["key"],
+            VersionId=record["versionId"],
+            Retention={"Mode": "COMPLIANCE", "RetainUntilDate": retain_until},
+        )
+    now = int(time.time())
+    item = {
+        **_item_key(tenant, "EVIDENCE_POLICY", "retention"),
+        "tenant_id": tenant,
+        "retention_days": days,
+        "revision": expected + 1,
+        "updated_at": now,
+        "updated_by": actor,
+        "rationale_hash": hashlib.sha256(rationale.encode()).hexdigest(),
+    }
+    condition = "attribute_not_exists(pk)" if expected == 0 else "revision = :revision"
+    values = None if expected == 0 else {":revision": expected}
+    try:
+        kwargs = {"Item": item, "ConditionExpression": condition}
+        if values:
+            kwargs["ExpressionAttributeValues"] = values
+        TABLE.put_item(**kwargs)
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("evidence retention policy changed before update") from error
+        raise
+    _audit(
+        tenant,
+        "evidence_retention_extended",
+        actor,
+        {
+            "retention_days": days,
+            "revision": expected + 1,
+            "rationale_hash": item["rationale_hash"],
+        },
+    )
+    return _evidence_policy(tenant)
+
+
+def _set_evidence_legal_hold(tenant, body, actor):
+    """Set or clear legal hold on one exact retained tenant object version."""
+    if not isinstance(body, dict) or set(body) != {"key", "versionId", "active", "rationale"}:
+        raise ValueError("evidence legal-hold request has an invalid schema")
+    key = _bounded_text(body.get("key"), "key", 1_024)
+    version_id = _bounded_text(body.get("versionId"), "versionId", 1_024)
+    rationale = _case_reason(body.get("rationale"))
+    active = body.get("active")
+    if not isinstance(active, bool):
+        raise ValueError("active must be a boolean")
+    if not key.startswith(f"tenant={tenant}/"):
+        raise PermissionError("evidence object is outside the authenticated tenant")
+    S3.head_object(Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id)
+    S3.put_object_legal_hold(
+        Bucket=os.environ["AUDIT_BUCKET"],
+        Key=key,
+        VersionId=version_id,
+        LegalHold={"Status": "ON" if active else "OFF"},
+    )
+    rationale_hash = hashlib.sha256(rationale.encode()).hexdigest()
+    _audit(
+        tenant,
+        "evidence_legal_hold_changed",
+        actor,
+        {
+            "object_identity_hash": hashlib.sha256(f"{key}:{version_id}".encode()).hexdigest(),
+            "active": active,
+            "rationale_hash": rationale_hash,
+        },
+    )
+    return {"key": key, "versionId": version_id, "active": active}
+
+
+def _evidence_export(tenant, actor):
+    """Return a complete, content-hashed manifest or refuse a partial export."""
+    inventory = _evidence_inventory(tenant)
+    if not inventory["complete"]:
+        raise PolicyConflict("complete evidence export exceeds the synchronous export bound")
+    if any(item["integrity"] == "mismatch" for item in inventory["records"]):
+        raise RuntimeError("retained evidence integrity verification failed")
+    generated_at = int(time.time())
+    content = {
+        "schemaVersion": 1,
+        "tenantId": tenant,
+        "generatedAt": generated_at,
+        "recordCount": len(inventory["records"]),
+        "deleteMarkerCount": inventory["deleteMarkerCount"],
+        "retentionPolicy": _evidence_policy(tenant),
+        "records": inventory["records"],
+    }
+    content_hash = hashlib.sha256(
+        json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    _audit(
+        tenant,
+        "evidence_manifest_exported",
+        actor,
+        {"record_count": content["recordCount"], "content_hash": content_hash},
+    )
+    return {**content, "contentSha256": content_hash}
+
+
 def _audit(tenant, event_type, actor, payload):
     redacted = {
         "event_type": event_type,
@@ -6424,11 +6707,16 @@ def _audit(tenant, event_type, actor, payload):
         f"tenant={tenant}/year={time.gmtime().tm_year}/"
         f"month={time.gmtime().tm_mon:02d}/{int(time.time())}-{uuid.uuid4()}.json"
     )
+    body = json.dumps(redacted, sort_keys=True, separators=(",", ":")).encode()
+    retention_days = _evidence_policy(tenant)["retentionDays"]
     S3.put_object(
         Bucket=os.environ["AUDIT_BUCKET"],
         Key=key,
-        Body=json.dumps(redacted).encode(),
+        Body=body,
         ContentType="application/json",
+        Metadata={"content-sha256": hashlib.sha256(body).hexdigest(), "schema-version": "1"},
+        ObjectLockMode="COMPLIANCE",
+        ObjectLockRetainUntilDate=datetime.now(UTC) + timedelta(days=retention_days),
     )
     return {
         "event_type": event_type,
@@ -11854,6 +12142,22 @@ def handler(event, context):
         if path.startswith("/enterprise/") or path.startswith("/api/enterprise/"):
             suffix = path.split("/enterprise/", 1)[1]
             parts = [p for p in suffix.split("/") if p]
+            if method == "GET" and parts in (["evidence"], ["evidence", "export"]):
+                if not _operator_authorized(event, "evidence_read", tenant):
+                    return _response(
+                        403,
+                        {"error": "evidence assurance requires an authorized evidence role"},
+                    )
+                return _response(
+                    200,
+                    _evidence_export(tenant, actor)
+                    if parts == ["evidence", "export"]
+                    else _evidence_assurance(tenant),
+                )
+            if method == "PUT" and parts == ["evidence", "retention"]:
+                return _response(200, _set_evidence_retention(tenant, _body(event), actor))
+            if method == "POST" and parts == ["evidence", "legal-hold"]:
+                return _response(200, _set_evidence_legal_hold(tenant, _body(event), actor))
             if method == "GET" and parts == ["policy-trust"]:
                 return _response(200, _policy_trust_metadata())
             if (

@@ -559,6 +559,14 @@ export class AwsControlPlaneStack extends cdk.Stack {
     idempotency.grantReadWriteData(handler);
     scim.grantReadWriteData(handler);
     audit.grantPut(handler);
+    // Evidence governance is tenant-prefix constrained in Lambda and requires
+    // exact-version reads before retention or legal-hold mutation. S3 Object
+    // Lock COMPLIANCE mode remains the non-bypassable enforcement boundary.
+    audit.grantRead(handler);
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["s3:GetObjectRetention", "s3:GetObjectLegalHold", "s3:PutObjectRetention", "s3:PutObjectLegalHold"],
+      resources: [audit.arnForObjects("tenant=*")],
+    }));
     securityAlerts.grantPublish(handler);
     handler.addToRolePolicy(new iam.PolicyStatement({ actions: ["sts:AssumeRole"], resources: [scopedToolRole.roleArn] }));
 
