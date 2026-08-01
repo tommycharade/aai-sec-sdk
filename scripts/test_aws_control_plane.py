@@ -673,6 +673,17 @@ def main() -> int:
         )
         if managed_client.heartbeat(session_token).get("status") != "connected":
             raise RuntimeError("AWS managed-host evidence heartbeat failed")
+        effective_status, effective_body = _request(
+            f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/effective-policy",
+            "GET",
+            token=session_token,
+            project_root_digest=project_root_digest,
+        )
+        if effective_status != 200:
+            raise RuntimeError(
+                "signed effective-policy lookup failed: "
+                f"status={effective_status}, response={effective_body}"
+            )
         effective = managed_client.effective_policy()
         if effective.get("policy", {}).get("id") != "policy-safe-default":
             raise RuntimeError("AWS agent client did not receive the assigned policy")

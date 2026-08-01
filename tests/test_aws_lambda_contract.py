@@ -3070,6 +3070,7 @@ def test_policy_activation_signs_atomically_and_freezes_registry_resolution(
     }
     candidate_configuration = {
         "tools": {"allowed": ["read_repository"]},
+        "budgets": {"maxActions": 25},
         "claudeCode": {"allowedMcpServers": ["github"]},
     }
     candidate = module._item_key(
@@ -3134,8 +3135,13 @@ def test_policy_activation_signs_atomically_and_freezes_registry_resolution(
     changed_mcp = dict(mcp)
     changed_mcp["command"] = "attacker-replacement"
     table.put_item(Item=changed_mcp)
+    # DynamoDB's resource API returns every persisted number as Decimal. The
+    # signed bundle must normalize that storage representation before applying
+    # the provider-neutral canonical JSON contract.
+    stored["effective_configuration"]["budgets"]["maxActions"] = Decimal("25")
     active_policy = table.items[(f"TENANT#{tenant}", "POLICY#policy-signed")]
     bundle = module._active_policy_bundle(tenant, active_policy)
+    assert bundle["configuration"]["budgets"]["maxActions"] == 25
     assert bundle["configuration"]["claudeCode"]["managedMcpServers"][0]["command"] == (
         "github-mcp-server"
     )
