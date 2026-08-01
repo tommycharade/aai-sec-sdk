@@ -1368,6 +1368,60 @@
   
   
     <li class="md-nav__item">
+      <a href="../measured-managed-rollout-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured managed-configuration rollout design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../measured-managed-rollout-acceptance-2026-08-01/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured managed-rollout acceptance — 2026-08-01
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -2350,14 +2404,20 @@ provider-neutral management plane around the runtime. The control plane owns
 inventory, tenant/project scope, agent presence, desired configuration,
 rollout state, drift, health, alerts, and emergency-stop intent. It does not
 execute tools and it does not mint credentials. A deployment-specific
-<code>FleetDeploymentAuthority</code> adapter is the trust boundary that applies a
-configuration or stops execution in the live SDK instance; the database state
-is updated only after that adapter succeeds.</p>
+<code>FleetDeploymentAuthority</code> adapter is the trust boundary for synchronous local
+applications. In the hosted AWS path, authenticated enrolled endpoints pull an
+immutable package bound to the live rollout; the control plane derives
+convergence only from fresh exact endpoint evidence. An operator write changes
+desired rollout authority but cannot write applied state.</p>
 <pre><code class="language-text">enterprise UI / API client
           |
-authenticated fleet API -&gt; tenant/RBAC checks -&gt; durable desired state
+authenticated fleet API -&gt; tenant/RBAC checks -&gt; immutable desired version
           |                                      |
-          +-&gt; deployment authority adapter &lt;-----+-- apply / stop / rollback
+          +-&gt; bounded rollout reconciler &lt;-------+-- ring / pause / rollback
+          |                                      |
+          +-&gt; attested package channel &lt;---------+-- exact package revision
+          |                                      |
+          +&lt;- authenticated endpoint evidence ---+-- derived convergence
           |
           +-&gt; inventory, drift, health, alerts, redacted audit
 </code></pre>

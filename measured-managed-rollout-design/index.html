@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/dynamic-groups-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/measured-managed-rollout-design/">
       
       
-        <link rel="prev" href="../endpoint-evidence-acceptance-2026-08-01/">
+        <link rel="prev" href="../managed-package-distribution-design/">
       
       
-        <link rel="next" href="../policy-editor/">
+        <link rel="next" href="../measured-managed-rollout-acceptance-2026-08-01/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Dynamic policy groups - Agentic AI Security SDK</title>
+        <title>Measured managed-configuration rollout design - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#dynamic-policy-groups" class="md-skip">
+        <a href="#measured-managed-configuration-rollouts" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Dynamic policy groups
+              Measured managed-configuration rollout design
             
           </span>
         </div>
@@ -853,37 +853,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Dynamic policy groups
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../dynamic-groups-design/" class="md-nav__link">
         
   
   
@@ -899,59 +872,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#operator-journey" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operator journey
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#api-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        API contract
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#security-invariants" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Security invariants
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1365,10 +1285,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../measured-managed-rollout-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured managed-configuration rollout design
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1384,6 +1331,114 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollout-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollout request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#measured-convergence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured convergence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deterministic-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deterministic rollback
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ui-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2252,10 +2307,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#operator-journey" class="md-nav__link">
+  <a href="#purpose" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Operator journey
+        Purpose
       
     </span>
   </a>
@@ -2263,10 +2318,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#api-contract" class="md-nav__link">
+  <a href="#trust-boundaries" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API contract
+        Trust boundaries
       
     </span>
   </a>
@@ -2274,10 +2329,65 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#security-invariants" class="md-nav__link">
+  <a href="#lifecycle" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Security invariants
+        Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rollout-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollout request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#measured-convergence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured convergence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deterministic-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deterministic rollback
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ui-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required evidence
       
     </span>
   </a>
@@ -2304,61 +2414,121 @@
   
 
 
-<h1 id="dynamic-policy-groups">Dynamic policy groups</h1>
-<p>Dynamic groups automate which enrolled agents receive a policy without making
-the browser, agent, or model an authority source. They are a materialized,
-reviewed assignment mechanism: the control plane evaluates a bounded rule over
-its own inventory, shows the exact effect, and applies that result only after an
-operator confirms it.</p>
-<h2 id="operator-journey">Operator journey</h2>
-<ol>
-<li>Open a group and select <strong>Automate membership</strong>.</li>
-<li>Add one or more typed conditions. All conditions must match.</li>
-<li>Enter an auditable business reason and select <strong>Preview rule</strong>.</li>
-<li>Review matched, added, removed, unchanged and conflicting agents.</li>
-<li>Resolve any overlap with another policy group.</li>
-<li>Apply the exact preview. The group becomes rule-managed and manual add or
-   remove operations are disabled.</li>
-<li>Select <strong>Review rule</strong> after trusted inventory changes to preview and apply
-   deterministic reevaluation.</li>
-</ol>
-<p>No JSON or expression language is required. The supported server-owned fields
-are agent host, project ID, deployment ID, deployment team, environment,
-region and reviewed agent criticality. Conditions support exact inclusion or
-exclusion of up to 20 values. Wildcards, regular expressions, volatile
-heartbeat state and browser-supplied risk values are not accepted.</p>
-<h2 id="api-contract">API contract</h2>
-<p><code>POST /api/enterprise/groups/{group}/dynamic-membership</code> accepts a closed
-schema with <code>mode</code>, <code>requestId</code>, <code>expectedMembershipRevision</code>, <code>reason</code> and a
-rule. A rule has <code>match: all</code> and one to seven unique conditions.</p>
-<p>Preview performs strongly consistent inventory reads and writes nothing. Its
-typed response includes the canonical rule and hash, current/resulting
-revision, additions, removals, unchanged agents, overlaps and summary counts.
-<code>canApply</code> is true only when a real change exists and no overlap is present.</p>
-<p>Apply repeats the evaluation. A stale revision or overlapping group returns
-HTTP 409 with no partial authority change. A successful change atomically
-stores the materialized membership, canonical rule, next membership revision,
-request-bound idempotency result and immutable primary audit record. Reusing a
-request ID with different semantics fails closed. The S3 audit export is a
-best-effort secondary copy after the DynamoDB transaction.</p>
-<h2 id="security-invariants">Security invariants</h2>
+<h1 id="measured-managed-configuration-rollouts">Measured managed-configuration rollouts</h1>
+<h2 id="purpose">Purpose</h2>
+<p>This design replaces the legacy deployment rollout flag with an evidence-led
+authority boundary for managed Claude Code and Codex configuration. An operator
+may choose a rollout target and ring, but cannot declare that endpoints applied
+it. Only current, exact endpoint evidence can establish convergence.</p>
+<p>The first slice targets P1-POL-05 and P1-POL-06 and provides the control-plane
+foundation needed by P1-FLT-06 and P1-FLT-08. It does not claim that an MDM has
+installed the SDK or that an unapproved SDK release is safe. Release-manifest
+and physical-device rollout evidence remain separate gates.</p>
+<h2 id="trust-boundaries">Trust boundaries</h2>
 <ul>
-<li>An agent can belong to at most one policy group.</li>
-<li>Only active agents in the group's server-resolved organization are eligible.</li>
-<li>Deployment lineage and reviewed criticality come from control-plane records,
-  never request JSON or model output.</li>
-<li>Missing attributes do not match.</li>
-<li>Candidate size is bounded to 500 agents.</li>
-<li>Dynamic groups reject manual single and bulk membership mutations.</li>
-<li>Inventory, groups and the target revision are re-read before every preview
-  and apply; optimistic concurrency rejects races.</li>
-<li>Audit payloads contain counts, identifiers and hashes, not prompts, tool
-  arguments, credentials or full membership lists.</li>
+<li>The authenticated operator chooses deployments, a bounded percentage,
+  channel, ring, schedule, health criteria and reason.</li>
+<li>The server resolves each deployment, desired configuration, exact package,
+  active agents and current evidence. Browser-provided counts and health are
+  never accepted.</li>
+<li>A rollout binds one immutable configuration version and one immutable managed
+  package revision. Publishing a later package cannot alter an active rollout.</li>
+<li>Agent selection is deterministic from the tenant-scoped deployment/agent
+  identity and percentage. The browser cannot choose a favourable canary.</li>
+<li><code>appliedHash</code> is written only after every selected endpoint in a 100-percent
+  rollout reports fresh exact managed configuration. An operator transition
+  can never write it.</li>
+<li>Threshold breaches and deadlines only remove rollout authority by pausing.
+  They never expand a ring or grant execution authority.</li>
+<li>Rollback creates a new immutable configuration version from the last
+  server-recorded known-good version and its retained package revision.</li>
 </ul>
-<p>This first contract intentionally requires an operator to apply reevaluation.
-Scheduled automatic reevaluation will require a separate service identity,
-failure policy, change notification and rollout design before it can safely
-change policy authority without a human confirmation.</p>
+<h2 id="lifecycle">Lifecycle</h2>
+<pre><code class="language-text">staged -&gt; scheduled -&gt; canary -&gt; active -&gt; converged
+                    \         \         -&gt; paused
+                     \         -&gt; paused
+                      -&gt; paused
+
+paused -&gt; canary | active
+any non-staged version with known-good history -&gt; rolling_back -&gt; converged
+</code></pre>
+<p><code>canary</code> remains visible after its selected endpoints converge; expansion is a
+separate authenticated mutation. <code>active</code> becomes <code>converged</code> only at 100
+percent with exact evidence from every active enrolled endpoint. A scheduled
+five-minute reconciler applies due schedules, calculates convergence and
+automatically pauses unhealthy or overdue rollouts.</p>
+<h2 id="rollout-request">Rollout request</h2>
+<p>The batch mutation accepts no presentation state or endpoint counts:</p>
+<pre><code class="language-json">{
+  &quot;deploymentIds&quot;: [&quot;deployment-a&quot;],
+  &quot;expectedRevisions&quot;: {&quot;deployment-a&quot;: 3},
+  &quot;targetState&quot;: &quot;canary&quot;,
+  &quot;percentage&quot;: 10,
+  &quot;channel&quot;: &quot;stable&quot;,
+  &quot;ring&quot;: &quot;canary&quot;,
+  &quot;reason&quot;: &quot;Deploy the reviewed configuration to the engineering canary ring.&quot;,
+  &quot;healthCriteria&quot;: {
+    &quot;maxUnavailablePercent&quot;: 5,
+    &quot;maxDriftPercent&quot;: 5,
+    &quot;minSampleSize&quot;: 1,
+    &quot;gracePeriodSeconds&quot;: 600
+  },
+  &quot;schedule&quot;: {
+    &quot;notBefore&quot;: 1800000000,
+    &quot;deadline&quot;: 1800003600,
+    &quot;timeZone&quot;: &quot;Europe/London&quot;
+  }
+}
+</code></pre>
+<p>The batch is bounded and all-or-none. Each deployment must have an active
+population, one current exact package matching desired managed-host state, no
+incompatible agent host, and the expected rollout revision. Canary rings are
+limited to 1–25 percent. Percentage may only increase unless a governed
+rollback is requested.</p>
+<h2 id="measured-convergence">Measured convergence</h2>
+<p>For the deterministic selected population the control plane reports:</p>
+<ul>
+<li>total and selected active agents;</li>
+<li>healthy, converged, pending, unavailable and drifted counts;</li>
+<li>measured percentages, not requested percentages;</li>
+<li>whether the grace period is active;</li>
+<li>threshold and deadline posture;</li>
+<li>exact desired hash, configuration version and package revision; and</li>
+<li>blockers such as missing package, no agents or incompatible host.</li>
+</ul>
+<p>An endpoint is converged only when it is active and connected and its fresh
+managed report exactly matches host, host version, platform, bundle hash,
+policy ID and policy version. Project-owned files, browser claims and rollout
+state do not count as evidence.</p>
+<h2 id="deterministic-rollback">Deterministic rollback</h2>
+<p>Every desired configuration version stores an integrity hash and the package
+revision bound when rollout began. Full convergence marks that version as the
+last known good. Rollback accepts only that exact version, expected rollout
+revision and a durable reason. It creates a new version with the known-good
+desired document and package revision, selects 100 percent, and remains
+<code>rolling_back</code> until endpoint evidence converges.</p>
+<h2 id="ui-journey">UI journey</h2>
+<p>Deployments &amp; rollout opens with measured state, not action buttons. Selecting
+a deployment opens a focused rollout workspace showing readiness, exact target,
+current versus desired authority, measured convergence and blockers. Starting
+or expanding a rollout requires typed ring, channel, percentage, maintenance
+window, thresholds and reason. Pause and rollback are visually consequential
+and require confirmation. Help text explains every field.</p>
+<h2 id="required-evidence">Required evidence</h2>
+<ul>
+<li>no operator request can set <code>appliedHash</code>, convergence counts or known-good
+  state;</li>
+<li>stale revision, malformed schedule, decreasing percentage, oversized batch,
+  incompatible host and package mismatch fail closed;</li>
+<li>stable canary selection and exact package revision are deterministic;</li>
+<li>fresh exact reports converge, while missing/stale/conflicting reports do not;</li>
+<li>health or deadline breach automatically pauses and emits audit evidence;</li>
+<li>rollback restores immutable desired content and package revision;</li>
+<li>concurrent reconciliation cannot overwrite a newer operator transition;</li>
+<li>scheduled reconciliation has bounded tenant/configuration work, retries, DLQ
+  and alarm evidence; and</li>
+<li>UI contract, responsive browser and live AWS synthetic acceptance evidence.</li>
+</ul>
 
 
 

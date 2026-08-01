@@ -1478,6 +1478,60 @@
   
   
     <li class="md-nav__item">
+      <a href="../measured-managed-rollout-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured managed-configuration rollout design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../measured-managed-rollout-acceptance-2026-08-01/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measured managed-rollout acceptance — 2026-08-01
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
@@ -2645,21 +2699,28 @@ environment, region, SDK version, current health, and operator authorization.
 Review the desired configuration hash and ensure the deployment authority is
 connected. Never put bearer tokens, credentials, or raw tool arguments into a
 template or ticket.</p>
-<p><strong>Stage safely:</strong> assign the reviewed template, use a staged or canary rollout,
-and start with a small percentage. Confirm agent heartbeats, health, alerts,
-policy decisions, audit replication, and representative synthetic actions
-before increasing the percentage. The UI's Enterprise fleet page is an
-operator view; the API remains the authoritative control boundary.</p>
-<p><strong>Detect drift:</strong> treat a desired/applied hash mismatch as an operational
-condition, not as permission to continue. Inspect the deployment's version,
-authority response, and audit trail. Reconcile through the deployment
-authority or reapply the reviewed template. Do not edit the database directly
-to hide drift.</p>
-<p><strong>Rollback:</strong> select a known-good configuration history version and invoke the
-fleet rollback endpoint. The authority is called before the control plane
-claims the rollback. If the authority rejects it, the desired state remains
-unchanged and the action must be escalated. Validate health and drift after
-rollback, then record the decision and evidence.</p>
+<p><strong>Stage safely:</strong> assign the reviewed template and publish the exact canonical
+managed package that matches its desired host identity. Open <strong>Deployments →
+Manage rollout</strong>, select a deterministic canary of at most 25%, set explicit
+unavailable/drift thresholds, minimum sample, grace period and operator
+rationale. Use a time-zone maintenance window when required. Confirm measured
+endpoint convergence, health, alerts, policy decisions, audit replication and
+representative synthetic actions before expanding the percentage. The browser
+cannot submit applied hashes, endpoint membership or health results.</p>
+<p><strong>Detect drift:</strong> treat stale, missing or conflicting authenticated endpoint
+evidence as an operational condition, not as permission to continue. The
+scheduled reconciler pauses after grace when drift or unavailable percentage
+exceeds the configured threshold, and pauses at deadline when convergence is
+incomplete. Inspect desired configuration version, bound package revision,
+selected population, blockers and audit trail. Never edit the database or
+browser payload to claim convergence.</p>
+<p><strong>Rollback:</strong> use the rollout workspace only when a last-known-good
+configuration and package pair exists. Supply the current rollout revision and
+a retained rationale. The control plane creates a new immutable configuration
+version from that exact pair, selects the retained package revision, and does
+not call it converged until all active endpoints provide fresh exact evidence.
+Validate convergence, health and audit after rollback; a browser success
+response is not endpoint enforcement evidence.</p>
 <p><strong>Emergency stop:</strong> use the deployment-scoped stop control for a localized
 incident or the tenant-wide stop for a wider incident. The hosted fleet stop is
 durable server-owned state and causes every enrolled agent's effective-policy
