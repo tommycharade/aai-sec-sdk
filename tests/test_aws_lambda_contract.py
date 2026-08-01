@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import hmac
 import importlib.util
 import json
 import re
@@ -4224,7 +4225,6 @@ def test_agent_replacement_is_atomic_inherits_groups_and_requires_new_enrollment
         )["statusCode"]
         == 403
     )
-
     bootstrap = _invoke(
         module,
         _event(
@@ -4248,6 +4248,199 @@ def test_agent_replacement_is_atomic_inherits_groups_and_requires_new_enrollment
     )
     assert enrolled["statusCode"] == 201
     assert json.loads(enrolled["body"])["agentId"] == "agent-new"
+
+
+def test_hosted_endpoint_evidence_is_tenant_bound_signed_and_server_derived(
+    monkeypatch: Any,
+) -> None:
+    """A current MDM device can report once; tamper and stale state fail closed."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-endpoint-evidence"
+    now = 2_000_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-endpoint",
+    }
+    snapshot = _discovery_snapshot(
+        "endpoint",
+        [
+            {
+                "kind": "device",
+                "id": "device-a",
+                "managed": True,
+                "businessUnit": "Platform",
+                "userIds": [],
+            }
+        ],
+        now=now,
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/discovery/sources/intune/snapshots",
+                "POST",
+                body=snapshot,
+                claims=platform,
+            ),
+        )["statusCode"]
+        == 201
+    )
+    credential_path = "/api/enterprise/endpoint-evidence/devices/device-a/credential"
+    issued_response = _invoke(
+        module, _event(credential_path, "POST", body={"expectedRevision": 0}, claims=platform)
+    )
+    assert issued_response["statusCode"] == 201
+    issued = json.loads(issued_response["body"])
+    assert len(issued["secret"]) >= 32
+    assert issued["secret"] not in json.dumps(list(table.items.values()))
+    payload = {
+        "schemaVersion": 1,
+        "observedAt": now,
+        "device": {"id": "device-a", "managed": True, "businessUnit": "Platform"},
+        "installations": [
+            {
+                "id": "installation-a",
+                "deviceId": "device-a",
+                "host": "claude-code",
+                "projectRootDigest": "a" * 64,
+                "binaryPresent": True,
+                "processActive": True,
+                "userId": "user-opaque-a",
+                "repositoryId": "repository-opaque-a",
+                "businessUnit": "Platform",
+            }
+        ],
+    }
+    signature = hmac.new(
+        issued["secret"].encode(),
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    report = {"keyId": issued["keyId"], "payload": payload, "signature": signature}
+    ingest_path = f"/api/endpoint-evidence/{tenant}/device-a"
+    accepted = _invoke(module, _event(ingest_path, "POST", body=report, token=issued["secret"]))
+    assert accepted["statusCode"] == 202
+    duplicate = _invoke(module, _event(ingest_path, "POST", body=report, token=issued["secret"]))
+    assert duplicate["statusCode"] == 202
+    assert json.loads(duplicate["body"])["duplicate"] is True
+    health = json.loads(
+        _invoke(module, _event("/api/enterprise/endpoint-evidence", "GET", claims=platform))["body"]
+    )
+    assert health["summary"] == {"devices": 1, "healthy": 1, "attention": 0, "stale": 0}
+    assert health["items"][0]["status"] == "healthy"
+    assert "secret" not in json.dumps(health)
+    assert "userId" not in json.dumps(health)
+    tampered = json.loads(json.dumps(report))
+    tampered["payload"]["installations"][0]["processActive"] = False
+    assert (
+        _invoke(module, _event(ingest_path, "POST", body=tampered, token=issued["secret"]))[
+            "statusCode"
+        ]
+        == 403
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/endpoint-evidence/tenant-other/device-a",
+                "POST",
+                body=report,
+                token=issued["secret"],
+            ),
+        )["statusCode"]
+        == 403
+    )
+    rotated_response = _invoke(
+        module, _event(credential_path, "POST", body={"expectedRevision": 1}, claims=platform)
+    )
+    assert rotated_response["statusCode"] == 201
+    rotated = json.loads(rotated_response["body"])
+    assert rotated["keyId"] != issued["keyId"]
+    assert (
+        _invoke(module, _event(ingest_path, "POST", body=report, token=issued["secret"]))[
+            "statusCode"
+        ]
+        == 403
+    )
+    rotated_health = json.loads(
+        _invoke(module, _event("/api/enterprise/endpoint-evidence", "GET", claims=platform))["body"]
+    )
+    assert rotated_health["items"][0]["reportStatus"] == "credential_rotated"
+    assert "fresh_report_required_after_rotation" in rotated_health["items"][0]["reasonCodes"]
+    revoked = _invoke(
+        module,
+        _event(
+            credential_path,
+            "DELETE",
+            body={"expectedRevision": rotated["revision"]},
+            claims=platform,
+        ),
+    )
+    assert revoked["statusCode"] == 200
+    assert json.loads(revoked["body"])["status"] == "revoked"
+    rotated_report = {**report, "keyId": rotated["keyId"]}
+    rotated_report["signature"] = hmac.new(
+        rotated["secret"].encode(),
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    assert (
+        _invoke(module, _event(ingest_path, "POST", body=rotated_report, token=rotated["secret"]))[
+            "statusCode"
+        ]
+        == 403
+    )
+    monkeypatch.setattr(module.time, "time", lambda: now + 901)
+    stale = json.loads(
+        _invoke(module, _event("/api/enterprise/endpoint-evidence", "GET", claims=platform))["body"]
+    )
+    assert stale["items"][0]["status"] == "stale"
+    assert stale["items"][0]["installations"] == []
+
+
+def test_endpoint_credential_requires_current_managed_inventory(monkeypatch: Any) -> None:
+    """Browser input cannot mint device authority outside current MDM inventory."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-endpoint-credential"
+    now = int(time.time())
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-endpoint",
+    }
+    path = "/api/enterprise/endpoint-evidence/devices/device-a/credential"
+    assert (
+        _invoke(module, _event(path, "POST", body={"expectedRevision": 0}, claims=claims))[
+            "statusCode"
+        ]
+        == 404
+    )
+    snapshot = _discovery_snapshot(
+        "endpoint", [{"kind": "device", "id": "device-a", "managed": False}], now=now
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/discovery/sources/intune/snapshots",
+                "POST",
+                body=snapshot,
+                claims=claims,
+            ),
+        )["statusCode"]
+        == 201
+    )
+    assert (
+        _invoke(module, _event(path, "POST", body={"expectedRevision": 0}, claims=claims))[
+            "statusCode"
+        ]
+        == 409
+    )
 
 
 def test_agent_replacement_rolls_back_when_group_membership_changes_concurrently(

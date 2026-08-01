@@ -7,6 +7,7 @@ tenant identity; the tenant is derived from the verified Cognito claims.
 
 import base64
 import hashlib
+import hmac
 import json
 import math
 import os
@@ -154,6 +155,12 @@ _MANAGED_DISCOVERY_PROVIDER_KINDS = {
 }
 _MANAGED_GITHUB_REPOSITORY_LIMIT = 500
 _MANAGED_INTUNE_BUSINESS_UNIT_LIMIT = 500
+
+# Endpoint sensors report often enough to detect a stopped process within the
+# five-minute P0 attestation target while allowing bounded MDM scheduling
+# jitter. Devices never submit this health state; the server derives it.
+_ENDPOINT_EVIDENCE_MAX_AGE_SECONDS = 15 * 60
+_ENDPOINT_EVIDENCE_FUTURE_SKEW_SECONDS = 5 * 60
 
 # Agent decision evidence is operationally useful but never authoritative.
 # The authenticated host may report only this fixed, content-free vocabulary;
@@ -5664,6 +5671,365 @@ def _all_agents(tenant, *, consistent_read=False):
     return agents
 
 
+def _authoritative_endpoint_devices(tenant, *, now=None, require_current=True):
+    """Return current, complete endpoint inventory without trusting a sensor.
+
+    Device identity and management state come from the MDM discovery source.
+    Sensor reports may describe software on a known device but can never create
+    the device population against which enterprise coverage is measured.
+    """
+    current_time = int(time.time()) if now is None else int(now)
+    devices = {}
+    for source in _list(tenant, "DISCOVERY_SOURCE", consistent_read=True):
+        if source.get("sourceKind") != "endpoint" or source.get("complete") is not True:
+            continue
+        if require_current and int(source.get("expiresAt", 0)) <= current_time:
+            continue
+        for observation in _discovery_generation_observations(tenant, source):
+            if not isinstance(observation, dict) or observation.get("kind") != "device":
+                continue
+            normalized = _discovery_observation(observation, "endpoint")
+            existing = devices.get(normalized["id"])
+            if existing is not None and existing != normalized:
+                raise PolicyConflict("endpoint inventory contains conflicting device identity")
+            devices[normalized["id"]] = normalized
+    return devices
+
+
+def _endpoint_credential_view(record):
+    """Project one device credential without returning its bearer digest."""
+    if not record:
+        return {"status": "not_configured", "revision": 0, "keyId": None}
+    return {
+        "status": "revoked" if record.get("revoked") is True else "active",
+        "revision": int(record.get("revision", 0)),
+        "keyId": record.get("keyId"),
+        "rotatedAt": int(record.get("rotatedAt", 0)),
+        "revokedAt": record.get("revokedAt"),
+    }
+
+
+def _issue_endpoint_credential(tenant, device_id, value, actor):
+    """Rotate a one-time device bearer/HMAC secret for an MDM-known device."""
+    if not isinstance(value, dict) or set(value) != {"expectedRevision"}:
+        raise ValueError("endpoint credential request has an invalid schema")
+    device_id = _bounded_identifier(device_id, "deviceId")
+    device = _authoritative_endpoint_devices(tenant).get(device_id)
+    if not device:
+        raise LookupError("device is not present in current endpoint inventory")
+    if device.get("managed") is not True:
+        raise PolicyConflict("endpoint credential requires a managed device")
+    expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision")
+    key = _item_key(tenant, "ENDPOINT_CREDENTIAL", device_id)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    current = int(existing.get("revision", 0)) if existing else 0
+    if current != expected:
+        raise PolicyConflict("endpoint credential revision changed")
+    token = secrets.token_urlsafe(32)
+    now = int(time.time())
+    record = {
+        **key,
+        "tenant_id": tenant,
+        "deviceId": device_id,
+        "keyId": f"endpoint-{uuid.uuid4()}",
+        "tokenHash": hashlib.sha256(token.encode()).hexdigest(),
+        "revision": expected + 1,
+        "rotatedAt": now,
+        "rotatedBy": actor,
+        "revoked": False,
+    }
+    arguments = {"Item": record}
+    if expected == 0:
+        arguments["ConditionExpression"] = "attribute_not_exists(pk)"
+    else:
+        arguments.update(
+            {
+                "ConditionExpression": "revision = :expected_revision",
+                "ExpressionAttributeValues": {":expected_revision": expected},
+            }
+        )
+    try:
+        TABLE.put_item(**arguments)
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("endpoint credential revision changed") from error
+        raise
+    _audit(
+        tenant,
+        "endpoint_credential_rotated",
+        actor,
+        {"device_id": device_id, "key_id": record["keyId"], "revision": expected + 1},
+    )
+    return {
+        "deviceId": device_id,
+        "keyId": record["keyId"],
+        "secret": token,
+        "revision": expected + 1,
+        "issuedAt": now,
+    }
+
+
+def _revoke_endpoint_credential(tenant, device_id, value, actor):
+    """Revoke one device credential with optimistic concurrency."""
+    if not isinstance(value, dict) or set(value) != {"expectedRevision"}:
+        raise ValueError("endpoint credential revocation has an invalid schema")
+    device_id = _bounded_identifier(device_id, "deviceId")
+    expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision", minimum=1)
+    key = _item_key(tenant, "ENDPOINT_CREDENTIAL", device_id)
+    record = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if not record:
+        raise LookupError("endpoint credential not found")
+    if int(record.get("revision", 0)) != expected:
+        raise PolicyConflict("endpoint credential revision changed")
+    if record.get("revoked") is True:
+        return _endpoint_credential_view(record)
+    now = int(time.time())
+    updated = {**record, "revoked": True, "revokedAt": now, "revokedBy": actor}
+    try:
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="revision = :expected_revision",
+            ExpressionAttributeValues={":expected_revision": expected},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("endpoint credential revision changed") from error
+        raise
+    _audit(
+        tenant,
+        "endpoint_credential_revoked",
+        actor,
+        {"device_id": device_id, "key_id": record.get("keyId"), "revision": expected},
+    )
+    return _endpoint_credential_view(updated)
+
+
+def _validate_endpoint_report(report, device_id):
+    """Validate exact path-free sensor evidence and return normalized content."""
+    if not isinstance(report, dict) or set(report) != {"keyId", "payload", "signature"}:
+        raise ValueError("endpoint report has an invalid schema")
+    key_id = _bounded_identifier(report.get("keyId"), "keyId")
+    signature = report.get("signature")
+    if not isinstance(signature, str) or not re.fullmatch(r"[0-9a-f]{64}", signature):
+        raise ValueError("endpoint report signature is invalid")
+    payload = report.get("payload")
+    if not isinstance(payload, dict) or set(payload) != {
+        "schemaVersion",
+        "observedAt",
+        "device",
+        "installations",
+    }:
+        raise ValueError("endpoint report payload has an invalid schema")
+    if payload.get("schemaVersion") != 1:
+        raise ValueError("endpoint report schema version is unsupported")
+    observed_at = _discovery_integer(payload.get("observedAt"), "observedAt", minimum=1)
+    device = payload.get("device")
+    if not isinstance(device, dict):
+        raise ValueError("endpoint report device is invalid")
+    normalized_device = _discovery_observation({"kind": "device", **device}, "endpoint")
+    if normalized_device["id"] != device_id:
+        raise PermissionError("endpoint report device identity mismatch")
+    installations = payload.get("installations")
+    if not isinstance(installations, list) or not 1 <= len(installations) <= 100:
+        raise ValueError("endpoint report must contain 1 to 100 installations")
+    normalized_installations = []
+    for installation in installations:
+        if not isinstance(installation, dict):
+            raise ValueError("endpoint report installation is invalid")
+        normalized = _discovery_observation({"kind": "installation", **installation}, "endpoint")
+        if normalized["deviceId"] != device_id:
+            raise PermissionError("endpoint installation device identity mismatch")
+        normalized.pop("kind")
+        normalized_installations.append(normalized)
+    identities = [item["id"] for item in normalized_installations]
+    if len(identities) != len(set(identities)):
+        raise ValueError("endpoint installation identifiers must be unique")
+    normalized_device.pop("kind")
+    normalized_payload = {
+        "schemaVersion": 1,
+        "observedAt": observed_at,
+        "device": normalized_device,
+        "installations": sorted(normalized_installations, key=lambda item: item["id"]),
+    }
+    signed_payload = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return key_id, signature, normalized_payload, signed_payload
+
+
+def _ingest_endpoint_report(event, tenant, device_id):
+    """Authenticate, verify and atomically retain the newest device report."""
+    tenant = _bounded_identifier(tenant, "tenantId")
+    device_id = _bounded_identifier(device_id, "deviceId")
+    credential = TABLE.get_item(
+        Key=_item_key(tenant, "ENDPOINT_CREDENTIAL", device_id), ConsistentRead=True
+    ).get("Item")
+    if not credential or credential.get("revoked") is True:
+        raise PermissionError("active endpoint credential is required")
+    token = _bearer(event)
+    if not token or not secrets.compare_digest(
+        hashlib.sha256(token.encode()).hexdigest(), str(credential.get("tokenHash", ""))
+    ):
+        raise PermissionError("endpoint credential is invalid")
+    key_id, signature, payload, signed_payload = _validate_endpoint_report(_body(event), device_id)
+    if key_id != credential.get("keyId"):
+        raise PermissionError("endpoint key identity mismatch")
+    expected_signature = hmac.new(token.encode(), signed_payload, hashlib.sha256).hexdigest()
+    if not secrets.compare_digest(expected_signature, signature):
+        _audit(
+            tenant,
+            "endpoint_evidence_rejected",
+            f"endpoint:{device_id}",
+            {"device_id": device_id, "key_id": key_id, "reason": "signature_invalid"},
+        )
+        raise PermissionError("endpoint report signature is invalid")
+    now = int(time.time())
+    observed_at = int(payload["observedAt"])
+    if observed_at > now + _ENDPOINT_EVIDENCE_FUTURE_SKEW_SECONDS:
+        raise ValueError("endpoint report is future-dated")
+    if observed_at <= now - _ENDPOINT_EVIDENCE_MAX_AGE_SECONDS:
+        raise ValueError("endpoint report is stale")
+    report_digest = hashlib.sha256(signed_payload).hexdigest()
+    key = _item_key(tenant, "ENDPOINT_EVIDENCE", device_id)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if existing:
+        if int(existing.get("observedAt", 0)) == observed_at and secrets.compare_digest(
+            str(existing.get("reportDigest", "")), report_digest
+        ):
+            return {"accepted": True, "duplicate": True, "deviceId": device_id}
+        if observed_at <= int(existing.get("observedAt", 0)):
+            raise PolicyConflict("endpoint report replay or reordering detected")
+    revision = int(existing.get("revision", 0)) if existing else 0
+    record = {
+        **key,
+        "tenant_id": tenant,
+        "deviceId": device_id,
+        "keyId": key_id,
+        "observedAt": observed_at,
+        "receivedAt": now,
+        "reportDigest": report_digest,
+        "payload": payload,
+        "revision": revision + 1,
+    }
+    arguments = {"Item": record}
+    if revision == 0:
+        arguments["ConditionExpression"] = "attribute_not_exists(pk)"
+    else:
+        arguments.update(
+            {
+                "ConditionExpression": "revision = :expected_revision",
+                "ExpressionAttributeValues": {":expected_revision": revision},
+            }
+        )
+    try:
+        TABLE.put_item(**arguments)
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("endpoint report changed concurrently") from error
+        raise
+    _audit(
+        tenant,
+        "endpoint_evidence_accepted",
+        f"endpoint:{device_id}",
+        {
+            "device_id": device_id,
+            "key_id": key_id,
+            "observed_at": observed_at,
+            "report_digest": report_digest,
+            "installation_count": len(payload["installations"]),
+        },
+    )
+    return {"accepted": True, "duplicate": False, "deviceId": device_id}
+
+
+def _endpoint_evidence_health(tenant, *, now=None):
+    """Derive per-device sensor health from MDM, credential and report state."""
+    current_time = int(time.time()) if now is None else int(now)
+    devices = _authoritative_endpoint_devices(tenant, now=current_time, require_current=False)
+    current_device_ids = set(_authoritative_endpoint_devices(tenant, now=current_time))
+    credentials = {item.get("deviceId"): item for item in _list(tenant, "ENDPOINT_CREDENTIAL")}
+    reports = {item.get("deviceId"): item for item in _list(tenant, "ENDPOINT_EVIDENCE")}
+    items = []
+    for device_id, device in sorted(devices.items()):
+        credential = credentials.get(device_id)
+        report = reports.get(device_id)
+        credential_view = _endpoint_credential_view(credential)
+        reasons = []
+        report_status = "never_reported"
+        payload = report.get("payload", {}) if isinstance(report, dict) else {}
+        installations = payload.get("installations", []) if isinstance(payload, dict) else []
+        # Health consumers do not need the observed user identifier. Keep it in
+        # the tenant-bound evidence record for reconciliation, but omit it from
+        # this operational response to minimise identity-data propagation.
+        health_installations = [
+            {key: value for key, value in item.items() if key != "userId"}
+            for item in installations
+        ]
+        if credential_view["status"] == "not_configured":
+            reasons.append("credential_not_configured")
+        elif credential_view["status"] == "revoked":
+            reasons.append("credential_revoked")
+        if report:
+            if report.get("keyId") != (credential or {}).get("keyId"):
+                report_status = "credential_rotated"
+                reasons.append("fresh_report_required_after_rotation")
+            elif (
+                int(report.get("observedAt", 0))
+                <= current_time - _ENDPOINT_EVIDENCE_MAX_AGE_SECONDS
+            ):
+                report_status = "stale"
+                reasons.append("report_stale")
+            else:
+                report_status = "current"
+        else:
+            reasons.append("report_missing")
+        if device.get("managed") is not True:
+            reasons.append("device_unmanaged")
+        if device_id not in current_device_ids:
+            reasons.append("inventory_stale")
+        if report_status == "current":
+            if not installations:
+                reasons.append("installation_missing")
+            if any(item.get("binaryPresent") is not True for item in installations):
+                reasons.append("binary_missing")
+            if any(item.get("processActive") is not True for item in installations):
+                reasons.append("process_not_observed")
+        status = (
+            "healthy"
+            if not reasons
+            else "stale"
+            if {"report_stale", "inventory_stale"}.intersection(reasons)
+            else "attention"
+        )
+        items.append(
+            {
+                "deviceId": device_id,
+                "businessUnit": device.get("businessUnit"),
+                "managed": device.get("managed") is True,
+                "status": status,
+                "reasonCodes": reasons,
+                "credential": credential_view,
+                "reportStatus": report_status,
+                "observedAt": int(report.get("observedAt", 0)) if report else None,
+                "receivedAt": int(report.get("receivedAt", 0)) if report else None,
+                "ageSeconds": max(0, current_time - int(report.get("observedAt", 0)))
+                if report
+                else None,
+                "reportDigest": report.get("reportDigest") if report else None,
+                "installations": health_installations if report_status == "current" else [],
+            }
+        )
+    return {
+        "generatedAt": current_time,
+        "freshnessSeconds": _ENDPOINT_EVIDENCE_MAX_AGE_SECONDS,
+        "summary": {
+            "devices": len(items),
+            "healthy": sum(1 for item in items if item["status"] == "healthy"),
+            "attention": sum(1 for item in items if item["status"] == "attention"),
+            "stale": sum(1 for item in items if item["status"] == "stale"),
+        },
+        "items": items,
+    }
+
+
 def _discovery_counts(instances):
     """Count target posture without allowing duplicates to inflate coverage."""
     denominator = len(instances)
@@ -6893,6 +7259,14 @@ def handler(event, context):
             if method != "POST":
                 return _response(405, {"error": "method not allowed"})
             return _response(201, _enroll_agent(event))
+        if path.startswith("/endpoint-evidence/") or path.startswith("/api/endpoint-evidence/"):
+            normalized = path.removeprefix("/api")
+            parts = [
+                part for part in normalized.removeprefix("/endpoint-evidence/").split("/") if part
+            ]
+            if method != "POST" or len(parts) != 2:
+                return _response(404, {"error": "endpoint evidence route not found"})
+            return _response(202, _ingest_endpoint_report(event, parts[0], parts[1]))
         if path.startswith("/discovery-ingest/") or path.startswith("/api/discovery-ingest/"):
             normalized = path.removeprefix("/api")
             parts = [
@@ -7316,6 +7690,28 @@ def handler(event, context):
                         {"error": "managed discovery requires a tenant operator role"},
                     )
                 return _response(200, _managed_discovery_capabilities())
+            if method == "GET" and parts == ["endpoint-evidence"]:
+                if not _operator_roles(event):
+                    return _response(
+                        403,
+                        {"error": "endpoint evidence requires a tenant operator role"},
+                    )
+                return _response(200, _endpoint_evidence_health(tenant))
+            if (
+                len(parts) == 4
+                and parts[:2] == ["endpoint-evidence", "devices"]
+                and parts[3] == "credential"
+            ):
+                if method == "POST":
+                    return _response(
+                        201,
+                        _issue_endpoint_credential(tenant, parts[2], _body(event), actor),
+                    )
+                if method == "DELETE":
+                    return _response(
+                        200,
+                        _revoke_endpoint_credential(tenant, parts[2], _body(event), actor),
+                    )
             if (
                 method == "POST"
                 and len(parts) == 4

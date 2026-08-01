@@ -75,6 +75,12 @@ not enter the signed report, assembles against an authoritative synthetic
 device inventory, passes the existing endpoint normalizer, and rejects a
 changed signed report.
 
+`tests/test_endpoint_evidence_transport.py` and the hosted endpoint contracts
+in `tests/test_aws_lambda_contract.py` prove HTTPS-only secret-safe transport,
+MDM-bound issuance, HMAC verification, idempotent retry, cross-tenant denial,
+tamper denial and server-derived stale posture. They are software/API evidence;
+real MDM rollout remains separate acceptance.
+
 `scripts/test_aws_entra_scim.py` is the live Microsoft Entra provisioning
 acceptance command. It discovers Entra and SCIM status from the selected
 CloudFormation stack, resolves the dedicated bearer directly from Secrets

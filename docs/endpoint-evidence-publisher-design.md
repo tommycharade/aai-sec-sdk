@@ -176,3 +176,8 @@ acceptance still requires root/admin rollout through the customer's Intune or
 Jamf tenant, independent verification of file ownership and secret delivery,
 successful reports from at least 95% of the agreed pilot, explicit review of
 the remaining devices, and UI health visibility for sensor/report freshness.
+
+The optional [hosted endpoint evidence channel](hosted-endpoint-evidence.md)
+now provides central credential lifecycle, signed ingestion and server-derived
+per-device freshness. It removes the UI visibility gap, but not the real MDM,
+Windows ACL, hardware-backed identity or 95% pilot acceptance above.

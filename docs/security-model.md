@@ -751,3 +751,6 @@ unknown reports, and creates one complete fleet input for atomic publication.
 The HMAC is source authentication, not hardware attestation; MDM administrators,
 endpoint root compromise and stolen device secrets remain deployment risks.
 See [Endpoint evidence publisher](endpoint-evidence-publisher-design.md).
+The [hosted endpoint evidence channel](hosted-endpoint-evidence.md) stores only
+credential digests, binds reports to current MDM devices, rejects altered,
+stale, replayed and cross-tenant evidence, and derives health server-side.
