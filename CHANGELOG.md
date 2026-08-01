@@ -433,6 +433,16 @@ authorization.
 
 ## Unreleased
 
+- Added a production-shaped endpoint installation/process evidence path for
+  discovery. A root/administrator sensor measures exact configured
+  Claude/Codex binaries and processes without invoking a shell, emits no raw
+  paths, and signs canonical reports with a per-device environment-injected
+  credential. A fleet assembler rejects changed, stale, revoked, duplicate,
+  cross-device or non-authoritative reports before producing one complete MDM-
+  joined endpoint snapshot for the existing atomic publisher. A standalone
+  fixed-query Intune v1.0 adapter supplies the authoritative device file using
+  only opaque device/user IDs and optional reviewed business-unit attribution.
+
 - Added operator-safe discovery source management: tenant operators can list
   redacted credential and snapshot posture, while platform administrators can
   register, rotate, or revoke source-scoped publisher credentials. Source kind

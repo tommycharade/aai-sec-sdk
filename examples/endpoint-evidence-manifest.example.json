@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "device": {
+    "id": "synthetic-device-a",
+    "managed": true,
+    "businessUnit": "Platform",
+    "userIds": ["synthetic-user-a"]
+  },
+  "installations": [
+    {
+      "id": "synthetic-device-a-claude-project-a",
+      "host": "claude-code",
+      "projectRoot": "/Users/synthetic-user/project-a",
+      "binaryPath": "/usr/local/bin/claude",
+      "expectedBinarySha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "processExecutablePaths": ["/usr/local/bin/claude"],
+      "userId": "synthetic-user-a",
+      "repositoryId": "synthetic-repository-a",
+      "businessUnit": "Platform"
+    }
+  ]
+}

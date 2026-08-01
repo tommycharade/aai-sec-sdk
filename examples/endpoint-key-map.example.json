@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "keys": [
+    {
+      "keyId": "synthetic-device-a-2026-08",
+      "deviceId": "synthetic-device-a",
+      "secretEnv": "AAI_ENDPOINT_KEY_SYNTHETIC_DEVICE_A"
+    }
+  ]
+}

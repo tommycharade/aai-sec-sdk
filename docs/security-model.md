@@ -729,3 +729,25 @@ hardware properties. Reconciliation suppresses all percentages and orphan
 conclusions until current endpoint evidence contains normalized installation
 observations as well as devices. This avoids upgrading a read-only management
 record into evidence Microsoft Graph cannot provide.
+
+Endpoint installation and process evidence therefore uses a separate
+administrator-run sensor. Its manifest names exact local files, executable
+paths and project roots, but output replaces project roots with SHA-256 and
+excludes paths, arguments, environment and user-facing content. A fixed
+process adapter is the only dynamic operating-system lookup. Process
+enumeration binds exact executable and configured project working-directory
+paths, never invokes a shell, and aborts on access-denied sentinel values or
+other incomplete visibility. POSIX collection verifies a root-owned,
+non-symlink manifest without broad write permission before reading
+configuration. Windows remains fail-closed until an ACL adapter can prove the
+owner SID and effective write boundary.
+
+Binary measurement rejects symlinks and measures an already-open regular inode,
+including optional byte digest and before/after metadata, so path replacement
+cannot become affirmative evidence. Each report is canonical HMAC-SHA-256
+signed by a per-device software credential. The fleet assembler binds that key
+to one authoritative MDM device, rejects stale, revoked, duplicate, changed or
+unknown reports, and creates one complete fleet input for atomic publication.
+The HMAC is source authentication, not hardware attestation; MDM administrators,
+endpoint root compromise and stolen device secrets remain deployment risks.
+See [Endpoint evidence publisher](endpoint-evidence-publisher-design.md).

@@ -495,5 +495,14 @@ Percentages are `null` unless every required source class is complete and
 current. See [Agent population discovery](agent-discovery-design.md) for exact
 schemas, limits, credential handling, commit semantics, and trust boundaries.
 The repository's `collect_discovery_inventory.py` reference adapters normalize
-Entra Graph, deployment-owned endpoint exports, and GitHub repository inventory;
-`publish_discovery_generation.py` performs the bounded three-phase upload.
+Entra Graph, deployment-owned endpoint exports, and GitHub repository inventory.
+For endpoint fleets, `collect_endpoint_evidence.py` produces a path-free,
+per-device signed installation/process report and
+`assemble_endpoint_inventory.py` validates every current report against the
+authoritative MDM device inventory before producing one complete endpoint
+export. The `intune` mode of `collect_discovery_inventory.py` obtains that
+device file from the fixed Microsoft Graph v1.0 managed-devices query with only
+opaque device/user IDs and optional reviewed business-unit mappings.
+`publish_discovery_generation.py` performs the bounded three-phase upload. See
+[Endpoint evidence publisher](endpoint-evidence-publisher-design.md) for the
+manifest, key, privilege and freshness boundaries.
