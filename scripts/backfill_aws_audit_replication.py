@@ -3,8 +3,10 @@
 
 The source bucket must already have live replication configured. Amazon S3
 generates an exact, version-aware manifest for objects whose replication status
-is NONE or FAILED as of a fixed cutoff. The script refuses an unexpectedly
-large source before creating a chargeable Batch Operations job.
+is NONE, FAILED or COMPLETED as of a fixed cutoff. Reprocessing COMPLETED
+versions repairs retention or metadata changed after the first copy. The script
+refuses an unexpectedly large source before creating a chargeable Batch
+Operations job.
 """
 
 from __future__ import annotations
@@ -15,6 +17,17 @@ import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
+
+_REPAIR_REPLICATION_STATUSES = ("NONE", "FAILED", "COMPLETED")
+
+
+def repair_filter(cutoff: datetime) -> dict[str, Any]:
+    """Return the exact manifest filter that repairs absence and stale replicas."""
+    return {
+        "EligibleForReplication": True,
+        "ObjectReplicationStatuses": list(_REPAIR_REPLICATION_STATUSES),
+        "CreatedBefore": cutoff,
+    }
 
 
 def count_versions_before(s3: Any, bucket: str, cutoff: datetime, maximum: int) -> int:
@@ -90,11 +103,10 @@ def main() -> int:
                 "ExpectedBucketOwner": account_id,
                 "SourceBucket": f"arn:aws:s3:::{args.source_bucket}",
                 "EnableManifestOutput": False,
-                "Filter": {
-                    "EligibleForReplication": True,
-                    "ObjectReplicationStatuses": ["NONE", "FAILED"],
-                    "CreatedBefore": cutoff,
-                },
+                # COMPLETED versions can still have stale retention or metadata
+                # after their first copy. The shared filter keeps that invariant
+                # independently testable from the live AWS call.
+                "Filter": repair_filter(cutoff),
             }
         },
         Priority=10,

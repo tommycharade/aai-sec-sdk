@@ -1,5 +1,9 @@
 # Changelog
 
+- Historical audit repair now reprocesses previously completed replicas so
+  later source-side Object Lock extensions cannot leave recovery retention
+  shorter despite matching object counts and hashes.
+
 - Fixed the cross-region rule to use the explicit S3 replication V2 schema
   required by replication metrics, while continuing to exclude non-evidence
   delete markers.
