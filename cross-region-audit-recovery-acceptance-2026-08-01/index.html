@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/durable-evidence-governance-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/cross-region-audit-recovery-acceptance-2026-08-01/">
       
       
-        <link rel="prev" href="../incident-case-export-design/">
+        <link rel="prev" href="../audit-recovery-deployment-guard-design/">
       
       
-        <link rel="next" href="../audit-recovery-deployment-guard-design/">
+        <link rel="next" href="../asynchronous-retention-design/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Durable evidence governance - Agentic AI Security SDK</title>
+        <title>Cross-region audit recovery acceptance — 2026-08-01 - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#durable-evidence-governance" class="md-skip">
+        <a href="#cross-region-audit-recovery-acceptance-2026-08-01" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Durable evidence governance
+              Cross-region audit recovery acceptance — 2026-08-01
             
           </span>
         </div>
@@ -799,37 +799,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Durable evidence governance
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../durable-evidence-governance-design/" class="md-nav__link">
         
   
   
@@ -845,81 +818,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#threat-and-trust-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Threat and trust boundary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#invariants" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Invariants
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#operator-api" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operator API
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#failure-behavior-and-limitations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Failure behavior and limitations
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Verification
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -955,10 +853,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../cross-region-audit-recovery-acceptance-2026-08-01/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-region audit recovery acceptance — 2026-08-01
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -974,6 +899,153 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#outcome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outcome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployed-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployed boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-sequence-and-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test sequence and evidence
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Test sequence and evidence">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-fail-closed-deployment-authority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Fail-closed deployment authority
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-live-write-smoke-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Live-write smoke test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-historical-absence-repair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Historical absence repair
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-independent-verifier-found-retention-drift" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Independent verifier found retention drift
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-retention-parity-repair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Retention-parity repair
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-complete-independent-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Complete independent verification
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operational-observations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operational observations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#re-run-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Re-run commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2436,10 +2508,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#threat-and-trust-boundary" class="md-nav__link">
+  <a href="#outcome" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Threat and trust boundary
+        Outcome
       
     </span>
   </a>
@@ -2447,10 +2519,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#invariants" class="md-nav__link">
+  <a href="#deployed-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Invariants
+        Deployed boundary
       
     </span>
   </a>
@@ -2458,10 +2530,93 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#operator-api" class="md-nav__link">
+  <a href="#test-sequence-and-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Operator API
+        Test sequence and evidence
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Test sequence and evidence">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-fail-closed-deployment-authority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Fail-closed deployment authority
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-live-write-smoke-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Live-write smoke test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-historical-absence-repair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Historical absence repair
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-independent-verifier-found-retention-drift" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Independent verifier found retention drift
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-retention-parity-repair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Retention-parity repair
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-complete-independent-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Complete independent verification
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operational-observations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operational observations
       
     </span>
   </a>
@@ -2469,21 +2624,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#failure-behavior-and-limitations" class="md-nav__link">
+  <a href="#re-run-commands" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Failure behavior and limitations
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Verification
+        Re-run commands
       
     </span>
   </a>
@@ -2510,179 +2654,188 @@
   
 
 
-<h1 id="durable-evidence-governance">Durable evidence governance</h1>
-<p>This design advances P0-08 by turning the AWS Object Lock foundation into a
-tenant-visible records-management control. It covers tenant retention,
-exact-version legal hold, live integrity assurance, asynchronous tenant-wide
-export, mass-retention extension and scheduled evidence-gap monitoring. The
-development AWS environment passed a complete
-<a href="../cross-region-audit-recovery-acceptance-2026-08-01/">cross-region recovery acceptance</a>
-for 603 versions. Replica authority
-must use the <a href="../audit-recovery-deployment-guard-design/">persistent recovery deployment guard</a>;
-an ephemeral deployment variable is not an acceptable recovery control.</p>
-<h2 id="threat-and-trust-boundary">Threat and trust boundary</h2>
-<p>The browser, operator-entered object identity and audit payload are untrusted.
-The API derives the tenant from the verified operator token and permits evidence
-reads only to security operators, auditors and platform administrators. Evidence
-mutations require <code>evidence_admin</code>; fleet and policy roles cannot acquire it by
-supplying request content.</p>
-<p>S3 Object Lock in <code>COMPLIANCE</code> mode is the enforcement boundary. DynamoDB stores
-the tenant policy and optimistic revision, but cannot shorten the bucket's
-365-day default. The Lambda receives only exact-version S3 permissions needed to
-read retention/legal-hold state and extend retention or change legal hold.
-Asynchronous work is authorized by an SQS event-source mapping, not by fields in
-the queue body. The worker reloads the server-owned tenant job and requires its
-exact optimistic revision before every state transition.</p>
-<h2 id="invariants">Invariants</h2>
-<ul>
-<li>Tenant retention is 365–3,650 days and can only increase through this API.</li>
-<li>The synchronous fast path extends existing versions before storing the new
-  future-record policy. The asynchronous path first makes the longer policy
-  authoritative for new writes, waits beyond the maximum evidence-writer
-  lifetime, then extends every pre-cutover version. Failure may retain data
-  longer, never for less time.</li>
-<li>Every new audit object explicitly carries COMPLIANCE retention plus a SHA-256
-  content binding in S3 metadata.</li>
-<li>Legal hold addresses an exact key and version under <code>tenant=&lt;token tenant&gt;/</code>.
-  Cross-tenant keys fail before an S3 mutation.</li>
-<li>Rationale text is never written to evidence; only its SHA-256 digest is kept.</li>
-<li>Assurance hashes the retained bytes again and compares the result with the
-  creation-time binding. A mismatch is <code>at_risk</code>, not healthy.</li>
-<li>An exact S3 <code>NoSuchObjectLockConfiguration</code> response on a legacy version is
-  represented as missing retention or legal hold and therefore <code>at_risk</code>.
-  Access-denied, service and malformed-response failures remain fatal.</li>
-<li>The synchronous inventory is complete only at 250 versions or fewer. A larger
-  tenant receives <code>incomplete</code>, and retention update/export fails closed rather
-  than returning a partial artifact. The bounded listing supplies only an
-  observed lower-bound count; the API performs no per-object verification or
-  presents any sampled records when tenant-wide completeness is unavailable.</li>
-<li>Export verifies every bounded version, orders records deterministically and
-  binds the complete manifest with a canonical SHA-256 digest. The browser
-  independently verifies that digest before download.</li>
-<li>Tenant-wide jobs fix a server-time snapshot cutoff, traverse S3 object
-  versions in pages, and exclude later writes by S3 <code>LastModified</code>. Each page is
-  canonically hashed; an ordered rolling hash binds every page into a final
-  index. A substituted, reordered or omitted page fails client verification.</li>
-<li>Derived report pages live in a separate private, encrypted, versioned bucket
-  for 30 days. They are convenience artifacts, not the source record. The final
-  index hash is written to retained Object-Lock audit evidence.</li>
-<li>Scheduled scans run every 15 minutes, permit only one active job per tenant,
-  regard a successful result as fresh for six hours, and fail jobs with no
-  progress for 30 minutes. Empty evidence, a decrease from the previous
-  completed record count, at-risk versions and delete markers are explicit gap
-  reasons. A changed non-healthy state is delivered to the
-  durable security-alert SNS/SQS channel; a delivery failure remains visible as
-  pending and is never represented as healthy.</li>
-</ul>
-<h2 id="operator-api">Operator API</h2>
+<h1 id="cross-region-audit-recovery-acceptance-2026-08-01">Cross-region audit recovery acceptance — 2026-08-01</h1>
+<h2 id="outcome">Outcome</h2>
+<p><strong>Accepted for the deployed P0-08 evidence boundary.</strong> The live AWS exercise
+recovered and independently verified all 603 immutable audit object versions
+from the primary <code>eu-west-2</code> bucket in the <code>eu-west-1</code> recovery bucket. Exact
+key/version identity, canonical ordering, bytes, digest metadata, COMPLIANCE
+mode, retain-until parity and S3 replica provenance all passed.</p>
+<p>This proves recoverability of the audit evidence set. It does not prove a
+regional control-plane failover, an approved RTO/RPO or customer-operated DR;
+those remain under P0-11.</p>
+<h2 id="deployed-boundary">Deployed boundary</h2>
 <table>
 <thead>
 <tr>
-<th>Route</th>
-<th>Authority</th>
-<th>Result</th>
+<th>Item</th>
+<th>Live value</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>GET /api/enterprise/evidence</code></td>
-<td><code>evidence_read</code></td>
-<td>Live policy, integrity, retention, legal-hold and completeness posture</td>
+<td>AWS account/profile</td>
+<td><code>396510133537</code> / <code>p1</code></td>
 </tr>
 <tr>
-<td><code>PUT /api/enterprise/evidence/retention</code></td>
-<td><code>evidence_admin</code></td>
-<td>Optimistic, increase-only retention update applied to existing and future records</td>
+<td>Primary stack</td>
+<td><code>AaiSecControlPlane</code>, <code>UPDATE_COMPLETE</code></td>
 </tr>
 <tr>
-<td><code>POST /api/enterprise/evidence/retention-jobs</code></td>
-<td><code>evidence_admin</code></td>
-<td>Idempotently start a revision-bound mass-retention extension</td>
+<td>Primary Region</td>
+<td><code>eu-west-2</code></td>
 </tr>
 <tr>
-<td><code>GET /api/enterprise/evidence/retention-jobs</code></td>
-<td><code>evidence_read</code></td>
-<td>List the 50 newest mass-retention jobs and progress</td>
+<td>Recovery Region</td>
+<td><code>eu-west-1</code></td>
 </tr>
 <tr>
-<td><code>GET /api/enterprise/evidence/retention-jobs/{jobId}</code></td>
-<td><code>evidence_read</code></td>
-<td>Read one exact tenant-bound retention job and alert posture</td>
+<td>Source bucket</td>
+<td><code>aaiseccontrolplane-auditbucketb01e0ae8-wgrcz2izyuj2</code></td>
 </tr>
 <tr>
-<td><code>POST /api/enterprise/evidence/legal-hold</code></td>
-<td><code>evidence_admin</code></td>
-<td>Legal-hold change for one exact tenant object version</td>
+<td>Replica bucket</td>
+<td><code>aaisecauditreplica-auditreplicabucketd9f6ff2a-smxacsrsl53i</code></td>
 </tr>
 <tr>
-<td><code>GET /api/enterprise/evidence/export</code></td>
-<td><code>evidence_read</code></td>
-<td>Complete integrity-bound manifest, or a fail-closed conflict/error</td>
+<td>Recovery manifest</td>
+<td><code>/aai-sec/AaiSecControlPlane/audit-recovery</code>, encrypted <code>SecureString</code>, version 1</td>
 </tr>
 <tr>
-<td><code>POST /api/enterprise/evidence/jobs</code></td>
-<td><code>evidence_admin</code></td>
-<td>Idempotently start a tenant-wide point-in-time assurance/export job</td>
+<td>Recovery feature merge</td>
+<td><code>f1deeb034069f47b2648f70e44f867feb1b6c562</code></td>
 </tr>
 <tr>
-<td><code>GET /api/enterprise/evidence/jobs</code></td>
-<td><code>evidence_read</code></td>
-<td>List the 50 newest tenant jobs and progress states</td>
+<td>Replication-schema fix</td>
+<td><code>ff9ffd95a81a50889838ad282bd36ee514a0cf5e</code></td>
 </tr>
 <tr>
-<td><code>GET /api/enterprise/evidence/jobs/{jobId}</code></td>
-<td><code>evidence_read</code></td>
-<td>Read one exact tenant-bound job and its completed export index</td>
-</tr>
-<tr>
-<td><code>GET /api/enterprise/evidence/jobs/{jobId}/pages/{page}</code></td>
-<td><code>evidence_read</code></td>
-<td>Read one completed page after server-side schema and digest verification</td>
+<td>Retention-parity fix</td>
+<td><code>89639a262ba10a7d3a0a0ea5258c29c2421e2487</code></td>
 </tr>
 </tbody>
 </table>
-<p>The hosted <strong>Evidence</strong> workspace leads with assurance instead of a raw audit
-table. It shows verified versions, retention, legal holds and delete markers;
-then offers increase-only retention, exact-version preservation, verified export
-and the existing redacted decision timeline.</p>
-<h2 id="failure-behavior-and-limitations">Failure behavior and limitations</h2>
-<p>An unavailable S3 version, malformed tenant policy, mismatched content hash,
-truncated inventory, stale policy revision or unauthorized role never produces a
-positive assurance result. Audit writes also resolve the live tenant retention
-policy before persisting the object.</p>
-<p>The 250-version synchronous path remains the fast path. Above that boundary the
-UI must use the asynchronous assurance/export job; it must never treat the
-bounded synchronous count as complete. A single job is bounded to 100,000 pages
-(at most 1,000,000 listed versions or delete markers), fails closed on malformed
-pagination or provider errors, retries a page at most three times and then
-records a sanitized terminal reason. Increase-only retention above 250 versions
-uses the dedicated asynchronous retention workflow. It makes the longer
-future-write policy authoritative before scanning, waits 65 seconds to drain
-writers that may have read the old policy and then extends every version at or
-before that cutover. A failed job leaves the longer future policy active and
-visible; retry reconciles existing versions without rollback. See
-<a href="../asynchronous-retention-design/">Asynchronous tenant retention</a>. The separate
-cross-region exercise verified count, order, bytes, metadata, provenance and
-retention parity for the complete deployed evidence set.</p>
-<p>The evidence worker is an intentional Lambda-to-FIFO-to-Lambda continuation
-workflow. Its Lambda recursive-loop setting is therefore explicitly <code>Allow</code>;
-without this declaration AWS terminates valid exports after approximately 16
-pages. This does not make the loop unbounded: every message is bound to the
-tenant, job and optimistic revision; FIFO deduplication prevents duplicate next
-steps; a job stops at 100,000 pages; reserved concurrency is five; each page has
-three attempts; and worker errors, queue exhaustion and dead letters are
-alarmed. Changing that declaration or any of those compensating controls
-requires a threat-model and infrastructure-contract review.</p>
-<h2 id="verification">Verification</h2>
-<p>Contract tests cover multi-page completion, mass retention above the synchronous
-bound, idempotent creation, cross-tenant
-denial, page substitution, malformed worker events, stale revisions, retry and
-terminal provider failure, deduplicated scheduling and alert delivery, plus the
-synchronous weak-role, retention, legal-hold and byte-tampering cases. CDK
-synthesis proves the separate worker, FIFO/DLQ, report store, schedule/DLQ,
-alarms and least-privilege permissions are deployable. UI tests and browser
-exercises cover progress, verified download and failed states without
-representing fixture data as live.</p>
+<p>The deployed rule uses priority 1, an empty-prefix all-object filter,
+delete-marker replication disabled and replication metrics enabled. S3
+<code>OperationFailedReplication</code> and <code>OperationNotTracked</code> events target the
+durable security-alert SNS/SQS path. The exact source bucket, replica ARN,
+replica Region and dedicated Batch Operations role are CloudFormation outputs.</p>
+<h2 id="test-sequence-and-evidence">Test sequence and evidence</h2>
+<h3 id="1-fail-closed-deployment-authority">1. Fail-closed deployment authority</h3>
+<p>The recovery manifest was validated against live AWS before persistence. The
+destination proved versioning <code>Enabled</code>, Object Lock <code>Enabled</code> and a default
+365-day <code>COMPLIANCE</code> period. The deployment helper removed ambient replica
+variables and loaded the persisted manifest. A later deploy without that
+manifest is contract-tested to stop before synthesis when the stack already
+reports replication.</p>
+<h3 id="2-live-write-smoke-test">2. Live-write smoke test</h3>
+<p>The repeatable smoke command wrote
+<code>replication-smoke/fd3079ecb89b45d89765b350ccb75c90.json</code> to the source. The
+destination received the same version ID
+<code>7QrM8GiH4nS9ihjiqOByXcm2GL.lXnvB</code>, synthetic metadata, COMPLIANCE lock and
+<code>ReplicationStatus=REPLICA</code> within the 180-second bound. The source reported
+<code>COMPLETED</code>.</p>
+<h3 id="3-historical-absence-repair">3. Historical absence repair</h3>
+<p>Before repair the source held 602 versions and the recovery bucket held 37.
+After the smoke write, the fixed-cutoff Batch Replication job
+<code>21b603ab-0956-4eed-bce0-b8eeb6b902a8</code> selected exact <code>NONE</code>/<code>FAILED</code> versions:</p>
+<ul>
+<li>cutoff: <code>2026-08-01T22:21:32.074127+00:00</code>;</li>
+<li>source versions at cutoff: 603;</li>
+<li>tasks: 565 total, 565 succeeded, 0 failed;</li>
+<li>active execution: 84 seconds;</li>
+<li>all-task report prefix:
+  <code>replication-reports/bce80119-e553-4360-ac1b-ae63be1f94e8</code>.</li>
+</ul>
+<h3 id="4-independent-verifier-found-retention-drift">4. Independent verifier found retention drift</h3>
+<p>The provider's successful task count was not accepted as recovery proof. The
+independent verifier found that 37 older replicas had matching bytes and
+version IDs but retained their original 365-day lock after source retention was
+extended to 730 days. Exact example:</p>
+<table>
+<thead>
+<tr>
+<th>Version</th>
+<th>Source retain-until</th>
+<th>Replica retain-until before repair</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Io9CPXTxq5jVwdMEF5vIF1PCtUtmMqs4</code></td>
+<td><code>2028-07-31T21:13:36Z</code></td>
+<td><code>2027-07-27T12:38:41.636Z</code></td>
+</tr>
+</tbody>
+</table>
+<p>Acceptance failed at this point. The repair tool was changed to include
+<code>COMPLETED</code> versions, because a provider completion status proves a prior copy,
+not current retention or metadata parity. The regression is documented and
+tested in merge <code>89639a2</code>.</p>
+<h3 id="5-retention-parity-repair">5. Retention-parity repair</h3>
+<p>Job <code>d313817c-7d1c-48bd-8b6f-61ff71032df1</code> ran from the exact merged repair:</p>
+<ul>
+<li>cutoff: <code>2026-08-01T22:34:29.291000+00:00</code>;</li>
+<li>filter statuses: <code>COMPLETED</code>, <code>FAILED</code>, <code>NONE</code>;</li>
+<li>tasks: 603 total, 603 succeeded, 0 failed;</li>
+<li>active execution: 84 seconds;</li>
+<li>all-task report prefix:
+  <code>replication-reports/50cfad73-73f4-4f8c-b505-84a1c60cd84a</code>.</li>
+</ul>
+<p>The known stale version then matched exactly: both source and replica retained
+COMPLIANCE mode through <code>2028-07-31T21:13:36Z</code>.</p>
+<h3 id="6-complete-independent-verification">6. Complete independent verification</h3>
+<p><code>scripts/verify_aws_audit_recovery.py</code> independently listed and fetched every
+exact version from both buckets. It did not trust either Batch Operations
+report. Final result:</p>
+<pre><code class="language-json">{
+  &quot;canonicalManifestSha256&quot;: &quot;d4acc0a8c32b073c2ce0e264028913fae544da24f50d720ff822a3e96a6591aa&quot;,
+  &quot;replicaRegion&quot;: &quot;eu-west-1&quot;,
+  &quot;sourceRegion&quot;: &quot;eu-west-2&quot;,
+  &quot;verifiedVersions&quot;: 603
+}
+</code></pre>
+<p>The source and replica each contained exactly 603 object versions. Every pair
+had the same key and version ID, SHA-256 body digest and <code>content-sha256</code>
+metadata value (including matching absence for legacy synthetic records), and
+the replica was COMPLIANCE-locked through at least the source retain-until date
+with <code>ReplicationStatus=REPLICA</code>.</p>
+<p>The source had five historical delete markers and the replica had zero. This is
+intentional: delete markers are not retained evidence records, production audit
+writers do not delete evidence, and the V2 rule explicitly excludes them. The
+603-version proof therefore covers the complete evidence object set rather than
+claiming delete-marker parity.</p>
+<h2 id="operational-observations">Operational observations</h2>
+<ul>
+<li>The shared security-alert queue remained at three visible, zero in-flight and
+  zero delayed messages across the successful parity job; existing messages
+  were not received or deleted because that would alter their delivery state.</li>
+<li>The unauthenticated API continued to return HTTP 401 after rollback and after
+  the successful deployment.</li>
+<li>The first metrics-enabled deployment failed safely because the rule used the
+  S3 V1 schema. CloudFormation reached <code>UPDATE_ROLLBACK_COMPLETE</code>; no audit
+  versions were changed or deleted. The V2 schema fix passed all CI gates and
+  deployed from merge <code>ff9ffd9</code> before any batch repair ran.</li>
+<li>Microsoft Entra ID/SCIM and runtime attestation remain <code>not-configured</code> in
+  this development stack. They are separate rollout gates and are not implied
+  by this evidence-recovery acceptance.</li>
+</ul>
+<h2 id="re-run-commands">Re-run commands</h2>
+<pre><code class="language-bash">python3 scripts/test_aws_audit_replication.py \
+  --source-bucket &lt;source&gt; --source-region eu-west-2 \
+  --replica-bucket &lt;replica&gt; --replica-region eu-west-1 --profile p1
+
+python3 scripts/backfill_aws_audit_replication.py \
+  --source-bucket &lt;source&gt; --report-bucket &lt;report-bucket&gt; \
+  --role-arn &lt;batch-role-arn&gt; --region eu-west-2 --profile p1
+
+python3 scripts/verify_aws_audit_recovery.py \
+  --source-bucket &lt;source&gt; --source-region eu-west-2 \
+  --replica-bucket &lt;replica&gt; --replica-region eu-west-1 --profile p1
+</code></pre>
+<p>Do not declare recovery accepted from object count, a smoke write or a green
+provider job alone. The independent full-version verifier is the acceptance
+boundary.</p>
 
 
 
