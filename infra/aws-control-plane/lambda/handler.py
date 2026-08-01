@@ -187,7 +187,11 @@ _EVIDENCE_ASYNC_MAX_PAGES = 100_000
 _EVIDENCE_JOB_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _EVIDENCE_JOB_FRESHNESS_SECONDS = 6 * 60 * 60
 _EVIDENCE_JOB_STALE_SECONDS = 30 * 60
+_EVIDENCE_QUEUE_RECOVERY_SECONDS = 5 * 60
 _EVIDENCE_INITIAL_CHAIN_HASH = "0" * 64
+_EVIDENCE_RETENTION_CUTOVER_SECONDS = 65
+_EVIDENCE_RETENTION_JOB_RETENTION_SECONDS = 90 * 24 * 60 * 60
+_EVIDENCE_RETENTION_JOB_STALE_SECONDS = 30 * 60
 _RESPONSE_RULE_VERSION_STATES = frozenset(
     {"draft", "review", "approved", "active", "superseded", "rejected"}
 )
@@ -6440,6 +6444,12 @@ def _evidence_policy(tenant):
             "revision": 0,
             "updatedAt": None,
             "updatedBy": None,
+            "applicationStatus": "applied",
+            "applicationJobId": None,
+            "applicationStartedAt": None,
+            "appliedAt": None,
+            "affectedRecordCount": None,
+            "failureReason": None,
         }
     days = item.get("retention_days")
     revision = item.get("revision")
@@ -6455,11 +6465,29 @@ def _evidence_policy(tenant):
         or int(revision) < 1
     ):
         raise RuntimeError("tenant evidence retention policy is malformed")
+    application_status = item.get("application_status", "applied")
+    if application_status not in {"applied", "applying", "failed"}:
+        raise RuntimeError("tenant evidence retention application state is malformed")
+    application_job_id = item.get("application_job_id")
+    if application_status in {"applying", "failed"} and (
+        not isinstance(application_job_id, str) or not application_job_id
+    ):
+        raise RuntimeError("tenant evidence retention job binding is malformed")
     return {
         "retentionDays": int(days),
         "revision": int(revision),
         "updatedAt": int(item.get("updated_at", 0)) or None,
         "updatedBy": item.get("updated_by"),
+        "applicationStatus": application_status,
+        "applicationJobId": application_job_id,
+        "applicationStartedAt": int(item.get("application_started_at", 0)) or None,
+        "appliedAt": int(item.get("applied_at", 0)) or None,
+        "affectedRecordCount": (
+            int(item["affected_record_count"])
+            if item.get("affected_record_count") is not None
+            else None
+        ),
+        "failureReason": item.get("failure_reason"),
     }
 
 
@@ -6588,6 +6616,7 @@ def _evidence_assurance(tenant):
     records = inventory["records"]
     policy = _evidence_policy(tenant)
     latest_job = _latest_evidence_job(tenant, statuses={"queued", "running", "completed", "failed"})
+    latest_retention_job = _latest_retention_job(tenant)
     now = datetime.now(UTC)
     at_risk = [
         item
@@ -6610,6 +6639,9 @@ def _evidence_assurance(tenant):
         "records": list(reversed(records[-100:])),
         "checkedAt": int(time.time()),
         "latestAsyncJob": _evidence_job_view(latest_job) if latest_job else None,
+        "latestRetentionJob": (
+            _retention_job_view(latest_retention_job) if latest_retention_job else None
+        ),
         "monitor": _evidence_monitor_view(_evidence_monitor_record(tenant)),
     }
 
@@ -7045,7 +7077,14 @@ def _reconcile_evidence_monitor(tenant, job):
 def _process_evidence_job(tenant, job_id, expected_revision):
     """Process one revision-bound page and enqueue only the next exact revision."""
     job = _evidence_job_record(tenant, job_id)
-    if int(job.get("revision", 0)) != int(expected_revision):
+    revision = int(job.get("revision", 0))
+    if revision != int(expected_revision):
+        # Repair the same durable-outbox edge as retention work: the page may
+        # be committed while its next FIFO send fails. Retrying the prior
+        # message dispatches only the already-recorded next revision.
+        if job.get("status") == "queued" and revision == int(expected_revision) + 1:
+            _enqueue_evidence_job(tenant, job_id, revision)
+            return {"status": "queue_recovered"}
         return {"status": "stale_message"}
     if job.get("status") not in {"queued", "running"}:
         return {"status": str(job.get("status"))}
@@ -7086,7 +7125,7 @@ def _process_evidence_job(tenant, job_id, expected_revision):
     at_risk = sum(1 for record in records if _evidence_record_at_risk(record, now=now))
     updated = {
         **job,
-        "status": "running",
+        "status": "queued" if response.get("IsTruncated") is True else "running",
         "revision": int(expected_revision) + 1,
         "started_at": job.get("started_at") or int(time.time()),
         "updated_at": int(time.time()),
@@ -7293,6 +7332,14 @@ def _evidence_schedule_cycle():
             continue
         try:
             running = _latest_evidence_job(tenant, statuses={"queued", "running"})
+            if (
+                running
+                and running.get("status") == "queued"
+                and now - int(running.get("updated_at", 0)) > _EVIDENCE_QUEUE_RECOVERY_SECONDS
+            ):
+                _enqueue_evidence_job(tenant, running["id"], int(running["revision"]))
+                active += 1
+                continue
             if running and now - int(running.get("updated_at", 0)) > _EVIDENCE_JOB_STALE_SECONDS:
                 _fail_evidence_job(
                     tenant,
@@ -7324,6 +7371,579 @@ def _evidence_schedule_cycle():
     if failed:
         raise RuntimeError("one or more tenant evidence assurance schedules failed")
     return {"processedTenants": len(tenants), "startedJobs": started, "activeJobs": active}
+
+
+def _retention_job_record(tenant, job_id):
+    """Load one exact tenant-bound asynchronous retention job."""
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "EVIDENCE_RETENTION_JOB", job_id), ConsistentRead=True
+    ).get("Item")
+    if not item:
+        raise LookupError("evidence retention job not found")
+    if item.get("tenant_id") != tenant or item.get("id") != job_id:
+        raise RuntimeError("evidence retention job identity is malformed")
+    return item
+
+
+def _retention_job_view(item):
+    """Project retention progress without exposing rationale or S3 cursors."""
+    return {
+        "id": item.get("id"),
+        "mode": "retention_extension",
+        "status": item.get("status"),
+        "revision": int(item.get("revision", 0)),
+        "policyRevision": int(item.get("policy_revision", 0)),
+        "previousRetentionDays": int(item.get("previous_retention_days", 0)),
+        "targetRetentionDays": int(item.get("target_retention_days", 0)),
+        "cutoverAt": int(item.get("cutover_at", 0)),
+        "retainUntil": int(item.get("retain_until", 0)),
+        "createdAt": int(item.get("created_at", 0)),
+        "startedAt": item.get("started_at"),
+        "updatedAt": int(item.get("updated_at", 0)),
+        "completedAt": item.get("completed_at"),
+        "recordCount": int(item.get("record_count", 0)),
+        "extendedCount": int(item.get("extended_count", 0)),
+        "alreadyCompliantCount": int(item.get("already_compliant_count", 0)),
+        "deleteMarkerCount": int(item.get("delete_marker_count", 0)),
+        "pageCount": int(item.get("page_count", 0)),
+        "failureReason": item.get("failure_reason"),
+        "alertDelivered": item.get("alert_delivery_status") == "delivered",
+    }
+
+
+def _retention_jobs(tenant):
+    """Return the 50 newest tenant retention jobs in deterministic order."""
+    items = _list(tenant, "EVIDENCE_RETENTION_JOB", consistent_read=True)
+    items.sort(
+        key=lambda item: (int(item.get("created_at", 0)), str(item.get("id", ""))),
+        reverse=True,
+    )
+    return [_retention_job_view(item) for item in items[:50]]
+
+
+def _latest_retention_job(tenant):
+    """Return the newest retention job when one exists."""
+    items = _list(tenant, "EVIDENCE_RETENTION_JOB", consistent_read=True)
+    return max(
+        items,
+        key=lambda item: (int(item.get("created_at", 0)), str(item.get("id", ""))),
+        default=None,
+    )
+
+
+def _enqueue_retention_job(tenant, job_id, revision):
+    """Send one tenant/job/revision-bound retention work item to its FIFO queue."""
+    queue_url = os.environ.get("EVIDENCE_RETENTION_QUEUE_URL", "")
+    if not queue_url:
+        raise RuntimeError("asynchronous evidence retention queue is not configured")
+    body = {
+        "schemaVersion": 1,
+        "tenantId": tenant,
+        "jobId": job_id,
+        "expectedRevision": int(revision),
+    }
+    SQS.send_message(
+        QueueUrl=queue_url,
+        MessageBody=json.dumps(body, sort_keys=True, separators=(",", ":")),
+        MessageGroupId=job_id,
+        MessageDeduplicationId=f"retention:{job_id}:{int(revision)}",
+    )
+
+
+def _transact_retention_records(operations):
+    """Atomically change retention job and policy state or expose a conflict."""
+    try:
+        DYNAMODB.transact_write_items(TransactItems=operations)
+    except Exception as error:
+        code = getattr(error, "response", {}).get("Error", {}).get("Code")
+        if code in {"ConditionalCheckFailedException", "TransactionCanceledException"}:
+            raise PolicyConflict("evidence retention state changed concurrently") from error
+        raise
+
+
+def _create_retention_job(tenant, body, actor):
+    """Commit an increase-only future policy and a durable backfill job atomically."""
+    if not isinstance(body, dict) or set(body) != {
+        "requestId",
+        "expectedRevision",
+        "retentionDays",
+        "rationale",
+    }:
+        raise ValueError("evidence retention job request has an invalid schema")
+    request_id = body.get("requestId")
+    if not isinstance(request_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id
+    ):
+        raise ValueError("requestId is invalid")
+    expected = _discovery_integer(body.get("expectedRevision"), "expectedRevision", minimum=0)
+    days = _discovery_integer(
+        body.get("retentionDays"),
+        "retentionDays",
+        minimum=_EVIDENCE_RETENTION_MIN_DAYS,
+        maximum=_EVIDENCE_RETENTION_MAX_DAYS,
+    )
+    rationale = _case_reason(body.get("rationale"))
+    request_hash = _canonical_sha256(
+        {
+            "requestId": request_id,
+            "expectedRevision": expected,
+            "retentionDays": days,
+            "rationale": rationale,
+        }
+    )
+    job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"aai:evidence-retention:{tenant}:{request_id}"))
+    key = _item_key(tenant, "EVIDENCE_RETENTION_JOB", job_id)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if existing:
+        if not secrets.compare_digest(str(existing.get("request_hash", "")), request_hash):
+            raise PolicyConflict("retention requestId was already used for different input")
+        return _retention_job_view(existing)
+    current = _evidence_policy(tenant)
+    if current["revision"] != expected:
+        raise PolicyConflict("evidence retention policy changed before update")
+    if current["applicationStatus"] == "applying":
+        raise PolicyConflict("another evidence retention extension is already applying")
+    if days < current["retentionDays"]:
+        raise ValueError("evidence retention cannot be shortened through the control plane")
+    if days == current["retentionDays"] and current["applicationStatus"] != "failed":
+        raise ValueError("evidence retention extension must increase the current period")
+    now = int(time.time())
+    policy_revision = expected + 1
+    rationale_hash = hashlib.sha256(rationale.encode()).hexdigest()
+    job = {
+        **key,
+        "tenant_id": tenant,
+        "id": job_id,
+        "request_id": request_id,
+        "request_hash": request_hash,
+        "status": "settling",
+        "revision": 1,
+        "policy_revision": policy_revision,
+        "previous_retention_days": current["retentionDays"],
+        "target_retention_days": days,
+        # Future writes use the new policy immediately. Waiting longer than the
+        # longest evidence-writing Lambda timeout lets old-policy in-flight
+        # writes finish before the bounded tenant scan begins.
+        "cutover_at": now + _EVIDENCE_RETENTION_CUTOVER_SECONDS,
+        "retain_until": now + (days * 24 * 60 * 60),
+        "created_at": now,
+        "updated_at": now,
+        "created_by": actor,
+        "rationale_hash": rationale_hash,
+        "record_count": 0,
+        "extended_count": 0,
+        "already_compliant_count": 0,
+        "delete_marker_count": 0,
+        "page_count": 0,
+        "ttl": now + _EVIDENCE_RETENTION_JOB_RETENTION_SECONDS,
+    }
+    policy = {
+        **_item_key(tenant, "EVIDENCE_POLICY", "retention"),
+        "tenant_id": tenant,
+        "retention_days": days,
+        "revision": policy_revision,
+        "updated_at": now,
+        "updated_by": actor,
+        "rationale_hash": rationale_hash,
+        "application_status": "applying",
+        "application_job_id": job_id,
+        "application_started_at": now,
+    }
+    policy_condition = (
+        "attribute_not_exists(pk)"
+        if expected == 0
+        else (
+            "revision = :expected AND "
+            "(attribute_not_exists(application_status) OR application_status <> :applying)"
+        )
+    )
+    policy_values = (
+        None
+        if expected == 0
+        else {
+            ":expected": expected,
+            ":applying": "applying",
+        }
+    )
+    _transact_retention_records(
+        [
+            _transaction_put(job, condition="attribute_not_exists(pk)"),
+            _transaction_put(policy, condition=policy_condition, values=policy_values),
+        ]
+    )
+    _audit(
+        tenant,
+        "evidence_retention_extension_started",
+        actor,
+        {
+            "job_id": job_id,
+            "retention_days": days,
+            "policy_revision": policy_revision,
+            "cutover_at": job["cutover_at"],
+            "rationale_hash": rationale_hash,
+        },
+    )
+    return _retention_job_view(job)
+
+
+def _evidence_retention_schedule_cycle():
+    """Dispatch due or recoverable retention jobs through the tenant schedule index."""
+    registrations = []
+    for shard in range(_EVIDENCE_ASSURANCE_SHARDS):
+        result = TABLE.query(
+            IndexName=_EVIDENCE_ASSURANCE_INDEX,
+            KeyConditionExpression=Key("evidence_assurance_pk").eq(
+                f"EVIDENCE_ASSURANCE#{shard:02d}"
+            ),
+            Limit=_ENDPOINT_DETECTION_TENANT_LIMIT + 1,
+        )
+        if result.get("LastEvaluatedKey"):
+            raise RuntimeError("evidence retention tenant shard exceeds its safe bound")
+        registrations.extend(result.get("Items", []))
+        if len(registrations) > _ENDPOINT_DETECTION_TENANT_LIMIT:
+            raise RuntimeError("evidence retention tenant inventory exceeds its safe bound")
+    now = int(time.time())
+    dispatched = active = failed = 0
+    for registration in registrations:
+        tenant = registration.get("evidence_assurance_sk")
+        if not isinstance(tenant, str) or registration.get("pk") != f"TENANT#{tenant}":
+            failed += 1
+            continue
+        try:
+            policy = _evidence_policy(tenant)
+            if policy["applicationStatus"] != "applying":
+                continue
+            job = _retention_job_record(tenant, policy["applicationJobId"])
+            status = job.get("status")
+            due = status == "settling" and now >= int(job.get("cutover_at", 0))
+            recoverable = (
+                status == "queued"
+                and now - int(job.get("updated_at", 0)) > _EVIDENCE_QUEUE_RECOVERY_SECONDS
+            ) or (
+                status == "running"
+                and now - int(job.get("updated_at", 0)) > _EVIDENCE_RETENTION_JOB_STALE_SECONDS
+            )
+            if due or recoverable:
+                _enqueue_retention_job(tenant, job["id"], int(job["revision"]))
+                dispatched += 1
+            elif status in {"settling", "running"}:
+                active += 1
+        except Exception:
+            failed += 1
+    if failed:
+        raise RuntimeError("one or more tenant evidence retention schedules failed")
+    return {
+        "processedTenants": len(registrations),
+        "dispatchedJobs": dispatched,
+        "activeJobs": active,
+    }
+
+
+def _retention_version_identity(tenant, version):
+    """Validate and return one exact tenant object identity from S3 inventory."""
+    key = version.get("Key")
+    version_id = version.get("VersionId")
+    if (
+        not isinstance(key, str)
+        or not key.startswith(f"tenant={tenant}/")
+        or not isinstance(version_id, str)
+        or not version_id
+    ):
+        raise RuntimeError("retention inventory returned an invalid tenant object identity")
+    return key, version_id
+
+
+def _complete_retention_job(tenant, job, updated):
+    """Atomically publish a completed backfill and its applied policy posture."""
+    policy_item = TABLE.get_item(
+        Key=_item_key(tenant, "EVIDENCE_POLICY", "retention"), ConsistentRead=True
+    ).get("Item")
+    if not policy_item:
+        raise RuntimeError("evidence retention policy disappeared during application")
+    now = int(time.time())
+    completed = {
+        **updated,
+        "status": "completed",
+        "completed_at": now,
+        "updated_at": now,
+    }
+    applied_policy = {
+        **policy_item,
+        "application_status": "applied",
+        "applied_at": now,
+        "affected_record_count": int(completed["record_count"]),
+    }
+    applied_policy.pop("failure_reason", None)
+    _transact_retention_records(
+        [
+            _transaction_put(
+                completed,
+                condition="revision = :revision",
+                values={":revision": int(job["revision"])},
+            ),
+            _transaction_put(
+                applied_policy,
+                condition=(
+                    "revision = :policy_revision AND application_job_id = :job "
+                    "AND application_status = :applying"
+                ),
+                values={
+                    ":policy_revision": int(job["policy_revision"]),
+                    ":job": job["id"],
+                    ":applying": "applying",
+                },
+            ),
+        ]
+    )
+    _audit(
+        tenant,
+        "evidence_retention_extension_completed",
+        "system:evidence-retention",
+        {
+            "job_id": job["id"],
+            "retention_days": int(job["target_retention_days"]),
+            "record_count": int(completed["record_count"]),
+            "extended_count": int(completed["extended_count"]),
+            "already_compliant_count": int(completed["already_compliant_count"]),
+            "policy_revision": int(job["policy_revision"]),
+        },
+    )
+    return completed
+
+
+def _process_retention_job(tenant, job_id, expected_revision):
+    """Extend one bounded inventory page and enqueue only the next exact revision."""
+    job = _retention_job_record(tenant, job_id)
+    revision = int(job.get("revision", 0))
+    if revision != int(expected_revision):
+        # A page commit can succeed immediately before its next queue send
+        # fails. Retrying the previous message repairs that outbox gap without
+        # repeating the already committed S3 page.
+        if job.get("status") == "queued" and revision == int(expected_revision) + 1:
+            _enqueue_retention_job(tenant, job_id, revision)
+            return {"status": "queue_recovered"}
+        return {"status": "stale_message"}
+    if job.get("status") == "settling" and int(time.time()) < int(job.get("cutover_at", 0)):
+        return _retention_job_view(job)
+    if job.get("status") not in {"settling", "queued", "running"}:
+        return _retention_job_view(job)
+    page_number = int(job.get("page_count", 0)) + 1
+    if page_number > _EVIDENCE_ASYNC_MAX_PAGES:
+        raise RuntimeError("evidence retention job exceeds its maximum page bound")
+    arguments = {
+        "Bucket": os.environ["AUDIT_BUCKET"],
+        "Prefix": f"tenant={tenant}/",
+        "MaxKeys": _EVIDENCE_ASYNC_PAGE_SIZE,
+    }
+    if job.get("next_key_marker"):
+        arguments["KeyMarker"] = job["next_key_marker"]
+    if job.get("next_version_id_marker"):
+        arguments["VersionIdMarker"] = job["next_version_id_marker"]
+    response = S3.list_object_versions(**arguments)
+    cutoff = datetime.fromtimestamp(int(job["cutover_at"]), UTC)
+    target = datetime.fromtimestamp(int(job["retain_until"]), UTC)
+    examined = extended = compliant = 0
+    for version in response.get("Versions", []):
+        modified = version.get("LastModified")
+        if not hasattr(modified, "timestamp"):
+            raise RuntimeError("retention inventory version timestamp is malformed")
+        if modified > cutoff:
+            continue
+        key, version_id = _retention_version_identity(tenant, version)
+        retention = _evidence_object_lock_state(
+            S3.get_object_retention,
+            key=key,
+            version_id=version_id,
+            field="Retention",
+        )
+        retain_until = retention.get("RetainUntilDate")
+        examined += 1
+        if (
+            retention.get("Mode") == "COMPLIANCE"
+            and hasattr(retain_until, "timestamp")
+            and retain_until >= target
+        ):
+            compliant += 1
+            continue
+        S3.put_object_retention(
+            Bucket=os.environ["AUDIT_BUCKET"],
+            Key=key,
+            VersionId=version_id,
+            Retention={"Mode": "COMPLIANCE", "RetainUntilDate": target},
+        )
+        extended += 1
+    delete_markers = 0
+    for marker in response.get("DeleteMarkers", []):
+        modified = marker.get("LastModified")
+        if not hasattr(modified, "timestamp"):
+            raise RuntimeError("retention delete-marker timestamp is malformed")
+        if modified <= cutoff:
+            delete_markers += 1
+    updated = {
+        **job,
+        "status": "queued",
+        "revision": revision + 1,
+        "started_at": job.get("started_at") or int(time.time()),
+        "updated_at": int(time.time()),
+        "record_count": int(job.get("record_count", 0)) + examined,
+        "extended_count": int(job.get("extended_count", 0)) + extended,
+        "already_compliant_count": int(job.get("already_compliant_count", 0)) + compliant,
+        "delete_marker_count": int(job.get("delete_marker_count", 0)) + delete_markers,
+        "page_count": page_number,
+    }
+    truncated = response.get("IsTruncated") is True
+    if truncated:
+        next_key = response.get("NextKeyMarker")
+        next_version = response.get("NextVersionIdMarker")
+        if not isinstance(next_key, str):
+            raise RuntimeError("retention inventory pagination marker is missing")
+        updated["next_key_marker"] = next_key
+        if isinstance(next_version, str):
+            updated["next_version_id_marker"] = next_version
+        else:
+            updated.pop("next_version_id_marker", None)
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="revision = :revision",
+            ExpressionAttributeValues={":revision": revision},
+        )
+        _enqueue_retention_job(tenant, job_id, updated["revision"])
+        return _retention_job_view(updated)
+    updated.pop("next_key_marker", None)
+    updated.pop("next_version_id_marker", None)
+    return _retention_job_view(_complete_retention_job(tenant, job, updated))
+
+
+def _retention_failure_reason(error):
+    """Map provider failures to a bounded, non-sensitive retention reason."""
+    code = getattr(error, "response", {}).get("Error", {}).get("Code")
+    if code in {"AccessDenied", "UnauthorizedOperation"}:
+        return "retention_provider_access_denied"
+    if code in {"SlowDown", "ServiceUnavailable", "InternalError", "RequestTimeout"}:
+        return "retention_provider_unavailable"
+    return "retention_extension_failed"
+
+
+def _fail_retention_job(tenant, job_id, expected_revision, reason):
+    """Persist a terminal fail-closed job while retaining the increased future policy."""
+    job = _retention_job_record(tenant, job_id)
+    if int(job.get("revision", 0)) != int(expected_revision):
+        return job
+    if job.get("status") not in {"settling", "queued", "running"}:
+        return job
+    policy = TABLE.get_item(
+        Key=_item_key(tenant, "EVIDENCE_POLICY", "retention"), ConsistentRead=True
+    ).get("Item")
+    if not policy:
+        raise RuntimeError("evidence retention policy disappeared during failure handling")
+    now = int(time.time())
+    failed = {
+        **job,
+        "status": "failed",
+        "revision": int(expected_revision) + 1,
+        "failure_reason": reason,
+        "updated_at": now,
+        "completed_at": now,
+        "alert_delivery_status": "pending",
+    }
+    failed_policy = {**policy, "application_status": "failed", "failure_reason": reason}
+    _transact_retention_records(
+        [
+            _transaction_put(
+                failed,
+                condition="revision = :revision",
+                values={":revision": int(expected_revision)},
+            ),
+            _transaction_put(
+                failed_policy,
+                condition=(
+                    "revision = :policy_revision AND application_job_id = :job "
+                    "AND application_status = :applying"
+                ),
+                values={
+                    ":policy_revision": int(job["policy_revision"]),
+                    ":job": job_id,
+                    ":applying": "applying",
+                },
+            ),
+        ]
+    )
+    try:
+        SNS.publish(
+            TopicArn=os.environ["SECURITY_ALERTS_TOPIC_ARN"],
+            Subject="AAI evidence retention alert",
+            Message=json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "tenantId": tenant,
+                    "source": "evidence_retention",
+                    "status": "failed",
+                    "reasonCode": reason,
+                    "jobId": job_id,
+                    "observedAt": now,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            MessageAttributes={
+                "tenantId": {"DataType": "String", "StringValue": tenant},
+                "severity": {"DataType": "String", "StringValue": "critical"},
+                "source": {"DataType": "String", "StringValue": "evidence_retention"},
+            },
+        )
+        failed["alert_delivery_status"] = "delivered"
+        failed["alert_delivered_at"] = now
+        TABLE.put_item(
+            Item=failed,
+            ConditionExpression="revision = :revision",
+            ExpressionAttributeValues={":revision": int(failed["revision"])},
+        )
+    except Exception:
+        # The transaction already retained a visible pending receipt. A later
+        # operator retry must never interpret delivery failure as success.
+        failed["alert_delivery_status"] = "pending"
+    _audit(
+        tenant,
+        "evidence_retention_extension_failed",
+        "system:evidence-retention",
+        {"job_id": job_id, "reason_code": reason, "policy_revision": job["policy_revision"]},
+    )
+    return failed
+
+
+def process_retention_queue_event(event):
+    """Process one dedicated retention SQS record with bounded terminal retry."""
+    records = event.get("Records") if isinstance(event, dict) else None
+    if not isinstance(records, list) or len(records) != 1:
+        raise ValueError("retention worker requires exactly one SQS record")
+    record = records[0]
+    if record.get("eventSource") not in {"aws:sqs", None}:
+        raise ValueError("retention worker event source is invalid")
+    try:
+        body = json.loads(record.get("body", ""))
+    except (TypeError, json.JSONDecodeError) as error:
+        raise ValueError("retention worker message is invalid") from error
+    if not isinstance(body, dict) or set(body) != {
+        "schemaVersion",
+        "tenantId",
+        "jobId",
+        "expectedRevision",
+    }:
+        raise ValueError("retention worker message schema is invalid")
+    if body.get("schemaVersion") != 1:
+        raise ValueError("retention worker schema version is unsupported")
+    tenant = _bounded_identifier(body.get("tenantId"), "tenantId")
+    job_id = _bounded_identifier(body.get("jobId"), "jobId")
+    expected = _discovery_integer(body.get("expectedRevision"), "expectedRevision", minimum=1)
+    receive_count = int(record.get("attributes", {}).get("ApproximateReceiveCount", "1"))
+    try:
+        return _process_retention_job(tenant, job_id, expected)
+    except Exception as error:
+        if receive_count < 3:
+            raise
+        return _retention_job_view(
+            _fail_retention_job(tenant, job_id, expected, _retention_failure_reason(error))
+        )
 
 
 def _set_evidence_retention(tenant, body, actor):
@@ -12582,6 +13202,10 @@ def handler(event, context):
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("evidence assurance schedule event is invalid")
         return _evidence_schedule_cycle()
+    if isinstance(event, dict) and event.get("source") == "aai.evidence-retention":
+        if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
+            raise ValueError("evidence retention schedule event is invalid")
+        return _evidence_retention_schedule_cycle()
     try:
         method, path = _method_path(event)
         if method == "OPTIONS":
@@ -12964,6 +13588,22 @@ def handler(event, context):
                 )
             if method == "PUT" and parts == ["evidence", "retention"]:
                 return _response(200, _set_evidence_retention(tenant, _body(event), actor))
+            if parts[:2] == ["evidence", "retention-jobs"]:
+                if method == "POST" and len(parts) == 2:
+                    return _response(202, _create_retention_job(tenant, _body(event), actor))
+                if method == "GET":
+                    if not _operator_authorized(event, "evidence_read", tenant):
+                        return _response(
+                            403,
+                            {"error": "evidence retention requires an authorized evidence role"},
+                        )
+                    if len(parts) == 2:
+                        return _response(200, {"items": _retention_jobs(tenant)})
+                    if len(parts) == 3:
+                        return _response(
+                            200,
+                            _retention_job_view(_retention_job_record(tenant, parts[2])),
+                        )
             if method == "POST" and parts == ["evidence", "legal-hold"]:
                 return _response(200, _set_evidence_legal_hold(tenant, _body(event), actor))
             if parts[:2] == ["evidence", "jobs"]:

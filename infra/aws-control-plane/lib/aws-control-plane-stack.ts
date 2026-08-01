@@ -394,7 +394,27 @@ export class AwsControlPlaneStack extends cdk.Stack {
       deadLetterQueue: { queue: evidenceWorkerDlq, maxReceiveCount: 3 },
       enforceSSL: true,
     });
+    const evidenceRetentionWorkerDlq = new sqs.Queue(this, "EvidenceRetentionWorkerDlq", {
+      fifo: true,
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const evidenceRetentionWorkerQueue = new sqs.Queue(this, "EvidenceRetentionWorkerQueue", {
+      fifo: true,
+      contentBasedDeduplication: false,
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      visibilityTimeout: cdk.Duration.minutes(6),
+      retentionPeriod: cdk.Duration.days(4),
+      deadLetterQueue: { queue: evidenceRetentionWorkerDlq, maxReceiveCount: 3 },
+      enforceSSL: true,
+    });
     const evidenceScheduleDlq = new sqs.Queue(this, "EvidenceScheduleDlq", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const evidenceRetentionScheduleDlq = new sqs.Queue(this, "EvidenceRetentionScheduleDlq", {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
@@ -573,6 +593,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       AUDIT_BUCKET: audit.bucketName,
       EVIDENCE_REPORT_BUCKET: evidenceReports.bucketName,
       EVIDENCE_QUEUE_URL: evidenceWorkerQueue.queueUrl,
+      EVIDENCE_RETENTION_QUEUE_URL: evidenceRetentionWorkerQueue.queueUrl,
       ENTRA_PROVIDER_ENABLED: entraProvider ? "true" : "false",
       ENTRA_TENANT_ID: entraTenantId ?? "",
       ENTRA_AAI_TENANT_ID: entraAaiTenantId ?? "",
@@ -616,6 +637,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     securityAlerts.grantPublish(handler);
     evidenceReports.grantRead(handler);
     evidenceWorkerQueue.grantSendMessages(handler);
+    evidenceRetentionWorkerQueue.grantSendMessages(handler);
     handler.addToRolePolicy(new iam.PolicyStatement({ actions: ["sts:AssumeRole"], resources: [scopedToolRole.roleArn] }));
 
     const evidenceWorker = new lambda.Function(this, "EvidenceWorker", {
@@ -649,6 +671,37 @@ export class AwsControlPlaneStack extends cdk.Stack {
       batchSize: 1,
       reportBatchItemFailures: false,
     }));
+
+    const evidenceRetentionWorker = new lambda.Function(this, "EvidenceRetentionWorker", {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: lambda.Architecture.ARM_64,
+      handler: "retention_worker.handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 1024,
+      // The dedicated FIFO continuation is intentional and bounded by exact
+      // revisions, 100,000 pages, reserved concurrency, retries and its DLQ.
+      recursiveLoop: lambda.RecursiveLoop.ALLOW,
+      reservedConcurrentExecutions: 5,
+      environment: controlPlaneEnvironment,
+      tracing: lambda.Tracing.PASS_THROUGH,
+    });
+    table.grantReadWriteData(evidenceRetentionWorker);
+    table.grant(evidenceRetentionWorker, "dynamodb:TransactWriteItems");
+    audit.grantRead(evidenceRetentionWorker);
+    audit.grantPut(evidenceRetentionWorker);
+    evidenceRetentionWorker.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["s3:GetObjectRetention", "s3:PutObjectRetention"],
+      resources: [audit.arnForObjects("tenant=*")],
+    }));
+    securityAlerts.grantPublish(evidenceRetentionWorker);
+    evidenceRetentionWorkerQueue.grantSendMessages(evidenceRetentionWorker);
+    evidenceRetentionWorker.addEventSource(
+      new lambdaEventSources.SqsEventSource(evidenceRetentionWorkerQueue, {
+        batchSize: 1,
+        reportBatchItemFailures: false,
+      }),
+    );
 
     const endpointDetectionRule = new events.Rule(this, "EndpointDetectionSchedule", {
       description: "Reconcile tenant endpoint evidence and persist actionable detections",
@@ -694,6 +747,22 @@ export class AwsControlPlaneStack extends cdk.Stack {
           schemaVersion: 1,
         }),
         deadLetterQueue: evidenceScheduleDlq,
+        maxEventAge: cdk.Duration.hours(1),
+        retryAttempts: 2,
+      }),
+    );
+    const evidenceRetentionRule = new events.Rule(this, "EvidenceRetentionSchedule", {
+      description: "Dispatch due asynchronous evidence-retention backfills",
+      schedule: events.Schedule.rate(cdk.Duration.minutes(1)),
+      enabled: true,
+    });
+    evidenceRetentionRule.addTarget(
+      new eventTargets.LambdaFunction(handler, {
+        event: events.RuleTargetInput.fromObject({
+          source: "aai.evidence-retention",
+          schemaVersion: 1,
+        }),
+        deadLetterQueue: evidenceRetentionScheduleDlq,
         maxEventAge: cdk.Duration.hours(1),
         retryAttempts: 2,
       }),
@@ -949,9 +1018,28 @@ export class AwsControlPlaneStack extends cdk.Stack {
       alarmDescription: "Asynchronous evidence verification failed and may delay assurance.",
     });
     evidenceWorkerErrors.addAlarmAction(new cloudwatchActions.SnsAction(securityAlerts));
+    const evidenceRetentionWorkerErrors = new cloudwatch.Alarm(
+      this,
+      "EvidenceRetentionWorkerErrors",
+      {
+        metric: evidenceRetentionWorker.metricErrors({
+          period: cdk.Duration.minutes(5),
+          statistic: "Sum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        alarmDescription: "Asynchronous evidence retention failed and requires attention.",
+      },
+    );
+    evidenceRetentionWorkerErrors.addAlarmAction(
+      new cloudwatchActions.SnsAction(securityAlerts),
+    );
     for (const [id, queue, description] of [
       ["EvidenceWorkerDeadLetters", evidenceWorkerDlq, "Evidence verification exhausted bounded retries."],
       ["EvidenceScheduleDeadLetters", evidenceScheduleDlq, "Scheduled evidence assurance exhausted bounded retries."],
+      ["EvidenceRetentionWorkerDeadLetters", evidenceRetentionWorkerDlq, "Evidence retention exhausted bounded retries."],
+      ["EvidenceRetentionScheduleDeadLetters", evidenceRetentionScheduleDlq, "Scheduled evidence-retention dispatch exhausted bounded retries."],
     ] as const) {
       const alarm = new cloudwatch.Alarm(this, id, {
         metric: queue.metricApproximateNumberOfMessagesVisible({
@@ -1006,6 +1094,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "EvidenceReportBucketName", { value: evidenceReports.bucketName });
     new cdk.CfnOutput(this, "EvidenceWorkerDlqArn", { value: evidenceWorkerDlq.queueArn });
     new cdk.CfnOutput(this, "EvidenceScheduleDlqArn", { value: evidenceScheduleDlq.queueArn });
+    new cdk.CfnOutput(this, "EvidenceRetentionWorkerDlqArn", {
+      value: evidenceRetentionWorkerDlq.queueArn,
+    });
+    new cdk.CfnOutput(this, "EvidenceRetentionScheduleDlqArn", {
+      value: evidenceRetentionScheduleDlq.queueArn,
+    });
     new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });
     new cdk.CfnOutput(this, "PolicySigningKeyArn", { value: policySigningKey.keyArn });
     new cdk.CfnOutput(this, "DiscoveryProviderSecretNamePrefix", {

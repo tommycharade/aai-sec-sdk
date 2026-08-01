@@ -645,10 +645,15 @@ evidence. EventBridge starts due scans every 15 minutes; changed evidence gaps
 publish to the existing durable security-alert SNS/SQS channel. Monitor the
 worker and schedule DLQ alarms and treat `pending` alert delivery as unresolved.
 
-Retention changes above 250 versions still fail closed because mass retention
-extension is not delegated to the assurance worker. Follow
-[Durable evidence governance](durable-evidence-governance-design.md), and retain
-separate live cross-region count/order/hash/retention recovery evidence.
+Retention changes above 250 versions use a separate retention FIFO queue and
+worker. The API first makes the longer period authoritative for future writes,
+then waits beyond the evidence-writer timeout and extends every pre-cutover
+version. Monitor `EvidenceRetentionWorkerErrors`,
+`EvidenceRetentionWorkerDlqNotEmpty` and `EvidenceRetentionScheduleDlqNotEmpty`;
+a failed job leaves the longer future policy active and requires reconciliation,
+not rollback. Follow [Asynchronous tenant retention](asynchronous-retention-design.md)
+and retain separate live cross-region count/order/hash/retention recovery
+evidence.
 
 This is the first AWS deployment slice, not a production security
 certification. Before production use:

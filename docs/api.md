@@ -581,7 +581,14 @@ The AWS control plane exposes a tenant-bound records-management contract:
   and returns retention, legal-hold, delete-marker and content-integrity posture;
 - `PUT /api/enterprise/evidence/retention` accepts exactly
   `expectedRevision`, `retentionDays` and `rationale`, permits 365–3,650 days,
-  and never permits a reduction;
+  never permits a reduction and is the complete-inventory fast path;
+- `POST /api/enterprise/evidence/retention-jobs` accepts exactly `requestId`,
+  `expectedRevision`, `retentionDays` and `rationale`, atomically activates the
+  longer future-write policy and starts a revision-bound existing-version
+  backfill;
+- `GET /api/enterprise/evidence/retention-jobs` and
+  `GET /api/enterprise/evidence/retention-jobs/{jobId}` expose server-owned
+  counts, progress, terminal failure and durable-alert delivery posture;
 - `POST /api/enterprise/evidence/legal-hold` sets or clears hold for one exact
   tenant key/version after rejecting cross-tenant identity; and
 - `GET /api/enterprise/evidence/export` returns a canonical content-hashed
@@ -598,8 +605,9 @@ The AWS control plane exposes a tenant-bound records-management contract:
 Security operators and platform administrators manage retention and legal hold.
 Auditors may read assurance and export evidence but cannot mutate it. Rationale
 text is content-hashed before audit persistence. See
-[Durable evidence governance](durable-evidence-governance-design.md) for queue
-authority, snapshot, hash-chain, schedule, alert and failure behavior.
+[Durable evidence governance](durable-evidence-governance-design.md) and
+[Asynchronous tenant retention](asynchronous-retention-design.md) for queue
+authority, cutover, snapshot, hash-chain, schedule, alert and failure behavior.
 
 ## Automatic response rules
 

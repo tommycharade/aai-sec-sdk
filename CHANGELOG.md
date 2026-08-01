@@ -1,5 +1,12 @@
 # Changelog
 
+- Added revision-bound asynchronous mass retention above the 250-version fast
+  path. The control plane atomically protects future writes with the longer
+  policy, waits for old-policy writers to drain, then uses a dedicated bounded
+  FIFO worker to extend every pre-cutover S3 Object Lock version. The Evidence
+  UI adds human-readable impact review, explicit irreversibility acknowledgement,
+  durable progress and failure posture; failure never rolls policy back.
+
 - Declared the evidence worker's intentional, bounded Lambda/FIFO continuation
   workflow so AWS recursive-loop protection does not truncate exports after 16
   pages. Reserved concurrency, optimistic revisions, page limits, retries,
