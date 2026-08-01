@@ -179,8 +179,10 @@ policy version so operators can identify which change caused a failure.
 2. Confirm **Integrity verified**, **Retention**, **Legal holds**, **Delete
    markers** and inventory completeness match the records schedule.
 3. To extend retention, select the longer period and enter the approved records
-   schedule/change reference. The control plane extends all bounded existing
-   versions before changing future-record policy; it refuses reductions.
+   schedule/change reference. Review current-to-target impact, complete count or
+   lower bound, future-write effect and synchronous/background handling, then
+   acknowledge that retention cannot be shortened. The control plane chooses
+   the correct path and refuses reductions.
 4. Select one retained version to place or release legal hold. Confirm the exact
    object version and provide the approved legal authority. The rationale is
    hashed rather than stored as case narrative.
@@ -200,6 +202,8 @@ policy version so operators can identify which change caused a failure.
    included.
 
 For more than 250 retained versions, the synchronous path deliberately shows
-`incomplete`. Use a completed tenant-wide job for export. Retention mutation
-remains blocked above this boundary until the asynchronous retention workflow
-is implemented. Never accept a sampled UI list as the complete tenant record.
+`incomplete`. Use a completed tenant-wide job for export; retention extension
+runs as a dedicated background job. The longer policy protects future writes
+immediately, while progress shows every pre-cutover version examined and
+extended. If the job fails, reconcile it; never roll back or accept a sampled UI
+list as the complete tenant record.

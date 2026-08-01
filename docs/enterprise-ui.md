@@ -130,11 +130,21 @@ at-risk posture, and exposes:
 - delete-marker visibility;
 - complete digest-bound manifest export; and
 - tenant-wide asynchronous assurance progress and scheduled monitor posture;
+- impact-reviewed mass-retention extension and durable application progress;
 - redacted runtime and lifecycle decision evidence.
 
 The browser cannot submit tenant identity, integrity status or completeness.
 It cannot shorten retention or bypass the 365-day COMPLIANCE floor. A failed or
 truncated assurance request remains visibly failed closed.
+
+Retention editing is review-first. Before save, the operator sees current and
+target periods, the complete count or explicit lower bound, affected future
+writes, synchronous versus background handling and the irreversible cost/legal
+impact. An explicit cannot-shorten acknowledgement is required. Large
+inventories continue independently of the browser and show examined/extended
+counts, pages, failure reason and alert-delivery posture. A failed application
+states that the longer future policy remains active and offers reconciliation,
+never rollback.
 
 When the synchronous inventory is incomplete, the page offers **Run full
 assurance** rather than a misleading sample. The operator supplies a change or

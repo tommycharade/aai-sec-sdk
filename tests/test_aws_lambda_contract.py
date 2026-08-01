@@ -547,6 +547,10 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("AUDIT_BUCKET", "audit")
     monkeypatch.setenv("EVIDENCE_REPORT_BUCKET", "evidence-reports")
     monkeypatch.setenv("EVIDENCE_QUEUE_URL", "https://sqs.example.invalid/evidence.fifo")
+    monkeypatch.setenv(
+        "EVIDENCE_RETENTION_QUEUE_URL",
+        "https://sqs.example.invalid/evidence-retention.fifo",
+    )
     monkeypatch.setenv("ENTRA_PROVIDER_ENABLED", "false")
     monkeypatch.setenv("ENTRA_TENANT_ID", "")
     monkeypatch.setenv("ENTRA_AAI_TENANT_ID", "")
@@ -923,6 +927,418 @@ def test_evidence_inventory_never_presents_a_bounded_sample_as_complete(monkeypa
     assert update["statusCode"] == 409
 
 
+def test_async_retention_extends_every_version_above_the_synchronous_bound(
+    monkeypatch: Any,
+) -> None:
+    """Apply an increase-only policy before a complete revision-bound backfill."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "security-retention",
+    }
+    for index in range(module._EVIDENCE_RECORD_LIMIT + 5):
+        module._audit(tenant, "retention_bound_probe", "test", {"index": index})
+    for (key, _version), record in module._fake_s3.objects.items():
+        if key.startswith(f"tenant={tenant}/"):
+            record["LastModified"] = datetime.now(UTC) - timedelta(seconds=10)
+    monkeypatch.setattr(module, "_EVIDENCE_RETENTION_CUTOVER_SECONDS", 0)
+
+    started = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention-jobs",
+            "POST",
+            claims=claims,
+            body={
+                "requestId": "mass-retention-a",
+                "expectedRevision": 0,
+                "retentionDays": 730,
+                "rationale": "Approved two-year synthetic enterprise records schedule.",
+            },
+        ),
+    )
+    assert started["statusCode"] == 202
+    job = json.loads(started["body"])
+    assert job["status"] == "settling"
+    posture = json.loads(
+        _invoke(module, _event("/api/enterprise/evidence", "GET", claims=claims))["body"]
+    )
+    assert posture["complete"] is False
+    assert posture["policy"]["retentionDays"] == 730
+    assert posture["policy"]["applicationStatus"] == "applying"
+    assert posture["latestRetentionJob"]["id"] == job["id"]
+
+    # A write after policy cutover receives the longer future-record policy
+    # immediately, before the existing-version backfill completes.
+    module._audit(tenant, "post_cutover_probe", "test", {"synthetic": True})
+    newest = max(module._fake_s3.objects.values(), key=lambda item: item["LastModified"])
+    assert newest["Retention"]["RetainUntilDate"] > datetime.now(UTC) + timedelta(days=729)
+
+    scheduled = module._evidence_retention_schedule_cycle()
+    assert scheduled["dispatchedJobs"] == 1
+    processed = 0
+    while module._fake_sqs.messages:
+        message = module._fake_sqs.messages.pop(0)
+        assert message["QueueUrl"].endswith("evidence-retention.fifo")
+        result = module.process_retention_queue_event(
+            {
+                "Records": [
+                    {
+                        "eventSource": "aws:sqs",
+                        "body": message["MessageBody"],
+                        "attributes": {"ApproximateReceiveCount": "1"},
+                    }
+                ]
+            }
+        )
+        processed += 1
+        assert result["status"] in {"queued", "completed"}
+        assert processed < 100
+
+    completed = json.loads(
+        _invoke(
+            module,
+            _event(
+                f"/api/enterprise/evidence/retention-jobs/{job['id']}",
+                "GET",
+                claims=claims,
+            ),
+        )["body"]
+    )
+    assert completed["status"] == "completed"
+    assert completed["recordCount"] > module._EVIDENCE_RECORD_LIMIT
+    assert completed["recordCount"] == (
+        completed["extendedCount"] + completed["alreadyCompliantCount"]
+    )
+    assert completed["pageCount"] > 25
+    applied = module._evidence_policy(tenant)
+    assert applied["applicationStatus"] == "applied"
+    assert applied["affectedRecordCount"] == completed["recordCount"]
+    target = datetime.fromtimestamp(completed["retainUntil"], UTC)
+    assert all(
+        record["Retention"]["Mode"] == "COMPLIANCE"
+        and record["Retention"]["RetainUntilDate"] >= target
+        for record in module._fake_s3.objects.values()
+        if record["LastModified"] <= datetime.fromtimestamp(completed["cutoverAt"], UTC)
+    )
+
+
+def test_async_retention_upgrades_a_legacy_applied_policy(monkeypatch: Any) -> None:
+    """An older policy record without application fields must remain upgradeable."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "EVIDENCE_POLICY", "retention"),
+            "tenant_id": tenant,
+            "retention_days": 365,
+            "revision": 4,
+            "updated_at": 1,
+            "updated_by": "legacy-operator",
+            "rationale_hash": "0" * 64,
+        }
+    )
+    response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention-jobs",
+            "POST",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["security-operator"],
+                "sub": "security-retention",
+            },
+            body={
+                "requestId": "legacy-policy-upgrade",
+                "expectedRevision": 4,
+                "retentionDays": 730,
+                "rationale": "Approved synthetic legacy-policy migration exercise.",
+            },
+        ),
+    )
+    assert response["statusCode"] == 202
+    policy = module._evidence_policy(tenant)
+    assert policy["revision"] == 5
+    assert policy["retentionDays"] == 730
+    assert policy["applicationStatus"] == "applying"
+
+
+def test_async_retention_denies_bypass_and_keeps_the_increased_policy_on_failure(
+    monkeypatch: Any,
+) -> None:
+    """Deny weak/stale/concurrent input and never roll future retention backward."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    security = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "security-retention",
+    }
+    fleet = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-retention",
+    }
+    body = {
+        "requestId": "retention-failure-a",
+        "expectedRevision": 0,
+        "retentionDays": 730,
+        "rationale": "Approved synthetic retention failure exercise reference.",
+    }
+    denied = _invoke(
+        module,
+        _event("/api/enterprise/evidence/retention-jobs", "POST", claims=fleet, body=body),
+    )
+    assert denied["statusCode"] == 403
+    monkeypatch.setattr(module, "_EVIDENCE_RETENTION_CUTOVER_SECONDS", 0)
+    module._audit(tenant, "retention_failure_probe", "test", {"synthetic": True})
+    for record in module._fake_s3.objects.values():
+        record["LastModified"] = datetime.now(UTC) - timedelta(seconds=10)
+    started = _invoke(
+        module,
+        _event("/api/enterprise/evidence/retention-jobs", "POST", claims=security, body=body),
+    )
+    assert started["statusCode"] == 202
+    job_id = json.loads(started["body"])["id"]
+    replay = _invoke(
+        module,
+        _event("/api/enterprise/evidence/retention-jobs", "POST", claims=security, body=body),
+    )
+    assert replay["statusCode"] == 202
+    assert json.loads(replay["body"])["id"] == job_id
+    concurrent = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention-jobs",
+            "POST",
+            claims=security,
+            body={**body, "requestId": "concurrent", "expectedRevision": 1, "retentionDays": 900},
+        ),
+    )
+    assert concurrent["statusCode"] == 409
+    stale = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention-jobs",
+            "POST",
+            claims=security,
+            body={**body, "requestId": "stale", "retentionDays": 900},
+        ),
+    )
+    assert stale["statusCode"] == 409
+
+    module._evidence_retention_schedule_cycle()
+    message = module._fake_sqs.messages.pop(0)
+
+    def deny_retention(**_value: Any) -> None:
+        raise ObjectLockAccessDenied()
+
+    put_retention = module.S3.put_object_retention
+    monkeypatch.setattr(module.S3, "put_object_retention", deny_retention)
+    failed = module.process_retention_queue_event(
+        {
+            "Records": [
+                {
+                    "eventSource": "aws:sqs",
+                    "body": message["MessageBody"],
+                    "attributes": {"ApproximateReceiveCount": "3"},
+                }
+            ]
+        }
+    )
+    assert failed["status"] == "failed"
+    assert failed["failureReason"] == "retention_provider_access_denied"
+    assert failed["alertDelivered"] is True
+    policy = module._evidence_policy(tenant)
+    assert policy["retentionDays"] == 730
+    assert policy["applicationStatus"] == "failed"
+    assert policy["failureReason"] == "retention_provider_access_denied"
+    monkeypatch.setattr(module.S3, "put_object_retention", put_retention)
+    retry = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention-jobs",
+            "POST",
+            claims=security,
+            body={
+                **body,
+                "requestId": "retention-failure-reconcile",
+                "expectedRevision": 1,
+            },
+        ),
+    )
+    assert retry["statusCode"] == 202
+    retried_policy = module._evidence_policy(tenant)
+    assert retried_policy["retentionDays"] == 730
+    assert retried_policy["revision"] == 2
+    assert retried_policy["applicationStatus"] == "applying"
+    cross_tenant = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/evidence/retention-jobs/{job_id}",
+            "GET",
+            claims={
+                "custom:tenant_id": "tenant-other",
+                "cognito:groups": ["security-operator"],
+                "sub": "other-security",
+            },
+        ),
+    )
+    assert cross_tenant["statusCode"] == 403
+
+
+def test_async_retention_repairs_a_committed_page_when_next_dispatch_fails(
+    monkeypatch: Any,
+) -> None:
+    """Retrying the old message repairs the durable outbox gap without reapplying a page."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "security-retention",
+    }
+    for index in range(15):
+        module._audit(tenant, "retention_dispatch_probe", "test", {"index": index})
+    for record in module._fake_s3.objects.values():
+        record["LastModified"] = datetime.now(UTC) - timedelta(seconds=10)
+    monkeypatch.setattr(module, "_EVIDENCE_RETENTION_CUTOVER_SECONDS", 0)
+    started = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/retention-jobs",
+            "POST",
+            claims=claims,
+            body={
+                "requestId": "dispatch-recovery-a",
+                "expectedRevision": 0,
+                "retentionDays": 730,
+                "rationale": "Approved synthetic queue dispatch recovery exercise.",
+            },
+        ),
+    )
+    job_id = json.loads(started["body"])["id"]
+    module._evidence_retention_schedule_cycle()
+    message = module._fake_sqs.messages.pop(0)
+    sender = module.SQS.send_message
+    monkeypatch.setattr(
+        module.SQS,
+        "send_message",
+        lambda **_value: (_ for _ in ()).throw(OSError("synthetic queue outage")),
+    )
+    with pytest.raises(OSError, match="synthetic queue outage"):
+        module.process_retention_queue_event(
+            {
+                "Records": [
+                    {
+                        "eventSource": "aws:sqs",
+                        "body": message["MessageBody"],
+                        "attributes": {"ApproximateReceiveCount": "1"},
+                    }
+                ]
+            }
+        )
+    committed = module._retention_job_record(tenant, job_id)
+    assert committed["status"] == "queued"
+    assert committed["page_count"] == 1
+    monkeypatch.setattr(module.SQS, "send_message", sender)
+    recovered = module.process_retention_queue_event(
+        {
+            "Records": [
+                {
+                    "eventSource": "aws:sqs",
+                    "body": message["MessageBody"],
+                    "attributes": {"ApproximateReceiveCount": "2"},
+                }
+            ]
+        }
+    )
+    assert recovered == {"status": "queue_recovered"}
+    assert len(module._fake_sqs.messages) == 1
+    assert module._retention_job_record(tenant, job_id)["page_count"] == 1
+
+
+def test_aws_async_retention_is_isolated_bounded_and_monitored() -> None:
+    """Infrastructure must isolate irreversible retention work and its recovery path."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    assert 'handler: "retention_worker.handler"' in stack
+    assert "EVIDENCE_RETENTION_QUEUE_URL: evidenceRetentionWorkerQueue.queueUrl" in stack
+    assert 'source: "aai.evidence-retention"' in stack
+    assert "schedule: events.Schedule.rate(cdk.Duration.minutes(1))" in stack
+    assert "recursiveLoop: lambda.RecursiveLoop.ALLOW" in stack
+    assert "reservedConcurrentExecutions: 5" in stack
+    assert "EvidenceRetentionWorkerDeadLetters" in stack
+    assert "EvidenceRetentionScheduleDeadLetters" in stack
+
+
+def test_async_assurance_repairs_a_committed_page_when_next_dispatch_fails(
+    monkeypatch: Any,
+) -> None:
+    """The read-only assurance worker must repair its committed-page outbox edge."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    for index in range(15):
+        module._audit(tenant, "assurance_dispatch_probe", "test", {"index": index})
+    started = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence/jobs",
+            "POST",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["security-operator"],
+                "sub": "security-assurance",
+            },
+            body={
+                "requestId": "assurance-dispatch-recovery",
+                "rationale": "Approved synthetic assurance dispatch recovery exercise.",
+            },
+        ),
+    )
+    job_id = json.loads(started["body"])["id"]
+    message = module._fake_sqs.messages.pop(0)
+    sender = module.SQS.send_message
+    monkeypatch.setattr(
+        module.SQS,
+        "send_message",
+        lambda **_value: (_ for _ in ()).throw(OSError("synthetic assurance queue outage")),
+    )
+    with pytest.raises(OSError, match="synthetic assurance queue outage"):
+        module.process_evidence_queue_event(
+            {
+                "Records": [
+                    {
+                        "eventSource": "aws:sqs",
+                        "body": message["MessageBody"],
+                        "attributes": {"ApproximateReceiveCount": "1"},
+                    }
+                ]
+            }
+        )
+    committed = module._evidence_job_record(tenant, job_id)
+    assert committed["status"] == "queued"
+    assert committed["page_count"] == 1
+    monkeypatch.setattr(module.SQS, "send_message", sender)
+    recovered = module.process_evidence_queue_event(
+        {
+            "Records": [
+                {
+                    "eventSource": "aws:sqs",
+                    "body": message["MessageBody"],
+                    "attributes": {"ApproximateReceiveCount": "2"},
+                }
+            ]
+        }
+    )
+    assert recovered == {"status": "queue_recovered"}
+    assert len(module._fake_sqs.messages) == 1
+    assert module._evidence_job_record(tenant, job_id)["page_count"] == 1
+
+
 def test_async_evidence_job_completes_all_pages_and_binds_export(monkeypatch: Any) -> None:
     """Scan beyond the synchronous bound and verify every derived export page."""
     module, _table = _load_handler(monkeypatch)
@@ -967,7 +1383,7 @@ def test_async_evidence_job_completes_all_pages_and_binds_export(monkeypatch: An
             }
         )
         processed += 1
-        assert result["status"] in {"running", "completed"}
+        assert result["status"] in {"queued", "completed"}
         assert processed < 20
 
     response = _invoke(

@@ -3,7 +3,8 @@
 This design advances P0-08 by turning the AWS Object Lock foundation into a
 tenant-visible records-management control. It covers tenant retention,
 exact-version legal hold, live integrity assurance, asynchronous tenant-wide
-export and scheduled evidence-gap monitoring. It does **not** claim that
+export, mass-retention extension and scheduled evidence-gap monitoring. It does
+**not** claim that
 cross-region recovery has passed for a customer environment.
 
 ## Threat and trust boundary
@@ -25,8 +26,11 @@ exact optimistic revision before every state transition.
 ## Invariants
 
 - Tenant retention is 365–3,650 days and can only increase through this API.
-- Existing versions are extended before the new future-record policy is stored.
-  A concurrent failure may retain data longer, never for less time.
+- The synchronous fast path extends existing versions before storing the new
+  future-record policy. The asynchronous path first makes the longer policy
+  authoritative for new writes, waits beyond the maximum evidence-writer
+  lifetime, then extends every pre-cutover version. Failure may retain data
+  longer, never for less time.
 - Every new audit object explicitly carries COMPLIANCE retention plus a SHA-256
   content binding in S3 metadata.
 - Legal hold addresses an exact key and version under `tenant=<token tenant>/`.
@@ -66,6 +70,9 @@ exact optimistic revision before every state transition.
 | --- | --- | --- |
 | `GET /api/enterprise/evidence` | `evidence_read` | Live policy, integrity, retention, legal-hold and completeness posture |
 | `PUT /api/enterprise/evidence/retention` | `evidence_admin` | Optimistic, increase-only retention update applied to existing and future records |
+| `POST /api/enterprise/evidence/retention-jobs` | `evidence_admin` | Idempotently start a revision-bound mass-retention extension |
+| `GET /api/enterprise/evidence/retention-jobs` | `evidence_read` | List the 50 newest mass-retention jobs and progress |
+| `GET /api/enterprise/evidence/retention-jobs/{jobId}` | `evidence_read` | Read one exact tenant-bound retention job and alert posture |
 | `POST /api/enterprise/evidence/legal-hold` | `evidence_admin` | Legal-hold change for one exact tenant object version |
 | `GET /api/enterprise/evidence/export` | `evidence_read` | Complete integrity-bound manifest, or a fail-closed conflict/error |
 | `POST /api/enterprise/evidence/jobs` | `evidence_admin` | Idempotently start a tenant-wide point-in-time assurance/export job |
@@ -90,10 +97,14 @@ UI must use the asynchronous assurance/export job; it must never treat the
 bounded synchronous count as complete. A single job is bounded to 100,000 pages
 (at most 1,000,000 listed versions or delete markers), fails closed on malformed
 pagination or provider errors, retries a page at most three times and then
-records a sanitized terminal reason. Increase-only retention mutation still
-requires the complete synchronous inventory and therefore remains blocked above
-250 versions until a separately reviewed asynchronous retention workflow is
-implemented. Cross-region count/order/hash/retention recovery also remains open.
+records a sanitized terminal reason. Increase-only retention above 250 versions
+uses the dedicated asynchronous retention workflow. It makes the longer
+future-write policy authoritative before scanning, waits 65 seconds to drain
+writers that may have read the old policy and then extends every version at or
+before that cutover. A failed job leaves the longer future policy active and
+visible; retry reconciles existing versions without rollback. See
+[Asynchronous tenant retention](asynchronous-retention-design.md). Cross-region
+count/order/hash/retention recovery remains open.
 
 The evidence worker is an intentional Lambda-to-FIFO-to-Lambda continuation
 workflow. Its Lambda recursive-loop setting is therefore explicitly `Allow`;
@@ -107,7 +118,8 @@ requires a threat-model and infrastructure-contract review.
 
 ## Verification
 
-Contract tests cover multi-page completion, idempotent creation, cross-tenant
+Contract tests cover multi-page completion, mass retention above the synchronous
+bound, idempotent creation, cross-tenant
 denial, page substitution, malformed worker events, stale revisions, retry and
 terminal provider failure, deduplicated scheduling and alert delivery, plus the
 synchronous weak-role, retention, legal-hold and byte-tampering cases. CDK

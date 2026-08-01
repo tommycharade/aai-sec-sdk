@@ -180,6 +180,15 @@ persist changed gap states and publish non-healthy transitions to the durable
 alert channel. This software assurance does not replace live cross-region
 recovery proof. See [Durable evidence governance](durable-evidence-governance-design.md).
 
+Mass-retention extension is a separate irreversible boundary. The API
+atomically binds a longer future-write policy to an idempotent job, waits longer
+than any evidence-writing Lambda can run and then extends every pre-cutover S3
+version through a dedicated bounded worker. Queue content grants no authority;
+the worker reloads tenant, job, policy revision and application binding before
+mutation. Provider or dispatch failure never restores the shorter policy and is
+surfaced as a failed application with durable-alert posture. See
+[Asynchronous tenant retention](asynchronous-retention-design.md).
+
 Native host hooks are policy enforcement points, not deployment integrity
 controls. Claude and Codex project hook files can be changed or disabled by a
 user who controls the project. Codex additionally requires explicit trust for
