@@ -829,6 +829,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../asynchronous-retention-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous tenant retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../async-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -3161,10 +3188,15 @@ audit records, and commits the final page-chain digest to retained audit
 evidence. EventBridge starts due scans every 15 minutes; changed evidence gaps
 publish to the existing durable security-alert SNS/SQS channel. Monitor the
 worker and schedule DLQ alarms and treat <code>pending</code> alert delivery as unresolved.</p>
-<p>Retention changes above 250 versions still fail closed because mass retention
-extension is not delegated to the assurance worker. Follow
-<a href="../durable-evidence-governance-design/">Durable evidence governance</a>, and retain
-separate live cross-region count/order/hash/retention recovery evidence.</p>
+<p>Retention changes above 250 versions use a separate retention FIFO queue and
+worker. The API first makes the longer period authoritative for future writes,
+then waits beyond the evidence-writer timeout and extends every pre-cutover
+version. Monitor <code>EvidenceRetentionWorkerErrors</code>,
+<code>EvidenceRetentionWorkerDlqNotEmpty</code> and <code>EvidenceRetentionScheduleDlqNotEmpty</code>;
+a failed job leaves the longer future policy active and requires reconciliation,
+not rollback. Follow <a href="../asynchronous-retention-design/">Asynchronous tenant retention</a>
+and retain separate live cross-region count/order/hash/retention recovery
+evidence.</p>
 <p>This is the first AWS deployment slice, not a production security
 certification. Before production use:</p>
 <ul>

@@ -16,7 +16,7 @@
         <link rel="prev" href="../incident-case-export-design/">
       
       
-        <link rel="next" href="../async-evidence-acceptance-2026-08-01/">
+        <link rel="next" href="../asynchronous-retention-design/">
       
       
         
@@ -920,6 +920,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../asynchronous-retention-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous tenant retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2406,7 +2433,8 @@
 <p>This design advances P0-08 by turning the AWS Object Lock foundation into a
 tenant-visible records-management control. It covers tenant retention,
 exact-version legal hold, live integrity assurance, asynchronous tenant-wide
-export and scheduled evidence-gap monitoring. It does <strong>not</strong> claim that
+export, mass-retention extension and scheduled evidence-gap monitoring. It does
+<strong>not</strong> claim that
 cross-region recovery has passed for a customer environment.</p>
 <h2 id="threat-and-trust-boundary">Threat and trust boundary</h2>
 <p>The browser, operator-entered object identity and audit payload are untrusted.
@@ -2424,8 +2452,11 @@ exact optimistic revision before every state transition.</p>
 <h2 id="invariants">Invariants</h2>
 <ul>
 <li>Tenant retention is 365–3,650 days and can only increase through this API.</li>
-<li>Existing versions are extended before the new future-record policy is stored.
-  A concurrent failure may retain data longer, never for less time.</li>
+<li>The synchronous fast path extends existing versions before storing the new
+  future-record policy. The asynchronous path first makes the longer policy
+  authoritative for new writes, waits beyond the maximum evidence-writer
+  lifetime, then extends every pre-cutover version. Failure may retain data
+  longer, never for less time.</li>
 <li>Every new audit object explicitly carries COMPLIANCE retention plus a SHA-256
   content binding in S3 metadata.</li>
 <li>Legal hold addresses an exact key and version under <code>tenant=&lt;token tenant&gt;/</code>.
@@ -2480,6 +2511,21 @@ exact optimistic revision before every state transition.</p>
 <td>Optimistic, increase-only retention update applied to existing and future records</td>
 </tr>
 <tr>
+<td><code>POST /api/enterprise/evidence/retention-jobs</code></td>
+<td><code>evidence_admin</code></td>
+<td>Idempotently start a revision-bound mass-retention extension</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/evidence/retention-jobs</code></td>
+<td><code>evidence_read</code></td>
+<td>List the 50 newest mass-retention jobs and progress</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/evidence/retention-jobs/{jobId}</code></td>
+<td><code>evidence_read</code></td>
+<td>Read one exact tenant-bound retention job and alert posture</td>
+</tr>
+<tr>
 <td><code>POST /api/enterprise/evidence/legal-hold</code></td>
 <td><code>evidence_admin</code></td>
 <td>Legal-hold change for one exact tenant object version</td>
@@ -2525,10 +2571,14 @@ UI must use the asynchronous assurance/export job; it must never treat the
 bounded synchronous count as complete. A single job is bounded to 100,000 pages
 (at most 1,000,000 listed versions or delete markers), fails closed on malformed
 pagination or provider errors, retries a page at most three times and then
-records a sanitized terminal reason. Increase-only retention mutation still
-requires the complete synchronous inventory and therefore remains blocked above
-250 versions until a separately reviewed asynchronous retention workflow is
-implemented. Cross-region count/order/hash/retention recovery also remains open.</p>
+records a sanitized terminal reason. Increase-only retention above 250 versions
+uses the dedicated asynchronous retention workflow. It makes the longer
+future-write policy authoritative before scanning, waits 65 seconds to drain
+writers that may have read the old policy and then extends every version at or
+before that cutover. A failed job leaves the longer future policy active and
+visible; retry reconciles existing versions without rollback. See
+<a href="../asynchronous-retention-design/">Asynchronous tenant retention</a>. Cross-region
+count/order/hash/retention recovery remains open.</p>
 <p>The evidence worker is an intentional Lambda-to-FIFO-to-Lambda continuation
 workflow. Its Lambda recursive-loop setting is therefore explicitly <code>Allow</code>;
 without this declaration AWS terminates valid exports after approximately 16
@@ -2539,7 +2589,8 @@ three attempts; and worker errors, queue exhaustion and dead letters are
 alarmed. Changing that declaration or any of those compensating controls
 requires a threat-model and infrastructure-contract review.</p>
 <h2 id="verification">Verification</h2>
-<p>Contract tests cover multi-page completion, idempotent creation, cross-tenant
+<p>Contract tests cover multi-page completion, mass retention above the synchronous
+bound, idempotent creation, cross-tenant
 denial, page substitution, malformed worker events, stale revisions, retry and
 terminal provider failure, deduplicated scheduling and alert delivery, plus the
 synchronous weak-role, retention, legal-hold and byte-tampering cases. CDK

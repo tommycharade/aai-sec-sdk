@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/getting-started/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/asynchronous-retention-design/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../durable-evidence-governance-design/">
       
       
-        <link rel="next" href="../security-model/">
+        <link rel="next" href="../async-evidence-acceptance-2026-08-01/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Getting started - Agentic AI Security SDK</title>
+        <title>Asynchronous tenant retention - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#getting-started" class="md-skip">
+        <a href="#asynchronous-tenant-retention" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Getting started
+              Asynchronous tenant retention
             
           </span>
         </div>
@@ -286,37 +286,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Getting started
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   
@@ -332,37 +305,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#run-the-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run the example
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -884,10 +826,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../asynchronous-retention-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous tenant retention
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -903,6 +872,114 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threat-and-authority-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threat and authority boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cutover-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cutover model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#durable-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Durable workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operator-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator API
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ui-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guarantees-and-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guarantees and non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2311,10 +2388,87 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#run-the-example" class="md-nav__link">
+  <a href="#purpose" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Run the example
+        Purpose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threat-and-authority-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threat and authority boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cutover-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cutover model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#durable-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Durable workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operator-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator API
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ui-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guarantees-and-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guarantees and non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
       
     </span>
   </a>
@@ -2341,30 +2495,125 @@
   
 
 
-<h1 id="getting-started">Getting started</h1>
-<p>The SDK is released under Apache-2.0. Clone the
-repository, install the development dependencies, and validate the project:</p>
-<pre><code class="language-bash">git clone https://github.com/tommycharade/aai-sec-sdk.git
-cd aai-sec-sdk
-python3 -m pip install -e '.[dev,docs]'
-make check
-</code></pre>
-<p>When using the runtime, the intended integration shape is:</p>
+<h1 id="asynchronous-tenant-retention">Asynchronous tenant retention</h1>
+<h2 id="purpose">Purpose</h2>
+<p>This design closes the P0-08 mass-retention gap above the 250-version
+synchronous boundary. It extends the tenant's S3 Object Lock COMPLIANCE period
+across every existing audit-object version while immediately protecting future
+writes. It is deliberately increase-only: neither failure, retry nor operator
+input can shorten retention.</p>
+<h2 id="threat-and-authority-boundary">Threat and authority boundary</h2>
+<p>The browser proposes a longer period, request ID and records-management
+rationale. The authenticated tenant and operator capability come from the
+server-owned identity context. Only <code>evidence_admin</code> can start a job;
+<code>evidence_read</code> can inspect progress. SQS fields are lookup keys, never
+authority. The worker reloads the exact tenant, job, policy revision and
+application binding from DynamoDB before every S3 mutation.</p>
+<p>S3 Object Lock COMPLIANCE mode is the irreversible enforcement boundary.
+DynamoDB coordinates desired policy and durable progress but cannot reduce the
+bucket's 365-day floor or an existing later retain-until date.</p>
+<h2 id="cutover-model">Cutover model</h2>
+<p>Starting a job atomically commits two records:</p>
 <ol>
-<li>Create an authenticated execution context.</li>
-<li>Register tools explicitly with typed arguments and impact metadata.</li>
-<li>Pass model proposals to the SDK execution boundary.</li>
-<li>Handle structured executed, denied, approval-required, and failed outcomes.</li>
-<li>Export the resulting trace and audit events.</li>
+<li>the longer tenant policy with <code>applicationStatus=applying</code>; and</li>
+<li>an idempotent revision-bound retention job.</li>
 </ol>
-<p>The SDK does not make an LLM trustworthy. It limits what an incorrect or manipulated model can cause at the execution boundary.</p>
-<h2 id="run-the-example">Run the example</h2>
-<pre><code class="language-bash">python examples/support_agent.py
-</code></pre>
-<p>The example demonstrates read, write, approval, credential, idempotency, audit,
-cross-tenant, and emergency-stop paths using synthetic data. It deliberately
-does not connect to a model or network. Read <a href="../production-readiness/">Production readiness</a>
-before connecting real tools.</p>
+<p>Every subsequent audit write therefore receives the longer period immediately.
+The job waits 65 seconds before listing versions. This is longer than the
+maximum evidence-writing Lambda timeout, so a request that read the old policy
+before cutover must finish or be terminated before the scan starts. The fixed
+cutover timestamp then bounds the complete inventory: post-cutover objects
+already use the new policy; every version at or before cutover is inspected and
+extended when necessary.</p>
+<p>The transition is safe in only one direction. If queueing, S3, DynamoDB or
+alert delivery fails, the longer future-record policy remains active. The UI
+shows <code>failed</code>, retains the sanitized reason and offers reconciliation at the
+same or a longer period. It never offers rollback.</p>
+<h2 id="durable-workflow">Durable workflow</h2>
+<ul>
+<li>EventBridge checks provisioned tenants every minute using the existing
+  sharded evidence-assurance tenant index.</li>
+<li>A dedicated encrypted FIFO queue and Lambda isolate irreversible retention
+  work from read-only assurance/export.</li>
+<li>One message handles at most ten listed versions or delete markers.</li>
+<li>Messages bind tenant, job and optimistic revision; FIFO deduplication binds
+  each next revision.</li>
+<li>A committed-page/failed-send edge is repaired when the previous message is
+  retried: it dispatches the already-recorded next revision without repeating
+  the page. The schedule also recovers queued work after the FIFO deduplication
+  window and stale running work after 30 minutes.</li>
+<li>A job is bounded to 100,000 pages, three attempts per message, reserved
+  concurrency five and a four-day source-queue lifetime.</li>
+<li>Exhausted failures update both job and policy application posture atomically,
+  publish a critical durable alert and remain visible if delivery is pending.</li>
+<li>Completion atomically marks the job complete and the exact policy revision
+  applied before writing a retained completion event.</li>
+</ul>
+<h2 id="operator-api">Operator API</h2>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Capability</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/enterprise/evidence/retention-jobs</code></td>
+<td><code>evidence_admin</code></td>
+<td>Idempotently start an increase-only tenant backfill from exact policy revision</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/evidence/retention-jobs</code></td>
+<td><code>evidence_read</code></td>
+<td>List the 50 newest jobs</td>
+</tr>
+<tr>
+<td><code>GET /api/enterprise/evidence/retention-jobs/{jobId}</code></td>
+<td><code>evidence_read</code></td>
+<td>Read exact server-owned progress and terminal alert posture</td>
+</tr>
+</tbody>
+</table>
+<p>The create schema is closed and accepts only <code>requestId</code>, <code>expectedRevision</code>,
+<code>retentionDays</code> and <code>rationale</code>. Retention is an integer from 365 through 3,650
+days. Reusing a request ID with different content, stale revision, concurrent
+application, reduction, malformed value or weak role fails closed.</p>
+<h2 id="ui-journey">UI journey</h2>
+<ol>
+<li>The operator chooses a longer period and enters an approved schedule/change
+   reference.</li>
+<li><strong>Review extension</strong> opens an impact summary showing current and target
+   periods, known or lower-bound version count, immediate future-write effect,
+   synchronous versus background treatment and irreversibility.</li>
+<li>The operator explicitly acknowledges that the period cannot be shortened.</li>
+<li>Small complete inventories use the synchronous fast path. Incomplete large
+   inventories start the durable job automatically; the operator does not need
+   to choose an implementation mode.</li>
+<li>The retention card shows <code>settling</code>, <code>queued</code>, <code>running</code>, <code>completed</code> or
+   <code>failed</code>, versions examined, versions extended, pages and durable-alert
+   delivery. Closing the page does not stop work.</li>
+<li>A failed job explains that the longer future policy remains active and a
+   retry reconciles existing versions without rollback.</li>
+</ol>
+<h2 id="guarantees-and-non-guarantees">Guarantees and non-guarantees</h2>
+<p>The workflow guarantees increase-only application to every source-region audit
+version at or before the server cutover when it reports <code>completed</code>. It does
+not claim that replica-region retention has been recovered or compared; the
+separate live cross-region count/order/hash/retention exercise remains open.
+It also does not interpret a longer period as legal advice or records-schedule
+approval.</p>
+<h2 id="verification">Verification</h2>
+<p>Contracts cover more than 250 versions, immediate future-write policy,
+complete pagination, exact counts, idempotency, stale/concurrent/weak-role and
+cross-tenant denial, terminal provider failure, retained longer policy,
+critical alert delivery, queue-send recovery and dedicated infrastructure
+bounds. UI tests cover human-readable impact review, explicit acknowledgement,
+correct synchronous/async routing and progress types. Live acceptance must
+extend a deployed tenant above 250 versions, independently inspect every
+pre-cutover retain-until date, prove post-cutover writes use the new period and
+confirm empty DLQs and healthy alarms.</p>
 
 
 

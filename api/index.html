@@ -829,6 +829,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../asynchronous-retention-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous tenant retention
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../async-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -53107,7 +53134,14 @@ Artifact schema, refusal bounds and offline verification are specified in
   and returns retention, legal-hold, delete-marker and content-integrity posture;</li>
 <li><code>PUT /api/enterprise/evidence/retention</code> accepts exactly
   <code>expectedRevision</code>, <code>retentionDays</code> and <code>rationale</code>, permits 365–3,650 days,
-  and never permits a reduction;</li>
+  never permits a reduction and is the complete-inventory fast path;</li>
+<li><code>POST /api/enterprise/evidence/retention-jobs</code> accepts exactly <code>requestId</code>,
+  <code>expectedRevision</code>, <code>retentionDays</code> and <code>rationale</code>, atomically activates the
+  longer future-write policy and starts a revision-bound existing-version
+  backfill;</li>
+<li><code>GET /api/enterprise/evidence/retention-jobs</code> and
+  <code>GET /api/enterprise/evidence/retention-jobs/{jobId}</code> expose server-owned
+  counts, progress, terminal failure and durable-alert delivery posture;</li>
 <li><code>POST /api/enterprise/evidence/legal-hold</code> sets or clears hold for one exact
   tenant key/version after rejecting cross-tenant identity; and</li>
 <li><code>GET /api/enterprise/evidence/export</code> returns a canonical content-hashed
@@ -53124,8 +53158,9 @@ Artifact schema, refusal bounds and offline verification are specified in
 <p>Security operators and platform administrators manage retention and legal hold.
 Auditors may read assurance and export evidence but cannot mutate it. Rationale
 text is content-hashed before audit persistence. See
-<a href="../durable-evidence-governance-design/">Durable evidence governance</a> for queue
-authority, snapshot, hash-chain, schedule, alert and failure behavior.</p>
+<a href="../durable-evidence-governance-design/">Durable evidence governance</a> and
+<a href="../asynchronous-retention-design/">Asynchronous tenant retention</a> for queue
+authority, cutover, snapshot, hash-chain, schedule, alert and failure behavior.</p>
 <h2 id="automatic-response-rules">Automatic response rules</h2>
 <p>The hosted adapter exposes an independently governed automatic-response API:</p>
 <ul>
