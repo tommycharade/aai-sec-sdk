@@ -370,7 +370,10 @@ Operators can export content-hashed evidence or move directly to Connect agents
 and Agents for response.
 
 **Coverage → Inventory sources → Connect inventory** provides UI-first managed
-Entra and GitHub setup. GitHub registration uses typed organization,
+Entra, Intune and GitHub setup. Intune registration shows the exact read-only
+Graph permission, accepts only optional opaque user-to-business-unit mappings,
+and states that device enrollment cannot substitute for installation evidence.
+GitHub registration uses typed organization,
 repository, project-root digest, expected-host and business-unit fields, with
 field-level help and schema-checked JSON import for larger fleets. The UI sends
 only a Secrets Manager ARN and the bounded non-secret map; it never accepts or

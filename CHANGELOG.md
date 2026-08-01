@@ -1,5 +1,10 @@
 # Changelog
 
+- Added a production-shaped AWS-managed Microsoft Intune device-discovery
+  design with least-privilege Graph access, fixed endpoints, content-minimised
+  observations and an explicit fail-closed split between device enrollment and
+  endpoint installation/process evidence. Coverage cannot become available
+  from managed-device records alone.
 - Added UI-first AWS-managed GitHub source-control discovery. A platform
   administrator selects a GitHub organization, imports or edits a bounded typed
   repository-to-project mapping, and supplies only a tenant-tagged Secrets

@@ -149,9 +149,11 @@ _DISCOVERY_MAX_VALIDITY_SECONDS = 24 * 60 * 60
 _MANAGED_DISCOVERY_INTERVALS = frozenset({5, 15, 30, 60, 180, 360, 720, 1440})
 _MANAGED_DISCOVERY_PROVIDER_KINDS = {
     "entra": "identity",
+    "intune": "endpoint",
     "github": "source_control",
 }
 _MANAGED_GITHUB_REPOSITORY_LIMIT = 500
+_MANAGED_INTUNE_BUSINESS_UNIT_LIMIT = 500
 
 # Agent decision evidence is operationally useful but never authoritative.
 # The authenticated host may report only this fixed, content-free vocabulary;
@@ -3557,6 +3559,13 @@ def _managed_discovery_capabilities():
                 "secretSchema": ["tenantId", "clientId", "clientSecret"],
                 "configurationSchema": [],
             },
+            "intune": {
+                "sourceKind": "endpoint",
+                "secretSchema": ["tenantId", "clientId", "clientSecret"],
+                "configurationSchema": ["userBusinessUnits"],
+                "maximumUserBusinessUnits": _MANAGED_INTUNE_BUSINESS_UNIT_LIMIT,
+                "installationEvidenceRequired": True,
+            },
             "github": {
                 "sourceKind": "source_control",
                 "secretSchema": ["token"],
@@ -3652,6 +3661,31 @@ def _managed_provider_configuration(provider, value):
         return {}
     if provider == "github":
         return _managed_github_configuration(value)
+    if provider == "intune":
+        if not isinstance(value, dict) or set(value) != {"userBusinessUnits"}:
+            raise ValueError("Intune provider configuration has an invalid schema")
+        mappings = value.get("userBusinessUnits")
+        if not isinstance(mappings, list) or len(mappings) > _MANAGED_INTUNE_BUSINESS_UNIT_LIMIT:
+            raise ValueError("Intune business-unit mappings must be a bounded list")
+        normalized = []
+        seen = set()
+        for item in mappings:
+            if not isinstance(item, dict) or set(item) != {"userId", "businessUnit"}:
+                raise ValueError("Intune business-unit mapping has an invalid schema")
+            try:
+                user_id = str(uuid.UUID(item.get("userId")))
+            except (ValueError, TypeError, AttributeError) as error:
+                raise ValueError("Intune userId must be a canonical UUID") from error
+            if user_id != item.get("userId", "").lower() or user_id in seen:
+                raise ValueError("Intune userIds must be canonical and unique")
+            seen.add(user_id)
+            normalized.append(
+                {
+                    "userId": user_id,
+                    "businessUnit": _bounded_text(item.get("businessUnit"), "businessUnit", 128),
+                }
+            )
+        return {"userBusinessUnits": sorted(normalized, key=lambda item: item["userId"])}
     raise ValueError("managed discovery provider is unsupported")
 
 
@@ -3757,7 +3791,9 @@ def _create_managed_discovery(tenant, source_id, value, actor):
     if not isinstance(value, dict):
         raise ValueError("managed discovery configuration has an invalid schema")
     provider = value.get("provider")
-    expected_fields = base_fields | ({"providerConfiguration"} if provider == "github" else set())
+    expected_fields = base_fields | (
+        {"providerConfiguration"} if provider in {"github", "intune"} else set()
+    )
     if set(value) != expected_fields:
         raise ValueError("managed discovery configuration has an invalid schema")
     source_id = _bounded_identifier(source_id, "sourceId")
@@ -3868,6 +3904,7 @@ def _create_managed_discovery(tenant, source_id, value, actor):
             "interval_minutes": interval,
             "configuration_digest": provider_configuration_digest,
             "repository_count": len(provider_configuration.get("repositories", [])),
+            "user_business_unit_count": len(provider_configuration.get("userBusinessUnits", [])),
         }
         audit_record = _managed_discovery_audit_record(
             tenant, "managed_discovery_created", actor, audit_payload, now=now
@@ -3997,6 +4034,12 @@ def _managed_discovery_view(job):
         provider_summary = {
             "organization": configuration.get("organization"),
             "repositoryCount": len(repositories) if isinstance(repositories, list) else 0,
+        }
+    elif job.get("provider") == "intune" and isinstance(configuration, dict):
+        mappings = configuration.get("userBusinessUnits")
+        provider_summary = {
+            "userBusinessUnitCount": len(mappings) if isinstance(mappings, list) else 0,
+            "installationEvidenceRequired": True,
         }
     return {
         "provider": job.get("provider"),
@@ -5874,7 +5917,19 @@ def _discovery_report(tenant, *, now=None):
             }
         )
 
-    source_complete = current_kinds == _DISCOVERY_REQUIRED_SOURCE_KINDS
+    endpoint_devices_present = any(item.get("kind") == "device" for item in observations)
+    endpoint_installations_present = any(
+        item.get("kind") == "installation" for item in observations
+    )
+    if "endpoint" in current_kinds and not endpoint_devices_present:
+        blind_spots.append("missing_endpoint_devices")
+    if "endpoint" in current_kinds and not endpoint_installations_present:
+        blind_spots.append("missing_endpoint_installations")
+    source_complete = (
+        current_kinds == _DISCOVERY_REQUIRED_SOURCE_KINDS
+        and endpoint_devices_present
+        and endpoint_installations_present
+    )
     orphaned_agent_keys = {
         f"{agent.get('deployment_id')}:{agent.get('id')}"
         for agent in agents

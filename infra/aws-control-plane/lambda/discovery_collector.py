@@ -49,9 +49,10 @@ _MAX_USERS_PER_PAGE = 100
 _MAX_OBSERVATIONS = 2_000
 _MAX_RESPONSE_BYTES = 1_000_000
 _REQUEST_TIMEOUT_SECONDS = 10.0
-_PROVIDERS = frozenset({"entra", "github"})
+_PROVIDERS = frozenset({"entra", "intune", "github"})
 _SUPPORTED_HOSTS = frozenset({"claude-code", "codex-cli"})
 _MAX_GITHUB_REPOSITORY_MAPPINGS = 500
+_MAX_INTUNE_BUSINESS_UNIT_MAPPINGS = 500
 _ERROR_CODES = frozenset(
     {
         "configuration_invalid",
@@ -402,6 +403,126 @@ def _collect_entra_users(token: str) -> list[dict[str, Any]]:
     return observations
 
 
+def _intune_configuration(value: Any, expected_digest: str) -> dict[str, str]:
+    """Revalidate and digest-bind privacy-preserving Intune attribution."""
+    if not isinstance(value, dict) or set(value) != {"userBusinessUnits"}:
+        raise ManagedDiscoveryError("configuration_invalid")
+    if not hmac.compare_digest(_canonical_digest(value), expected_digest):
+        raise ManagedDiscoveryError("configuration_invalid")
+    mappings = value.get("userBusinessUnits")
+    if not isinstance(mappings, list) or len(mappings) > _MAX_INTUNE_BUSINESS_UNIT_MAPPINGS:
+        raise ManagedDiscoveryError("configuration_invalid")
+    normalized: dict[str, str] = {}
+    for item in mappings:
+        if not isinstance(item, dict) or set(item) != {"userId", "businessUnit"}:
+            raise ManagedDiscoveryError("configuration_invalid")
+        user_id = item.get("userId")
+        business_unit = item.get("businessUnit")
+        if (
+            not isinstance(user_id, str)
+            or not _uuid_like(user_id)
+            or user_id != user_id.lower()
+            or user_id in normalized
+            or not isinstance(business_unit, str)
+            or not business_unit.strip()
+            or len(business_unit.strip()) > 128
+        ):
+            raise ManagedDiscoveryError("configuration_invalid")
+        normalized[user_id] = business_unit.strip()
+    return normalized
+
+
+def _validated_intune_graph_url(value: str) -> str:
+    """Constrain Intune pagination to the exact managed-device collection."""
+    parsed = urllib.parse.urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "graph.microsoft.com"
+        or parsed.path != "/v1.0/deviceManagement/managedDevices"
+        or parsed.fragment
+    ):
+        raise ManagedDiscoveryError("provider_response_invalid")
+    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    if (
+        set(query) - {"$select", "$top", "$skiptoken"}
+        or query.get("$select") != ["id,userId"]
+        or query.get("$top") != ["100"]
+        or len(query.get("$skiptoken", [])) > 1
+        or any(len(item) > 1_024 for item in query.get("$skiptoken", []))
+    ):
+        raise ManagedDiscoveryError("provider_response_invalid")
+    return value
+
+
+def _collect_intune_devices(token: str, business_units: dict[str, str]) -> list[dict[str, Any]]:
+    """Collect managed devices without inferring agent installation evidence."""
+    url: str | None = (
+        "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices"
+        "?$select=id,userId&$top=100"
+    )
+    observations: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for _ in range(_MAX_PROVIDER_PAGES):
+        if url is None:
+            return observations
+        request = urllib.request.Request(  # noqa: S310
+            _validated_intune_graph_url(url),
+            headers={"authorization": f"Bearer {token}"},
+        )
+        page = _open_json(request, error_code="provider_response_invalid")
+        if not isinstance(page, dict) or set(page) - {
+            "value",
+            "@odata.nextLink",
+            "@odata.context",
+        }:
+            raise ManagedDiscoveryError("provider_response_invalid")
+        context = page.get("@odata.context")
+        if context is not None and (not isinstance(context, str) or len(context) > 2_048):
+            raise ManagedDiscoveryError("provider_response_invalid")
+        devices = page.get("value")
+        if not isinstance(devices, list) or len(devices) > _MAX_USERS_PER_PAGE:
+            raise ManagedDiscoveryError("provider_response_invalid")
+        for device in devices:
+            if not isinstance(device, dict) or set(device) - {"id", "userId"}:
+                raise ManagedDiscoveryError("provider_response_invalid")
+            identifier = device.get("id")
+            user_id = device.get("userId")
+            if (
+                not isinstance(identifier, str)
+                or not _uuid_like(identifier)
+                or identifier != identifier.lower()
+                or identifier in seen
+                or user_id not in (None, "")
+                and (
+                    not isinstance(user_id, str)
+                    or not _uuid_like(user_id)
+                    or user_id != user_id.lower()
+                )
+            ):
+                raise ManagedDiscoveryError("provider_response_invalid")
+            seen.add(identifier)
+            observation: dict[str, Any] = {
+                "kind": "device",
+                "id": identifier,
+                # Membership of managedDevices is the provider fact. No binary,
+                # process or project evidence is inferred at this boundary.
+                "managed": True,
+                "userIds": [user_id] if user_id else [],
+            }
+            if user_id in business_units:
+                observation["businessUnit"] = business_units[user_id]
+            observations.append(observation)
+            if len(observations) > _MAX_OBSERVATIONS:
+                raise ManagedDiscoveryError("provider_inventory_too_large")
+        next_url = page.get("@odata.nextLink")
+        if next_url is not None and not isinstance(next_url, str):
+            raise ManagedDiscoveryError("provider_response_invalid")
+        url = _validated_intune_graph_url(next_url) if next_url else None
+    if url is not None:
+        raise ManagedDiscoveryError("provider_inventory_too_large")
+    return observations
+
+
 def _github_slug(value: Any, *, maximum: int, organization: bool = False) -> str:
     """Validate and normalize one server-owned GitHub slug."""
     allowed = (
@@ -706,7 +827,17 @@ def handler(event: Any, context: Any) -> dict[str, Any]:
         live_job = _load_live_job(configuration)
         live_job_bound = True
         _update_job_attempt(configuration, now=now, status="running")
-        if configuration["provider"] == "entra":
+        if configuration["provider"] in {"entra", "intune"}:
+            # Provider configuration is live authority. Validate and digest-bind
+            # it before retrieving a credential or opening a network connection.
+            provider_configuration = (
+                _intune_configuration(
+                    live_job.get("providerConfiguration"),
+                    configuration["providerConfigurationDigest"],
+                )
+                if configuration["provider"] == "intune"
+                else None
+            )
             provider = _secret_json(
                 configuration["providerSecretArn"],
                 frozenset({"tenantId", "clientId", "clientSecret"}),
@@ -730,6 +861,8 @@ def handler(event: Any, context: Any) -> dict[str, Any]:
         )
         if configuration["provider"] == "entra":
             observations = _collect_entra_users(access_token)
+        elif configuration["provider"] == "intune":
+            observations = _collect_intune_devices(access_token, provider_configuration)
         else:
             observations = _collect_github_repositories(provider["token"], provider_configuration)
         result = _publish(configuration, connector["token"], observations, now=now)
