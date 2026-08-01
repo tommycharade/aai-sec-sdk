@@ -775,6 +775,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../incident-case-export-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit-ready incident case export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -52503,6 +52530,13 @@ response</a>.</p>
   metadata, authoritative binding state, a content-minimised timeline and
   correlated decision/approval references. Raw endpoint payloads, project
   roots and credentials are excluded.</li>
+<li><code>GET /enterprise/cases/{caseId}/export</code> returns schema-version <code>1</code> audit-ready
+  JSON to a canonical <code>platform-admin</code>, <code>security-operator</code>,
+  <code>incident-responder</code> or <code>auditor</code>. The control plane strongly reads the case,
+  source alert and bounded correlated evidence; refuses truncation or concurrent
+  revision changes; SHA-256 hashes canonical <code>content</code>; and persists that digest
+  to the immutable audit sink before returning it. Free-form approval reasons,
+  project paths, prompts, arguments, results and credentials are excluded.</li>
 <li><code>POST /enterprise/cases/{caseId}/contain</code> requires the current case revision
   and binding digest. It creates a server-owned quarantine for the exactly
   bound agent. Policy delivery, approvals and managed-package retrieval fail
@@ -52520,7 +52554,9 @@ response</a>.</p>
 <p>All mutations require <code>incident_response</code>, a 20–500 character redaction-safe
 rationale and optimistic concurrency. There is intentionally no <code>agentId</code> in a
 containment request. See
-<a href="../incident-case-containment-design/">Incident case and containment design</a>.</p>
+<a href="../incident-case-containment-design/">Incident case and containment design</a>.
+Artifact schema, refusal bounds and offline verification are specified in
+<a href="../incident-case-export-design/">Audit-ready incident case export</a>.</p>
 
 
 

@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/scheduled-discovery-connectors-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/incident-case-export-design/">
       
       
-        <link rel="prev" href="../agent-discovery-design/">
+        <link rel="prev" href="../incident-case-containment-design/">
       
       
-        <link rel="next" href="../endpoint-evidence-publisher-design/">
+        <link rel="next" href="../endpoint-evidence-acceptance-2026-08-01/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>AWS-managed discovery connectors - Agentic AI Security SDK</title>
+        <title>Audit-ready incident case export - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#aws-managed-discovery-connectors" class="md-skip">
+        <a href="#audit-ready-incident-case-export" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              AWS-managed discovery connectors
+              Audit-ready incident case export
             
           </span>
         </div>
@@ -637,37 +637,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AWS-managed discovery connectors
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../scheduled-discovery-connectors-design/" class="md-nav__link">
         
   
   
@@ -683,203 +656,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decision
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#trust-boundaries" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trust boundaries
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Trust boundaries">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#browser-to-control-plane" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Browser to control plane
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#provider-secret" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Provider secret
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#connector-credential" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Connector credential
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#scheduler-to-collector" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Scheduler to collector
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#collector-to-provider-and-ingestion" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Collector to provider and ingestion
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#state-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        State model
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#api" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        API
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="API">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#configure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configure
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#disable" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Disable
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#read" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Read
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#failure-and-monitoring-behavior" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Failure and monitoring behavior
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#low-friction-operator-journey" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Low-friction operator journey
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#non-guarantees-and-remaining-work" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Non-guarantees and remaining work
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -996,10 +772,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../incident-case-export-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit-ready incident case export
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1015,6 +818,92 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#customer-outcome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Customer outcome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#versioned-artifact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioned artifact
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#completeness-and-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Completeness and limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#integrity-and-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integrity and non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2126,10 +2015,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
+  <a href="#customer-outcome" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Decision
+        Customer outcome
       
     </span>
   </a>
@@ -2145,74 +2034,13 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Trust boundaries">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#browser-to-control-plane" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Browser to control plane
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#provider-secret" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Provider secret
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#connector-credential" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Connector credential
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#scheduler-to-collector" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Scheduler to collector
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#collector-to-provider-and-ingestion" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Collector to provider and ingestion
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
-  <a href="#state-model" class="md-nav__link">
+  <a href="#versioned-artifact" class="md-nav__link">
     <span class="md-ellipsis">
       
-        State model
+        Versioned artifact
       
     </span>
   </a>
@@ -2220,60 +2048,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#api" class="md-nav__link">
+  <a href="#completeness-and-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="API">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#configure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Configure
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#disable" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Disable
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#read" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Read
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#failure-and-monitoring-behavior" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Failure and monitoring behavior
+        Completeness and limits
       
     </span>
   </a>
@@ -2281,10 +2059,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#low-friction-operator-journey" class="md-nav__link">
+  <a href="#integrity-and-non-guarantees" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Low-friction operator journey
+        Integrity and non-guarantees
       
     </span>
   </a>
@@ -2292,10 +2070,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#non-guarantees-and-remaining-work" class="md-nav__link">
+  <a href="#verification" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Non-guarantees and remaining work
+        Verification
       
     </span>
   </a>
@@ -2322,316 +2100,82 @@
   
 
 
-<h1 id="aws-managed-discovery-connectors">AWS-managed discovery connectors</h1>
-<h2 id="decision">Decision</h2>
-<p>The managed discovery providers are Microsoft Entra ID, Microsoft Intune and GitHub. The AWS
-control plane creates a tenant-scoped EventBridge Scheduler job that invokes a
-dedicated collector Lambda. Entra produces the expected identity population;
-Intune produces the managed-device population; GitHub produces the expected
-Claude Code and Codex repository population. All three
-publish through the existing source-scoped atomic ingestion contract.</p>
-<p>Intune device enrollment is deliberately not treated as installation evidence.
-Microsoft Graph does not prove that a Claude/Codex binary is present, that a
-process is active, or which project root it serves. The reconciler therefore
-keeps coverage unavailable until a current endpoint source also contains at
-least one normalized <code>installation</code> observation. A deployment-owned endpoint
-agent or MDM custom-inventory publisher supplies that evidence through the
-existing connector contract. This prevents an authoritative device list from
-being misrepresented as complete agent coverage.</p>
-<p>This is intentionally separate from Entra operator SSO and SCIM. Those
-integrations authenticate and provision console operators. Discovery observes
-the population that should be governed. Reusing an SSO or SCIM credential for
-collection would combine unrelated authority and make revocation unsafe.</p>
+<h1 id="audit-ready-incident-case-export">Audit-ready incident case export</h1>
+<p>This design implements P1-SOC-10 from the
+<a href="../enterprise-rollout-p0-p1-requirements/">enterprise rollout requirements</a>.
+It turns one retained incident case into a bounded, content-minimised JSON
+package that an auditor can verify without access to the control plane.</p>
+<h2 id="customer-outcome">Customer outcome</h2>
+<p>An incident responder, security operator, auditor or platform administrator
+can download one case package from the Incidents workspace. The package
+contains the case and alert state, the server-derived endpoint-to-agent
+binding, response history, correlated redacted decisions, approvals and
+evidence digests. It never contains project paths, endpoint payloads, prompts,
+tool arguments, tool results, credentials or credential-shaped configuration.</p>
+<p>The console verifies the package hash before offering the download and shows
+the digest and evidence counts. A repository-supplied offline verifier repeats
+the same check and validates every timeline payload hash.</p>
 <h2 id="trust-boundaries">Trust boundaries</h2>
-<h3 id="browser-to-control-plane">Browser to control plane</h3>
-<p>The browser submits only:</p>
 <ul>
-<li>the stable source ID;</li>
-<li>the provider enum <code>entra</code>, <code>intune</code> or <code>github</code>;</li>
-<li>an interval from the closed set supported by the service;</li>
-<li>the ARN of a deployment-owned provider secret; and</li>
-<li>for GitHub only, a bounded typed repository-to-project mapping; and</li>
-<li>optimistic-concurrency revisions.</li>
+<li>The authenticated tenant claim selects the tenant. A case identifier never
+  selects a tenant.</li>
+<li>Only canonical incident-responder, security-operator, auditor and
+  platform-administrator roles may export a case.</li>
+<li>The browser does not assemble evidence, choose an agent or claim
+  completeness. The control plane reads strongly consistent tenant records.</li>
+<li>Correlation uses the binding captured by the case. Live binding posture is
+  included separately so a changed endpoint relationship remains visible.</li>
+<li>The export is content-minimised before hashing and before immutable audit
+  persistence.</li>
+<li>Export generation fails if a bounded source is incomplete, if the case
+  changes during assembly or if immutable audit persistence fails.</li>
 </ul>
-<p>It never submits a client secret, Graph token, connector token, tenant override,
-target Lambda ARN, scheduler role ARN, network URL, or arbitrary schedule
-expression. The authenticated tenant comes from the operator context and the
-control plane derives every AWS target.</p>
-<h3 id="provider-secret">Provider secret</h3>
-<p>An Entra or Intune provider secret contains exactly:</p>
-<pre><code class="language-json">{
-  &quot;tenantId&quot;: &quot;11111111-1111-4111-8111-111111111111&quot;,
-  &quot;clientId&quot;: &quot;22222222-2222-4222-8222-222222222222&quot;,
-  &quot;clientSecret&quot;: &quot;&lt;deployment-owned-secret&gt;&quot;
-}
-</code></pre>
-<p>It must be in the deployed AWS account and region, use the stack's discovery
-KMS key, have a name under
-<code>aai-sec/discovery/providers/{aaiTenantId}/</code>, and carry exact tags
-<code>aai-sec:tenant-id={aaiTenantId}</code> and
-<code>aai-sec:purpose=discovery-provider</code>. The control-plane Lambda may describe but
-cannot read provider values. Only the collector Lambda can call
-<code>GetSecretValue</code> for this bounded namespace.</p>
-<p>Secrets Manager requires a KMS decrypt check while creating a connector secret
-with the customer-managed key. The control-plane role's KMS decrypt permission
-is therefore constrained to requests routed through Secrets Manager. The role
-still has no <code>GetSecretValue</code> permission, so it cannot retrieve provider or
-connector secret bytes.</p>
-<p>The Entra application receives only Microsoft Graph application permission
-<code>User.Read.All</code>, with tenant-admin consent and no directory write permission.
-A separate Intune application receives only
-<code>DeviceManagementManagedDevices.Read.All</code>, with tenant-admin consent and no
-device-management write permission. Separate applications and secrets are
-recommended so revoking device discovery cannot disrupt identity discovery.
-A GitHub provider secret contains exactly <code>{"token":"&lt;secret&gt;"}</code>. Use an
-organization-approved fine-grained token covering every organization
-repository, with repository metadata read-only and no content, administration,
-Actions, or write permission. Production onboarding must retain evidence of
-the selected organization's permission and repository-access review.</p>
-<h3 id="connector-credential">Connector credential</h3>
-<p>For a managed source, the control plane generates the ingestion bearer and
-stores its SHA-256 digest in DynamoDB. The plaintext is written directly to a
-KMS-encrypted service secret whose name is derived from hashes of the tenant and
-source IDs. It is never returned to the browser, logs, audit payloads, or job
-read model. The collector reads it only when publishing.</p>
-<p>Manual connectors keep the existing one-time-returned credential flow. A source
-cannot be both manual and managed at the same credential revision.</p>
-<h3 id="scheduler-to-collector">Scheduler to collector</h3>
-<p>The schedule name and invocation payload are derived by the control plane. A
-dedicated IAM role can invoke only the collector Lambda and send failed events
-only to the collector dead-letter queue. Schedule targets use a fixed retry
-budget and no flexible delivery window. The collector accepts an exact event
-schema and rejects unknown fields, providers, identifiers, secret namespaces,
-and unbounded values before any network request.</p>
-<h3 id="collector-to-provider-and-ingestion">Collector to provider and ingestion</h3>
-<p>The Entra collector may contact only:</p>
+<h2 id="versioned-artifact">Versioned artifact</h2>
+<p>The response has four top-level fields:</p>
 <ul>
-<li><code>login.microsoftonline.com</code> for the exact tenant OAuth token endpoint;</li>
-<li><code>graph.microsoft.com</code> for the exact <code>/v1.0/users</code> collection and validated
-  continuation links; and</li>
-<li>the deployment-owned HTTPS API Gateway origin for discovery ingestion.</li>
+<li><code>schemaVersion</code>: currently <code>1</code>;</li>
+<li><code>content</code>: the complete bounded evidence package;</li>
+<li><code>integrity</code>: SHA-256 over UTF-8 <code>AAI canonical JSON v1</code> encoding of
+  <code>content</code> (recursive lexicographic object-key ordering, compact separators,
+  Unicode preserved);</li>
+<li><code>auditReceipt</code>: the content-minimised receipt returned after the export hash
+  is written to the Object-Lock-protected audit sink.</li>
 </ul>
-<p>The Intune collector may contact only the same fixed token endpoint, the exact
-Microsoft Graph <code>/v1.0/deviceManagement/managedDevices</code> collection with the
-service-owned <code>$select</code> and <code>$top</code> query, validated continuation links for that
-collection, and the deployment-owned ingestion origin.</p>
-<p>The GitHub collector may contact only <code>api.github.com</code> at the fixed
-<code>/orgs/{organization}/repos</code> endpoint and the same deployment-owned ingestion
-origin. The service supplies the API version, sort order, pagination and page
-size; browser input cannot change a hostname, path or query.</p>
-<p>Collection is bounded to 20 pages and 2,000 observations, applies independent request
-timeouts, rejects duplicate or malformed identities, and retains only opaque
-object ID, active state, and optional department. GitHub collection has the
-same 20-page and 2,000-observation limits. It rejects duplicate or malformed
-repository IDs and requires every visible active repository to have exactly one
-deployment-owned mapping and every configured repository to be visible.
-Archived, unmapped repositories are ignored. Only the numeric repository ID,
-project-root digest, expected hosts and optional business unit are published.
-Names remain transient mapping keys. Email, display name, repository name,
-provider token responses, and arbitrary provider properties are not persisted.</p>
-<p>Intune retains only the opaque managed-device ID, whether Intune still reports
-the record as managed, the opaque Entra user ID when present, and an optional
-deployment-owned business-unit mapping keyed by that user ID. Device names,
-serial numbers, email addresses, hardware identifiers, compliance details and
-operating-system properties are rejected rather than persisted. Duplicate,
-malformed or over-limit device records fail the complete generation.</p>
-<p>The collector strongly reads the current source revision before publication.
-Partial upload pages remain invisible until the existing hash-bound atomic
-commit succeeds.</p>
-<h2 id="state-model">State model</h2>
-<p>One <code>DISCOVERY_JOB</code> record exists per managed source:</p>
-<table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>provider</code></td>
-<td>Closed provider enum: <code>entra</code>, <code>intune</code> or <code>github</code></td>
-</tr>
-<tr>
-<td><code>providerConfiguration</code></td>
-<td>Canonical non-secret GitHub repository map or Intune user attribution; empty for Entra</td>
-</tr>
-<tr>
-<td><code>providerConfigurationDigest</code></td>
-<td>SHA-256 binding used by the schedule and collector</td>
-</tr>
-<tr>
-<td><code>status</code></td>
-<td><code>provisioning</code>, <code>scheduled</code>, <code>running</code>, <code>healthy</code>, <code>degraded</code>, or <code>disabled</code></td>
-</tr>
-<tr>
-<td><code>revision</code></td>
-<td>Optimistic-concurrency revision for operator changes</td>
-</tr>
-<tr>
-<td><code>intervalMinutes</code></td>
-<td>Bounded service-defined cadence</td>
-</tr>
-<tr>
-<td><code>providerSecretArn</code></td>
-<td>Reviewed AWS reference, never secret content</td>
-</tr>
-<tr>
-<td><code>scheduleName</code></td>
-<td>Server-derived EventBridge Scheduler identity</td>
-</tr>
-<tr>
-<td><code>lastAttemptAt</code></td>
-<td>Start of the latest collector invocation</td>
-</tr>
-<tr>
-<td><code>lastSuccessAt</code></td>
-<td>Latest committed generation</td>
-</tr>
-<tr>
-<td><code>lastErrorCode</code></td>
-<td>Fixed content-free operational reason</td>
-</tr>
-<tr>
-<td><code>consecutiveFailures</code></td>
-<td>Bounded failure counter for UI/alerting</td>
-</tr>
-</tbody>
-</table>
-<p>Credential state, job state, and snapshot state remain separate. A configured
-schedule does not imply that credentials work, that Graph collection succeeded,
-or that evidence is current.</p>
-<h2 id="api">API</h2>
-<p>All mutations require <code>discovery_write</code> and exact platform-administrator
-authority.</p>
-<h3 id="configure">Configure</h3>
-<p><code>POST /api/enterprise/discovery/sources/{sourceId}/managed-collector</code></p>
-<pre><code class="language-json">{
-  &quot;provider&quot;: &quot;entra&quot;,
-  &quot;intervalMinutes&quot;: 15,
-  &quot;providerSecretArn&quot;: &quot;arn:aws:secretsmanager:eu-west-2:123456789012:secret:aai-sec/discovery/providers/tenant-a/entra-production-AbCdEf&quot;,
-  &quot;expectedJobRevision&quot;: 0,
-  &quot;expectedCredentialRevision&quot;: 0
-}
-</code></pre>
-<p>The response is redacted job metadata. Initial provisioning creates the
-connector secret and schedule before conditionally committing authority. Any
-failed precondition removes the newly created external resources. A schedule
-cannot run before its delayed start time, so no job observes uncommitted state.</p>
-<p>GitHub uses the same route with a typed configuration:</p>
-<pre><code class="language-json">{
-  &quot;provider&quot;: &quot;github&quot;,
-  &quot;intervalMinutes&quot;: 15,
-  &quot;providerSecretArn&quot;: &quot;arn:aws:secretsmanager:eu-west-2:123456789012:secret:aai-sec/discovery/providers/tenant-a/github-production-AbCdEf&quot;,
-  &quot;providerConfiguration&quot;: {
-    &quot;organization&quot;: &quot;example-enterprise&quot;,
-    &quot;repositories&quot;: [
-      {
-        &quot;fullName&quot;: &quot;example-enterprise/platform-api&quot;,
-        &quot;projectRootDigest&quot;: &quot;0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef&quot;,
-        &quot;expectedHosts&quot;: [&quot;claude-code&quot;, &quot;codex-cli&quot;],
-        &quot;businessUnit&quot;: &quot;Platform&quot;
-      }
-    ]
-  },
-  &quot;expectedJobRevision&quot;: 0,
-  &quot;expectedCredentialRevision&quot;: 0
-}
-</code></pre>
-<p>The configuration permits at most 500 mappings. Unknown fields, unsafe slugs,
-raw project paths, duplicate repositories or digests, unsupported hosts and
-empty host sets fail closed. The response exposes only organization and mapping
-count, never repository names, project digests or secret references.</p>
-<p>Intune uses the Entra-shaped secret and a typed, optional privacy-preserving
-business-unit mapping:</p>
-<pre><code class="language-json">{
-  &quot;provider&quot;: &quot;intune&quot;,
-  &quot;intervalMinutes&quot;: 15,
-  &quot;providerSecretArn&quot;: &quot;arn:aws:secretsmanager:eu-west-2:123456789012:secret:aai-sec/discovery/providers/tenant-a/intune-production-AbCdEf&quot;,
-  &quot;providerConfiguration&quot;: {
-    &quot;userBusinessUnits&quot;: [
-      {
-        &quot;userId&quot;: &quot;33333333-3333-4333-8333-333333333333&quot;,
-        &quot;businessUnit&quot;: &quot;Platform&quot;
-      }
-    ]
-  },
-  &quot;expectedJobRevision&quot;: 0,
-  &quot;expectedCredentialRevision&quot;: 0
-}
-</code></pre>
-<p>At most 500 mappings are accepted. Unknown fields, duplicate user IDs, invalid
-UUIDs and blank or oversized business-unit labels fail closed. The read model
-exposes only the mapping count and digest, never user IDs. The mapping is
-optional because a complete device population is still useful when business
-unit attribution is unavailable.</p>
-<h3 id="disable">Disable</h3>
-<p><code>DELETE /api/enterprise/discovery/sources/{sourceId}/managed-collector</code>
-requires the job and credential revisions in its JSON body. The control plane
-atomically marks the job disabled and revokes the connector before deleting the
-schedule and scheduling secret deletion. If external cleanup fails, ingestion
-still remains denied by live connector state and the job reports cleanup
-required.</p>
-<h3 id="read">Read</h3>
-<p><code>GET /api/enterprise/discovery/sources</code> includes redacted <code>managedCollector</code>
-metadata alongside credential and snapshot state. It never includes connector
-secret names/ARNs, provider secret values, Graph tokens, schedule input, or raw
-errors.</p>
-<h2 id="failure-and-monitoring-behavior">Failure and monitoring behavior</h2>
-<p>The collector records only fixed reason codes:</p>
-<ul>
-<li><code>configuration_invalid</code></li>
-<li><code>provider_secret_unavailable</code></li>
-<li><code>connector_secret_unavailable</code></li>
-<li><code>provider_authentication_failed</code></li>
-<li><code>provider_transport_failed</code></li>
-<li><code>provider_response_invalid</code></li>
-<li><code>provider_inventory_too_large</code></li>
-<li><code>provider_mapping_incomplete</code></li>
-<li><code>source_revision_conflict</code></li>
-<li><code>ingestion_rejected</code></li>
-<li><code>internal_error</code></li>
-</ul>
-<p>Every failed invocation increments a bounded counter and leaves the previous
-snapshot untouched. Lambda failure metrics and the dedicated dead-letter queue
-feed the existing security alerting foundation. The UI shows the last attempt,
-last success, failure count, and fixed reason without exposing provider data.</p>
-<h2 id="low-friction-operator-journey">Low-friction operator journey</h2>
-<ol>
-<li>In <strong>Coverage → Inventory sources</strong>, choose <strong>Microsoft Entra ID</strong>,
-   <strong>Microsoft Intune</strong> or <strong>GitHub organization</strong>, then <strong>AWS-managed schedule</strong>.</li>
-<li>Copy the generated AWS CLI template for the required KMS key, secret prefix,
-   and tags; fill the three values locally or through the enterprise secret
-   provisioning workflow.</li>
-<li>For GitHub, enter the organization and edit or import the typed repository
-   map. Paste only the resulting secret ARN, select a cadence, and review the
-   exact permission and data-minimisation boundary.
-   For Intune, optionally import the opaque user-to-business-unit map and review
-   the explicit warning that device evidence alone does not prove installation.</li>
-<li>Choose <strong>Create managed collector</strong>. The UI reports schedule state separately
-   from credential and evidence state.</li>
-<li>Wait for the first run or choose a bounded <strong>Run now</strong> action when supported.</li>
-<li>Confirm <strong>Healthy</strong> collector state and <strong>Current</strong> evidence before relying on
-   coverage.</li>
-</ol>
-<h2 id="non-guarantees-and-remaining-work">Non-guarantees and remaining work</h2>
-<ul>
-<li>Managed Intune establishes a managed-device population but cannot by itself
-  prove installed binaries, active processes or project roots. Coverage remains
-  unavailable until a current endpoint installation feed is present.</li>
-<li>GitHub REST responses can prove only repositories visible to the token. A
-  token that hides both an unmapped repository and its mapping cannot reveal
-  that blind spot. Production acceptance must independently prove that the
-  token covers all organization repositories; a future organization-installed
-  GitHub App is preferred for centrally governed access and revocation.</li>
-<li>A client secret is not workload identity; future deployments may replace it
-  with Entra workload identity federation without changing normalized output.</li>
-<li>The first live acceptance can prove AWS scheduling, secret isolation, bounded
-  failure, and synthetic provider contracts. Successful real Graph collection
-  requires pilot-tenant credentials and admin consent.</li>
-<li>Population acceptance still requires a measured 95% pilot denominator and
-  documented blind spots.</li>
-</ul>
+<p>The content declares its correlation window, counts, bounds and capture
+boundary. Decisions and approvals are correlated to the exact captured agent
+from 24 hours before the source alert's first observation through a cutoff one
+second before export generation. The one-second boundary prevents a record
+created concurrently in the export second from being silently treated as part
+of a complete snapshot. Timeline events are revision-bound case events and are
+not restricted by that decision/approval window.</p>
+<h2 id="completeness-and-limits">Completeness and limits</h2>
+<p>The package contains at most 500 timeline events, 500 decisions and 500
+approvals. Those are refusal bounds, not truncation rules. Exceeding a bound,
+an oversized tenant partition, a changed case revision or a changed source
+alert revision causes export generation to fail. A successful artifact always
+sets <code>complete: true</code>, <code>decisionsTruncated: false</code>,
+<code>rawContentIncluded: false</code> and <code>credentialsIncluded: false</code>.
+The package also sets <code>approvalDecisionReasonsIncluded: false</code>; approval
+bindings and outcomes remain present, but optional free-form decision
+narrative is never made portable.</p>
+<h2 id="integrity-and-non-guarantees">Integrity and non-guarantees</h2>
+<p>The content hash and per-event payload hashes detect accidental or malicious
+modification after download. The immutable audit receipt lets an authorized
+investigator compare the exported digest with the retained control-plane
+record. The package is not a digital signature and does not independently
+prove who operated AWS; deployments requiring portable third-party
+authenticity should add a KMS signing adapter without weakening this hash and
+WORM baseline.</p>
+<p>The export does not prove device isolation, process termination, credential
+broker revocation, SIEM delivery or legal admissibility. Those remain separate
+deployment controls and evidence sources.</p>
+<h2 id="verification">Verification</h2>
+<p>Control-plane contracts must prove role denial, tenant isolation, no raw
+content or credentials, exact binding correlation, deterministic content
+hashes, per-event payload hashes, refusal rather than truncation and
+concurrent-revision denial. UI tests must prove hash verification precedes
+download and a mismatched package is never saved. The offline verifier must
+accept an unchanged package and reject changed content or timeline payloads.</p>
 
 
 

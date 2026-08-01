@@ -775,6 +775,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../incident-case-export-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit-ready incident case export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -2449,6 +2476,17 @@ the agent's authority revision, invalidating old bearer and bootstrap material.
 Release performs live recovery checks. These controls do not isolate the
 device or terminate arbitrary local processes; integrate an MDM/EDR adapter
 before making that operational claim.</p>
+<p>Canonical incident responders, security operators, auditors and platform
+administrators can export one retained case from the Incidents workspace. The
+browser downloads only after verifying the server's canonical content digest.
+Verify the downloaded file again on any machine from a trusted checkout:</p>
+<pre><code class="language-bash">python3 scripts/verify_incident_case_export.py \
+  ~/Downloads/aai-incident-CASE_ID-DIGEST.json
+</code></pre>
+<p>A successful verifier prints the case identifier, full SHA-256 digest and
+evidence counts. Preserve the JSON with the corresponding Object-Lock audit
+record. Do not treat the artifact as proof of MDM/EDR isolation or as a digital
+signature; add those deployment evidence sources separately.</p>
 <p>Agent identity lifecycle is independent from presence and emergency stop. A
 fleet operator can call <code>POST /enterprise/agents/{deployment}/{agent}/revoke</code>
 with <code>expectedLifecycleRevision</code> and a bounded reason. The transition is

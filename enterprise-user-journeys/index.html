@@ -775,6 +775,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../incident-case-export-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit-ready incident case export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -2212,8 +2239,14 @@ from absence alone.</p>
 <li>Select <strong>Release quarantine</strong>. The server rechecks binding, endpoint health,
    agent verification, independent stop scopes and alert readiness.</li>
 <li>Resolve and then close the case; the revisioned timeline remains retained.</li>
-<li>Export the redacted incident evidence and use MDM/EDR separately if device,
-    process or network isolation is required.</li>
+<li>Select <strong>Export verified JSON</strong>. The console asks the control plane for the
+    complete bounded package, verifies its canonical SHA-256 digest locally and
+    only then creates the download. It shows the retained digest and counts.</li>
+<li>Run <code>python3 scripts/verify_incident_case_export.py FILE.json</code> from a
+    trusted SDK checkout before sharing or importing the package elsewhere.</li>
+<li>Compare the receipt digest with the immutable audit record when chain of
+    custody matters. Use MDM/EDR separately if device, process or network
+    isolation is required.</li>
 </ol>
 <p>The UI should make the safe response the shortest path, while requiring
 stronger confirmation for broader scope and irreversible actions.</p>
