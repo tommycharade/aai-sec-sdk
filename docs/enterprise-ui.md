@@ -14,18 +14,26 @@ the central team's operating workflows.
 The recommended navigation is:
 
 - Dashboard
-- Policies
+- Coverage
 - Groups
 - Agents
-- Deployments
-- Integrations
 - Approvals
-- Audit and evidence
-- Credentials
-- Isolation
-- Configuration history
-- Emergency controls
-- Settings
+- Incidents
+- Audit trail
+- Policies
+- Skills and MCP
+- Connect agents
+- Identity and access
+- Deployments
+- SDK runtime
+
+The **Identity and access** page must not be one continuous administration
+form. Its overview shows verified identity foundations and one next-best
+action. Separate workspaces cover **Entra setup**, **Directory & roles**,
+**Delegated access**, **Emergency access**, and **Access reviews**. This keeps
+rare emergency and certification work out of the routine federation journey.
+The parked Splunk stub belongs to integration posture, not identity readiness,
+and must not appear as a failed identity control.
 
 ## Enterprise-managed features
 
@@ -66,6 +74,11 @@ The recommended navigation is:
 | Live runtime activation | Stage, activate and verify configuration changes. |
 | Configuration validation | Show validation results before activation. |
 | UI authentication | Operators, roles, bearer tokens and enterprise SSO integration. |
+| Microsoft Entra onboarding | A non-secret, task-focused setup workspace with redirect URI, server-owned tenant binding, downloadable manifest, guarded deployment commands and explicit live-acceptance gate. |
+| Directory authority | SCIM lifecycle, exact group-to-role mappings, canonical capabilities and degraded/not-configured states. |
+| Delegated administration | Expiring organization/project/deployment grants, live scope, rationale, revocation and retained history. |
+| Emergency access | Recent-MFA, four-eyes, exact-capability, maximum-60-minute break-glass workflow. |
+| Access certification | Complete-or-explicitly-incomplete digest-bound operator, role, delegation and emergency evidence export. |
 | CORS/origin restriction | Allowed browser origins and deployment environment. |
 | Agent groups | Create groups, select a policy, use manual batch assignment or trusted dynamic rules, inspect outcomes and manage agents. |
 | Claude onboarding script | Display or generate the exact onboarding command for a project. |
@@ -109,3 +122,9 @@ confirmation for emergency operations, produce audit events, and expose
 health/error state rather than silently accepting configuration. Secrets should
 be stored as references to an enterprise secret/IAM system, never displayed or
 persisted in browser state.
+
+Identity setup may copy or download non-secret deployment values, but the
+browser never accepts an OIDC client secret, SCIM bearer, tenant authority or
+role claim. Configuration status is not acceptance evidence: the UI continues
+to distinguish deployed federation from completed OIDC, joiner/mover/leaver,
+role-denial and two-person MFA exercises.

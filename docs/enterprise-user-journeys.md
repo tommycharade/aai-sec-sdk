@@ -3,6 +3,35 @@
 These journeys describe the intended low-friction workflow for a central
 security or platform team managing many agent deployments.
 
+## Journey 0: Connect Microsoft Entra ID
+
+**Actor:** Enterprise identity or platform administrator.
+
+1. Open **Identity and access**. The overview shows the verified foundations
+   and directs an unconfigured tenant to **Entra setup**.
+2. Register a single-tenant Entra application using the displayed Cognito
+   redirect URI and bind pilot administrators to an MFA-enforcing Conditional
+   Access policy.
+3. Create separate OIDC and SCIM secrets in AWS Secrets Manager. Neither value
+   is pasted into the browser.
+4. Download the secret-free deployment manifest and populate the Entra tenant,
+   client, secret-resource names, AAI tenant and retained Conditional Access
+   evidence reference outside the repository.
+5. Copy and run the read-only preflight, reviewed-reference persistence and
+   guarded deployment commands from the setup workspace.
+6. Configure Entra automatic provisioning with the deployed SCIM endpoint.
+7. Open **Directory & roles**, confirm current lifecycle evidence, and map
+   exact provisioned groups to the smallest canonical roles.
+8. Exercise a joiner, mover and leaver, including one permitted and one denied
+   API action for each role transition.
+9. Use **Emergency access** for the separate two-person recent-MFA exercise and
+   **Access reviews** to export the digest-bound certification artifact.
+
+Success means OIDC, SCIM lifecycle, role transition, role denial and
+independently approved emergency access have live retained evidence. A
+downloaded manifest, configured identity provider or successful synthetic
+SCIM contract alone is never displayed as acceptance.
+
 ## Journey 1: Onboard an agent
 
 **Actor:** Platform engineer or local developer using an approved enrollment
