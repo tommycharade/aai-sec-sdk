@@ -3233,6 +3233,9 @@ the CloudWatch metric alone as proof that every version recovered.</p>
 configuration outage, run the bounded Batch Replication repair using the stack
 outputs <code>AuditBucketName</code>, <code>EvidenceReportBucketName</code> and
 <code>AuditBatchReplicationRoleArn</code>:</p>
+<p>The repair also reprocesses versions already marked <code>COMPLETED</code>. This is
+necessary when source Object Lock retention was extended after their first
+replication; a matching object count alone does not prove retention parity.</p>
 <pre><code class="language-bash">AWS_PROFILE=p1 python3 scripts/backfill_aws_audit_replication.py \
   --source-bucket &lt;primary-audit-bucket&gt; \
   --report-bucket &lt;evidence-report-bucket&gt; \

@@ -2477,8 +2477,10 @@ region and historical Batch Replication role outputs.</p>
 <h2 id="historical-repair">Historical repair</h2>
 <p>Live S3 replication protects versions written after a rule is active; it does
 not repair older versions. <code>scripts/backfill_aws_audit_replication.py</code> creates a
-bounded S3 Batch Replication job for exact versions with <code>NONE</code> or <code>FAILED</code>
-replication status at a fixed cutoff. The script:</p>
+bounded S3 Batch Replication job for exact versions with <code>NONE</code>, <code>FAILED</code> or
+<code>COMPLETED</code> replication status at a fixed cutoff. <code>COMPLETED</code> versions are
+intentionally reprocessed: their bytes may exist while destination retention or
+metadata is stale after a later source-side change. The script:</p>
 <ul>
 <li>counts source versions and refuses more than the reviewed safety bound;</li>
 <li>asks S3 to generate the version-aware manifest in the source Region;</li>
