@@ -16,7 +16,7 @@
         <link rel="prev" href="../incident-case-export-design/">
       
       
-        <link rel="next" href="../asynchronous-retention-design/">
+        <link rel="next" href="../audit-recovery-deployment-guard-design/">
       
       
         
@@ -920,6 +920,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../audit-recovery-deployment-guard-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Persistent audit-recovery deployment guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2462,7 +2489,9 @@ tenant-visible records-management control. It covers tenant retention,
 exact-version legal hold, live integrity assurance, asynchronous tenant-wide
 export, mass-retention extension and scheduled evidence-gap monitoring. It does
 <strong>not</strong> claim that
-cross-region recovery has passed for a customer environment.</p>
+cross-region recovery has passed for a customer environment. Replica authority
+must use the <a href="../audit-recovery-deployment-guard-design/">persistent recovery deployment guard</a>;
+an ephemeral deployment variable is not an acceptable recovery control.</p>
 <h2 id="threat-and-trust-boundary">Threat and trust boundary</h2>
 <p>The browser, operator-entered object identity and audit payload are untrusted.
 The API derives the tenant from the verified operator token and permits evidence

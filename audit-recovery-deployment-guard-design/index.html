@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/runtime-attestation-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/audit-recovery-deployment-guard-design/">
       
       
-        <link rel="prev" href="../enterprise-integration-design/">
+        <link rel="prev" href="../durable-evidence-governance-design/">
       
       
-        <link rel="next" href="../managed-host-configuration/">
+        <link rel="next" href="../asynchronous-retention-design/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Runtime attestation design - Agentic AI Security SDK</title>
+        <title>Persistent audit-recovery deployment guard - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#runtime-attestation-design" class="md-skip">
+        <a href="#persistent-audit-recovery-deployment-guard" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Runtime attestation design
+              Persistent audit-recovery deployment guard
             
           </span>
         </div>
@@ -826,10 +826,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../audit-recovery-deployment-guard-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Persistent audit-recovery deployment guard
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -845,6 +872,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#historical-repair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Historical repair
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#independent-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Independent acceptance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-and-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure and recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1312,37 +1403,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Runtime attestation design
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../runtime-attestation-design/" class="md-nav__link">
         
   
   
@@ -1358,81 +1422,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#trust-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trust boundary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#evidence-fields" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Evidence fields
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#guarantees-and-limitations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Guarantees and limitations
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#acceptance-plan" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Acceptance plan
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#generating-an-approved-release-bundle" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Generating an approved release bundle
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2409,10 +2398,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#trust-boundary" class="md-nav__link">
+  <a href="#decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Trust boundary
+        Decision
       
     </span>
   </a>
@@ -2420,10 +2409,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#evidence-fields" class="md-nav__link">
+  <a href="#historical-repair" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Evidence fields
+        Historical repair
       
     </span>
   </a>
@@ -2431,10 +2420,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#guarantees-and-limitations" class="md-nav__link">
+  <a href="#independent-acceptance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Guarantees and limitations
+        Independent acceptance
       
     </span>
   </a>
@@ -2442,21 +2431,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#acceptance-plan" class="md-nav__link">
+  <a href="#failure-and-recovery" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Acceptance plan
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#generating-an-approved-release-bundle" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Generating an approved release bundle
+        Failure and recovery
       
     </span>
   </a>
@@ -2483,151 +2461,60 @@
   
 
 
-<h1 id="runtime-attestation-design">Runtime attestation design</h1>
-<p>Runtime attestation closes the gap between <strong>a bearer sent a heartbeat</strong> and
-<strong>the approved Claude Code or Codex security runtime is still running in its
-approved state</strong>. It is the implementation design for P0-05 in the
-<a href="../enterprise-rollout-p0-p1-requirements/">enterprise rollout requirements</a>.</p>
-<h2 id="trust-boundary">Trust boundary</h2>
-<p>The host measures the installed SDK package, MCP gateway, native security hook,
-project configuration, Python executable, project scope, source origin/revision
-and launch context. Only SHA-256 identifiers and bounded metadata leave the
-host. No source, configuration content, local path, prompt, command, credential
-or result is captured.</p>
-<p>Measurement is not approval. The control plane must compare invariant artifact
-digests to a deployment-owned manifest that was independently verified against
-the signed release provenance. Project-specific executable, configuration and
-launch-context digests are bound on the first compliant enrollment and must
-remain exact thereafter.</p>
-<p>Every heartbeat follows this sequence:</p>
-<pre><code class="language-text">authenticated session -&gt; one-time server challenge -&gt; local measurement
-                      -&gt; exact manifest/baseline comparison -&gt; posture update
-                      -&gt; heartbeat accepted or session quarantined/revoked
-</code></pre>
-<p>The nonce and short observation window prevent replaying an old compliant
-measurement. A missing, expired, malformed or mismatched attestation fails
-closed. Quarantined agents cannot retrieve effective policy, request approval
-or report a consequential governed action until they are remediated and
-re-enrolled.</p>
-<p>The repository intentionally ships with an empty
-<code>infra/aws-control-plane/lambda/runtime-manifests.json</code>. In that state the
-control plane records <code>not_configured</code>, operator verification fails its runtime
-attestation check, and no production trust claim is made. Governed agent routes
-retain their pre-attestation compatibility until an approved manifest exists.
-Production rollout must replace the empty bundle with independently verified
-manifests before enrolling agents. Once a matching host/version manifest is
-configured, attestation becomes mandatory and fail-closed for that runtime.</p>
-<h2 id="evidence-fields">Evidence fields</h2>
-<table>
-<thead>
-<tr>
-<th>Evidence</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>SDK version and Git revision</td>
-<td>Identifies the intended release/source state.</td>
-</tr>
-<tr>
-<td>Source-origin digest</td>
-<td>Detects a checkout from an unapproved repository without exposing its URL.</td>
-</tr>
-<tr>
-<td>Installed package digest</td>
-<td>Detects changed Python enforcement code.</td>
-</tr>
-<tr>
-<td>Gateway and native-hook digests</td>
-<td>Detects changes at the MCP and native-tool enforcement points.</td>
-</tr>
-<tr>
-<td>Configuration digest</td>
-<td>Detects project policy/configuration tampering.</td>
-</tr>
-<tr>
-<td>Executable and launch-context digests</td>
-<td>Detects a changed interpreter or unexpected launch path/context.</td>
-</tr>
-<tr>
-<td>Project-root digest</td>
-<td>Binds evidence to the immutable enrolled checkout.</td>
-</tr>
-<tr>
-<td>Observation time and nonce</td>
-<td>Proves freshness and prevents replay.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="guarantees-and-limitations">Guarantees and limitations</h2>
-<p>This control detects accidental or adversarial file/configuration changes when
-the attestor remains inside the trusted execution path. It binds runtime
-posture to enrollment and makes reason codes, freshness and quarantine events
-centrally auditable.</p>
-<p>Software-only attestation cannot prove host integrity against an attacker with
-root/administrator control who can alter the attestor itself or forge process
-memory. Enterprise production should pair this control with endpoint
-management and a hardware-backed device/workload identity (TPM, Secure Enclave,
-managed workload certificate or equivalent). That limitation must remain
-visible in acceptance evidence; a compliant software measurement is not device
-attestation.</p>
-<h2 id="acceptance-plan">Acceptance plan</h2>
-<ol>
-<li>Verify a release wheel/source archive and its GitHub provenance, then pin
-   the resulting manifest at deployment.</li>
-<li>Enroll one synthetic Claude Code and one Codex pilot with immediate
-   nonce-bound attestation.</li>
-<li>Modify the package, gateway, native hook, project configuration and launch
-   executable independently. Each change must quarantine the agent within five
-   minutes and emit a content-minimised reason code.</li>
-<li>Prove stale/replayed evidence is denied and its session cannot fetch an
-   effective policy or submit a governed approval/action.</li>
-<li>Restore approved artifacts, re-enroll and prove posture recovery without
-   deleting the audit history.</li>
-</ol>
-<p>The current automated contracts prove comparison, replay, freshness, baseline,
-quarantine and session-revocation behavior. Live release-manifest, five-minute
-detection and host-identity acceptance remain required before P0-05 can be
-marked complete.</p>
-<h2 id="generating-an-approved-release-bundle">Generating an approved release bundle</h2>
-<p>Do not hand-author artifact hashes. From a new clean checkout of the exact
-release tag, download the published release evidence outside the checkout and
-run the generator. The command independently runs the checked-in evidence
-verifier and GitHub's provenance verifier for both the wheel and source
-archive before measuring either host:</p>
-<pre><code class="language-bash">export AAI_SDK_ROOT=&quot;$PWD&quot;
-export AAI_RELEASE_TAG=&quot;v1.1.0&quot;
-export AAI_RELEASE_COMMIT=&quot;replace-with-the-tag-commit-sha&quot;
-export AAI_RELEASE_EVIDENCE=&quot;/absolute/path/to/downloaded-release-evidence&quot;
-
-PYTHONPATH=&quot;$AAI_SDK_ROOT/src&quot; python \
-  scripts/generate_runtime_manifests.py \
-  --sdk-root &quot;$AAI_SDK_ROOT&quot; \
-  --sdk-version &quot;1.1.0&quot; \
-  --expected-revision &quot;$AAI_RELEASE_COMMIT&quot; \
-  --expected-origin-digest \
-    c6cbebffe32d553b4dc08a611c4d0aacaeae195585edac442aa8ef10eb6e2c85 \
-  --release-tag &quot;$AAI_RELEASE_TAG&quot; \
-  --release-evidence &quot;$AAI_RELEASE_EVIDENCE&quot;
-</code></pre>
-<p>That origin digest is the SHA-256 identifier of the official HTTPS clone URL,
-<code>https://github.com/tommycharade/aai-sec-sdk.git</code>. The runtime checkout must use
-that exact origin identity. A different transport or mirror is a separate
-deployment approval, not an automatic equivalent.</p>
-<p>The generator refuses dirty, staged or untracked checkout state; mismatched
-version, revision or origin; missing release subjects; failed GitHub
-attestations; duplicate hosts; unsafe symlinks; and stale output. It writes:</p>
+<h1 id="persistent-audit-recovery-deployment-guard">Persistent audit-recovery deployment guard</h1>
+<h2 id="decision">Decision</h2>
+<p>Cross-region audit recovery is deployment authority, not ambient shell state.
+The primary control-plane deployer loads one reviewed, secret-free recovery
+manifest from encrypted Parameter Store and removes any ambient
+<code>AUDIT_REPLICA_*</code> values before synthesis. Once the stack reports a replica,
+losing that manifest blocks deployment instead of silently removing the S3
+replication rule.</p>
+<p>The manifest binds one exact destination bucket ARN, a distinct AWS Region and
+an opaque recovery-review reference. Configuration succeeds only when AWS
+proves that the destination is versioned and defaults to at least 365 days of
+COMPLIANCE Object Lock. A post-deployment check requires the exact destination,
+region and historical Batch Replication role outputs.</p>
+<h2 id="historical-repair">Historical repair</h2>
+<p>Live S3 replication protects versions written after a rule is active; it does
+not repair older versions. <code>scripts/backfill_aws_audit_replication.py</code> creates a
+bounded S3 Batch Replication job for exact versions with <code>NONE</code> or <code>FAILED</code>
+replication status at a fixed cutoff. The script:</p>
 <ul>
-<li><code>runtime-manifests.json</code>, containing only runtime comparison values; and</li>
-<li><code>runtime-manifests.provenance.json</code>, binding the exact manifest bytes to the
-  verified release checksum bundle and approval identity.</li>
+<li>counts source versions and refuses more than the reviewed safety bound;</li>
+<li>asks S3 to generate the version-aware manifest in the source Region;</li>
+<li>uses a dedicated least-privilege Batch Operations role;</li>
+<li>writes a provider completion report outside the immutable audit namespace;</li>
+<li>fails on timeout, terminal provider failure or any failed task.</li>
 </ul>
-<p>Both files are review artifacts. CDK checks their binding during synthesis and
-the Lambda revalidates it at startup. Commit them through normal review, deploy
-the changed Lambda, and enroll pilots only after the stack output changes from
-<code>not-configured</code>. The generator does not create or sign a release and cannot
-turn an unsigned development commit into an approved production artifact.</p>
+<p>The role can initiate replication for source audit objects and write only under
+the recovery-report prefix. The existing S3 replication role remains the
+principal authorized to read immutable source versions and create replicas.
+Replication metrics enable object-level failed/not-tracked events, which enter
+the existing durable security-alert SNS/SQS channel with provider failure
+reasons. CloudWatch replication metrics are best-effort and published in the
+destination Region, so they are not treated as the sole failure signal.</p>
+<h2 id="independent-acceptance">Independent acceptance</h2>
+<p><code>scripts/verify_aws_audit_recovery.py</code> does not trust the Batch Operations
+completion count. It independently enumerates both versioned buckets and
+requires exact key/version identity and canonical ordering, SHA-256 equality,
+preserved content-digest metadata, COMPLIANCE mode, destination retention no
+shorter than source retention and <code>REPLICA</code> provenance. Verification is bounded
+and emits a canonical manifest digest suitable for retained acceptance evidence.</p>
+<p>Delete markers are not evidence records and are excluded from the retained
+version proof. Production audit writers never delete records; unexpected delete
+markers should be investigated separately.</p>
+<h2 id="failure-and-recovery">Failure and recovery</h2>
+<ul>
+<li>Missing or malformed persisted authority: deployment stops before synthesis.</li>
+<li>Same-region or weakly retained destination: configuration and deployment stop.</li>
+<li>Historical job failure: live replication remains enabled; inspect the
+  completion report, correct the failure and rerun the idempotent repair.</li>
+<li>Verification mismatch: do not declare recovery ready. Preserve both provider
+  reports and verifier output, then investigate the exact object/version.</li>
+</ul>
+<p>This control proves immutable audit data recoverability. It does not by itself
+provide a second regional API, an approved RTO/RPO or automated control-plane
+failover.</p>
 
 
 
