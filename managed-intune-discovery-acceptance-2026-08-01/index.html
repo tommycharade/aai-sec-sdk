@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/entra-scim-runbook/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/managed-intune-discovery-acceptance-2026-08-01/">
       
       
-        <link rel="prev" href="../managed-intune-discovery-acceptance-2026-08-01/">
+        <link rel="prev" href="../managed-github-discovery-acceptance-2026-07-30/">
       
       
-        <link rel="next" href="../access-governance-runbook/">
+        <link rel="next" href="../entra-scim-runbook/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Microsoft Entra SCIM lifecycle runbook - Agentic AI Security SDK</title>
+        <title>AWS-managed Intune discovery acceptance — 2026-08-01 - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#microsoft-entra-scim-lifecycle-runbook" class="md-skip">
+        <a href="#aws-managed-intune-discovery-acceptance-2026-08-01" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Microsoft Entra SCIM lifecycle runbook
+              AWS-managed Intune discovery acceptance — 2026-08-01
             
           </span>
         </div>
@@ -1150,33 +1150,6 @@
       
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../managed-intune-discovery-acceptance-2026-08-01/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AWS-managed Intune discovery acceptance — 2026-08-01
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
     
   
   
@@ -1196,7 +1169,7 @@
   <span class="md-ellipsis">
     
   
-    Microsoft Entra SCIM lifecycle runbook
+    AWS-managed Intune discovery acceptance — 2026-08-01
   
 
     
@@ -1214,7 +1187,7 @@
   <span class="md-ellipsis">
     
   
-    Microsoft Entra SCIM lifecycle runbook
+    AWS-managed Intune discovery acceptance — 2026-08-01
   
 
     
@@ -1240,10 +1213,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#security-boundary" class="md-nav__link">
+  <a href="#scope" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Security boundary
+        Scope
       
     </span>
   </a>
@@ -1251,10 +1224,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#deployment" class="md-nav__link">
+  <a href="#tested-revisions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Deployment
+        Tested revisions
       
     </span>
   </a>
@@ -1262,10 +1235,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#entra-enterprise-application-setup" class="md-nav__link">
+  <a href="#live-acceptance-path" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Entra enterprise application setup
+        Live acceptance path
       
     </span>
   </a>
@@ -1273,71 +1246,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#acceptance-procedure" class="md-nav__link">
+  <a href="#security-properties-demonstrated" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Acceptance procedure
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Acceptance procedure">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#joiner" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Joiner
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#mover" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mover
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#leaver" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Leaver
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#delegated-operator" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Delegated operator
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#operations-and-incident-response" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operations and incident response
+        Security properties demonstrated
       
     </span>
   </a>
@@ -1345,10 +1257,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#current-limitations" class="md-nav__link">
+  <a href="#cleanup-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Current limitations
+        Cleanup evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-production-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining production acceptance
       
     </span>
   </a>
@@ -1359,6 +1282,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entra-scim-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Entra SCIM lifecycle runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1903,10 +1853,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#security-boundary" class="md-nav__link">
+  <a href="#scope" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Security boundary
+        Scope
       
     </span>
   </a>
@@ -1914,10 +1864,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#deployment" class="md-nav__link">
+  <a href="#tested-revisions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Deployment
+        Tested revisions
       
     </span>
   </a>
@@ -1925,10 +1875,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#entra-enterprise-application-setup" class="md-nav__link">
+  <a href="#live-acceptance-path" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Entra enterprise application setup
+        Live acceptance path
       
     </span>
   </a>
@@ -1936,71 +1886,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#acceptance-procedure" class="md-nav__link">
+  <a href="#security-properties-demonstrated" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Acceptance procedure
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Acceptance procedure">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#joiner" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Joiner
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#mover" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mover
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#leaver" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Leaver
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#delegated-operator" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Delegated operator
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#operations-and-incident-response" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operations and incident response
+        Security properties demonstrated
       
     </span>
   </a>
@@ -2008,10 +1897,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#current-limitations" class="md-nav__link">
+  <a href="#cleanup-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Current limitations
+        Cleanup evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-production-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining production acceptance
       
     </span>
   </a>
@@ -2038,158 +1938,186 @@
   
 
 
-<h1 id="microsoft-entra-scim-lifecycle-runbook">Microsoft Entra SCIM lifecycle runbook</h1>
-<p>This runbook connects Microsoft Entra automatic provisioning to the hosted
-control plane. It covers operator joiner, mover and leaver actions. It does not
-provision Claude Code or Codex agents; agent enrollment remains a separate
-fleet workflow.</p>
-<h2 id="security-boundary">Security boundary</h2>
+<h1 id="aws-managed-intune-discovery-acceptance-2026-08-01">AWS-managed Intune discovery acceptance — 2026-08-01</h1>
+<h2 id="scope">Scope</h2>
+<p>This report records a live, bounded acceptance of the AWS-managed Microsoft
+Intune device-discovery connector. It proves provisioning, scheduling, secret
+isolation, fixed-destination provider access, controlled provider failure,
+redacted operator visibility, fail-closed coverage semantics, disablement,
+credential revocation and recoverable cleanup in the deployed AWS control
+plane. Every identity, device and credential used by the acceptance was
+synthetic.</p>
+<p>This is not evidence of successful collection from a real Intune tenant or of
+95% endpoint coverage. Microsoft Graph managed-device records establish device
+enrollment only. A production endpoint publisher must separately report
+installed binaries, active processes and project-root digests.</p>
+<h2 id="tested-revisions">Tested revisions</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Revision</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SDK and AWS control plane</td>
+<td><code>48953665bd9ac61535bd3cbc3dcd6e1ada97584f</code></td>
+<td>Merged pull request <a href="https://github.com/tommycharade/aai-sec-sdk/pull/69">#69</a></td>
+</tr>
+<tr>
+<td>Management UI</td>
+<td><code>3aead6302d4acf5e11812d2d815b0d138296afde</code></td>
+<td>Merged private UI pull request #32</td>
+</tr>
+<tr>
+<td>AWS stack</td>
+<td><code>AaiSecControlPlane</code></td>
+<td><code>UPDATE_COMPLETE</code> in account <code>396510133537</code>, region <code>eu-west-2</code></td>
+</tr>
+<tr>
+<td>Hosted UI</td>
+<td><code>https://d2ir54klde64bd.cloudfront.net</code></td>
+<td>CloudFront invalidation <code>I7SBN1NTCBCHBDZKEIC9KLLDAX</code> completed</td>
+</tr>
+</tbody>
+</table>
+<p>The SDK pull request passed Python 3.11, 3.12 and 3.13 quality gates,
+PostgreSQL integration, Docker isolation, strict documentation, dependency
+audit and the bounded mutation gate. The local gate passed 781 tests, one
+intentionally skipped external integration, 90.20% coverage, package
+validation and dependency audits. The UI passed type checking, 117 tests,
+production build, and desktop plus 390-pixel browser acceptance without
+horizontal overflow.</p>
+<p>The workstation had an editable SDK installation pointing at an older checkout.
+The reproducible local SDK gate therefore explicitly used
+<code>PYTHONPATH="$PWD/src" make check</code>; plain <code>pytest</code> would otherwise import the
+unrelated checkout rather than the tested worktree.</p>
+<h2 id="live-acceptance-path">Live acceptance path</h2>
+<p>The test registered <code>intune-acceptance-20260801</code> for <code>tenant-demo</code>. Its
+deployment-owned provider secret contained synthetic UUIDs and a synthetic
+invalid client secret. The typed provider configuration contained one opaque
+synthetic user ID to business-unit mapping.</p>
+<table>
+<thead>
+<tr>
+<th>Assertion</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Configure managed source</td>
+<td>HTTP 201; Intune/endpoint job revision 1; status <code>scheduled</code></td>
+</tr>
+<tr>
+<td>Scheduler target</td>
+<td>Enabled, service-derived <code>rate(60 minutes)</code> schedule targeting the fixed collector Lambda</td>
+</tr>
+<tr>
+<td>Schedule binding</td>
+<td>Event contained live job, configuration and provider-configuration digests; the user mapping was not copied into the event</td>
+</tr>
+<tr>
+<td>Browser/API exposure</td>
+<td>Source directory returned only mapping count and <code>installationEvidenceRequired</code>; no user ID, provider configuration, secret ARN or bearer was returned</td>
+</tr>
+<tr>
+<td>Controlled collection</td>
+<td>Fixed error <code>provider_authentication_failed</code>; provider response content was not persisted or displayed</td>
+</tr>
+<tr>
+<td>Durable job state</td>
+<td>Status <code>degraded</code>; <code>lastAttemptAt</code> set; failure count 1; no <code>lastSuccessAt</code></td>
+</tr>
+<tr>
+<td>Atomic evidence on failure</td>
+<td>Failed authentication created no source snapshot</td>
+</tr>
+<tr>
+<td>Device-only semantic test</td>
+<td>A current complete synthetic device snapshot still returned <code>coverageAvailable=false</code>, <code>sourceComplete=false</code>, null percentages and blind spot <code>missing_endpoint_installations</code></td>
+</tr>
+<tr>
+<td>False orphan prevention</td>
+<td>Device-only evidence returned zero orphan findings rather than inferring conclusions from incomplete endpoint semantics</td>
+</tr>
+<tr>
+<td>Disable result</td>
+<td>Job status <code>disabled</code>, revision 2; connector status <code>revoked</code>, revision 2; <code>cleanupRequired=false</code></td>
+</tr>
+<tr>
+<td>External cleanup</td>
+<td>Schedule absent; connector and provider secrets under seven-day recoverable deletion</td>
+</tr>
+<tr>
+<td>Audit evidence</td>
+<td>Hash-retained <code>managed_discovery_created</code> and <code>managed_discovery_disabled</code> records present</td>
+</tr>
+<tr>
+<td>Failure containment</td>
+<td>Collector dead-letter queue had zero visible, in-flight and delayed messages</td>
+</tr>
+<tr>
+<td>Hosted delivery</td>
+<td>CloudFront returned HTTP 200 and the deployed asset contained the Intune permission, evidence warning and coverage-unavailable copy</td>
+</tr>
+<tr>
+<td>API boundary</td>
+<td>Unauthenticated managed-collector capability request returned HTTP 401</td>
+</tr>
+</tbody>
+</table>
+<p>The device-only snapshot used to prove the semantic coverage gate was removed by
+an exact tenant/source/revision-conditioned deletion after the assertion. It was
+synthetic transient test data; the disabled job, revoked connector and hashed
+audit records remain as redacted operational evidence.</p>
+<h2 id="security-properties-demonstrated">Security properties demonstrated</h2>
 <ul>
-<li>The SCIM endpoint is public at the network layer because Microsoft Entra must
-  call it. Every request requires a tenant-specific bearer resolved from AWS
-  Secrets Manager and compared in constant time.</li>
-<li>The request cannot choose an AAI tenant. One deployed endpoint is bound to
-  the configured <code>ENTRA_AAI_TENANT_ID</code>.</li>
-<li>Entra <code>externalId</code> and the signed OIDC <code>oid</code> claim must contain the same
-  directory object UUID. Email addresses and display names are never identity
-  keys.</li>
-<li>SCIM users and groups grant no authority by themselves. A platform
-  administrator must map an exact provisioned group to one canonical role in
-  <strong>Identity &amp; trust</strong>. An unmapped or inactive group grants no access.</li>
-<li>Cognito access and ID tokens live for five minutes. Every refresh reruns the
-  pre-token lifecycle lookup. A deactivated, unprovisioned or roleless Entra
-  identity cannot obtain another token.</li>
-<li>The OIDC client secret and SCIM bearer are distinct secrets. Neither is
-  returned by the API, embedded in the UI, or accepted from browser state.</li>
+<li>The browser contract supplies only a tenant-scoped KMS secret ARN and bounded
+  non-secret attribution; it never receives the provider or connector secret.</li>
+<li>Intune access is fixed to the service-owned Graph token and managed-devices
+  endpoints and requests only <code>id</code> and <code>userId</code>.</li>
+<li>The collector revalidates the current job and configuration digest before
+  reading a provider secret or opening a network connection.</li>
+<li>Device enrollment cannot be upgraded into binary, process or project-root
+  evidence. Missing installation observations suppress every percentage and
+  orphan conclusion.</li>
+<li>Operator views retain only provider, source kind, schedule health, timestamps,
+  fixed error code, mapping count and the explicit installation requirement.</li>
+<li>Disablement revokes ingestion before external cleanup, and secret deletion is
+  recoverable rather than forced.</li>
 </ul>
-<h2 id="deployment">Deployment</h2>
-<p>Create a random SCIM bearer of at least 32 characters and store it as either a
-raw Secrets Manager <code>SecretString</code> or JSON with one <code>token</code> field. Restrict
-read access to the generated SCIM Lambda role.</p>
-<p>Deploy all OIDC variables plus the SCIM secret name:</p>
-<pre><code class="language-bash">ENTRA_TENANT_ID=&lt;entra-directory-uuid&gt; \
-ENTRA_CLIENT_ID=&lt;entra-application-client-id&gt; \
-ENTRA_CLIENT_SECRET_NAME=&lt;oidc-secret-name&gt; \
-ENTRA_AAI_TENANT_ID=&lt;provisioned-aai-tenant-id&gt; \
-ENTRA_SCIM_TOKEN_SECRET_NAME=&lt;scim-bearer-secret-name&gt; \
-ENTRA_STRONG_AUTH_ENFORCED=true \
-AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
-</code></pre>
-<p>Record the <code>MicrosoftEntraScimEndpoint</code> stack output. The stack rejects a SCIM
-secret configured without the complete Entra OIDC binding.</p>
-<h2 id="entra-enterprise-application-setup">Entra enterprise application setup</h2>
-<ol>
-<li>Use a single-tenant enterprise application and the Cognito callback ending
-   in <code>/oauth2/idpresponse</code> for sign-in.</li>
-<li>Include the Entra object ID as the OIDC <code>oid</code> claim. Cognito maps it to the
-   non-writable browser attribute <code>custom:entra_object_id</code>.</li>
-<li>Bind the enterprise application to a Conditional Access policy requiring
-   MFA for emergency-access requesters and approvers. After live verification,
-   deploy with <code>ENTRA_STRONG_AUTH_ENFORCED=true</code>; the pre-token trigger emits
-   the server-owned assertion without using a mutable user attribute.</li>
-<li>Open <strong>Provisioning</strong>, select automatic provisioning and enter the SCIM
-   endpoint as the tenant URL.</li>
-<li>Enter the dedicated SCIM bearer. Do not reuse the OIDC client secret.</li>
-<li>Scope provisioning to assigned users and groups. Ensure the user object ID
-   is sent as <code>externalId</code>, <code>userName</code> is populated, and group object IDs are
-   sent as <code>externalId</code>.</li>
-<li>Test the connection, run on-demand provisioning for a synthetic pilot user
-   and group, then start the provisioning job.</li>
-<li>Open <strong>Identity &amp; trust</strong>. Confirm the user/group counts and sync age, then
-   map the pilot group to the least-privilege canonical role.</li>
-</ol>
-<p>Microsoft Entra supports creating, updating and deactivating users and groups,
-and adding or removing group membership through SCIM. The adapter deliberately
-rejects unsupported filters, unknown users, malformed UUIDs, more than 20
-operations per request and inventories beyond its bounded response limit.</p>
-<h2 id="acceptance-procedure">Acceptance procedure</h2>
-<p>Use synthetic identities and retain redaction-safe timestamps and result IDs.</p>
-<p>Before testing with a real Entra pilot identity, run the deployment acceptance
-command. It discovers the endpoint from CloudFormation, reads the dedicated
-bearer directly from Secrets Manager, rejects an invalid bearer, and exercises
-synthetic joiner, mover and leaver behavior. The bearer is never accepted as a
-command argument or written to output:</p>
-<pre><code class="language-bash">ENTRA_SCIM_TOKEN_SECRET_NAME=&lt;scim-bearer-secret-name&gt; \
-ENTRA_AAI_TENANT_ID=&lt;provisioned-aai-tenant-id&gt; \
-PYTHONPATH=src python scripts/test_aws_entra_scim.py \
-  --stack-name AaiSecControlPlane \
-  --profile p1 \
-  --region eu-west-2
-</code></pre>
-<p>Exit status <code>0</code> proves the live SCIM endpoint behavior. Exit status <code>2</code> means
-the stack or required operator inputs are not configured and must never be
-recorded as an acceptance pass. Exit status <code>1</code> means configured behavior
-failed. Exact synthetic user, group and membership records are removed on exit;
-content-minimised lifecycle audit records are intentionally retained.</p>
-<h3 id="joiner">Joiner</h3>
-<ol>
-<li>Assign a new pilot operator and mapped group to the Entra application.</li>
-<li>Run on-demand provisioning and confirm the UI active-user count changes.</li>
-<li>Sign in as the operator.</li>
-<li>Verify the token receives only the mapped canonical role.</li>
-<li>Call one permitted API and one API belonging to another role; retain the
-   success and HTTP 403 evidence.</li>
-</ol>
-<h3 id="mover">Mover</h3>
-<ol>
-<li>Move the operator from the original Entra group to a different mapped
-   group.</li>
-<li>Confirm SCIM removes and adds the exact memberships.</li>
-<li>Wait for the current token to expire or sign out and back in.</li>
-<li>Prove the old capability is denied and the new capability is permitted.</li>
-</ol>
-<h3 id="leaver">Leaver</h3>
-<ol>
-<li>Disable or unassign the operator in Entra and run provisioning.</li>
-<li>Confirm the UI disabled-user count changes.</li>
-<li>Attempt token refresh and a new login; both must fail.</li>
-<li>Verify any already-issued operator token stops working within five minutes.</li>
-<li>Retain the lifecycle audit record and the denied authentication evidence.</li>
-</ol>
-<h3 id="delegated-operator">Delegated operator</h3>
-<ol>
-<li>Provision an active pilot operator without a tenant-wide mapped role.</li>
-<li>As a different platform administrator, create a 7-day <code>fleet-operator</code>
-   grant for one synthetic project in <strong>Delegated operator access</strong>.</li>
-<li>Sign in as the pilot and confirm token issuance reports delegated access
-   without adding <code>fleet-operator</code> to <code>cognito:groups</code>.</li>
-<li>Create one synthetic deployment inside the project and confirm success.</li>
-<li>Attempt the same operation in a sibling project and confirm HTTP 403.</li>
-<li>Revoke the grant and confirm the formerly permitted operation receives HTTP
-   403 immediately, without waiting for token expiry.</li>
-<li>Generate access certification and confirm the grant and revocation appear
-   in schema version 2 evidence.</li>
-</ol>
-<h2 id="operations-and-incident-response">Operations and incident response</h2>
+<h2 id="cleanup-evidence">Cleanup evidence</h2>
+<p>After acceptance:</p>
 <ul>
-<li><strong>Provisioning failure:</strong> do not create a local Cognito group workaround.
-  Keep the user unprivileged, inspect Entra provisioning logs and the SCIM
-  Lambda error alarm, then retry the idempotent operation.</li>
-<li><strong>Inventory degraded:</strong> the UI refuses to display a partial inventory after
-  the bounded limit. Reduce assignment scope or use a future paginated
-  administration API; do not assign roles from partial data.</li>
-<li><strong>Suspected SCIM bearer exposure:</strong> rotate the Secrets Manager value, wait up
-  to five minutes for the Lambda cache to expire, update Entra and verify the
-  old bearer receives HTTP 401. If immediate invalidation is required, publish
-  a new Lambda version or force cold starts while updating Entra.</li>
-<li><strong>Incorrect group mapping:</strong> unmap the group in <strong>Identity &amp; trust</strong>. New
-  tokens receive no role from it; current tokens expire within five minutes.</li>
-<li><strong>Emergency access:</strong> use the separate, time-bound, recent-MFA break-glass
-  workflow in <strong>Identity &amp; trust</strong>. SCIM remains normal lifecycle authority;
-  emergency grants are exact server-owned capabilities and never directory
-  group workarounds. Follow the
-  <a href="../access-governance-runbook/">access-governance runbook</a>.</li>
+<li>the managed schedule was absent;</li>
+<li>the generated connector secret was under recoverable deletion;</li>
+<li>the synthetic provider secret was scheduled for deletion on 2026-08-08;</li>
+<li>the transient device-only snapshot was conditionally deleted;</li>
+<li>the collector dead-letter queue remained empty; and</li>
+<li>CloudFormation remained <code>UPDATE_COMPLETE</code>.</li>
 </ul>
-<h2 id="current-limitations">Current limitations</h2>
-<p>This implementation advances P0-06 but does not complete it. The automated
-command proves the deployed SCIM protocol once configured; real Entra OIDC
-sign-in and joiner/mover/leaver acceptance, configurable provisioning SLO
-alarms, immediate global token
-revocation and live multi-business-unit delegated-scope acceptance remain
-outstanding. The
-break-glass and access-certification contracts are implemented but still need
-the deployed two-person Entra MFA acceptance exercise. Splunk remains a
-non-delivering stub.</p>
+<h2 id="remaining-production-acceptance">Remaining production acceptance</h2>
+<p>Before relying on Intune discovery for an enterprise denominator:</p>
+<ol>
+<li>provision a separate Entra application with only
+   <code>DeviceManagementManagedDevices.Read.All</code> application permission and retain
+   administrator-consent evidence;</li>
+<li>complete a successful scheduled collection against a non-production pilot
+   tenant and compare the opaque device IDs with the agreed managed-device
+   denominator;</li>
+<li>deploy a production endpoint installation/process publisher and prove that
+   known missing, duplicate and inactive Claude/Codex instances appear within
+   the discovery SLO;</li>
+<li>test application-secret rotation, expiry, permission removal and tenant
+   revocation;</li>
+<li>reach at least 95% of the agreed pilot population and document every blind
+   spot; and</li>
+<li>replace the client secret with workload identity when the deployment
+   platform supports that credential model.</li>
+</ol>
 
 
 
