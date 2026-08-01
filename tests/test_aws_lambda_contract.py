@@ -4972,9 +4972,12 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
             "risk_class": "consequential",
             "resource_ids": ["repository-a"],
             "status": "approved",
-            "requested_at": now - 10,
-            "expires_at": now + 600,
-            "decided_at": now - 5,
+            # Real DynamoDB returns numeric attributes as Decimal even when
+            # the application wrote integers. Keep this contract realistic so
+            # export hashing cannot regress to non-JSON-safe content.
+            "requested_at": Decimal(now - 10),
+            "expires_at": Decimal(now + 600),
+            "decided_at": Decimal(now - 5),
             "decided_by": "approver-a",
             "decision_reason": "Narrative intentionally excluded from portable evidence.",
         }

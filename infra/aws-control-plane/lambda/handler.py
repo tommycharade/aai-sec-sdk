@@ -6963,6 +6963,10 @@ def _case_export(tenant, case_id, actor):
             "recordLimitPerCollection": _CASE_EXPORT_RECORD_LIMIT,
         },
     }
+    # boto3 deserializes every DynamoDB number as Decimal. Convert the complete
+    # artifact at the API boundary before hashing so the digest binds exactly
+    # the JSON-safe value returned to browsers and offline verifiers.
+    content = _json(content)
     canonical = json.dumps(
         content,
         sort_keys=True,
