@@ -150,6 +150,24 @@ live Approvals record, not infer authority from an audit event. Both pages show
 redacted metadata, while lifecycle evidence records the request and operator
 decision without action content.
 
+The **Incidents** workspace separates operator-owned cases from **Response
+rules**. Rules begin in a fleet inventory with status, host scope, active
+version, action limit, cooldown and update metadata. Opening one shows active
+authority separately from pending governance and lists content-minimised match
+outcomes. The editor is typed: exact endpoint reasons, severity, Claude
+Code/Codex scope, fixed SDK quarantine, hourly limit, per-agent cooldown and
+priority. Every control has a keyboard-focusable help marker. A read-only impact
+preview is required before draft creation in the browser, while the API repeats
+all schema and authority validation.
+
+Draft creation never activates a rule. The workflow visibly requires submit,
+independent approval and version-bound activation. Authors cannot approve their
+own versions; disabling removes future automatic authority immediately; and
+rollback offers only independently approved superseded versions. The UI states
+that quarantine restricts SDK execution authority while preserving heartbeat
+and attestation—it does not claim device, network or process isolation. See
+[Approved automatic response rules](automatic-response-rules-design.md).
+
 Trial tenants also receive a server-derived status banner showing the remaining
 trial time and safe-default readiness. Before the first enrollment it links
 directly to onboarding; once an agent is enrolled it reports the enrolled-agent

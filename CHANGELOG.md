@@ -1,5 +1,13 @@
 # Changelog
 
+- Added independently approved, immutable automatic-response rules for
+  server-derived endpoint detections. Rules have a typed UI, read-only impact
+  preview, exact Claude Code/Codex host scope, bounded hourly actions,
+  per-agent cooldown, deterministic execution evidence, no case takeover,
+  immediate disable and approved-version rollback. Consequential evaluation
+  runs only from scheduled detection or authenticated security-event writes;
+  reading the operator UI cannot trigger containment.
+
 - Added audit-ready incident case export with canonical SHA-256 content
   integrity, immutable audit-receipt binding, refusal rather than evidence
   truncation, free-form narrative exclusion, an offline verifier and a

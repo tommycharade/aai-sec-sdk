@@ -126,6 +126,13 @@ class FakeTable:
                     "lifecycle_revision"
                 ) != values.get(":revision"):
                     raise ConditionalFailure()
+            elif not _condition_permitted(
+                condition,
+                self.items.get(key, {}),
+                kwargs.get("ExpressionAttributeNames", {}),
+                values,
+            ):
+                raise ConditionalFailure()
         self.items[key] = dict(Item)
 
     def delete_item(self, *, Key: dict[str, str], **_: Any) -> None:
@@ -479,6 +486,90 @@ def _runtime_manifest(host: str = "claude-code") -> dict[str, Any]:
         "hookDigest": "e" * 64,
         "host": host,
     }
+
+
+def _bound_endpoint_alert(
+    module: Any,
+    table: FakeTable,
+    tenant: str,
+    *,
+    now: int,
+    alert_id: str = "endpoint-alert-a",
+    agent_id: str = "agent-a",
+    host: str = "claude-code",
+) -> None:
+    """Seed synthetic server-side facts for one unique current agent binding."""
+    project_root = f"/synthetic/{agent_id}"
+    project_digest = hashlib.sha256(project_root.encode()).hexdigest()
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", f"deployment-a:{agent_id}")
+        | {
+            "tenant_id": tenant,
+            "id": agent_id,
+            "deployment_id": "deployment-a",
+            "host": host,
+            "project_root": project_root,
+            "status": "connected",
+            "last_heartbeat": now,
+            "expires_at": now + 300,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            "session_revision": 1,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "DISCOVERY_SOURCE", "intune")
+        | {
+            "tenant_id": tenant,
+            "sourceId": "intune",
+            "sourceKind": "endpoint",
+            "generation": "synthetic-current",
+            "observedAt": now,
+            "expiresAt": now + 300,
+            "complete": True,
+            "observations": [{"kind": "device", "id": "device-a", "managed": True}],
+            "revision": 1,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "ENDPOINT_EVIDENCE", "device-a")
+        | {
+            "tenant_id": tenant,
+            "id": "device-a",
+            "observedAt": now,
+            "revision": 1,
+            "reportDigest": "a" * 64,
+            "payload": {
+                "installations": [
+                    {
+                        "id": "installation-a",
+                        "host": host,
+                        "projectRootDigest": project_digest,
+                        "binaryPresent": True,
+                        "processActive": False,
+                    }
+                ]
+            },
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "ALERT", alert_id)
+        | {
+            "tenant_id": tenant,
+            "id": alert_id,
+            "source": "endpoint_evidence",
+            "severity": "high",
+            "type": "endpoint_runtime_stopped",
+            "deviceId": "device-a",
+            "message": "The protected agent runtime stopped reporting.",
+            "reasonCode": "process_not_observed",
+            "status": "open",
+            "revision": 1,
+            "occurrenceCount": 1,
+            "firstObservedAt": now,
+            "lastObservedAt": now,
+        }
+    )
 
 
 def _managed_package_fixture(
@@ -1317,7 +1408,7 @@ def test_bulk_group_assignment_previews_applies_partial_results_and_replays(
     path = "/enterprise/groups/target/agents/bulk"
 
     preview = _invoke(module, _event(path, "POST", body=request, claims=claims))
-    assert preview["statusCode"] == 200
+    assert preview["statusCode"] == 200, preview
     preview_body = json.loads(preview["body"])
     assert preview_body["counts"] == {
         "requested": 6,
@@ -2464,7 +2555,7 @@ def test_aws_policy_governance_requires_independent_review_and_atomic_activation
             claims=author_claims,
         ),
     )
-    assert submitted["statusCode"] == 200
+    assert submitted["statusCode"] == 200, submitted
     denied_author_role = _invoke(
         module,
         _event(
@@ -4699,6 +4790,444 @@ def test_endpoint_alerts_are_deduplicated_delivered_acknowledged_and_resolved(
     )["items"]
     assert resolved[0]["status"] == "resolved"
     assert resolved[0]["resolvedAt"] == now
+
+
+def test_automatic_response_rule_is_governed_bounded_and_idempotent(
+    monkeypatch: Any,
+) -> None:
+    """Only an independently approved rule may quarantine an exact agent binding."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-automatic-response"
+    other_tenant = "tenant-automatic-response-other"
+    now = 2_160_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(other_tenant, "TENANT", "root") | {"id": other_tenant})
+    _bound_endpoint_alert(module, table, tenant, now=now)
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "rule-author",
+    }
+    approver = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "rule-approver",
+    }
+    fleet_only = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-only",
+    }
+    configuration = {
+        "match": {
+            "source": "endpoint_evidence",
+            "reasonCodes": ["process_not_observed"],
+            "severities": ["high"],
+            "hosts": ["claude-code"],
+        },
+        "action": {"type": "quarantine_agent"},
+        "safeguards": {"maxActionsPerHour": 1, "agentCooldownSeconds": 900},
+        "priority": 100,
+    }
+    preview = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules/preview",
+            "POST",
+            body={"configuration": configuration},
+            claims=author,
+        ),
+    )
+    assert preview["statusCode"] == 200, preview
+    preview_body = json.loads(preview["body"])
+    assert preview_body["mutated"] is False
+    assert preview_body["matches"][0]["outcome"] == "would_contain"
+    assert not [item for item in table.items.values() if item.get("case_id")]
+
+    create_body = {
+        "ruleId": "stop-dead-runtime",
+        "name": "Stop dead protected runtimes",
+        "description": "Quarantine the exact enrolled agent when its protected runtime stops.",
+        "configuration": configuration,
+    }
+    denied = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules",
+            "POST",
+            body=create_body,
+            claims=fleet_only,
+        ),
+    )
+    assert denied["statusCode"] == 403
+    created = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules",
+            "POST",
+            body=create_body,
+            claims=author,
+        ),
+    )
+    assert created["statusCode"] == 201
+    assert json.loads(created["body"])["governanceState"] == "draft"
+    submitted = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules/stop-dead-runtime/versions/1/submit",
+            "POST",
+            claims=author,
+        ),
+    )
+    assert submitted["statusCode"] == 200, submitted
+    decision_path = "/api/enterprise/response-rules/stop-dead-runtime/versions/1/decision"
+    self_approval = _invoke(
+        module,
+        _event(
+            decision_path,
+            "POST",
+            body={
+                "decision": "approved",
+                "reason": "The author must not approve their own automatic authority.",
+            },
+            claims=author,
+        ),
+    )
+    assert self_approval["statusCode"] == 403
+    approved = _invoke(
+        module,
+        _event(
+            decision_path,
+            "POST",
+            body={
+                "decision": "approved",
+                "reason": "The scope and containment safeguards are appropriate for production.",
+            },
+            claims=approver,
+        ),
+    )
+    assert approved["statusCode"] == 200
+    activated = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules/stop-dead-runtime/versions/1/activate",
+            "POST",
+            body={"expectedActiveVersion": 0},
+            claims=approver,
+        ),
+    )
+    assert activated["statusCode"] == 200
+    assert json.loads(activated["body"])["enabled"] is True
+
+    outcomes = module._evaluate_response_rules(tenant, now=now)
+    assert len(outcomes) == 1
+    assert outcomes[0]["outcome"] == "contained"
+    control = module._agent_control_state(
+        tenant,
+        table.items[(f"TENANT#{tenant}", "AGENT#deployment-a:agent-a")],
+    )
+    assert control["executionAllowed"] is False
+    assert control["evidenceAllowed"] is True
+    first_case_id = outcomes[0]["caseId"]
+    assert first_case_id
+    assert module._evaluate_response_rules(tenant, now=now) == outcomes
+    assert len(module._list(tenant, "CASE")) == 1
+    assert len(module._list(tenant, "RESPONSE_EXECUTION")) == 1
+
+    # A distinct alert occurrence for the same exact agent is retained as
+    # evidence but cannot exceed the approved hourly/cooldown authority.
+    table.put_item(
+        Item=module._item_key(tenant, "ALERT", "endpoint-alert-b")
+        | {
+            **table.items[(f"TENANT#{tenant}", "ALERT#endpoint-alert-a")],
+            "pk": f"TENANT#{tenant}",
+            "sk": "ALERT#endpoint-alert-b",
+            "id": "endpoint-alert-b",
+            "caseId": None,
+            "revision": 1,
+            "occurrenceCount": 1,
+        }
+    )
+    outcomes = module._evaluate_response_rules(tenant, now=now + 1)
+    assert {item["reasonCode"] for item in outcomes} >= {
+        "approved_rule_matched",
+        "hourly_limit",
+    }
+    assert len(module._list(tenant, "CASE")) == 1
+
+    detail = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules/stop-dead-runtime",
+            "GET",
+            claims=approver,
+        ),
+    )
+    assert detail["statusCode"] == 200
+    detail_body = json.loads(detail["body"])
+    assert detail_body["activeVersion"] == 1
+    assert detail_body["versions"][0]["contentHash"]
+    assert len(detail_body["executions"]) == 2
+    other_rules = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/response-rules",
+                "GET",
+                claims={
+                    "custom:tenant_id": other_tenant,
+                    "cognito:groups": ["security-operator"],
+                    "sub": "other-operator",
+                },
+            ),
+        )["body"]
+    )
+    assert other_rules["items"] == []
+
+
+def test_endpoint_reads_cannot_trigger_automatic_response(monkeypatch: Any) -> None:
+    """Only scheduled detection and event writes may invoke consequential rules."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-read-side-effect"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    evaluations: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "_evaluate_response_rules",
+        lambda evaluated_tenant, **_kwargs: evaluations.append(evaluated_tenant),
+    )
+
+    module._reconcile_endpoint_alerts(tenant, {"items": []})
+    assert evaluations == []
+    module._reconcile_endpoint_alerts(
+        tenant,
+        {"items": []},
+        automatic_response=True,
+    )
+    assert evaluations == [tenant]
+
+
+def test_automatic_response_reservation_cannot_exceed_limit_under_race(
+    monkeypatch: Any,
+) -> None:
+    """A concurrent trigger can consume capacity but cannot overrun it."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-response-reservation-race"
+    now = 2_165_000_000
+    rule = {
+        "id": "bounded-rule",
+        "active_version": 1,
+        "configuration": {
+            "match": {
+                "source": "endpoint_evidence",
+                "reasonCodes": ["process_not_observed"],
+                "severities": ["high"],
+                "hosts": ["claude-code"],
+            },
+            "action": {"type": "quarantine_agent"},
+            "safeguards": {"maxActionsPerHour": 1, "agentCooldownSeconds": 900},
+            "priority": 100,
+        },
+    }
+    first = {"id": "alert-a", "occurrenceCount": 1}
+    concurrent = {"id": "alert-b", "occurrenceCount": 1}
+    binding = {"agentKey": "deployment-a:agent-a"}
+    concurrent_result: list[str | None] = []
+    module.DYNAMODB.before_transaction = lambda: concurrent_result.append(
+        module._reserve_response_rule_action(
+            tenant,
+            rule,
+            concurrent,
+            binding,
+            now,
+        )
+    )
+
+    assert (
+        module._reserve_response_rule_action(
+            tenant,
+            rule,
+            first,
+            binding,
+            now,
+        )
+        == "hourly_limit"
+    )
+    assert concurrent_result == [None]
+    assert len(module._list(tenant, "RESPONSE_LEASE")) == 1
+    rate = table.get_item(Key=module._item_key(tenant, "RESPONSE_RATE", "bounded-rule"))["Item"]
+    assert rate["action_times"] == [now]
+
+
+def test_response_rule_version_rollback_and_disable_preserve_governance(
+    monkeypatch: Any,
+) -> None:
+    """Rollback can select only an approved superseded version and disable fails stale."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-response-rule-rollback"
+    now = 2_170_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "author-a",
+    }
+    approver = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "approver-b",
+    }
+
+    def configuration(maximum: int) -> dict[str, Any]:
+        return {
+            "match": {
+                "source": "endpoint_evidence",
+                "reasonCodes": ["process_not_observed"],
+                "severities": ["high"],
+                "hosts": ["claude-code", "codex"],
+            },
+            "action": {"type": "quarantine_agent"},
+            "safeguards": {
+                "maxActionsPerHour": maximum,
+                "agentCooldownSeconds": 900,
+            },
+            "priority": 100,
+        }
+
+    create = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules",
+            "POST",
+            body={
+                "ruleId": "rollback-rule",
+                "name": "Rollback rule",
+                "description": "A governed synthetic rule used to prove safe rollback behavior.",
+                "configuration": configuration(1),
+            },
+            claims=author,
+        ),
+    )
+    assert create["statusCode"] == 201, create
+    for version, expected in ((1, 0),):
+        assert (
+            _invoke(
+                module,
+                _event(
+                    f"/api/enterprise/response-rules/rollback-rule/versions/{version}/submit",
+                    "POST",
+                    claims=author,
+                ),
+            )["statusCode"]
+            == 200
+        )
+        assert (
+            _invoke(
+                module,
+                _event(
+                    f"/api/enterprise/response-rules/rollback-rule/versions/{version}/decision",
+                    "POST",
+                    body={
+                        "decision": "approved",
+                        "reason": "Independent review confirms bounded automatic authority.",
+                    },
+                    claims=approver,
+                ),
+            )["statusCode"]
+            == 200
+        )
+        assert (
+            _invoke(
+                module,
+                _event(
+                    f"/api/enterprise/response-rules/rollback-rule/versions/{version}/activate",
+                    "POST",
+                    body={"expectedActiveVersion": expected},
+                    claims=approver,
+                ),
+            )["statusCode"]
+            == 200
+        )
+    draft_two = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules/rollback-rule/versions",
+            "POST",
+            body={
+                "name": "Rollback rule",
+                "description": "A governed synthetic second version used to test rollback.",
+                "configuration": configuration(2),
+            },
+            claims=author,
+        ),
+    )
+    assert draft_two["statusCode"] == 201
+    for operation, body, claims in (
+        ("submit", None, author),
+        (
+            "decision",
+            {
+                "decision": "approved",
+                "reason": "Independent review approves the changed hourly action limit.",
+            },
+            approver,
+        ),
+        ("activate", {"expectedActiveVersion": 1}, approver),
+    ):
+        result = _invoke(
+            module,
+            _event(
+                f"/api/enterprise/response-rules/rollback-rule/versions/2/{operation}",
+                "POST",
+                body=body,
+                claims=claims,
+            ),
+        )
+        assert result["statusCode"] == 200
+    rollback = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules/rollback-rule/rollback",
+            "POST",
+            body={
+                "expectedActiveVersion": 2,
+                "targetVersion": 1,
+                "reason": "Restore the previously approved safer hourly containment limit.",
+            },
+            claims=approver,
+        ),
+    )
+    assert rollback["statusCode"] == 200
+    assert json.loads(rollback["body"])["activeVersion"] == 1
+    stale_disable = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules/rollback-rule/disable",
+            "POST",
+            body={
+                "expectedActiveVersion": 2,
+                "reason": "A stale operator must not remove newer automatic authority.",
+            },
+            claims=approver,
+        ),
+    )
+    assert stale_disable["statusCode"] == 409
+    disabled = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules/rollback-rule/disable",
+            "POST",
+            body={
+                "expectedActiveVersion": 1,
+                "reason": "Disable automatic authority while the response logic is reviewed.",
+            },
+            claims=approver,
+        ),
+    )
+    assert disabled["statusCode"] == 200
+    assert json.loads(disabled["body"])["enabled"] is False
 
 
 def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
