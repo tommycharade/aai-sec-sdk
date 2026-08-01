@@ -2642,16 +2642,25 @@ policy version so operators can identify which change caused a failure.</p>
 <li>Select one retained version to place or release legal hold. Confirm the exact
    object version and provide the approved legal authority. The rationale is
    hashed rather than stored as case narrative.</li>
-<li>Choose <strong>Export verified manifest</strong>. The API refuses partial or mismatched
-   evidence, and the browser independently verifies the canonical digest before
-   download.</li>
+<li>If the fast-path inventory is incomplete, choose <strong>Run full assurance</strong> and
+   enter the approved case or change rationale. Leave the page open to see
+   queued/running page progress, or return later; the job is server-owned and
+   continues independently of the browser.</li>
+<li>When the job is complete, choose <strong>Download verified export</strong>. The browser
+   retrieves every page, verifies its canonical hash, recalculates the ordered
+   rolling chain and checks the final index digest before creating the file.
+   Any missing, reordered or substituted page blocks download.</li>
+<li>Review <strong>Scheduled assurance</strong>. <code>attention</code> or <code>critical</code> needs investigation;
+   <code>alert pending</code> means the gap is visible but durable alert delivery has not
+   been acknowledged.</li>
 <li>Use <strong>Decision evidence</strong> below the assurance controls for redacted runtime
    investigation. Tool arguments, credentials and sensitive output are not
    included.</li>
 </ol>
-<p>For more than 250 retained versions, the current synchronous path deliberately
-shows <code>incomplete</code> and blocks export/retention mutation. Never accept a sampled
-UI list as the complete tenant record.</p>
+<p>For more than 250 retained versions, the synchronous path deliberately shows
+<code>incomplete</code>. Use a completed tenant-wide job for export. Retention mutation
+remains blocked above this boundary until the asynchronous retention workflow
+is implemented. Never accept a sampled UI list as the complete tenant record.</p>
 
 
 

@@ -2642,11 +2642,19 @@ at-risk posture, and exposes:</p>
 <li>exact-version legal hold with hashed rationale;</li>
 <li>delete-marker visibility;</li>
 <li>complete digest-bound manifest export; and</li>
+<li>tenant-wide asynchronous assurance progress and scheduled monitor posture;</li>
 <li>redacted runtime and lifecycle decision evidence.</li>
 </ul>
 <p>The browser cannot submit tenant identity, integrity status or completeness.
 It cannot shorten retention or bypass the 365-day COMPLIANCE floor. A failed or
 truncated assurance request remains visibly failed closed.</p>
+<p>When the synchronous inventory is incomplete, the page offers <strong>Run full
+assurance</strong> rather than a misleading sample. The operator supplies a change or
+case rationale; tenant, cutoff and status remain server-owned. The completed
+view downloads every page, recalculates each canonical page hash and ordered
+chain, then verifies the final export-index digest before constructing the JSON
+download. Scheduled state distinguishes <code>healthy</code>, <code>attention</code>, <code>critical</code> and
+alert-delivery <code>pending</code>; job failures are never collapsed into an empty state.</p>
 <p>Enterprise actions should require role-based authorization, use explicit
 confirmation for emergency operations, produce audit events, and expose
 health/error state rather than silently accepting configuration. Secrets should

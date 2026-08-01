@@ -53085,14 +53085,20 @@ Artifact schema, refusal bounds and offline verification are specified in
   tenant key/version after rejecting cross-tenant identity; and</li>
 <li><code>GET /api/enterprise/evidence/export</code> returns a canonical content-hashed
   complete manifest only when every record fits the 250-version synchronous
-  boundary and no content mismatch exists.</li>
+  boundary and no content mismatch exists;</li>
+<li><code>POST /api/enterprise/evidence/jobs</code> accepts exactly <code>requestId</code> and
+  <code>rationale</code> and idempotently starts a tenant-wide point-in-time job;</li>
+<li><code>GET /api/enterprise/evidence/jobs</code> and
+  <code>GET /api/enterprise/evidence/jobs/{jobId}</code> expose server-owned progress and
+  the completed chain-bound export index; and</li>
+<li><code>GET /api/enterprise/evidence/jobs/{jobId}/pages/{page}</code> returns one completed
+  page only after tenant binding, closed-schema and canonical-digest checks.</li>
 </ul>
 <p>Security operators and platform administrators manage retention and legal hold.
 Auditors may read assurance and export evidence but cannot mutate it. Rationale
 text is content-hashed before audit persistence. See
-<a href="../durable-evidence-governance-design/">Durable evidence governance</a> for trust
-boundaries, failure behavior and the production-scale asynchronous work that
-remains.</p>
+<a href="../durable-evidence-governance-design/">Durable evidence governance</a> for queue
+authority, snapshot, hash-chain, schedule, alert and failure behavior.</p>
 <h2 id="automatic-response-rules">Automatic response rules</h2>
 <p>The hosted adapter exposes an independently governed automatic-response API:</p>
 <ul>

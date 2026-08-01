@@ -3126,12 +3126,18 @@ live retained object versions. New audit objects explicitly apply the tenant's
 binding. Security operators can only increase tenant retention and can place or
 release legal hold on one exact tenant object version. Auditors can verify and
 export but cannot mutate.</p>
-<p>The current synchronous assurance/export boundary is 250 versions. It returns
-<code>incomplete</code> and refuses retention mutation or export above that bound. This is
-a pilot-safe fail-closed limit; deploy asynchronous S3 Inventory/Batch
-Operations before production scale. Follow
-<a href="../durable-evidence-governance-design/">Durable evidence governance</a> and retain
-separate live cross-region recovery evidence.</p>
+<p>The synchronous assurance/export fast path is 250 versions. Above that bound it
+returns <code>incomplete</code>; start a tenant-wide job from <strong>Evidence</strong> or
+<code>POST /api/enterprise/evidence/jobs</code>. The FIFO worker verifies every retained
+version as of a fixed cutoff, stores 30-day derived pages separately from WORM
+audit records, and commits the final page-chain digest to retained audit
+evidence. EventBridge starts due scans every 15 minutes; changed evidence gaps
+publish to the existing durable security-alert SNS/SQS channel. Monitor the
+worker and schedule DLQ alarms and treat <code>pending</code> alert delivery as unresolved.</p>
+<p>Retention changes above 250 versions still fail closed because mass retention
+extension is not delegated to the assurance worker. Follow
+<a href="../durable-evidence-governance-design/">Durable evidence governance</a>, and retain
+separate live cross-region count/order/hash/retention recovery evidence.</p>
 <p>This is the first AWS deployment slice, not a production security
 certification. Before production use:</p>
 <ul>
