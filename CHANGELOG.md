@@ -1,5 +1,10 @@
 # Changelog
 
+- Declared the evidence worker's intentional, bounded Lambda/FIFO continuation
+  workflow so AWS recursive-loop protection does not truncate exports after 16
+  pages. Reserved concurrency, optimistic revisions, page limits, retries,
+  dead letters and alarms remain mandatory compensating controls.
+
 - Added tenant-wide asynchronous evidence assurance and export. Revision-bound
   FIFO workers verify a fixed S3 snapshot in canonical hash-chained pages,
   commit the final digest to retained audit evidence, and expose authenticated

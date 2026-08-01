@@ -95,6 +95,16 @@ requires the complete synchronous inventory and therefore remains blocked above
 250 versions until a separately reviewed asynchronous retention workflow is
 implemented. Cross-region count/order/hash/retention recovery also remains open.
 
+The evidence worker is an intentional Lambda-to-FIFO-to-Lambda continuation
+workflow. Its Lambda recursive-loop setting is therefore explicitly `Allow`;
+without this declaration AWS terminates valid exports after approximately 16
+pages. This does not make the loop unbounded: every message is bound to the
+tenant, job and optimistic revision; FIFO deduplication prevents duplicate next
+steps; a job stops at 100,000 pages; reserved concurrency is five; each page has
+three attempts; and worker errors, queue exhaustion and dead letters are
+alarmed. Changing that declaration or any of those compensating controls
+requires a threat-model and infrastructure-contract review.
+
 ## Verification
 
 Contract tests cover multi-page completion, idempotent creation, cross-tenant
