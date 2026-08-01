@@ -30,6 +30,7 @@ SCIM_TABLE_NAME = os.environ.get("SCIM_TABLE", "")
 SCIM = boto3.resource("dynamodb").Table(SCIM_TABLE_NAME) if SCIM_TABLE_NAME else None
 DYNAMODB = boto3.client("dynamodb")
 S3 = boto3.client("s3")
+SNS = boto3.client("sns")
 
 # Tenant list reads are deliberately finite. Callers that require complete
 # security state fail closed once either bound is reached; they never authorize
@@ -161,6 +162,71 @@ _MANAGED_INTUNE_BUSINESS_UNIT_LIMIT = 500
 # jitter. Devices never submit this health state; the server derives it.
 _ENDPOINT_EVIDENCE_MAX_AGE_SECONDS = 15 * 60
 _ENDPOINT_EVIDENCE_FUTURE_SKEW_SECONDS = 5 * 60
+_ENDPOINT_DETECTION_INDEX = "EndpointDetectionTenants"
+_ENDPOINT_DETECTION_SHARDS = 16
+_ENDPOINT_DETECTION_TENANT_LIMIT = 2_000
+_ENDPOINT_ALERT_DEFINITIONS = {
+    "credential_not_configured": (
+        "medium",
+        "endpoint_sensor_not_enrolled",
+        "Managed device has no endpoint sensor credential.",
+    ),
+    "credential_revoked": (
+        "high",
+        "endpoint_sensor_credential_revoked",
+        "Endpoint sensor credential is revoked.",
+    ),
+    "fresh_report_required_after_rotation": (
+        "high",
+        "endpoint_sensor_rotation_pending",
+        "Endpoint sensor has not reported with its rotated credential.",
+    ),
+    "report_missing": (
+        "medium",
+        "endpoint_report_missing",
+        "Managed device has not submitted endpoint evidence.",
+    ),
+    "report_stale": (
+        "high",
+        "endpoint_report_stale",
+        "Endpoint evidence is outside the freshness objective.",
+    ),
+    "device_unmanaged": (
+        "critical",
+        "endpoint_device_unmanaged",
+        "Endpoint inventory reports the device as unmanaged.",
+    ),
+    "inventory_stale": (
+        "high",
+        "endpoint_inventory_stale",
+        "Endpoint management inventory is stale.",
+    ),
+    "installation_missing": (
+        "high",
+        "endpoint_installation_missing",
+        "No governed Claude Code or Codex installation was observed.",
+    ),
+    "binary_missing": (
+        "critical",
+        "endpoint_binary_missing",
+        "An expected Claude Code or Codex binary was not observed.",
+    ),
+    "process_not_observed": (
+        "high",
+        "endpoint_process_not_observed",
+        "An expected Claude Code or Codex process was not observed.",
+    ),
+    "signature_invalid": (
+        "critical",
+        "endpoint_signature_invalid",
+        "Endpoint evidence failed cryptographic signature validation.",
+    ),
+    "report_replayed": (
+        "high",
+        "endpoint_report_replayed",
+        "Endpoint evidence was replayed or delivered out of order.",
+    ),
+}
 
 # Agent decision evidence is operationally useful but never authoritative.
 # The authenticated host may report only this fixed, content-free vocabulary;
@@ -3399,6 +3465,11 @@ def _publish_discovery_snapshot(tenant, source_id, value, actor):
         "publishedBy": actor,
         "tenant_id": tenant,
     }
+    if source_kind == "endpoint":
+        # Register before the snapshot write. A harmless registry entry can be
+        # retried, while registering after commit could make a successful
+        # snapshot return an unsafe, non-repeatable failure to its publisher.
+        _register_endpoint_detection_tenant(tenant)
     arguments = {"Item": record}
     if expected == 0:
         arguments["ConditionExpression"] = "attribute_not_exists(pk)"
@@ -5696,6 +5767,28 @@ def _authoritative_endpoint_devices(tenant, *, now=None, require_current=True):
     return devices
 
 
+def _register_endpoint_detection_tenant(tenant):
+    """Put one provisioned tenant in the bounded scheduled-detection index."""
+    digest = hashlib.sha256(tenant.encode()).digest()
+    shard = digest[0] % _ENDPOINT_DETECTION_SHARDS
+    try:
+        TABLE.update_item(
+            Key=_item_key(tenant, "TENANT", "root"),
+            UpdateExpression=(
+                "SET endpoint_detection_pk = :partition, endpoint_detection_sk = :tenant"
+            ),
+            ConditionExpression="attribute_exists(pk)",
+            ExpressionAttributeValues={
+                ":partition": f"ENDPOINT_DETECTION#{shard:02d}",
+                ":tenant": tenant,
+            },
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PermissionError("tenant is not provisioned for endpoint detection") from error
+        raise
+
+
 def _endpoint_credential_view(record):
     """Project one device credential without returning its bearer digest."""
     if not record:
@@ -5719,6 +5812,7 @@ def _issue_endpoint_credential(tenant, device_id, value, actor):
         raise LookupError("device is not present in current endpoint inventory")
     if device.get("managed") is not True:
         raise PolicyConflict("endpoint credential requires a managed device")
+    _register_endpoint_detection_tenant(tenant)
     expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision")
     key = _item_key(tenant, "ENDPOINT_CREDENTIAL", device_id)
     existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
@@ -5874,6 +5968,7 @@ def _ingest_endpoint_report(event, tenant, device_id):
         raise PermissionError("endpoint key identity mismatch")
     expected_signature = hmac.new(token.encode(), signed_payload, hashlib.sha256).hexdigest()
     if not secrets.compare_digest(expected_signature, signature):
+        _record_endpoint_event_alert(tenant, device_id, "signature_invalid")
         _audit(
             tenant,
             "endpoint_evidence_rejected",
@@ -5896,6 +5991,7 @@ def _ingest_endpoint_report(event, tenant, device_id):
         ):
             return {"accepted": True, "duplicate": True, "deviceId": device_id}
         if observed_at <= int(existing.get("observedAt", 0)):
+            _record_endpoint_event_alert(tenant, device_id, "report_replayed")
             raise PolicyConflict("endpoint report replay or reordering detected")
     revision = int(existing.get("revision", 0)) if existing else 0
     record = {
@@ -5960,8 +6056,7 @@ def _endpoint_evidence_health(tenant, *, now=None):
         # the tenant-bound evidence record for reconciliation, but omit it from
         # this operational response to minimise identity-data propagation.
         health_installations = [
-            {key: value for key, value in item.items() if key != "userId"}
-            for item in installations
+            {key: value for key, value in item.items() if key != "userId"} for item in installations
         ]
         if credential_view["status"] == "not_configured":
             reasons.append("credential_not_configured")
@@ -6028,6 +6123,327 @@ def _endpoint_evidence_health(tenant, *, now=None):
         },
         "items": items,
     }
+
+
+def _endpoint_alert_id(tenant, device_id, reason_code):
+    """Return a stable opaque identifier used to deduplicate one detection."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"aai:{tenant}:{device_id}:{reason_code}"))
+
+
+def _endpoint_alert_view(item):
+    """Project a content-minimised endpoint alert for operator APIs."""
+    return {
+        "id": item.get("id"),
+        "source": "endpoint_evidence",
+        "severity": item.get("severity"),
+        "type": item.get("type"),
+        "deviceId": item.get("deviceId"),
+        "deploymentId": "",
+        "message": item.get("message"),
+        "reasonCode": item.get("reasonCode"),
+        "status": item.get("status"),
+        "acknowledged": item.get("status") in {"acknowledged", "resolved"},
+        "revision": int(item.get("revision", 0)),
+        "firstObservedAt": int(item.get("firstObservedAt", 0)),
+        "lastObservedAt": int(item.get("lastObservedAt", 0)),
+        "occurrenceCount": int(item.get("occurrenceCount", 0)),
+        "acknowledgedAt": item.get("acknowledgedAt"),
+        "acknowledgedBy": item.get("acknowledgedBy"),
+        "acknowledgementReason": item.get("acknowledgementReason"),
+        "resolvedAt": item.get("resolvedAt"),
+        "deliveryStatus": item.get("deliveryStatus", "pending"),
+        "deliveredAt": item.get("deliveredAt"),
+    }
+
+
+def _publish_endpoint_alert(tenant, alert):
+    """Deliver one normalized alert to the durable AWS operations channel.
+
+    SNS/SQS is the built-in control-plane channel, not a claim of Splunk
+    delivery. The deterministic alert and revision let consumers deduplicate
+    SNS's intentional at-least-once delivery.
+    """
+    topic_arn = os.environ.get("SECURITY_ALERTS_TOPIC_ARN", "")
+    if not topic_arn:
+        return False
+    SNS.publish(
+        TopicArn=topic_arn,
+        Subject=f"AAI endpoint alert: {alert['type']}",
+        Message=json.dumps(
+            {
+                "schemaVersion": 1,
+                "tenantId": tenant,
+                "alertId": alert["id"],
+                "revision": int(alert["revision"]),
+                "source": "endpoint_evidence",
+                "severity": alert["severity"],
+                "type": alert["type"],
+                "deviceId": alert["deviceId"],
+                "reasonCode": alert["reasonCode"],
+                "observedAt": int(alert["lastObservedAt"]),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        MessageAttributes={
+            "tenantId": {"DataType": "String", "StringValue": tenant},
+            "severity": {"DataType": "String", "StringValue": alert["severity"]},
+            "source": {"DataType": "String", "StringValue": "endpoint_evidence"},
+        },
+    )
+    return True
+
+
+def _deliver_pending_endpoint_alerts(tenant):
+    """Retry undelivered active alerts without losing their durable record."""
+    for alert in _list(tenant, "ALERT", consistent_read=True):
+        if (
+            alert.get("source") != "endpoint_evidence"
+            or alert.get("status") == "resolved"
+            or alert.get("deliveryStatus") == "delivered"
+        ):
+            continue
+        try:
+            if not _publish_endpoint_alert(tenant, alert):
+                continue
+            delivered = {
+                **alert,
+                "deliveryStatus": "delivered",
+                "deliveredAt": int(time.time()),
+                "revision": int(alert.get("revision", 0)) + 1,
+            }
+            TABLE.put_item(
+                Item=delivered,
+                ConditionExpression="revision = :expected_revision",
+                ExpressionAttributeValues={":expected_revision": int(alert.get("revision", 0))},
+            )
+        except Exception:
+            # The durable alert remains pending and the scheduled reconciler
+            # retries it. Never include provider exception text or alert data
+            # in Lambda logs at this credential-bearing boundary.
+            print(json.dumps({"warning": "endpoint alert delivery remains pending"}))
+
+
+def _open_endpoint_alert(tenant, device_id, reason_code, *, now, reopen_acknowledged=False):
+    """Create or reopen one deduplicated endpoint alert."""
+    definition = _ENDPOINT_ALERT_DEFINITIONS.get(reason_code)
+    if not definition:
+        return None
+    severity, alert_type, message = definition
+    alert_id = _endpoint_alert_id(tenant, device_id, reason_code)
+    key = _item_key(tenant, "ALERT", alert_id)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if existing and existing.get("status") in {"open", "acknowledged"}:
+        if existing.get("status") == "open" or not reopen_acknowledged:
+            return existing
+    revision = int(existing.get("revision", 0)) if existing else 0
+    record = {
+        **key,
+        "tenant_id": tenant,
+        "id": alert_id,
+        "source": "endpoint_evidence",
+        "severity": severity,
+        "type": alert_type,
+        "deviceId": device_id,
+        "message": message,
+        "reasonCode": reason_code,
+        "status": "open",
+        "revision": revision + 1,
+        "firstObservedAt": int(existing.get("firstObservedAt", now)) if existing else now,
+        "lastObservedAt": now,
+        "occurrenceCount": int(existing.get("occurrenceCount", 0)) + 1 if existing else 1,
+        "deliveryStatus": "pending",
+        "reopenedAt": now if existing else None,
+    }
+    arguments = {"Item": record}
+    if existing:
+        arguments.update(
+            {
+                "ConditionExpression": "revision = :expected_revision",
+                "ExpressionAttributeValues": {":expected_revision": revision},
+            }
+        )
+    else:
+        arguments["ConditionExpression"] = "attribute_not_exists(pk)"
+    try:
+        TABLE.put_item(**arguments)
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("endpoint alert changed concurrently") from error
+        raise
+    _audit(
+        tenant,
+        "endpoint_alert_opened" if not existing else "endpoint_alert_reopened",
+        "system:endpoint-detection",
+        {
+            "alert_id": alert_id,
+            "device_id": device_id,
+            "reason_code": reason_code,
+            "severity": severity,
+            "revision": revision + 1,
+        },
+    )
+    return record
+
+
+def _reconcile_endpoint_alerts(tenant, health, *, now=None):
+    """Materialize current server-derived endpoint health as durable alerts."""
+    current_time = int(time.time()) if now is None else int(now)
+    active_keys = set()
+    for device in health.get("items", []):
+        device_id = _bounded_identifier(device.get("deviceId"), "deviceId")
+        reasons = set(device.get("reasonCodes", []))
+        # One unenrolled device needs one actionable alert, not a second
+        # derivative "report missing" alert for the same root condition.
+        if "credential_not_configured" in reasons:
+            reasons.discard("report_missing")
+        for reason_code in sorted(reasons & set(_ENDPOINT_ALERT_DEFINITIONS)):
+            active_keys.add((device_id, reason_code))
+            _open_endpoint_alert(tenant, device_id, reason_code, now=current_time)
+    for alert in _list(tenant, "ALERT", consistent_read=True):
+        if alert.get("source") != "endpoint_evidence" or alert.get("status") == "resolved":
+            continue
+        identity = (alert.get("deviceId"), alert.get("reasonCode"))
+        # Event alerts represent observed attacks rather than continuous
+        # posture and require acknowledgement; health reconciliation must not
+        # silently resolve them on the next clean report.
+        if alert.get("reasonCode") in {"signature_invalid", "report_replayed"}:
+            continue
+        if identity in active_keys:
+            continue
+        revision = int(alert.get("revision", 0))
+        resolved = {
+            **alert,
+            "status": "resolved",
+            "resolvedAt": current_time,
+            "resolvedBy": "system:endpoint-detection",
+            "revision": revision + 1,
+        }
+        try:
+            TABLE.put_item(
+                Item=resolved,
+                ConditionExpression="revision = :expected_revision",
+                ExpressionAttributeValues={":expected_revision": revision},
+            )
+        except Exception as error:
+            if _is_conditional_conflict(error):
+                raise PolicyConflict("endpoint alert changed concurrently") from error
+            raise
+        _audit(
+            tenant,
+            "endpoint_alert_resolved",
+            "system:endpoint-detection",
+            {"alert_id": alert.get("id"), "device_id": alert.get("deviceId")},
+        )
+    _deliver_pending_endpoint_alerts(tenant)
+    return [
+        _endpoint_alert_view(item)
+        for item in sorted(
+            _list(tenant, "ALERT", consistent_read=True),
+            key=lambda value: (int(value.get("lastObservedAt", 0)), str(value.get("id", ""))),
+            reverse=True,
+        )
+        if item.get("source") == "endpoint_evidence"
+    ]
+
+
+def _record_endpoint_event_alert(tenant, device_id, reason_code):
+    """Retain one authenticated sensor security event without changing its denial."""
+    try:
+        _open_endpoint_alert(
+            tenant,
+            device_id,
+            reason_code,
+            now=int(time.time()),
+            reopen_acknowledged=True,
+        )
+        _deliver_pending_endpoint_alerts(tenant)
+    except Exception:
+        print(json.dumps({"warning": "endpoint security event alert persistence failed"}))
+
+
+def _acknowledge_endpoint_alert(tenant, alert_id, body, actor):
+    """Acknowledge one live alert with optimistic concurrency and rationale."""
+    if not isinstance(body, dict) or set(body) != {"expectedRevision", "reason"}:
+        raise ValueError("alert acknowledgement has an invalid schema")
+    alert_id = _bounded_identifier(alert_id, "alertId")
+    expected = _discovery_integer(body.get("expectedRevision"), "expectedRevision", minimum=1)
+    reason = _bounded_text(body.get("reason"), "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("reason must contain at least 20 characters")
+    if re.search(
+        r"(?i)(authorization\s*:\s*bearer|-----BEGIN [A-Z ]+PRIVATE KEY-----|"
+        r"(?:token|secret|password|api[_ -]?key)\s*[:=]\s*\S+)",
+        reason,
+    ):
+        raise ValueError("reason must not contain credential material")
+    key = _item_key(tenant, "ALERT", alert_id)
+    alert = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if not alert or alert.get("source") != "endpoint_evidence":
+        raise LookupError("endpoint alert not found")
+    if int(alert.get("revision", 0)) != expected:
+        raise PolicyConflict("endpoint alert revision changed")
+    if alert.get("status") != "open":
+        raise PolicyConflict("only an open endpoint alert can be acknowledged")
+    acknowledged = {
+        **alert,
+        "status": "acknowledged",
+        "acknowledgedAt": int(time.time()),
+        "acknowledgedBy": actor,
+        "acknowledgementReason": reason,
+        "revision": expected + 1,
+    }
+    try:
+        TABLE.put_item(
+            Item=acknowledged,
+            ConditionExpression="revision = :expected_revision",
+            ExpressionAttributeValues={":expected_revision": expected},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("endpoint alert revision changed") from error
+        raise
+    _audit(
+        tenant,
+        "endpoint_alert_acknowledged",
+        actor,
+        {"alert_id": alert_id, "device_id": alert.get("deviceId"), "revision": expected + 1},
+    )
+    return _endpoint_alert_view(acknowledged)
+
+
+def _endpoint_detection_cycle():
+    """Reconcile every registered endpoint tenant on the five-minute schedule."""
+    tenants = []
+    for shard in range(_ENDPOINT_DETECTION_SHARDS):
+        result = TABLE.query(
+            IndexName=_ENDPOINT_DETECTION_INDEX,
+            KeyConditionExpression=Key("endpoint_detection_pk").eq(
+                f"ENDPOINT_DETECTION#{shard:02d}"
+            ),
+            Limit=250,
+        )
+        if result.get("LastEvaluatedKey"):
+            raise RuntimeError("endpoint detection tenant shard exceeds its safe bound")
+        tenants.extend(result.get("Items", []))
+        if len(tenants) > _ENDPOINT_DETECTION_TENANT_LIMIT:
+            raise RuntimeError("endpoint detection tenant inventory exceeds its safe bound")
+    processed = 0
+    failed = 0
+    for registration in tenants:
+        tenant = registration.get("endpoint_detection_sk")
+        if not isinstance(tenant, str) or registration.get("pk") != f"TENANT#{tenant}":
+            failed += 1
+            continue
+        try:
+            health = _endpoint_evidence_health(tenant)
+            _reconcile_endpoint_alerts(tenant, health)
+            processed += 1
+        except Exception:
+            failed += 1
+    if failed:
+        raise RuntimeError("one or more endpoint tenant detection cycles failed")
+    return {"processedTenants": processed, "failedTenants": 0}
 
 
 def _discovery_counts(instances):
@@ -7251,6 +7667,14 @@ def _renew_agent_session(tenant, session, current_token):
 
 def handler(event, context):
     """Route one API Gateway request through agent or operator trust boundaries."""
+    # Scheduled reconciliation is an internal invocation contract. Let its
+    # failures escape Lambda so EventBridge performs bounded retries and moves
+    # exhausted events to the monitored DLQ; an HTTP-shaped 500 would look like
+    # a successful invocation to EventBridge and silently disable that safety.
+    if isinstance(event, dict) and event.get("source") == "aai.endpoint-detection":
+        if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
+            raise ValueError("endpoint detection schedule event is invalid")
+        return _endpoint_detection_cycle()
     try:
         method, path = _method_path(event)
         if method == "OPTIONS":
@@ -7648,12 +8072,37 @@ def handler(event, context):
                     "audit": "AUDIT",
                     "approvals": "APPROVAL",
                 }[parts[0]]
-                items = (
-                    _fleet(tenant).get("mcpServers" if parts[0] == "mcp-servers" else parts[0], [])
-                    if parts[0]
-                    in {"groups", "agents", "health", "policies", "drift", "skills", "mcp-servers"}
-                    else _list(tenant, key)
-                )
+                if parts[0] == "alerts":
+                    _reconcile_endpoint_alerts(tenant, _endpoint_evidence_health(tenant))
+                    items = [
+                        _endpoint_alert_view(item)
+                        for item in _list(tenant, "ALERT", consistent_read=True)
+                        if item.get("source") == "endpoint_evidence"
+                    ]
+                    items.sort(
+                        key=lambda item: (
+                            int(item.get("lastObservedAt", 0)),
+                            str(item.get("id", "")),
+                        ),
+                        reverse=True,
+                    )
+                else:
+                    items = (
+                        _fleet(tenant).get(
+                            "mcpServers" if parts[0] == "mcp-servers" else parts[0], []
+                        )
+                        if parts[0]
+                        in {
+                            "groups",
+                            "agents",
+                            "health",
+                            "policies",
+                            "drift",
+                            "skills",
+                            "mcp-servers",
+                        }
+                        else _list(tenant, key)
+                    )
                 items = _filter_enterprise_items(tenant, event, key, items)
                 if parts[0] == "approvals":
                     items = sorted(
@@ -7696,7 +8145,19 @@ def handler(event, context):
                         403,
                         {"error": "endpoint evidence requires a tenant operator role"},
                     )
-                return _response(200, _endpoint_evidence_health(tenant))
+                health = _endpoint_evidence_health(tenant)
+                _reconcile_endpoint_alerts(tenant, health)
+                return _response(200, health)
+            if (
+                method == "POST"
+                and len(parts) == 3
+                and parts[0] == "alerts"
+                and parts[2] == "acknowledge"
+            ):
+                return _response(
+                    200,
+                    _acknowledge_endpoint_alert(tenant, parts[1], _body(event), actor),
+                )
             if (
                 len(parts) == 4
                 and parts[:2] == ["endpoint-evidence", "devices"]
