@@ -122,8 +122,12 @@ with KMS. Effective-policy retrieval rechecks agent lifecycle, assignment,
 base version/content hash and server-clock expiry; expiry, revocation or stale
 scope restores the normal signed policy and records lifecycle evidence.
 Contracts cover overlap, role denial, secrets, immutable-field weakening,
-transition replay, signing and expiry. Live deployed acceptance remains
-required before these rows are described as complete for an enterprise pilot.
+transition replay, signing and expiry. The 2026-08-01 AWS acceptance exercised
+independent approval, KMS-signed activation, exact-agent delivery and
+server-clock restoration against the deployed stack; see
+[time-limited policy exception acceptance](time-limited-policy-exception-acceptance-2026-08-01.md).
+Endpoint convergence and configured runtime attestation remain separate pilot
+requirements and are not claimed by this evidence.
 
 ## Current delivery slice — Entra identity and trust
 
