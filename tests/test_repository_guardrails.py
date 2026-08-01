@@ -109,3 +109,16 @@ def test_cdk_exception_is_exact_pinned_monitored_and_unexpired() -> None:
     assert expiry_match is not None
     assert date.today() <= date.fromisoformat(expiry_match.group(1))
     assert "aws/aws-cdk#38410" in acceptance
+
+
+def test_aws_deploy_routes_through_the_persistent_identity_guard() -> None:
+    """A routine deployment cannot regress to ephemeral Entra shell variables."""
+    package = json.loads(
+        (ROOT / "infra/aws-control-plane/package.json").read_text(encoding="utf-8")
+    )
+    assert package["scripts"]["deploy"] == (
+        "python3 ../../scripts/deploy_aws_control_plane.py deploy"
+    )
+    guard = (ROOT / "scripts/deploy_aws_control_plane.py").read_text(encoding="utf-8")
+    assert "stack has Entra configured but its persistent deployment manifest is missing" in guard
+    assert '"--with-decryption"' in guard

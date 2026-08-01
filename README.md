@@ -45,6 +45,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [AWS-managed Entra discovery acceptance — 2026-07-30](docs/managed-discovery-acceptance-2026-07-30.md)
 - [AWS-managed GitHub discovery acceptance — 2026-07-30](docs/managed-github-discovery-acceptance-2026-07-30.md)
 - [Microsoft Entra SCIM lifecycle runbook](docs/entra-scim-runbook.md)
+- [Persistent Microsoft Entra deployment guard](docs/entra-deployment-guard-design.md)
 - [Emergency access and access certification runbook](docs/access-governance-runbook.md)
 - [Delegated administration](docs/delegated-administration.md)
 - [Product Owner enterprise Claude Code rollout review](docs/product-owner-enterprise-claude-rollout-review-2026-07-27.md)

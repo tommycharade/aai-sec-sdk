@@ -30,20 +30,30 @@ Create a random SCIM bearer of at least 32 characters and store it as either a
 raw Secrets Manager `SecretString` or JSON with one `token` field. Restrict
 read access to the generated SCIM Lambda role.
 
-Deploy all OIDC variables plus the SCIM secret name:
+Create a strict secret-free deployment manifest from
+`infra/aws-control-plane/entra-deployment.example.json`. Keep the populated
+file outside the repository. Run read-only preflight, explicitly confirm the
+retained Conditional Access review, and persist the references before deploy:
 
 ```bash
-ENTRA_TENANT_ID=<entra-directory-uuid> \
-ENTRA_CLIENT_ID=<entra-application-client-id> \
-ENTRA_CLIENT_SECRET_NAME=<oidc-secret-name> \
-ENTRA_AAI_TENANT_ID=<provisioned-aai-tenant-id> \
-ENTRA_SCIM_TOKEN_SECRET_NAME=<scim-bearer-secret-name> \
-ENTRA_STRONG_AUTH_ENFORCED=true \
+python3 scripts/deploy_aws_control_plane.py check \
+  --config /secure/path/entra-deployment.json \
+  --profile p1 --region eu-west-2
+
+python3 scripts/deploy_aws_control_plane.py configure \
+  --config /secure/path/entra-deployment.json \
+  --confirm-conditional-access \
+  --profile p1 --region eu-west-2
+
+cd infra/aws-control-plane
 AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 ```
 
 Record the `MicrosoftEntraScimEndpoint` stack output. The stack rejects a SCIM
-secret configured without the complete Entra OIDC binding.
+secret configured without the complete Entra OIDC binding. The supported
+deployment path reloads the encrypted manifest on every run and refuses a
+configured stack whose manifest is missing. See the
+[deployment guard design](entra-deployment-guard-design.md).
 
 ## Entra enterprise application setup
 
