@@ -774,6 +774,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../hosted-endpoint-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hosted endpoint evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -1993,6 +2020,11 @@ process and executable, proves that temporary paths and the synthetic secret do
 not enter the signed report, assembles against an authoritative synthetic
 device inventory, passes the existing endpoint normalizer, and rejects a
 changed signed report.</p>
+<p><code>tests/test_endpoint_evidence_transport.py</code> and the hosted endpoint contracts
+in <code>tests/test_aws_lambda_contract.py</code> prove HTTPS-only secret-safe transport,
+MDM-bound issuance, HMAC verification, idempotent retry, cross-tenant denial,
+tamper denial and server-derived stale posture. They are software/API evidence;
+real MDM rollout remains separate acceptance.</p>
 <p><code>scripts/test_aws_entra_scim.py</code> is the live Microsoft Entra provisioning
 acceptance command. It discovers Entra and SCIM status from the selected
 CloudFormation stack, resolves the dedicated bearer directly from Secrets

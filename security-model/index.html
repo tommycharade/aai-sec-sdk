@@ -906,6 +906,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../hosted-endpoint-evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hosted endpoint evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -2870,7 +2897,10 @@ to one authoritative MDM device, rejects stale, revoked, duplicate, changed or
 unknown reports, and creates one complete fleet input for atomic publication.
 The HMAC is source authentication, not hardware attestation; MDM administrators,
 endpoint root compromise and stolen device secrets remain deployment risks.
-See <a href="../endpoint-evidence-publisher-design/">Endpoint evidence publisher</a>.</p>
+See <a href="../endpoint-evidence-publisher-design/">Endpoint evidence publisher</a>.
+The <a href="../hosted-endpoint-evidence/">hosted endpoint evidence channel</a> stores only
+credential digests, binds reports to current MDM devices, rejects altered,
+stale, replayed and cross-tenant evidence, and derives health server-side.</p>
 
 
 
