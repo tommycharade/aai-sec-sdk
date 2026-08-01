@@ -155,5 +155,8 @@ def test_recovery_iac_exposes_operator_inputs_and_separates_roles() -> None:
     assert 'ServicePrincipal("batchoperations.s3.amazonaws.com")' in stack
     assert 'ServicePrincipal("s3.amazonaws.com")' in stack
     assert 'metrics: { status: "Enabled" }' in stack
+    assert "priority: 1" in stack
+    assert 'filter: { prefix: "" }' in stack
+    assert 'deleteMarkerReplication: { status: "Disabled" }' in stack
     assert "REPLICATION_OPERATION_FAILED_REPLICATION" in stack
     assert "REPLICATION_OPERATION_NOT_TRACKED" in stack

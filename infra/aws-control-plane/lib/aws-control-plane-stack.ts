@@ -332,6 +332,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
         rules: [
           {
             id: "replicate-audit-to-recovery-region",
+            // Metrics require the V2 replication schema. Keep the empty
+            // prefix explicit so every immutable audit version is eligible;
+            // delete markers are not evidence and remain excluded.
+            priority: 1,
+            filter: { prefix: "" },
+            deleteMarkerReplication: { status: "Disabled" },
             status: "Enabled",
             destination: {
               bucket: auditReplicaArn,
