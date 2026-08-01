@@ -505,4 +505,7 @@ device file from the fixed Microsoft Graph v1.0 managed-devices query with only
 opaque device/user IDs and optional reviewed business-unit mappings.
 `publish_discovery_generation.py` performs the bounded three-phase upload. See
 [Endpoint evidence publisher](endpoint-evidence-publisher-design.md) for the
-manifest, key, privilege and freshness boundaries.
+manifest, key, privilege and freshness boundaries, and
+[hosted endpoint evidence](hosted-endpoint-evidence.md) for credential,
+ingestion and health APIs. The service derives health; endpoint reports never
+carry authority or a submitted health label.

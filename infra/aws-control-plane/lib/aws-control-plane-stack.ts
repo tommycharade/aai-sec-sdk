@@ -562,6 +562,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
     // Agent enrollment and short-lived session calls are authenticated by the
     // handler with one-time/expiring credentials, not by an operator JWT.
     api.addRoutes({ path: "/agent/{proxy+}", methods: [apigwv2.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration("AgentIntegration", handler) });
+    // Endpoint sensors authenticate with a per-device bearer that also signs
+    // the exact path-free payload. Cognito operator tokens are never accepted
+    // on this machine ingestion boundary.
+    api.addRoutes({ path: "/endpoint-evidence/{proxy+}", methods: [apigwv2.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration("EndpointEvidenceIntegration", handler) });
     // Discovery connectors authenticate with a revocable source-scoped bearer
     // in the handler. They are deliberately isolated from operator JWT routes.
     api.addRoutes({ path: "/discovery-ingest/{proxy+}", methods: [apigwv2.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration("DiscoveryIngestIntegration", handler) });
