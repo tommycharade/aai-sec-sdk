@@ -721,6 +721,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../endpoint-detection-response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint detection and response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -52350,6 +52377,12 @@ manifest, key, privilege and freshness boundaries, and
 <a href="../hosted-endpoint-evidence/">hosted endpoint evidence</a> for credential,
 ingestion and health APIs. The service derives health; endpoint reports never
 carry authority or a submitted health label.</p>
+<p><code>GET /enterprise/alerts</code> reconciles and returns content-minimised endpoint
+detections to authorized security operators. <code>POST
+/enterprise/alerts/{alertId}/acknowledge</code> requires <code>incident_response</code>, an exact
+live revision and a redaction-safe investigation rationale. Acknowledgement is
+ownership evidence, not remediation. See <a href="../endpoint-detection-response/">Endpoint detection and
+response</a>.</p>
 
 
 

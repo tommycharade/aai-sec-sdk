@@ -933,6 +933,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../endpoint-detection-response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint detection and response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -2900,7 +2927,11 @@ endpoint root compromise and stolen device secrets remain deployment risks.
 See <a href="../endpoint-evidence-publisher-design/">Endpoint evidence publisher</a>.
 The <a href="../hosted-endpoint-evidence/">hosted endpoint evidence channel</a> stores only
 credential digests, binds reports to current MDM devices, rejects altered,
-stale, replayed and cross-tenant evidence, and derives health server-side.</p>
+stale, replayed and cross-tenant evidence, and derives health server-side.
+Endpoint detections are also server-derived. A device cannot choose severity,
+alert state, acknowledgement or containment. Scheduled reconciliation uses a
+deployment-owned sharded tenant index. Notification failure leaves a durable
+pending alert for retry; it never converts the health condition into success.</p>
 
 
 
