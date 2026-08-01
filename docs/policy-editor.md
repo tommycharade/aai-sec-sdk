@@ -101,6 +101,15 @@ Before activation, display:
 - redaction and content-capture behaviour;
 - groups and agents affected by the policy.
 
+The pending-version view also shows a semantic authority diff and a bounded
+historical simulation. The diff calls out newly expanded or restricted
+authority, approval changes, limits, credential/isolation requirements and
+data-capture changes. Simulation uses only retained redacted evidence. It shows
+determinate coverage and never guesses the result of a redacted shell command
+or an MCP call whose server identity was not retained. The activation dialogue
+opens only after a simulation has been run for the exact pending content hash
+and selected lookback window.
+
 Saving a policy is not the same as activating it. Activation should be an
 explicit, audited operation with validation, version selection and a clear
 rollback path.

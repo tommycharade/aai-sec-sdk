@@ -323,7 +323,13 @@ credentials, isolation, data capture/redaction, and review/versioning. The
 effective-policy preview shows allowed, denied and approval-required actions,
 limits, requirements and affected groups/agents before saving. Expert users can
 open advanced JSON, but it is schema-validated and cannot bypass immutable SDK
-safeguards. On **Enterprise fleet**, the posture strip first shows total groups,
+safeguards. A pending policy presents a semantic authority diff rather than a
+raw JSON comparison. The operator can run a bounded 7, 30 or 90-day historical
+simulation and sees predicted changes, determinate coverage, truncation and
+redaction-driven uncertainty. A staged version cannot open the UI activation
+dialogue until a simulation exists for its exact content hash and selected
+window. This UI gate supports review; the host still makes every live decision
+and convergence is measured separately. On **Enterprise fleet**, the posture strip first shows total groups,
 enrolled agents, healthy heartbeats, and unassigned agents. Create an agent
 group, select its policy, inspect enrolled Claude Code or Codex agents, and use
 **Assign agents** to open the controlled bulk workflow. Select up to 100

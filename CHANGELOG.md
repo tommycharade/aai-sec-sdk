@@ -1,5 +1,13 @@
 # Changelog
 
+- Added tenant-bound, non-mutating historical policy simulation over a bounded
+  redacted decision window, with explicit indeterminate outcomes for evidence
+  that cannot be reconstructed.
+- Replaced top-level policy section comparison with a typed semantic authority
+  diff covering tools, commands, MCP servers, skills, approvals, limits,
+  credentials, isolation and data capture; the UI requires a current simulation
+  before opening staged-policy activation.
+
 - Added independently approved, immutable automatic-response rules for
   server-derived endpoint detections. Rules have a typed UI, read-only impact
   preview, exact Claude Code/Codex host scope, bounded hourly actions,

@@ -2750,6 +2750,199 @@ def test_aws_policy_governance_requires_independent_review_and_atomic_activation
     assert "must not contain secrets" in json.loads(secret_policy["body"])["error"]
 
 
+def test_policy_semantic_diff_and_historical_simulation_are_bounded_and_honest(
+    monkeypatch: Any,
+) -> None:
+    """A draft predicts only decisions supported by retained redacted evidence."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-policy-simulation"
+    other_tenant = "tenant-policy-simulation-other"
+    now = 2_130_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    for tenant_id in (tenant, other_tenant):
+        table.put_item(Item=module._item_key(tenant_id, "TENANT", "root") | {"id": tenant_id})
+    base_configuration = {
+        "policy": {"allowedPrincipals": ["developer"], "denyByDefault": True},
+        "tools": {"allowed": ["Read", "Write"], "denied": []},
+        "approvals": {"requiredFor": [], "ttlSeconds": 120},
+        "budgets": {"maxActions": 20},
+        "audit": {"captureToolContent": False, "redactSensitiveData": True},
+        "telemetry": {"captureToolContent": False, "redactSensitiveData": True},
+        "claudeCode": {
+            "allowedBuiltInTools": ["Bash", "Read", "Write"],
+            "allowedMcpServers": ["github"],
+        },
+    }
+    candidate_configuration = {
+        **base_configuration,
+        "tools": {"allowed": ["Read"], "denied": ["Write"]},
+        "budgets": {"maxActions": 40},
+        "audit": {"captureToolContent": True, "redactSensitiveData": True},
+        "claudeCode": {
+            "allowedBuiltInTools": ["Bash", "Read"],
+            "allowedMcpServers": [],
+        },
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-a")
+        | {
+            "tenant_id": tenant,
+            "id": "policy-a",
+            "organization_id": "org-a",
+            "name": "Policy A",
+            "configuration": base_configuration,
+            "version": 1,
+            "activeVersion": 1,
+            "latestVersion": 2,
+            "governanceState": "draft",
+            "pendingVersion": 2,
+            "pendingAuthor": "author-a",
+            "governance_schema_version": 1,
+            "createdAt": now - 1_000,
+            "author": "author-a",
+        }
+    )
+    for version, state, configuration in (
+        (1, "active", base_configuration),
+        (2, "draft", candidate_configuration),
+    ):
+        table.put_item(
+            Item=module._item_key(
+                tenant,
+                "POLICY_VERSION",
+                module._policy_version_identifier("policy-a", version),
+            )
+            | {
+                "tenant_id": tenant,
+                "id": module._policy_version_identifier("policy-a", version),
+                "policy_id": "policy-a",
+                "organization_id": "org-a",
+                "version": version,
+                "base_version": max(0, version - 1),
+                "name": f"Policy A v{version}",
+                "configuration": configuration,
+                "content_hash": module._configuration_hash(configuration),
+                "state": state,
+                "author": "author-a",
+                "created_at": now - 500,
+            }
+        )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-a")
+        | {"id": "group-a", "policyId": "policy-a", "agent_keys": ["deployment-a:agent-a"]}
+    )
+    decisions = (
+        ("read", "claude_native", "Read", "project_file", "allowed", now - 10),
+        ("write", "claude_native", "Write", "project_file", "allowed", now - 20),
+        ("bash", "claude_native", "Bash", "shell_command", "allowed", now - 30),
+        ("mcp", "mcp", "issues.create", "mcp_tool", "allowed", now - 40),
+        ("old", "claude_native", "Write", "project_file", "allowed", now - 91 * 86_400),
+    )
+    for identity, source, tool, resource, decision, observed_at in decisions:
+        table.put_item(
+            Item=module._item_key(tenant, "DECISION", identity)
+            | {
+                "id": identity,
+                "policy_id": "policy-a",
+                "policy_version": 1,
+                "source": source,
+                "tool_name": tool,
+                "resource_kind": resource,
+                "decision": decision,
+                "observed_at": observed_at,
+                "timeline_pk": f"TENANT#{tenant}#DECISION",
+                "timeline_sk": f"{observed_at:010d}#{identity}",
+            }
+        )
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-author"],
+        "sub": "author-a",
+    }
+    approver = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-approver"],
+        "sub": "approver-b",
+    }
+    fleet = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-c",
+    }
+    version_response = _invoke(
+        module,
+        _event("/enterprise/policies/policy-a/versions/2", "GET", claims=approver),
+    )
+    assert version_response["statusCode"] == 200
+    semantic = json.loads(version_response["body"])["changeSummary"]
+    assert semantic["summary"]["authorityExpanded"] == 1
+    assert semantic["summary"]["authorityRestricted"] >= 3
+    assert semantic["summary"]["dataCaptureChanges"] == 1
+    assert any(
+        item["field"] == "claudeCode.allowedMcpServers" and item["effect"] == "authority_restricted"
+        for item in semantic["changes"]
+    )
+
+    path = "/enterprise/policies/policy-a/versions/2/simulate"
+    before_keys = set(table.items)
+    first = _invoke(module, _event(path, "POST", body={"lookbackDays": 90}, claims=author))
+    second = _invoke(module, _event(path, "POST", body={"lookbackDays": 90}, claims=approver))
+    assert first["statusCode"] == second["statusCode"] == 200
+    result = json.loads(first["body"])
+    assert result["mutated"] is False
+    assert result["scope"] == {
+        "groupIds": ["group-a"],
+        "agentKeys": ["deployment-a:agent-a"],
+    }
+    assert result["counts"] == {
+        "historical": 4,
+        "determined": 2,
+        "indeterminate": 2,
+        "changed": 1,
+        "predictedAllowed": 1,
+        "predictedDenied": 1,
+        "predictedApprovalRequired": 0,
+    }
+    assert result["coveragePercent"] == 50.0
+    assert result["transitions"] == {
+        "allowed_to_allowed": 1,
+        "allowed_to_denied": 1,
+        "allowed_to_indeterminate": 2,
+    }
+    assert json.loads(second["body"])["simulationHash"] == result["simulationHash"]
+    assert {
+        item["reasonCode"]
+        for item in result["items"]
+        if item["predictedDecision"] == "indeterminate"
+    } == {"mcp_server_identity_unavailable", "redacted_command_content"}
+    assert set(table.items) == before_keys
+
+    assert (
+        _invoke(module, _event(path, "POST", body={"lookbackDays": 90}, claims=fleet))["statusCode"]
+        == 403
+    )
+    assert (
+        _invoke(module, _event(path, "POST", body={"lookbackDays": 91}, claims=author))[
+            "statusCode"
+        ]
+        == 400
+    )
+    cross_tenant = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={"lookbackDays": 30},
+            claims={
+                "custom:tenant_id": other_tenant,
+                "cognito:groups": ["policy-author"],
+                "sub": "other-author",
+            },
+        ),
+    )
+    assert cross_tenant["statusCode"] == 404
+
+
 def test_aws_policy_governance_migrates_existing_active_authority(monkeypatch: Any) -> None:
     """Legacy active policies gain an immutable ledger without interrupting coverage."""
     module, table = _load_handler(monkeypatch)

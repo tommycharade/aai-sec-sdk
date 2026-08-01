@@ -40,6 +40,7 @@ _MAX_LIST_PAGES = 8
 _MAX_LIST_ITEMS = 2_000
 _DECISION_WINDOW_LIMIT = 250
 _DECISION_TIMELINE_INDEX = "DecisionTimeline"
+_POLICY_SIMULATION_MAX_LOOKBACK_DAYS = 90
 _ATTESTATION_MANIFEST_FIELDS = frozenset(
     {
         "schemaVersion",
@@ -299,8 +300,8 @@ _ROLE_CAPABILITIES = {
             "response_rule_write",
         }
     ),
-    "policy-author": frozenset({"policy_write"}),
-    "policy-approver": frozenset({"approval_decision", "policy_approval"}),
+    "policy-author": frozenset({"policy_write", "policy_simulation"}),
+    "policy-approver": frozenset({"approval_decision", "policy_approval", "policy_simulation"}),
     "fleet-operator": frozenset({"fleet_write"}),
     "incident-responder": frozenset({"incident_response"}),
     "auditor": frozenset({"access_certification_read"}),
@@ -961,6 +962,11 @@ def _required_mutation_capability(path):
         normalized,
     ):
         return "policy_approval"
+    if re.fullmatch(
+        r"/enterprise/policies/[^/]+/versions/[1-9][0-9]*/simulate",
+        normalized,
+    ):
+        return "policy_simulation"
     if normalized.startswith("/enterprise/policies"):
         return "policy_write"
     if normalized.startswith("/enterprise/deployments/") and normalized.endswith(
@@ -2694,6 +2700,233 @@ def _policy_version_identifier(policy_id, version):
     return f"{policy_id}:{version:020d}"
 
 
+def _policy_object(configuration, section):
+    """Return one policy section when it is an object, otherwise an empty view."""
+    value = configuration.get(section) if isinstance(configuration, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def _policy_string_set(configuration, section, field):
+    """Return a normalized set without letting malformed legacy data imply authority."""
+    value = _policy_object(configuration, section).get(field, [])
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        return frozenset()
+    return frozenset(item for item in value if item)
+
+
+def _policy_scalar(configuration, section, field):
+    """Read one scalar from a typed section without interpreting nested input."""
+    value = _policy_object(configuration, section).get(field)
+    return value if value is None or isinstance(value, (str, int, float, bool)) else None
+
+
+def _policy_action_decision(configuration, evidence):
+    """Predict one retained action without inventing facts removed by redaction.
+
+    Historical command text and MCP server identity are deliberately not
+    persisted. A simulation must therefore report those actions as
+    indeterminate unless an exact tool-level rule is sufficient. This avoids a
+    reassuring but false prediction from content the control plane does not
+    possess.
+    """
+    tool = evidence.get("tool_name")
+    source = evidence.get("source")
+    resource_kind = evidence.get("resource_kind")
+    if not isinstance(tool, str) or source not in _DECISION_SOURCES:
+        return "indeterminate", "historical_identity_unavailable"
+    denied = _policy_string_set(configuration, "tools", "denied")
+    allowed = _policy_string_set(configuration, "tools", "allowed")
+    approvals = _policy_string_set(configuration, "approvals", "requiredFor")
+    if tool in denied:
+        return "denied", "explicit_tool_deny"
+    if tool in approvals or resource_kind in approvals:
+        return "approval_required", "explicit_approval_rule"
+    if resource_kind == "shell_command":
+        return "indeterminate", "redacted_command_content"
+    if tool in allowed:
+        return "allowed", "explicit_tool_allow"
+    if source == "claude_native":
+        native = _policy_string_set(configuration, "claudeCode", "allowedBuiltInTools")
+        return (
+            ("allowed", "explicit_native_allow")
+            if tool in native
+            else (
+                "denied",
+                "deny_by_default",
+            )
+        )
+    if source == "mcp":
+        return "indeterminate", "mcp_server_identity_unavailable"
+    return "denied", "deny_by_default"
+
+
+def _semantic_policy_diff(base_configuration, candidate_configuration):
+    """Explain policy meaning using typed authority, limit and data changes."""
+    base = base_configuration if isinstance(base_configuration, dict) else {}
+    candidate = candidate_configuration if isinstance(candidate_configuration, dict) else {}
+    changes = []
+
+    def set_changes(section, field, label, added_effect, removed_effect):
+        before = _policy_string_set(base, section, field)
+        after = _policy_string_set(candidate, section, field)
+        for value in sorted(after - before):
+            changes.append(
+                {
+                    "category": label,
+                    "field": f"{section}.{field}",
+                    "value": value,
+                    "change": "added",
+                    "effect": added_effect,
+                }
+            )
+        for value in sorted(before - after):
+            changes.append(
+                {
+                    "category": label,
+                    "field": f"{section}.{field}",
+                    "value": value,
+                    "change": "removed",
+                    "effect": removed_effect,
+                }
+            )
+
+    set_changes(
+        "policy", "allowedPrincipals", "identity", "authority_expanded", "authority_restricted"
+    )
+    set_changes("tools", "allowed", "tool", "authority_expanded", "authority_restricted")
+    set_changes("tools", "denied", "tool", "authority_restricted", "review_required")
+    set_changes("tools", "builtIn", "native_tool", "authority_expanded", "authority_restricted")
+    set_changes("tools", "fileTools", "file_tool", "authority_expanded", "authority_restricted")
+    set_changes(
+        "claudeCode",
+        "allowedBuiltInTools",
+        "claude_native_tool",
+        "authority_expanded",
+        "authority_restricted",
+    )
+    set_changes(
+        "claudeCode", "allowedSkills", "skill", "authority_expanded", "authority_restricted"
+    )
+    set_changes(
+        "claudeCode",
+        "allowedMcpServers",
+        "mcp_server",
+        "authority_expanded",
+        "authority_restricted",
+    )
+    set_changes(
+        "claudeCode",
+        "allowedCommandPatterns",
+        "command_rule",
+        "authority_expanded",
+        "authority_restricted",
+    )
+    set_changes(
+        "claudeCode",
+        "deniedCommandPatterns",
+        "command_rule",
+        "authority_restricted",
+        "review_required",
+    )
+    set_changes(
+        "claudeCode", "approvalCommandPatterns", "command_rule", "approval_added", "review_required"
+    )
+    set_changes("approvals", "requiredFor", "approval", "approval_added", "approval_removed")
+    set_changes(
+        "credentials", "scopes", "credential_scope", "authority_expanded", "authority_restricted"
+    )
+
+    limits = [
+        ("approvals", "ttlSeconds"),
+        ("budgets", "maxActions"),
+        ("budgets", "maxConcurrent"),
+        ("budgets", "maxFanOut"),
+        ("budgets", "maxCostUnits"),
+        ("budgets", "maxDelegationDepth"),
+        ("budgets", "maxActionsPerSecond"),
+        ("budgets", "executionTimeoutSeconds"),
+        ("budgets", "maxTimedOutWorkers"),
+    ]
+    for section, field in limits:
+        before = _policy_scalar(base, section, field)
+        after = _policy_scalar(candidate, section, field)
+        if before == after:
+            continue
+        effect = "limit_changed"
+        if isinstance(before, (int, float)) and isinstance(after, (int, float)):
+            effect = "authority_expanded" if after > before else "authority_restricted"
+        changes.append(
+            {
+                "category": "limit",
+                "field": f"{section}.{field}",
+                "before": before,
+                "after": after,
+                "change": "changed",
+                "effect": effect,
+            }
+        )
+
+    scalar_fields = [
+        ("policy", "provider", "policy_provider"),
+        ("approvals", "provider", "approval_provider"),
+        ("credentials", "enabled", "credential_requirement"),
+        ("credentials", "mode", "credential_requirement"),
+        ("credentials", "brokerEndpoint", "credential_requirement"),
+        ("isolation", "verifier", "isolation_requirement"),
+        ("isolation", "requiredForHighRisk", "isolation_requirement"),
+        ("isolation", "mode", "isolation_requirement"),
+        ("audit", "captureToolContent", "data_capture"),
+        ("telemetry", "captureToolContent", "data_capture"),
+    ]
+    for section, field, category in scalar_fields:
+        before = _policy_scalar(base, section, field)
+        after = _policy_scalar(candidate, section, field)
+        if before == after:
+            continue
+        effect = "requirement_changed"
+        if category == "data_capture":
+            effect = "data_capture_increased" if after is True else "data_capture_reduced"
+        elif category == "isolation_requirement" and field == "requiredForHighRisk":
+            effect = "authority_restricted" if after is True else "authority_expanded"
+        changes.append(
+            {
+                "category": category,
+                "field": f"{section}.{field}",
+                "before": before,
+                "after": after,
+                "change": "changed",
+                "effect": effect,
+            }
+        )
+    changed_sections = sorted(
+        key for key in set(base) | set(candidate) if base.get(key) != candidate.get(key)
+    )
+    return {
+        "changedSections": changed_sections,
+        "changes": changes,
+        "summary": {
+            "total": len(changes),
+            "authorityExpanded": sum(
+                1 for item in changes if item["effect"] == "authority_expanded"
+            ),
+            "authorityRestricted": sum(
+                1 for item in changes if item["effect"] == "authority_restricted"
+            ),
+            "approvalChanges": sum(
+                1 for item in changes if item["effect"] in {"approval_added", "approval_removed"}
+            ),
+            "dataCaptureChanges": sum(
+                1 for item in changes if str(item["effect"]).startswith("data_capture_")
+            ),
+            "reviewRequired": sum(
+                1
+                for item in changes
+                if item["effect"] in {"review_required", "requirement_changed", "limit_changed"}
+            ),
+        },
+    }
+
+
 def _policy_versions(tenant, policy_id, *, consistent_read=False):
     """Return the bounded immutable version ledger for one tenant policy."""
     items = [
@@ -2770,11 +3003,7 @@ def _policy_version_view(tenant, record, versions=None):
     )
     configuration = _json(record.get("configuration", {}))
     base_configuration = _json(base.get("configuration", {})) if base else {}
-    changed_sections = sorted(
-        key
-        for key in set(configuration) | set(base_configuration)
-        if configuration.get(key) != base_configuration.get(key)
-    )
+    semantic_change = _semantic_policy_diff(base_configuration, configuration)
     approved_by = (
         record.get("decided_by")
         if record.get("decision") == "approved"
@@ -2803,7 +3032,124 @@ def _policy_version_view(tenant, record, versions=None):
         "stagedAt": record.get("staged_at"),
         "activatedBy": record.get("activated_by"),
         "activatedAt": record.get("activated_at"),
-        "changeSummary": {"changedSections": changed_sections},
+        "changeSummary": semantic_change,
+    }
+
+
+def _simulate_policy_version(tenant, policy_id, version, body):
+    """Predict a candidate policy over bounded, redacted historical decisions.
+
+    Simulation is observational: it does not execute actions, change policy
+    authority, create approvals or mutate retained decision evidence. Results
+    are bound to the immutable candidate hash and the exact sampled evidence.
+    """
+    if not isinstance(body, dict) or set(body) != {"lookbackDays"}:
+        raise ValueError("policy simulation request has an invalid schema")
+    lookback_days = body.get("lookbackDays")
+    if (
+        isinstance(lookback_days, bool)
+        or not isinstance(lookback_days, int)
+        or not 1 <= lookback_days <= _POLICY_SIMULATION_MAX_LOOKBACK_DAYS
+    ):
+        raise ValueError("lookbackDays must be an integer from 1 to 90")
+    candidate = _policy_version_record(tenant, policy_id, version)
+    if candidate.get("state") not in {"draft", "review", "approved", "staged"}:
+        raise PolicyConflict("only a pending policy version can be simulated")
+    policy = TABLE.get_item(Key=_item_key(tenant, "POLICY", policy_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not policy:
+        raise LookupError("policy not found")
+    governed = _ensure_policy_governance(tenant, policy)
+    if int(candidate.get("base_version", -1)) != int(governed.get("version", 0)):
+        raise PolicyConflict("policy simulation base is no longer active")
+    now = int(time.time())
+    cutoff = now - (lookback_days * 86_400)
+    decision_window, truncated = _decision_window(tenant)
+    decisions = [
+        item
+        for item in decision_window
+        if item.get("policy_id") == policy_id and int(item.get("observed_at", 0)) >= cutoff
+    ]
+    items = []
+    for item in decisions:
+        predicted, reason_code = _policy_action_decision(candidate.get("configuration", {}), item)
+        previous = (
+            item.get("decision") if item.get("decision") in _DECISION_VALUES else "indeterminate"
+        )
+        items.append(
+            {
+                "decisionId": item.get("id"),
+                "observedAt": int(item.get("observed_at", 0)),
+                "source": item.get("source"),
+                "toolName": item.get("tool_name"),
+                "resourceKind": item.get("resource_kind"),
+                "previousDecision": previous,
+                "predictedDecision": predicted,
+                "reasonCode": reason_code,
+                "changed": predicted != "indeterminate" and predicted != previous,
+            }
+        )
+    transitions = {}
+    for item in items:
+        key = f"{item['previousDecision']}_to_{item['predictedDecision']}"
+        transitions[key] = transitions.get(key, 0) + 1
+    groups = [
+        item
+        for item in _list(tenant, "GROUP", consistent_read=True)
+        if item.get("policyId") == policy_id
+    ]
+    agent_keys = sorted(
+        {
+            agent_key
+            for group in groups
+            for agent_key in group.get("agent_keys", [])
+            if isinstance(agent_key, str)
+        }
+    )
+    stable_evidence = {
+        "policyId": policy_id,
+        "version": int(candidate["version"]),
+        "baseVersion": int(candidate.get("base_version", 0)),
+        "contentHash": candidate["content_hash"],
+        "lookbackDays": lookback_days,
+        "truncated": truncated,
+        "items": items,
+    }
+    simulation_hash = hashlib.sha256(
+        json.dumps(stable_evidence, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    determined = sum(1 for item in items if item["predictedDecision"] != "indeterminate")
+    return {
+        "schemaVersion": 1,
+        "policyId": policy_id,
+        "version": int(candidate["version"]),
+        "baseVersion": int(candidate.get("base_version", 0)),
+        "contentHash": candidate["content_hash"],
+        "simulationHash": simulation_hash,
+        "generatedAt": now,
+        "window": {
+            "lookbackDays": lookback_days,
+            "sampled": len(items),
+            "maximumSample": _DECISION_WINDOW_LIMIT,
+            "truncated": truncated,
+        },
+        "scope": {"groupIds": sorted(group["id"] for group in groups), "agentKeys": agent_keys},
+        "counts": {
+            "historical": len(items),
+            "determined": determined,
+            "indeterminate": len(items) - determined,
+            "changed": sum(1 for item in items if item["changed"]),
+            "predictedAllowed": sum(1 for item in items if item["predictedDecision"] == "allowed"),
+            "predictedDenied": sum(1 for item in items if item["predictedDecision"] == "denied"),
+            "predictedApprovalRequired": sum(
+                1 for item in items if item["predictedDecision"] == "approval_required"
+            ),
+        },
+        "coveragePercent": round((determined * 100 / len(items)), 1) if items else 0.0,
+        "transitions": dict(sorted(transitions.items())),
+        "items": items,
+        "mutated": False,
     }
 
 
@@ -10959,6 +11305,8 @@ def handler(event, context):
                 action = parts[4]
                 if action == "submit":
                     result = _submit_policy_version(tenant, policy_id, version, actor)
+                elif action == "simulate":
+                    result = _simulate_policy_version(tenant, policy_id, version, _body(event))
                 elif action == "decision":
                     result = _decide_policy_version(tenant, policy_id, version, _body(event), actor)
                 elif action == "stage":
