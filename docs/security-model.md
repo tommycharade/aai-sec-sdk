@@ -178,7 +178,9 @@ through an ordered SHA-256 chain and is committed to retained audit evidence;
 the browser independently recalculates the same bindings. Scheduled scans
 persist changed gap states and publish non-healthy transitions to the durable
 alert channel. This software assurance does not replace live cross-region
-recovery proof. See [Durable evidence governance](durable-evidence-governance-design.md).
+recovery proof; the deployed 603-version exercise is recorded in the
+[cross-region acceptance](cross-region-audit-recovery-acceptance-2026-08-01.md).
+See [Durable evidence governance](durable-evidence-governance-design.md).
 
 Cross-region recovery configuration is persistent deployment authority. The
 deployer strips ambient replica variables, reloads one reviewed Parameter Store

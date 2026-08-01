@@ -95,8 +95,9 @@ application, reduction, malformed value or weak role fails closed.
 
 The workflow guarantees increase-only application to every source-region audit
 version at or before the server cutover when it reports `completed`. It does
-not claim that replica-region retention has been recovered or compared; the
-separate live cross-region count/order/hash/retention exercise remains open.
+not itself claim replica-region retention. The separate
+[live cross-region recovery exercise](cross-region-audit-recovery-acceptance-2026-08-01.md)
+subsequently repaired and independently compared every source/replica version.
 It also does not interpret a longer period as legal advice or records-schedule
 approval.
 
@@ -111,3 +112,6 @@ correct synchronous/async routing and progress types. Live acceptance must
 extend a deployed tenant above 250 versions, independently inspect every
 pre-cutover retain-until date, prove post-cutover writes use the new period and
 confirm empty DLQs and healthy alarms.
+The 2026-08-01 live acceptance completed those checks for 536 pre-cutover
+tenant versions; cross-region recovery then verified the full 603-version audit
+set including propagated 730-day retention.
