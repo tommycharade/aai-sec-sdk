@@ -698,9 +698,25 @@ def main() -> int:
         if effective.get("policy", {}).get("id") != "policy-safe-default":
             raise RuntimeError("AWS agent client did not receive the assigned policy")
 
-        base_configuration = json.loads(
-            json.dumps(effective_body.get("policyBundle", {}).get("configuration", {}))
+        policy_inventory = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event("/enterprise/policies", "GET", {}, arguments.tenant),
         )
+        base_policy = next(
+            (
+                item
+                for item in json.loads(policy_inventory["body"]).get("items", [])
+                if item.get("id") == "policy-safe-default"
+            ),
+            None,
+        )
+        if policy_inventory["statusCode"] != 200 or not base_policy:
+            raise RuntimeError(f"raw governed policy lookup failed: {policy_inventory}")
+        # Exception authoring compares against the governed source document.
+        # The agent response contains registry-resolved runtime configuration,
+        # which deliberately cannot be resubmitted as browser-authored policy.
+        base_configuration = json.loads(json.dumps(base_policy.get("configuration", {})))
         candidate_configuration = json.loads(json.dumps(base_configuration))
         tools = candidate_configuration.setdefault("tools", {})
         allowed_tools = list(tools.get("allowed", []))
@@ -1306,7 +1322,8 @@ def main() -> int:
             "missing/conflict enforcement, policy, agent verification, "
             "approval replay, emergency-stop enforcement/recovery, and "
             "multi-process/runtime-connected durable idempotency, and WORM audit "
-            "retention, SNS/SQS alert delivery, and irreversible replacement/offboarding"
+            "retention, SNS/SQS alert delivery, irreversible replacement/offboarding, "
+            "and independently approved signed policy-exception activation/expiry/restoration"
         )
         if not runtime_attestation_proven:
             print(
