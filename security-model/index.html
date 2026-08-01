@@ -2746,8 +2746,9 @@ retains only its digest in DynamoDB.</p>
 <p>The scheduled event is canonical and digest-bound to the live job revision,
 provider, provider configuration and both secret ARNs. The collector strongly
 reads that job before secret or network access, accepts only the Entra token and
-users endpoints or the fixed GitHub organization-repositories endpoint plus the
-deployment API origin, and bounds time, response bytes, pages and observations.
+users endpoint, the exact Intune managed-devices endpoint, or the fixed GitHub
+organization-repositories endpoint plus the deployment API origin, and bounds
+time, response bytes, pages and observations.
 Redirects or continuation links outside the provider's exact host/path/query
 contract fail closed. GitHub additionally requires every visible active
 repository to match one deployment-owned project/host mapping and every mapping
@@ -2762,6 +2763,13 @@ unmapped repository cannot expose that blind spot; production acceptance must
 independently prove all-repository access, and a centrally installed GitHub App
 is the preferred future credential model. See
 <a href="../scheduled-discovery-connectors-design/">AWS-managed discovery connectors</a>.</p>
+<p>Intune is authoritative only for its managed-device population. The collector
+does not infer binary presence, process activity or project roots from device
+enrollment, and it excludes device names, serial numbers, email addresses and
+hardware properties. Reconciliation suppresses all percentages and orphan
+conclusions until current endpoint evidence contains normalized installation
+observations as well as devices. This avoids upgrading a read-only management
+record into evidence Microsoft Graph cannot provide.</p>
 
 
 

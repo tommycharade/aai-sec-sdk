@@ -2135,11 +2135,20 @@
 
 <h1 id="aws-managed-discovery-connectors">AWS-managed discovery connectors</h1>
 <h2 id="decision">Decision</h2>
-<p>The managed discovery providers are Microsoft Entra ID and GitHub. The AWS
+<p>The managed discovery providers are Microsoft Entra ID, Microsoft Intune and GitHub. The AWS
 control plane creates a tenant-scoped EventBridge Scheduler job that invokes a
 dedicated collector Lambda. Entra produces the expected identity population;
-GitHub produces the expected Claude Code and Codex repository population. Both
+Intune produces the managed-device population; GitHub produces the expected
+Claude Code and Codex repository population. All three
 publish through the existing source-scoped atomic ingestion contract.</p>
+<p>Intune device enrollment is deliberately not treated as installation evidence.
+Microsoft Graph does not prove that a Claude/Codex binary is present, that a
+process is active, or which project root it serves. The reconciler therefore
+keeps coverage unavailable until a current endpoint source also contains at
+least one normalized <code>installation</code> observation. A deployment-owned endpoint
+agent or MDM custom-inventory publisher supplies that evidence through the
+existing connector contract. This prevents an authoritative device list from
+being misrepresented as complete agent coverage.</p>
 <p>This is intentionally separate from Entra operator SSO and SCIM. Those
 integrations authenticate and provision console operators. Discovery observes
 the population that should be governed. Reusing an SSO or SCIM credential for
@@ -2149,7 +2158,7 @@ collection would combine unrelated authority and make revocation unsafe.</p>
 <p>The browser submits only:</p>
 <ul>
 <li>the stable source ID;</li>
-<li>the provider enum <code>entra</code> or <code>github</code>;</li>
+<li>the provider enum <code>entra</code>, <code>intune</code> or <code>github</code>;</li>
 <li>an interval from the closed set supported by the service;</li>
 <li>the ARN of a deployment-owned provider secret; and</li>
 <li>for GitHub only, a bounded typed repository-to-project mapping; and</li>
@@ -2160,7 +2169,7 @@ target Lambda ARN, scheduler role ARN, network URL, or arbitrary schedule
 expression. The authenticated tenant comes from the operator context and the
 control plane derives every AWS target.</p>
 <h3 id="provider-secret">Provider secret</h3>
-<p>An Entra provider secret contains exactly:</p>
+<p>An Entra or Intune provider secret contains exactly:</p>
 <pre><code class="language-json">{
   &quot;tenantId&quot;: &quot;11111111-1111-4111-8111-111111111111&quot;,
   &quot;clientId&quot;: &quot;22222222-2222-4222-8222-222222222222&quot;,
@@ -2181,6 +2190,10 @@ still has no <code>GetSecretValue</code> permission, so it cannot retrieve provi
 connector secret bytes.</p>
 <p>The Entra application receives only Microsoft Graph application permission
 <code>User.Read.All</code>, with tenant-admin consent and no directory write permission.
+A separate Intune application receives only
+<code>DeviceManagementManagedDevices.Read.All</code>, with tenant-admin consent and no
+device-management write permission. Separate applications and secrets are
+recommended so revoking device discovery cannot disrupt identity discovery.
 A GitHub provider secret contains exactly <code>{"token":"&lt;secret&gt;"}</code>. Use an
 organization-approved fine-grained token covering every organization
 repository, with repository metadata read-only and no content, administration,
@@ -2209,11 +2222,15 @@ and unbounded values before any network request.</p>
   continuation links; and</li>
 <li>the deployment-owned HTTPS API Gateway origin for discovery ingestion.</li>
 </ul>
+<p>The Intune collector may contact only the same fixed token endpoint, the exact
+Microsoft Graph <code>/v1.0/deviceManagement/managedDevices</code> collection with the
+service-owned <code>$select</code> and <code>$top</code> query, validated continuation links for that
+collection, and the deployment-owned ingestion origin.</p>
 <p>The GitHub collector may contact only <code>api.github.com</code> at the fixed
 <code>/orgs/{organization}/repos</code> endpoint and the same deployment-owned ingestion
 origin. The service supplies the API version, sort order, pagination and page
 size; browser input cannot change a hostname, path or query.</p>
-<p>Collection is bounded to 20 pages and 2,000 users, applies independent request
+<p>Collection is bounded to 20 pages and 2,000 observations, applies independent request
 timeouts, rejects duplicate or malformed identities, and retains only opaque
 object ID, active state, and optional department. GitHub collection has the
 same 20-page and 2,000-observation limits. It rejects duplicate or malformed
@@ -2223,6 +2240,12 @@ Archived, unmapped repositories are ignored. Only the numeric repository ID,
 project-root digest, expected hosts and optional business unit are published.
 Names remain transient mapping keys. Email, display name, repository name,
 provider token responses, and arbitrary provider properties are not persisted.</p>
+<p>Intune retains only the opaque managed-device ID, whether Intune still reports
+the record as managed, the opaque Entra user ID when present, and an optional
+deployment-owned business-unit mapping keyed by that user ID. Device names,
+serial numbers, email addresses, hardware identifiers, compliance details and
+operating-system properties are rejected rather than persisted. Duplicate,
+malformed or over-limit device records fail the complete generation.</p>
 <p>The collector strongly reads the current source revision before publication.
 Partial upload pages remain invisible until the existing hash-bound atomic
 commit succeeds.</p>
@@ -2238,11 +2261,11 @@ commit succeeds.</p>
 <tbody>
 <tr>
 <td><code>provider</code></td>
-<td>Closed provider enum: <code>entra</code> or <code>github</code></td>
+<td>Closed provider enum: <code>entra</code>, <code>intune</code> or <code>github</code></td>
 </tr>
 <tr>
 <td><code>providerConfiguration</code></td>
-<td>Canonical non-secret GitHub organization and repository map; absent for Entra</td>
+<td>Canonical non-secret GitHub repository map or Intune user attribution; empty for Entra</td>
 </tr>
 <tr>
 <td><code>providerConfigurationDigest</code></td>
@@ -2330,6 +2353,29 @@ cannot run before its delayed start time, so no job observes uncommitted state.<
 raw project paths, duplicate repositories or digests, unsupported hosts and
 empty host sets fail closed. The response exposes only organization and mapping
 count, never repository names, project digests or secret references.</p>
+<p>Intune uses the Entra-shaped secret and a typed, optional privacy-preserving
+business-unit mapping:</p>
+<pre><code class="language-json">{
+  &quot;provider&quot;: &quot;intune&quot;,
+  &quot;intervalMinutes&quot;: 15,
+  &quot;providerSecretArn&quot;: &quot;arn:aws:secretsmanager:eu-west-2:123456789012:secret:aai-sec/discovery/providers/tenant-a/intune-production-AbCdEf&quot;,
+  &quot;providerConfiguration&quot;: {
+    &quot;userBusinessUnits&quot;: [
+      {
+        &quot;userId&quot;: &quot;33333333-3333-4333-8333-333333333333&quot;,
+        &quot;businessUnit&quot;: &quot;Platform&quot;
+      }
+    ]
+  },
+  &quot;expectedJobRevision&quot;: 0,
+  &quot;expectedCredentialRevision&quot;: 0
+}
+</code></pre>
+<p>At most 500 mappings are accepted. Unknown fields, duplicate user IDs, invalid
+UUIDs and blank or oversized business-unit labels fail closed. The read model
+exposes only the mapping count and digest, never user IDs. The mapping is
+optional because a complete device population is still useful when business
+unit attribution is unavailable.</p>
 <h3 id="disable">Disable</h3>
 <p><code>DELETE /api/enterprise/discovery/sources/{sourceId}/managed-collector</code>
 requires the job and credential revisions in its JSON body. The control plane
@@ -2363,14 +2409,16 @@ feed the existing security alerting foundation. The UI shows the last attempt,
 last success, failure count, and fixed reason without exposing provider data.</p>
 <h2 id="low-friction-operator-journey">Low-friction operator journey</h2>
 <ol>
-<li>In <strong>Coverage → Inventory sources</strong>, choose <strong>Microsoft Entra ID</strong> or
-   <strong>GitHub organization</strong>, then <strong>AWS-managed schedule</strong>.</li>
+<li>In <strong>Coverage → Inventory sources</strong>, choose <strong>Microsoft Entra ID</strong>,
+   <strong>Microsoft Intune</strong> or <strong>GitHub organization</strong>, then <strong>AWS-managed schedule</strong>.</li>
 <li>Copy the generated AWS CLI template for the required KMS key, secret prefix,
    and tags; fill the three values locally or through the enterprise secret
    provisioning workflow.</li>
 <li>For GitHub, enter the organization and edit or import the typed repository
    map. Paste only the resulting secret ARN, select a cadence, and review the
-   exact permission and data-minimisation boundary.</li>
+   exact permission and data-minimisation boundary.
+   For Intune, optionally import the opaque user-to-business-unit map and review
+   the explicit warning that device evidence alone does not prove installation.</li>
 <li>Choose <strong>Create managed collector</strong>. The UI reports schedule state separately
    from credential and evidence state.</li>
 <li>Wait for the first run or choose a bounded <strong>Run now</strong> action when supported.</li>
@@ -2379,7 +2427,9 @@ last success, failure count, and fixed reason without exposing provider data.</p
 </ol>
 <h2 id="non-guarantees-and-remaining-work">Non-guarantees and remaining work</h2>
 <ul>
-<li>Managed Entra and GitHub collection does not prove endpoint coverage.</li>
+<li>Managed Intune establishes a managed-device population but cannot by itself
+  prove installed binaries, active processes or project roots. Coverage remains
+  unavailable until a current endpoint installation feed is present.</li>
 <li>GitHub REST responses can prove only repositories visible to the token. A
   token that hides both an unmapped repository and its mapping cannot reveal
   that blind spot. Production acceptance must independently prove that the

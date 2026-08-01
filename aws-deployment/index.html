@@ -1435,10 +1435,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#aws-managed-entra-and-github-discovery" class="md-nav__link">
+  <a href="#aws-managed-entra-intune-and-github-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       
-        AWS-managed Entra and GitHub discovery
+        AWS-managed Entra, Intune and GitHub discovery
       
     </span>
   </a>
@@ -1904,10 +1904,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#aws-managed-entra-and-github-discovery" class="md-nav__link">
+  <a href="#aws-managed-entra-intune-and-github-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       
-        AWS-managed Entra and GitHub discovery
+        AWS-managed Entra, Intune and GitHub discovery
       
     </span>
   </a>
@@ -2056,7 +2056,7 @@ AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
   bearer resolved only by the SCIM Lambda from AWS Secrets Manager;</li>
 <li>API Gateway HTTP API with Cognito JWT authorizer;</li>
 <li>Lambda control-plane handler;</li>
-<li>an AWS-managed Entra discovery collector, EventBridge Scheduler invocation
+<li>an AWS-managed Entra, Intune and GitHub discovery collector, EventBridge Scheduler invocation
   role, KMS key, connector dead-letter queue and collector alarms;</li>
 <li>on-demand DynamoDB control and presence tables; the control table expires
   short-lived records by <code>ttl</code> and has a decision-timeline index for bounded
@@ -2180,7 +2180,7 @@ not enterprise SSO acceptance evidence.</p>
 <a href="../aws-pilot-acceptance-2026-07-29/">AWS pilot acceptance evidence</a>. Entra OIDC
 and SCIM are not configured in that environment, so the source contracts must
 not be presented as live federation acceptance.</p>
-<h2 id="aws-managed-entra-and-github-discovery">AWS-managed Entra and GitHub discovery</h2>
+<h2 id="aws-managed-entra-intune-and-github-discovery">AWS-managed Entra, Intune and GitHub discovery</h2>
 <p>After deployment, CloudFormation outputs <code>DiscoverySecretKmsKeyArn</code> and
 <code>DiscoveryProviderSecretNamePrefix</code>. A platform administrator can also obtain
 these non-secret values from <strong>Coverage → Inventory sources → Add source</strong>.
@@ -2193,6 +2193,14 @@ an exact JSON object:</p>
   &quot;clientSecret&quot;: &quot;&lt;secret&gt;&quot;
 }
 </code></pre>
+<p>For Intune managed-device population, create a separate application with only
+Microsoft Graph application permission
+<code>DeviceManagementManagedDevices.Read.All</code>, grant tenant-admin consent, and use
+the same three-field secret schema. The UI optionally accepts opaque Entra user
+ID to business-unit mappings; names and email addresses are not accepted.
+Intune does not prove installed binaries, active processes or project roots, so
+coverage remains unavailable until a separate endpoint publisher commits
+current <code>installation</code> evidence.</p>
 <p>For GitHub, use an organization-approved fine-grained token covering all
 repositories, with repository metadata read-only and no code-content,
 administration, Actions or write access. Store exactly:</p>

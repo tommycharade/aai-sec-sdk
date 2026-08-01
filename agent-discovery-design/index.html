@@ -2013,10 +2013,13 @@ targets declared by current source-control records or observed by current
 endpoint records. Enrollment is correlated by hashing the server-owned project
 root and matching the host.</p>
 <p>Coverage, health, and compliance percentages are returned only when all three
-required source classes have a current complete snapshot and the denominator is
-non-zero. Otherwise those percentages are <code>null</code>, <code>coverageAvailable</code> is false,
-and <code>blindSpots</code> identifies missing or non-current sources. Incomplete or stale
-evidence never produces orphan conclusions.</p>
+required source classes have a current complete snapshot, current endpoint
+evidence contains both <code>device</code> and <code>installation</code> observations, and the
+denominator is non-zero. Otherwise those percentages are <code>null</code>,
+<code>coverageAvailable</code> is false, and <code>blindSpots</code> identifies missing, non-current
+or semantically incomplete sources. Incomplete or stale evidence never produces
+orphan conclusions. This means an Intune managed-device collection cannot be
+mistaken for proof that Claude or Codex is installed.</p>
 <p>The reconciler reports:</p>
 <ul>
 <li>expected but unenrolled instances (<code>unmanaged</code>);</li>
@@ -2094,7 +2097,7 @@ canonical <code>contentHash</code> for evidence handling.</p>
 generations remove its 100-record ceiling and are suitable for a bounded pilot;
 very large estates should move immutable pages to dedicated object storage and
 retain the same atomic current-generation pointer. AWS deployments can use the
-<a href="../scheduled-discovery-connectors-design/">managed Entra and GitHub collectors</a>,
+<a href="../scheduled-discovery-connectors-design/">managed Entra, Intune and GitHub collectors</a>,
 which deliver credentials through KMS-encrypted Secrets Manager values and run
 bounded EventBridge schedules. Their application bearers are still revocable
 service credentials, not hardware-backed workload identities. Production
