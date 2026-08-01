@@ -31,9 +31,14 @@ read retention/legal-hold state and extend retention or change legal hold.
 - Rationale text is never written to evidence; only its SHA-256 digest is kept.
 - Assurance hashes the retained bytes again and compares the result with the
   creation-time binding. A mismatch is `at_risk`, not healthy.
+- An exact S3 `NoSuchObjectLockConfiguration` response on a legacy version is
+  represented as missing retention or legal hold and therefore `at_risk`.
+  Access-denied, service and malformed-response failures remain fatal.
 - The synchronous inventory is complete only at 250 versions or fewer. A larger
   tenant receives `incomplete`, and retention update/export fails closed rather
-  than returning a partial artifact.
+  than returning a partial artifact. The bounded listing supplies only an
+  observed lower-bound count; the API performs no per-object verification or
+  presents any sampled records when tenant-wide completeness is unavailable.
 - Export verifies every bounded version, orders records deterministically and
   binds the complete manifest with a canonical SHA-256 digest. The browser
   independently verifies that digest before download.
@@ -68,7 +73,8 @@ count, ordering, hashes and retention. Those items remain open in the P0 ledger.
 ## Verification
 
 Contract tests cover the complete positive journey plus weak-role access,
-retention reduction, stale revision, cross-tenant legal hold and post-write byte
-tampering. CDK synthesis proves the least-privilege S3 permissions are
-deployable. UI tests and desktop/mobile browser exercises cover assurance,
-retention and legal-hold journeys without representing fixture data as live.
+retention reduction, stale revision, cross-tenant legal hold, absent legacy
+Object Lock properties and post-write byte tampering. CDK synthesis proves the
+least-privilege S3 permissions are deployable. UI tests and desktop/mobile
+browser exercises cover assurance, retention and legal-hold journeys without
+representing fixture data as live.

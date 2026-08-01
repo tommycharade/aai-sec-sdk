@@ -35,6 +35,18 @@ class ConditionalFailure(Exception):
     response = {"Error": {"Code": "ConditionalCheckFailedException"}}
 
 
+class ObjectLockConfigurationMissing(Exception):
+    """Minimal boto-compatible legacy Object Lock absence response."""
+
+    response = {"Error": {"Code": "NoSuchObjectLockConfiguration"}}
+
+
+class ObjectLockAccessDenied(Exception):
+    """Minimal boto-compatible Object Lock permission failure."""
+
+    response = {"Error": {"Code": "AccessDenied"}}
+
+
 def _condition_parts(expression: str, separator: str) -> list[str]:
     """Split a synthetic DynamoDB condition only at its top-level operators."""
     parts: list[str] = []
@@ -377,7 +389,10 @@ class FakeS3:
         return {"Body": self.objects[(value["Key"], value["VersionId"])]["Body"]}
 
     def get_object_retention(self, **value: Any) -> dict[str, Any]:
-        return {"Retention": dict(self.objects[(value["Key"], value["VersionId"])]["Retention"])}
+        retention = self.objects[(value["Key"], value["VersionId"])].get("Retention")
+        if retention is None:
+            raise ObjectLockConfigurationMissing()
+        return {"Retention": dict(retention)}
 
     def put_object_retention(self, **value: Any) -> None:
         record = self.objects[(value["Key"], value["VersionId"])]
@@ -388,7 +403,10 @@ class FakeS3:
         record["Retention"] = dict(value["Retention"])
 
     def get_object_legal_hold(self, **value: Any) -> dict[str, Any]:
-        return {"LegalHold": dict(self.objects[(value["Key"], value["VersionId"])]["LegalHold"])}
+        hold = self.objects[(value["Key"], value["VersionId"])].get("LegalHold")
+        if hold is None:
+            raise ObjectLockConfigurationMissing()
+        return {"LegalHold": dict(hold)}
 
     def put_object_legal_hold(self, **value: Any) -> None:
         self.objects[(value["Key"], value["VersionId"])]["LegalHold"] = dict(value["LegalHold"])
@@ -763,6 +781,57 @@ def test_evidence_governance_fails_closed_on_bypass_and_tamper(monkeypatch: Any)
     assert failed_export["statusCode"] == 500
 
 
+def test_evidence_assurance_reports_legacy_object_lock_gaps_without_failing(
+    monkeypatch: Any,
+) -> None:
+    """Treat absent legacy lock state as at risk while preserving assurance access."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-demo"
+    module._audit(tenant, "legacy_record", "synthetic", {"source": "pre-migration"})
+    legacy = next(iter(module._fake_s3.objects.values()))
+    legacy.pop("Retention")
+    legacy.pop("LegalHold")
+
+    response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence",
+            "GET",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["auditor"],
+                "sub": "auditor-a",
+            },
+        ),
+    )
+
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["status"] == "at_risk"
+    assert body["verifiedCount"] == body["recordCount"] - 1
+    legacy_record = next(record for record in body["records"] if not record["retainUntil"])
+    assert legacy_record["retentionMode"] is None
+    assert legacy_record["legalHold"] is False
+
+    def deny_legal_hold(**_value: Any) -> dict[str, Any]:
+        raise ObjectLockAccessDenied()
+
+    monkeypatch.setattr(module._fake_s3, "get_object_legal_hold", deny_legal_hold)
+    denied = _invoke(
+        module,
+        _event(
+            "/api/enterprise/evidence",
+            "GET",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["auditor"],
+                "sub": "auditor-a",
+            },
+        ),
+    )
+    assert denied["statusCode"] == 500
+
+
 def test_evidence_inventory_never_presents_a_bounded_sample_as_complete(monkeypatch: Any) -> None:
     """Refuse synchronous export and retention mutation above the explicit pilot bound."""
     module, _table = _load_handler(monkeypatch)
@@ -780,7 +849,9 @@ def test_evidence_inventory_never_presents_a_bounded_sample_as_complete(monkeypa
     body = json.loads(assurance["body"])
     assert body["status"] == "incomplete"
     assert body["complete"] is False
-    assert body["recordCount"] == module._EVIDENCE_RECORD_LIMIT
+    assert body["recordCount"] == module._EVIDENCE_RECORD_LIMIT + 1
+    assert body["verifiedCount"] == 0
+    assert body["records"] == []
     export = _invoke(module, _event("/api/enterprise/evidence/export", "GET", claims=security))
     assert export["statusCode"] == 409
     update = _invoke(
