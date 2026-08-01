@@ -1,5 +1,12 @@
 # Changelog
 
+- Fixed durable-evidence assurance for legacy S3 versions that predate an
+  explicit Object Lock retention or legal-hold property. Missing lock state is
+  now reported as at risk; permission, service and integrity failures still
+  fail closed. Oversized synchronous inventories now stop after the bounded
+  listing and report an incomplete lower bound without expensive or misleading
+  per-object sampling.
+
 - Replaced browser-authored deployment rollout status with measured managed
   rollouts. The AWS control plane now binds immutable configuration and package
   revisions, selects deterministic canaries, enforces health thresholds and

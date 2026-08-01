@@ -6463,6 +6463,28 @@ def _evidence_body_bytes(response):
     return value
 
 
+def _evidence_object_lock_state(method, *, key, version_id, field):
+    """Read one optional legacy Object Lock property without hiding real failures.
+
+    S3 returns ``NoSuchObjectLockConfiguration`` for versions created before a
+    legal hold or explicit retention was attached.  That is evidence of a
+    missing safeguard, not a control-plane outage.  Every other error remains
+    fatal so denied access and unavailable assurance cannot be mistaken for a
+    safe result.
+    """
+    try:
+        return method(Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id).get(
+            field, {}
+        )
+    except Exception as error:
+        if (
+            getattr(error, "response", {}).get("Error", {}).get("Code")
+            == "NoSuchObjectLockConfiguration"
+        ):
+            return {}
+        raise
+
+
 def _evidence_inventory(tenant):
     """Return a complete bounded manifest of immutable tenant audit versions.
 
@@ -6476,9 +6498,20 @@ def _evidence_inventory(tenant):
     )
     versions = response.get("Versions", [])
     delete_markers = response.get("DeleteMarkers", [])
-    complete = not response.get("IsTruncated", False) and len(versions) <= _EVIDENCE_RECORD_LIMIT
-    if len(versions) > _EVIDENCE_RECORD_LIMIT:
-        versions = versions[:_EVIDENCE_RECORD_LIMIT]
+    observed_version_count = len(versions)
+    complete = (
+        not response.get("IsTruncated", False) and observed_version_count <= _EVIDENCE_RECORD_LIMIT
+    )
+    if not complete:
+        # A sample cannot support tenant-wide assurance. Stop before any
+        # per-object reads so a large tenant gets a fast, honest incomplete
+        # result rather than a misleading sample or a Lambda timeout.
+        return {
+            "records": [],
+            "complete": False,
+            "observedVersionCount": observed_version_count,
+            "deleteMarkerCount": len(delete_markers),
+        }
     records = []
     for version in versions:
         key = version.get("Key")
@@ -6495,12 +6528,18 @@ def _evidence_inventory(tenant):
         )
         content_hash = hashlib.sha256(body).hexdigest()
         expected_hash = head.get("Metadata", {}).get("content-sha256")
-        retention = S3.get_object_retention(
-            Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id
-        ).get("Retention", {})
-        hold = S3.get_object_legal_hold(
-            Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id
-        ).get("LegalHold", {})
+        retention = _evidence_object_lock_state(
+            S3.get_object_retention,
+            key=key,
+            version_id=version_id,
+            field="Retention",
+        )
+        hold = _evidence_object_lock_state(
+            S3.get_object_legal_hold,
+            key=key,
+            version_id=version_id,
+            field="LegalHold",
+        )
         modified = version.get("LastModified")
         records.append(
             {
@@ -6527,6 +6566,7 @@ def _evidence_inventory(tenant):
     return {
         "records": records,
         "complete": complete,
+        "observedVersionCount": observed_version_count,
         "deleteMarkerCount": len(delete_markers),
     }
 
@@ -6550,7 +6590,7 @@ def _evidence_assurance(tenant):
         "schemaVersion": 1,
         "status": status,
         "policy": policy,
-        "recordCount": len(records),
+        "recordCount": inventory["observedVersionCount"],
         "verifiedCount": len(records) - len(at_risk),
         "legalHoldCount": sum(1 for item in records if item["legalHold"]),
         "deleteMarkerCount": inventory["deleteMarkerCount"],
