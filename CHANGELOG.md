@@ -1,5 +1,14 @@
 # Changelog
 
+- Replaced browser-authored deployment rollout status with measured managed
+  rollouts. The AWS control plane now binds immutable configuration and package
+  revisions, selects deterministic canaries, enforces health thresholds and
+  IANA-zone maintenance windows, automatically pauses unhealthy or overdue
+  rings, and records convergence only from fresh exact evidence across every
+  active endpoint. Rollback creates a new version from the retained exact
+  known-good configuration/package pair. The Deployments UI provides a focused
+  typed rollout workspace and never submits applied hashes or health claims.
+
 - Added independently reviewed, exact-agent temporary policy exceptions. The
   AWS control plane permits only a closed set of tool, Claude resource/command
   and action-budget changes, signs a distinct derived bundle with KMS, rejects

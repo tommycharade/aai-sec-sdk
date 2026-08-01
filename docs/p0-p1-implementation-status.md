@@ -77,8 +77,8 @@ installation or live host-load acceptance.
 
 | Workstream | Status | Implemented foundation | Major remaining work |
 | --- | --- | --- | --- |
-| Fleet lifecycle | Partial | Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and deterministic reevaluation, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, server-clock-expiring exact-agent policy exceptions, source-reconciled orphan/leaver detection, AWS-managed Entra/Intune/GitHub discovery connectors, signed endpoint installation/process collection, per-device credential lifecycle and server-derived evidence health | Bulk enrollment import, scheduled dynamic reevaluation, managed upgrades, MDM sensor packaging/rollout, real-provider population coverage and response automation |
-| Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, self-approval denial, semantic authority diff, bounded redacted historical simulation with explicit indeterminacy, staging, atomic activation, tenant-bound asymmetric signed bundles with locally pinned verification, independently approved KMS-signed temporary agent exceptions with automatic secure restoration, assignment impact and rollback | Scheduling, inheritance and measured endpoint convergence |
+| Fleet lifecycle | Partial | Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and deterministic reevaluation, health, immutable desired/package rollout binding, deterministic canary rings, time-zone maintenance windows, server-derived endpoint convergence, automatic health/deadline pause, exact known-good rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, server-clock-expiring exact-agent policy exceptions, source-reconciled orphan/leaver detection, AWS-managed Entra/Intune/GitHub discovery connectors, signed endpoint installation/process collection, per-device credential lifecycle and server-derived evidence health | Real release manifests for managed SDK/gateway/hook upgrades, physical MDM distribution, bulk enrollment import, scheduled dynamic reevaluation, real-provider population coverage and response automation |
+| Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, self-approval denial, semantic authority diff, bounded redacted historical simulation with explicit indeterminacy, staging, atomic activation, tenant-bound asymmetric signed bundles with locally pinned verification, independently approved KMS-signed temporary agent exceptions with automatic secure restoration, assignment impact, percentage canary/scheduling, evidence-only convergence and deterministic known-good rollback | Policy inheritance, policy-as-code and live physical-endpoint rollout-SLO acceptance |
 | Security operations | Partial | Approvals, audit timeline, independent scoped emergency stops, scheduled server-derived endpoint detections, deduplicated alert lifecycle, audited acknowledgement, durable SNS/SQS delivery, revisioned cases, authoritative endpoint-to-agent binding, evidence-preserving agent quarantine, independently approved versioned endpoint-response rules with preview, action limits, cooldown, idempotent evidence, disable and rollback, session revocation, recovery-gated release and integrity-verifiable content-minimised case export | Broader tool/MCP/repository/configuration anomaly rules, credential-broker response, maintenance windows, baselines, MDM/EDR isolation and external workflow integrations |
 | Reporting and administration | Partial | Fleet posture, health, SLO and compliance summaries plus fail-closed population coverage and content-hashed export | Executive/auditor report packs, connector service identities, Terraform, CMK/residency and private access |
 
@@ -109,6 +109,34 @@ manual-route bypass and transaction races. UI tests prove typed authoring,
 preview-before-apply and exact request-ID reuse. Scheduled service-driven
 reevaluation and endpoint posture attributes remain outstanding and are not
 claimed.
+
+### P1-FLT-08, P1-POL-05 and P1-POL-06 implementation evidence
+
+The AWS control plane now treats rollout state as server-derived operational
+evidence rather than an operator presentation flag. Every desired assignment
+creates an immutable configuration version. Starting a rollout requires the
+exact optimistic revision, desired managed-host target, current immutable
+package revision, active compatible agents, bounded channel/ring/percentage,
+health thresholds, rationale and optional IANA-zone maintenance window.
+Canaries are deterministic from tenant and agent identity and are capped at
+25%; percentages may expand but cannot decrease outside rollback.
+
+The five-minute reconciler computes availability, drift and convergence from
+fresh authenticated agent reports. Browser requests cannot submit applied
+hashes, endpoint membership, health or known-good state. A threshold breach or
+deadline automatically pauses authority. Only a 100% rollout with fresh exact
+evidence from every active endpoint becomes `converged` and records a
+last-known-good configuration/package pair. Rollback creates a new immutable
+version from that exact retained pair and measures convergence again. Contract
+tests prove forged convergence denial, stale revision rejection, schedule and
+canary bounds, automatic pause, immutable package selection and rollback.
+
+This implements the control-plane portions of P1-FLT-08, P1-POL-05 and
+P1-POL-06. The requirement remains short of enterprise acceptance until a real
+MDM-delivered Claude/Codex fleet demonstrates the rollout SLO. P1-FLT-06 also
+remains partial: configuration packages are pinned, but SDK, gateway and hook
+upgrade channels still need independently approved release manifests and
+physical endpoint distribution.
 
 ### P1-FLT-09 and P1-POL-10 implementation evidence
 

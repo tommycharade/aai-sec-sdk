@@ -72,6 +72,8 @@ nav:
   - Managed host configuration: managed-host-configuration.md
   - Managed endpoint deployment design: managed-endpoint-deployment-design.md
   - Managed package distribution design: managed-package-distribution-design.md
+  - Measured managed-configuration rollout design: measured-managed-rollout-design.md
+  - Measured managed-rollout acceptance — 2026-08-01: measured-managed-rollout-acceptance-2026-08-01.md
   - Enterprise user journeys: enterprise-user-journeys.md
   - Enterprise rollout P0 and P1 requirements: enterprise-rollout-p0-p1-requirements.md
   - Enterprise P0 and P1 implementation status: p0-p1-implementation-status.md

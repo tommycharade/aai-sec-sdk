@@ -116,16 +116,22 @@ provider-neutral management plane around the runtime. The control plane owns
 inventory, tenant/project scope, agent presence, desired configuration,
 rollout state, drift, health, alerts, and emergency-stop intent. It does not
 execute tools and it does not mint credentials. A deployment-specific
-`FleetDeploymentAuthority` adapter is the trust boundary that applies a
-configuration or stops execution in the live SDK instance; the database state
-is updated only after that adapter succeeds.
+`FleetDeploymentAuthority` adapter is the trust boundary for synchronous local
+applications. In the hosted AWS path, authenticated enrolled endpoints pull an
+immutable package bound to the live rollout; the control plane derives
+convergence only from fresh exact endpoint evidence. An operator write changes
+desired rollout authority but cannot write applied state.
 
 ```text
 enterprise UI / API client
           |
-authenticated fleet API -> tenant/RBAC checks -> durable desired state
+authenticated fleet API -> tenant/RBAC checks -> immutable desired version
           |                                      |
-          +-> deployment authority adapter <-----+-- apply / stop / rollback
+          +-> bounded rollout reconciler <-------+-- ring / pause / rollback
+          |                                      |
+          +-> attested package channel <---------+-- exact package revision
+          |                                      |
+          +<- authenticated endpoint evidence ---+-- derived convergence
           |
           +-> inventory, drift, health, alerts, redacted audit
 ```

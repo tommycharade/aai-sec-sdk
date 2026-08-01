@@ -104,7 +104,8 @@ class FakeTable:
         if condition:
             values = kwargs.get("ExpressionAttributeValues", {})
             if ":expected_revision" in values:
-                if self.items.get(key, {}).get("revision") != values[":expected_revision"]:
+                revision_field = "rolloutRevision" if "rolloutRevision" in condition else "revision"
+                if self.items.get(key, {}).get(revision_field) != values[":expected_revision"]:
                     raise ConditionalFailure()
             elif condition == "attribute_not_exists(pk)" and key in self.items:
                 raise ConditionalFailure()
@@ -4147,7 +4148,7 @@ def test_runtime_attestation_binds_heartbeat_and_quarantines_tampering(
         module,
         _event("/agent/dep-a/agent-a/effective-policy", "GET", token=token),
     )
-    assert effective["statusCode"] == 200
+    assert effective["statusCode"] == 200, effective
 
     second_challenge = json.loads(
         _invoke(
@@ -7458,25 +7459,112 @@ def test_response_stop_scopes_are_independent_and_follow_live_group_membership(
 
 
 def test_deployment_configuration_rollout_tracks_drift_and_activation(monkeypatch: Any) -> None:
-    """The AWS control plane exposes the rollout states consumed by the UI."""
+    """Only exact endpoint evidence can converge a ring and anchor rollback."""
     module, table = _load_handler(monkeypatch)
     tenant = "tenant-rollout"
-    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
-    claims = {"custom:tenant_id": tenant, "cognito:groups": ["platform-admin"], "sub": "operator"}
-    template = _invoke(
-        module,
-        _event(
-            "/enterprise/templates",
-            "POST",
-            body={
-                "templateId": "template-a",
-                "name": "Safe",
-                "configuration": {"runtime": {"maxActions": 5}},
-            },
-            claims=claims,
-        ),
+    clock = [2_230_000_000]
+    monkeypatch.setattr(module.time, "time", lambda: clock[0])
+    package_v1, desired_v1 = _managed_package_fixture(policy_version=1)
+    package_v2, desired_v2 = _managed_package_fixture(policy_version=2)
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root")
+        | {
+            "id": tenant,
+            "endpoint_detection_pk": "ENDPOINT_DETECTION#00",
+            "endpoint_detection_sk": tenant,
+        }
     )
-    assert template["statusCode"] == 201
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "deployment-a")
+        | {
+            "id": "deployment-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "sdk_version": "1.1.0",
+        }
+    )
+    agent_ids = [f"agent-{index:02d}" for index in range(20)]
+    for agent_id in agent_ids:
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"deployment-a:{agent_id}")
+            | {
+                "id": agent_id,
+                "deployment_id": "deployment-a",
+                "host": "claude-code",
+                "status": "connected",
+                "expires_at": clock[0] + 3_600,
+                "lifecycle_state": "active",
+                "lifecycle_revision": 1,
+            }
+        )
+    claims = {"custom:tenant_id": tenant, "cognito:groups": ["platform-admin"], "sub": "operator"}
+
+    def create_template(template_id: str, desired: dict[str, Any]) -> None:
+        response = _invoke(
+            module,
+            _event(
+                "/enterprise/templates",
+                "POST",
+                body={
+                    "templateId": template_id,
+                    "name": template_id,
+                    "configuration": {"managedHost": desired},
+                },
+                claims=claims,
+            ),
+        )
+        assert response["statusCode"] == 201, response
+
+    def publish(package: ManagedDeploymentPackage, expected_revision: int) -> None:
+        response = _invoke(
+            module,
+            _event(
+                "/enterprise/deployments/deployment-a/managed-package",
+                "PUT",
+                body={
+                    "expectedRevision": expected_revision,
+                    "packageBase64": base64.b64encode(package.to_json()).decode(),
+                    "packageSha256": package.package_sha256,
+                },
+                claims=claims,
+            ),
+        )
+        assert response["statusCode"] == 201, response
+
+    def configuration() -> dict[str, Any]:
+        response = _invoke(
+            module,
+            _event("/enterprise/deployment-config", "GET", claims=claims),
+        )
+        assert response["statusCode"] == 200, response
+        return cast(dict[str, Any], json.loads(response["body"])["items"][0])
+
+    def rollout_request(
+        revision: int,
+        *,
+        target: str,
+        percentage: int,
+        ring: str,
+        schedule: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "deploymentIds": ["deployment-a"],
+            "expectedRevisions": {"deployment-a": revision},
+            "targetState": target,
+            "percentage": percentage,
+            "channel": "stable",
+            "ring": ring,
+            "reason": "Exercise a bounded synthetic managed configuration rollout.",
+            "healthCriteria": {
+                "maxUnavailablePercent": 10,
+                "maxDriftPercent": 10,
+                "minSampleSize": 1,
+                "gracePeriodSeconds": 300,
+            },
+            "schedule": schedule,
+        }
+
+    create_template("template-a", desired_v1)
     staged = _invoke(
         module,
         _event(
@@ -7486,19 +7574,14 @@ def test_deployment_configuration_rollout_tracks_drift_and_activation(monkeypatc
             claims=claims,
         ),
     )
-    assert staged["statusCode"] == 201
-    assert json.loads(staged["body"])["drifted"] is True
-    canary = _invoke(
-        module,
-        _event(
-            "/enterprise/deployment-config/batch-rollout",
-            "POST",
-            body={"deploymentIds": ["deployment-a"], "state": "canary", "percentage": 10},
-            claims=claims,
-        ),
-    )
-    assert json.loads(canary["body"])["items"][0]["rolloutState"] == "canary"
-    active = _invoke(
+    assert staged["statusCode"] == 201, staged
+    staged_body = json.loads(staged["body"])
+    assert staged_body["drifted"] is True
+    assert staged_body["appliedHash"] is None
+    assert staged_body["rolloutRevision"] == 1
+    publish(package_v1, 0)
+
+    legacy_claim = _invoke(
         module,
         _event(
             "/enterprise/deployment-config/batch-rollout",
@@ -7507,9 +7590,305 @@ def test_deployment_configuration_rollout_tracks_drift_and_activation(monkeypatc
             claims=claims,
         ),
     )
+    assert legacy_claim["statusCode"] == 400
+    canary = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config/batch-rollout",
+            "POST",
+            body=rollout_request(
+                staged_body["rolloutRevision"],
+                target="canary",
+                percentage=25,
+                ring="canary",
+            ),
+            claims=claims,
+        ),
+    )
+    assert canary["statusCode"] == 200, canary
+    canary_body = json.loads(canary["body"])["items"][0]
+    assert canary_body["rolloutState"] == "canary"
+    assert canary_body["rolloutPackageRevision"] == 1
+    assert canary_body["convergence"]["selectedAgents"] > 0
+    assert canary_body["convergence"]["selectedAgents"] < len(agent_ids)
+    assert canary_body["appliedHash"] is None
+
+    stale = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config/batch-rollout",
+            "POST",
+            body=rollout_request(
+                staged_body["rolloutRevision"],
+                target="active",
+                percentage=100,
+                ring="broad",
+            ),
+            claims=claims,
+        ),
+    )
+    assert stale["statusCode"] == 409
+    active = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config/batch-rollout",
+            "POST",
+            body=rollout_request(
+                canary_body["rolloutRevision"],
+                target="active",
+                percentage=100,
+                ring="broad",
+            ),
+            claims=claims,
+        ),
+    )
     activated = json.loads(active["body"])["items"][0]
-    assert activated["drifted"] is False
-    assert activated["appliedHash"] == activated["desiredHash"]
+    assert active["statusCode"] == 200, active
+    assert activated["rolloutState"] == "active"
+    assert activated["drifted"] is True
+    assert activated["appliedHash"] is None
+
+    for agent_id in agent_ids:
+        table.items[(f"TENANT#{tenant}", f"AGENT#deployment-a:{agent_id}")][
+            "managed_configuration_report"
+        ] = {
+            **desired_v1,
+            "source": "endpoint-managed-file",
+            "verifiedAt": clock[0],
+            "expiresAt": clock[0] + 3_600,
+        }
+    converged = configuration()
+    assert converged["rolloutState"] == "converged", converged
+    assert converged["drifted"] is False
+    assert converged["appliedHash"] == converged["desiredHash"]
+    assert converged["lastKnownGoodVersion"] == 1
+    assert converged["lastKnownGoodPackageRevision"] == 1
+    assert converged["convergence"]["fullConverged"] is True
+
+    create_template("template-b", desired_v2)
+    second_stage = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config",
+            "POST",
+            body={"deploymentId": "deployment-a", "templateId": "template-b"},
+            claims=claims,
+        ),
+    )
+    assert second_stage["statusCode"] == 201, second_stage
+    second_body = json.loads(second_stage["body"])
+    assert second_body["version"] == 2
+    assert second_body["lastKnownGoodVersion"] == 1
+    publish(package_v2, 1)
+    second_active = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config/batch-rollout",
+            "POST",
+            body=rollout_request(
+                second_body["rolloutRevision"],
+                target="active",
+                percentage=100,
+                ring="broad",
+            ),
+            claims=claims,
+        ),
+    )
+    assert second_active["statusCode"] == 200, second_active
+    clock[0] += 301
+    events: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "_audit",
+        lambda _tenant, event_type, _actor, _payload: events.append(event_type),
+    )
+    scheduled = module.handler({"source": "aai.rollout-reconciliation", "schemaVersion": 1}, None)
+    assert scheduled["processedRollouts"] == 1
+    auto_paused = configuration()
+    assert auto_paused["rolloutState"] == "paused"
+    assert "drift threshold" in auto_paused["pauseReason"]
+    assert events == ["deployment_rollout_auto_paused"]
+
+    rolled_back = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config/rollback",
+            "POST",
+            body={
+                "deploymentId": "deployment-a",
+                "targetVersion": 1,
+                "expectedRevision": auto_paused["rolloutRevision"],
+                "reason": "Restore the exact last known-good managed configuration.",
+            },
+            claims=claims,
+        ),
+    )
+    assert rolled_back["statusCode"] == 200, rolled_back
+    rollback_body = json.loads(rolled_back["body"])
+    assert rollback_body["version"] == 3
+    # Existing fresh endpoint evidence already matches the retained known-good
+    # version, so the server may reconcile the rollback in the same request.
+    assert rollback_body["rolloutState"] == "converged"
+    assert rollback_body["desiredHash"] == converged["desiredHash"]
+    assert rollback_body["rolloutPackageRevision"] == 1
+    package_payload = module._agent_managed_package(
+        tenant,
+        "deployment-a",
+        agent_ids[0],
+        table.items[(f"TENANT#{tenant}", f"AGENT#deployment-a:{agent_ids[0]}")],
+    )
+    assert package_payload["revision"] == 1
+    restored = configuration()
+    assert restored["rolloutState"] == "converged"
+    assert restored["version"] == 3
+    assert restored["convergence"]["fullConverged"] is True
+
+
+def test_managed_rollout_schedule_and_unsafe_transitions_fail_closed(monkeypatch: Any) -> None:
+    """Malformed windows, canary expansion and browser convergence claims are denied."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-rollout-denial"
+    now = 2_240_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    package, desired = _managed_package_fixture()
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(tenant, "DEPLOYMENT", "dep-a") | {"id": "dep-a"})
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "status": "connected",
+            "expires_at": now + 3_600,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/enterprise/templates",
+                "POST",
+                body={
+                    "templateId": "template-a",
+                    "name": "Template A",
+                    "configuration": {"managedHost": desired},
+                },
+                claims=claims,
+            ),
+        )["statusCode"]
+        == 201
+    )
+    staged = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/enterprise/deployment-config",
+                "POST",
+                body={"deploymentId": "dep-a", "templateId": "template-a"},
+                claims=claims,
+            ),
+        )["body"]
+    )
+    publish = _invoke(
+        module,
+        _event(
+            "/enterprise/deployments/dep-a/managed-package",
+            "PUT",
+            body={
+                "expectedRevision": 0,
+                "packageBase64": base64.b64encode(package.to_json()).decode(),
+                "packageSha256": package.package_sha256,
+            },
+            claims=claims,
+        ),
+    )
+    assert publish["statusCode"] == 201
+    base = {
+        "deploymentIds": ["dep-a"],
+        "expectedRevisions": {"dep-a": staged["rolloutRevision"]},
+        "targetState": "canary",
+        "percentage": 10,
+        "channel": "stable",
+        "ring": "canary",
+        "reason": "Schedule a bounded synthetic canary during its maintenance window.",
+        "healthCriteria": {
+            "maxUnavailablePercent": 10,
+            "maxDriftPercent": 10,
+            "minSampleSize": 1,
+            "gracePeriodSeconds": 300,
+        },
+        "schedule": {
+            "notBefore": now + 600,
+            "deadline": now + 3_600,
+            "timeZone": "Europe/London",
+        },
+    }
+    rollout_schedule = cast(dict[str, Any], base["schedule"])
+    invalid_zone = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config/batch-rollout",
+            "POST",
+            body={**base, "schedule": {**rollout_schedule, "timeZone": "Not/AZone"}},
+            claims=claims,
+        ),
+    )
+    assert invalid_zone["statusCode"] == 400
+    oversized_canary = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config/batch-rollout",
+            "POST",
+            body={**base, "percentage": 50},
+            claims=claims,
+        ),
+    )
+    assert oversized_canary["statusCode"] == 400
+    forged = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config/batch-rollout",
+            "POST",
+            body={**base, "appliedHash": staged["desiredHash"]},
+            claims=claims,
+        ),
+    )
+    assert forged["statusCode"] == 400
+    scheduled = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config/batch-rollout",
+            "POST",
+            body=base,
+            claims=claims,
+        ),
+    )
+    assert scheduled["statusCode"] == 200, scheduled
+    scheduled_body = json.loads(scheduled["body"])["items"][0]
+    assert scheduled_body["rolloutState"] == "scheduled"
+    assert scheduled_body["appliedHash"] is None
+    decreasing = _invoke(
+        module,
+        _event(
+            "/enterprise/deployment-config/batch-rollout",
+            "POST",
+            body={
+                **base,
+                "expectedRevisions": {"dep-a": scheduled_body["rolloutRevision"]},
+                "percentage": 5,
+            },
+            claims=claims,
+        ),
+    )
+    assert decreasing["statusCode"] == 409
 
 
 def test_tenant_summary_exposes_only_safe_trial_metadata(monkeypatch: Any) -> None:
