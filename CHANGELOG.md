@@ -1,5 +1,9 @@
 # Changelog
 
+- Fixed the cross-region rule to use the explicit S3 replication V2 schema
+  required by replication metrics, while continuing to exclude non-evidence
+  delete markers.
+
 - Persisted cross-region audit-recovery authority now survives routine AWS
   deployments, fails closed if its manifest is lost, verifies destination
   Object Lock posture, supports bounded S3 Batch Replication of historical

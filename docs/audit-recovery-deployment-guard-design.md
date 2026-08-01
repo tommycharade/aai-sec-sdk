@@ -35,6 +35,9 @@ Replication metrics enable object-level failed/not-tracked events, which enter
 the existing durable security-alert SNS/SQS channel with provider failure
 reasons. CloudWatch replication metrics are best-effort and published in the
 destination Region, so they are not treated as the sole failure signal.
+The rule uses the explicit V2 schema required by metrics: priority 1, an empty
+prefix that covers every evidence object, and disabled delete-marker replication
+because delete markers are not retained evidence records.
 
 ## Independent acceptance
 
