@@ -937,6 +937,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../policy-change-assurance-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy change assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../claude-managed-resources/" class="md-nav__link">
         
   
@@ -5815,6 +5842,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#policy-change-assurance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy change assurance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#incident-cases-and-response-authority" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -10223,6 +10261,17 @@
     <span class="md-ellipsis">
       
         Enterprise population discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#policy-change-assurance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy change assurance
       
     </span>
   </a>
@@ -52568,6 +52617,19 @@ detections to authorized security operators. <code>POST
 live revision and a redaction-safe investigation rationale. Acknowledgement is
 ownership evidence, not remediation. See <a href="../endpoint-detection-response/">Endpoint detection and
 response</a>.</p>
+<h2 id="policy-change-assurance">Policy change assurance</h2>
+<p><code>GET /enterprise/policies/{policyId}/versions/{version}</code> returns a typed
+<code>changeSummary</code> comparing the candidate with its immutable base version. The
+summary identifies individual authority expansions/restrictions, approval and
+limit changes, credential/isolation requirements and data-capture changes.</p>
+<p><code>POST /enterprise/policies/{policyId}/versions/{version}/simulate</code> accepts only
+<code>{"lookbackDays": N}</code>, where <code>N</code> is 1–90. A policy author, policy approver or
+platform administrator can evaluate a pending version against at most 250
+recent redacted decisions for that policy and tenant. The result is read-only,
+content-hash bound and contains explicit indeterminate outcomes where command
+text or MCP server identity was not retained. It never executes actions or
+changes policy authority. See
+<a href="../policy-change-assurance-design/">Policy change assurance</a>.</p>
 <h2 id="incident-cases-and-response-authority">Incident cases and response authority</h2>
 <p>The hosted AWS adapter exposes a revisioned case API for endpoint detections:</p>
 <ul>

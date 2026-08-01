@@ -16,7 +16,7 @@
         <link rel="prev" href="../policy-editor/">
       
       
-        <link rel="next" href="../claude-managed-resources/">
+        <link rel="next" href="../policy-change-assurance-design/">
       
       
         
@@ -1028,6 +1028,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-change-assurance-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy change assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2176,11 +2203,15 @@ creates a draft; no policy-write route directly mutates active authority.</p>
 <h2 id="operator-journey">Operator journey</h2>
 <ol>
 <li>An author edits a typed policy form and saves a draft.</li>
-<li>The review screen shows active-versus-draft semantic changes, affected
-   groups and agents, and the immutable content hash.</li>
+<li>The review screen shows active-versus-draft semantic authority changes,
+   affected groups and agents, and the immutable content hash.</li>
+<li>The operator runs a bounded historical simulation. Redacted commands and
+   missing MCP server identity remain explicitly indeterminate.</li>
 <li>The author submits the version. The editor becomes read-only.</li>
 <li>Another authenticated subject approves or rejects it with a rationale.</li>
 <li>An approver stages the approved version after confirming the active base.</li>
+<li>The UI requires a current simulation bound to the staged content hash before
+   opening activation confirmation.</li>
 <li>Activation atomically changes fleet authority; agent convergence remains a
    separate rollout and enforcement measurement.</li>
 </ol>
@@ -2195,9 +2226,10 @@ active policy resolution during review, complete audit attribution and honest
 UI state. The AWS adapter uses conditional writes for lifecycle steps and one
 DynamoDB transaction for activation, so a concurrent activation cannot
 partially update the candidate, retired predecessor, or active policy snapshot.</p>
-<p>Historical simulation, signed policy bundles, scheduling, inheritance,
-time-limited exceptions and measured endpoint convergence remain separate P1
-requirements and are not claimed by this lifecycle foundation.</p>
+<p>The historical-simulation and semantic-diff contract is defined in
+<a href="../policy-change-assurance-design/">Policy change assurance</a>. Signed policy
+bundles, scheduling, inheritance, time-limited exceptions and measured endpoint
+convergence remain separate P1 requirements.</p>
 
 
 

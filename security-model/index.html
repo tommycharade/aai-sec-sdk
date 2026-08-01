@@ -1149,6 +1149,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../policy-change-assurance-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy change assurance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../claude-managed-resources/" class="md-nav__link">
         
   
@@ -3039,6 +3066,15 @@ evaluation. Disabling removes future automatic authority immediately; rollback
 can select only an independently approved superseded version. Response records
 contain hashes and identifiers, not tool content or credentials. See
 <a href="../automatic-response-rules-design/">Approved automatic response rules</a>.</p>
+<p>Policy simulation is not execution and does not grant authority. The control
+plane evaluates only a pending immutable version against a bounded tenant- and
+policy-scoped window of redacted decision evidence. It reports missing command
+content and MCP server identity as indeterminate instead of reconstructing or
+guessing them. The result hash binds the candidate and exact sample, but does
+not prove unseen behavior, endpoint convergence or policy safety. Semantic
+diffs highlight expansions, restrictions and data-capture changes without
+turning reviewer judgement into an automated allow decision. See
+<a href="../policy-change-assurance-design/">Policy change assurance</a>.</p>
 <p>Case export is a separate read authority available only to canonical evidence
 roles. The server, never the browser, assembles a complete bounded snapshot,
 rechecks case and source-alert revisions, removes raw content, credentials and
