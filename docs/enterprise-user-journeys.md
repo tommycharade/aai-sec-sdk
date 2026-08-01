@@ -117,8 +117,14 @@ from absence alone.
 8. Select **Release quarantine**. The server rechecks binding, endpoint health,
    agent verification, independent stop scopes and alert readiness.
 9. Resolve and then close the case; the revisioned timeline remains retained.
-10. Export the redacted incident evidence and use MDM/EDR separately if device,
-    process or network isolation is required.
+10. Select **Export verified JSON**. The console asks the control plane for the
+    complete bounded package, verifies its canonical SHA-256 digest locally and
+    only then creates the download. It shows the retained digest and counts.
+11. Run `python3 scripts/verify_incident_case_export.py FILE.json` from a
+    trusted SDK checkout before sharing or importing the package elsewhere.
+12. Compare the receipt digest with the immutable audit record when chain of
+    custody matters. Use MDM/EDR separately if device, process or network
+    isolation is required.
 
 The UI should make the safe response the shortest path, while requiring
 stronger confirmation for broader scope and irreversible actions.

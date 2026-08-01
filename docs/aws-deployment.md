@@ -277,6 +277,21 @@ Release performs live recovery checks. These controls do not isolate the
 device or terminate arbitrary local processes; integrate an MDM/EDR adapter
 before making that operational claim.
 
+Canonical incident responders, security operators, auditors and platform
+administrators can export one retained case from the Incidents workspace. The
+browser downloads only after verifying the server's canonical content digest.
+Verify the downloaded file again on any machine from a trusted checkout:
+
+```bash
+python3 scripts/verify_incident_case_export.py \
+  ~/Downloads/aai-incident-CASE_ID-DIGEST.json
+```
+
+A successful verifier prints the case identifier, full SHA-256 digest and
+evidence counts. Preserve the JSON with the corresponding Object-Lock audit
+record. Do not treat the artifact as proof of MDM/EDR isolation or as a digital
+signature; add those deployment evidence sources separately.
+
 Agent identity lifecycle is independent from presence and emergency stop. A
 fleet operator can call `POST /enterprise/agents/{deployment}/{agent}/revoke`
 with `expectedLifecycleRevision` and a bounded reason. The transition is

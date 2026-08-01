@@ -529,6 +529,13 @@ The hosted AWS adapter exposes a revisioned case API for endpoint detections:
   metadata, authoritative binding state, a content-minimised timeline and
   correlated decision/approval references. Raw endpoint payloads, project
   roots and credentials are excluded.
+- `GET /enterprise/cases/{caseId}/export` returns schema-version `1` audit-ready
+  JSON to a canonical `platform-admin`, `security-operator`,
+  `incident-responder` or `auditor`. The control plane strongly reads the case,
+  source alert and bounded correlated evidence; refuses truncation or concurrent
+  revision changes; SHA-256 hashes canonical `content`; and persists that digest
+  to the immutable audit sink before returning it. Free-form approval reasons,
+  project paths, prompts, arguments, results and credentials are excluded.
 - `POST /enterprise/cases/{caseId}/contain` requires the current case revision
   and binding digest. It creates a server-owned quarantine for the exactly
   bound agent. Policy delivery, approvals and managed-package retrieval fail
@@ -547,3 +554,5 @@ All mutations require `incident_response`, a 20–500 character redaction-safe
 rationale and optimistic concurrency. There is intentionally no `agentId` in a
 containment request. See
 [Incident case and containment design](incident-case-containment-design.md).
+Artifact schema, refusal bounds and offline verification are specified in
+[Audit-ready incident case export](incident-case-export-design.md).

@@ -166,6 +166,11 @@ _ENDPOINT_DETECTION_INDEX = "EndpointDetectionTenants"
 _ENDPOINT_DETECTION_SHARDS = 16
 _ENDPOINT_DETECTION_TENANT_LIMIT = 2_000
 _CASE_STATUSES = frozenset({"open", "investigating", "contained", "resolved", "closed"})
+_CASE_EXPORT_ROLES = frozenset(
+    {"platform-admin", "security-operator", "incident-responder", "auditor"}
+)
+_CASE_EXPORT_RECORD_LIMIT = 500
+_CASE_EXPORT_LOOKBACK_SECONDS = 24 * 60 * 60
 _ENDPOINT_EVENT_REASONS = frozenset({"signature_invalid", "report_replayed"})
 _ENDPOINT_ALERT_DEFINITIONS = {
     "credential_not_configured": (
@@ -6819,6 +6824,174 @@ def _case_view(tenant, case, *, detailed=False):
     }
 
 
+def _case_export_event(item):
+    """Project and verify one content-minimised timeline event for export."""
+    payload = _json(item.get("payload", {}))
+    expected_hash = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    stored_hash = str(item.get("payloadHash", ""))
+    if not re.fullmatch(r"[0-9a-f]{64}", stored_hash) or not secrets.compare_digest(
+        stored_hash, expected_hash
+    ):
+        raise RuntimeError("case timeline integrity verification failed")
+    return {
+        "id": item.get("id"),
+        "eventType": item.get("eventType"),
+        "actor": item.get("actor"),
+        "occurredAt": int(item.get("occurredAt", 0)),
+        "sequence": int(item.get("sequence", 0)),
+        "payload": payload,
+        "payloadHash": stored_hash,
+    }
+
+
+def _case_export_approval(item, now):
+    """Project approval evidence without exporting free-form operator text.
+
+    Approval bindings and outcomes are required to reconstruct the decision
+    path. The optional decision reason is deliberately excluded because it can
+    contain investigation narrative that was never approved for portability.
+    """
+    view = _approval_view(item, now)
+    view.pop("decisionReason", None)
+    view["decisionReasonIncluded"] = False
+    return view
+
+
+def _case_export(tenant, case_id, actor):
+    """Build one complete bounded case package and retain its export digest.
+
+    The export is assembled only from strongly read server-owned records. It
+    refuses unsafe bounds or concurrent case/alert changes instead of labelling
+    a partial package complete.
+    """
+    generated_at = int(time.time())
+    evidence_cutoff = max(0, generated_at - 1)
+    case = _case_record(tenant, case_id)
+    case_revision = int(case.get("revision", 0))
+    alert = TABLE.get_item(
+        Key=_item_key(tenant, "ALERT", case.get("alertId", "")), ConsistentRead=True
+    ).get("Item")
+    if not alert or alert.get("source") != "endpoint_evidence":
+        raise RuntimeError("case source alert is unavailable for export")
+    alert_revision = int(alert.get("revision", 0))
+    timeline = [_case_export_event(item) for item in _case_events(tenant, case["id"])]
+    if len(timeline) > _CASE_EXPORT_RECORD_LIMIT:
+        raise RuntimeError("case timeline exceeds the export bound")
+
+    binding = _json(case.get("binding", {}))
+    first_observed = int(alert.get("firstObservedAt", case.get("createdAt", 0)))
+    correlation_start = max(
+        0,
+        min(int(case.get("createdAt", 0)), first_observed) - _CASE_EXPORT_LOOKBACK_SECONDS,
+    )
+    deployment_id = binding.get("deploymentId")
+    agent_id = binding.get("agentId")
+    decisions = []
+    approvals = []
+    if isinstance(deployment_id, str) and deployment_id and isinstance(agent_id, str) and agent_id:
+        decisions = [
+            _decision_view(item)
+            for item in _list(tenant, "DECISION", consistent_read=True)
+            if item.get("deployment_id") == deployment_id
+            and item.get("agent_id") == agent_id
+            and correlation_start <= int(item.get("observed_at", 0)) <= evidence_cutoff
+        ]
+        decisions.sort(key=lambda item: (item.get("timestamp", ""), item.get("id", "")))
+        agent_key = f"{deployment_id}:{agent_id}"
+        approvals = [
+            _case_export_approval(item, generated_at)
+            for item in _list(tenant, "APPROVAL", consistent_read=True)
+            if item.get("agent_key") == agent_key
+            and correlation_start
+            <= int(item.get("requested_at", item.get("created_at", 0)))
+            <= evidence_cutoff
+        ]
+        approvals.sort(key=lambda item: (int(item.get("requestedAt", 0)), item.get("id", "")))
+    if len(decisions) > _CASE_EXPORT_RECORD_LIMIT:
+        raise RuntimeError("correlated decisions exceed the case export bound")
+    if len(approvals) > _CASE_EXPORT_RECORD_LIMIT:
+        raise RuntimeError("correlated approvals exceed the case export bound")
+
+    # Re-read the revisioned roots after assembly. A concurrent mutation must
+    # make the export retry rather than produce a mixed-state evidence package.
+    current_case = _case_record(tenant, case_id)
+    current_alert = TABLE.get_item(
+        Key=_item_key(tenant, "ALERT", case.get("alertId", "")), ConsistentRead=True
+    ).get("Item")
+    if int(current_case.get("revision", 0)) != case_revision or not current_alert:
+        raise PolicyConflict("incident case changed during export")
+    if int(current_alert.get("revision", 0)) != alert_revision:
+        raise PolicyConflict("source alert changed during export")
+
+    case_snapshot = _case_view(tenant, case)
+    content = {
+        "artifactType": "aai.incident-case",
+        "tenantId": tenant,
+        "caseId": case["id"],
+        "caseRevision": case_revision,
+        "generatedAt": generated_at,
+        "generatedBy": actor,
+        "correlationWindow": {
+            "startAt": correlation_start,
+            "endAt": evidence_cutoff,
+            "basis": "24_hours_before_first_alert_observation",
+        },
+        "case": case_snapshot,
+        "alert": _endpoint_alert_view(alert),
+        "timeline": timeline,
+        "decisions": decisions,
+        "approvals": approvals,
+        "evidence": {
+            "endpointReportDigest": binding.get("evidenceDigest"),
+            "endpointReportRevision": binding.get("evidenceRevision"),
+            "endpointObservedAt": binding.get("evidenceObservedAt"),
+            "projectRootDigest": binding.get("projectRootDigest"),
+        },
+        "completeness": {
+            "complete": True,
+            "decisionsTruncated": False,
+            "rawContentIncluded": False,
+            "credentialsIncluded": False,
+            "approvalDecisionReasonsIncluded": False,
+            "counts": {
+                "timelineEvents": len(timeline),
+                "decisions": len(decisions),
+                "approvals": len(approvals),
+            },
+            "recordLimitPerCollection": _CASE_EXPORT_RECORD_LIMIT,
+        },
+    }
+    canonical = json.dumps(
+        content,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode()
+    content_hash = hashlib.sha256(canonical).hexdigest()
+    receipt = _audit(
+        tenant,
+        "incident_case_exported",
+        actor,
+        {
+            "case_id": case["id"],
+            "case_revision": case_revision,
+            "content_hash": content_hash,
+        },
+    )
+    return {
+        "schemaVersion": 1,
+        "content": content,
+        "integrity": {
+            "algorithm": "SHA-256",
+            "canonicalization": "AAI canonical JSON v1",
+            "contentHash": content_hash,
+        },
+        "auditReceipt": receipt,
+    }
+
+
 def _create_case(tenant, body, actor):
     """Create one deterministic case from a live endpoint alert."""
     if not isinstance(body, dict) or set(body) != {"alertId", "expectedAlertRevision", "reason"}:
@@ -9068,6 +9241,13 @@ def handler(event, context):
                 return _response(200, health)
             if method == "POST" and parts == ["cases"]:
                 return _response(201, _create_case(tenant, _body(event), actor))
+            if method == "GET" and len(parts) == 3 and parts[0] == "cases" and parts[2] == "export":
+                if not (_operator_roles(event) & _CASE_EXPORT_ROLES):
+                    return _response(
+                        403,
+                        {"error": "incident case export requires an authorized evidence role"},
+                    )
+                return _response(200, _case_export(tenant, parts[1], actor))
             if method == "GET" and len(parts) == 2 and parts[0] == "cases":
                 return _response(
                     200, _case_view(tenant, _case_record(tenant, parts[1]), detailed=True)

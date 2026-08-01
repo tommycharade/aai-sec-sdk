@@ -775,3 +775,13 @@ increasing authority revision; a bearer or bootstrap issued under an earlier
 revision fails closed. Release requires a current binding and independently
 derived recovery evidence. This is SDK/control-plane containment, not an MDM,
 EDR, operating-system process kill or network-isolation claim.
+
+Case export is a separate read authority available only to canonical evidence
+roles. The server, never the browser, assembles a complete bounded snapshot,
+rechecks case and source-alert revisions, removes raw content, credentials and
+free-form approval narrative, and writes the canonical content digest to the
+Object-Lock audit sink before returning the artifact. The browser verifies the
+SHA-256 digest before download; `scripts/verify_incident_case_export.py`
+repeats content, count, timeline and audit-receipt checks offline. The digest
+detects modification but is not a KMS signature or a claim of legal
+admissibility.

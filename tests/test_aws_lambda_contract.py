@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from scripts.verify_incident_case_export import verify_artifact
 
 from agentic_security import (
     AgentHost,
@@ -4938,6 +4939,145 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
         "agent_quarantined",
         "agent_sessions_revoked",
     ]
+
+    # Export correlation uses the case-captured agent binding and excludes
+    # free-form approval narrative even when it exists in the source record.
+    table.put_item(
+        Item=module._item_key(tenant, "DECISION", "decision-a")
+        | {
+            "id": "decision-a",
+            "deployment_id": "deployment-a",
+            "agent_id": "agent-a",
+            "observed_at": now - 10,
+            "tool_name": "Bash",
+            "decision": "denied",
+            "reason_code": "policy_denied",
+            "resource_kind": "command",
+            "source": "claude_native_hook",
+            "policy_id": "policy-a",
+            "policy_version": 4,
+            "action_digest": "b" * 64,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "APPROVAL", "approval-a")
+        | {
+            "id": "approval-a",
+            "agent_key": "deployment-a:agent-a",
+            "tool_name": "Bash",
+            "proposal_id": "proposal-a",
+            "task_id": "task-a",
+            "principal_id": "synthetic-principal",
+            "action_hash": "c" * 64,
+            "risk_class": "consequential",
+            "resource_ids": ["repository-a"],
+            "status": "approved",
+            "requested_at": now - 10,
+            "expires_at": now + 600,
+            "decided_at": now - 5,
+            "decided_by": "approver-a",
+            "decision_reason": "Narrative intentionally excluded from portable evidence.",
+        }
+    )
+    auditor = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["auditor"],
+        "sub": "auditor-a",
+    }
+    exported = _invoke(
+        module,
+        _event(f"/api/enterprise/cases/{case['id']}/export", "GET", claims=auditor),
+    )
+    assert exported["statusCode"] == 200
+    artifact = json.loads(exported["body"])
+    verification = verify_artifact(artifact)
+    assert verification == {
+        "caseId": case["id"],
+        "contentHash": artifact["integrity"]["contentHash"],
+        "timelineEvents": 3,
+        "decisions": 1,
+        "approvals": 1,
+    }
+    assert artifact["content"]["decisions"][0]["id"] == "decision-a"
+    assert "decisionReason" not in artifact["content"]["approvals"][0]
+    assert artifact["content"]["completeness"]["approvalDecisionReasonsIncluded"] is False
+    assert project_root not in exported["body"]
+    assert "Narrative intentionally excluded" not in exported["body"]
+    denied_export = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case['id']}/export",
+            "GET",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["fleet-operator"],
+                "sub": "fleet-only",
+            },
+        ),
+    )
+    assert denied_export["statusCode"] == 403
+
+    other_tenant = "tenant-other-incident"
+    table.put_item(Item=module._item_key(other_tenant, "TENANT", "root") | {"id": other_tenant})
+    cross_tenant = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case['id']}/export",
+            "GET",
+            claims={
+                "custom:tenant_id": other_tenant,
+                "cognito:groups": ["auditor"],
+                "sub": "auditor-other",
+            },
+        ),
+    )
+    assert cross_tenant["statusCode"] == 404
+
+    event_key = next(
+        key
+        for key, item in table.items.items()
+        if item.get("case_id") == case["id"] and item.get("sequence") == 1
+    )
+    original_event = dict(table.items[event_key])
+    table.items[event_key]["payload"] = {"reason": "Changed without updating the digest."}
+    tampered = _invoke(
+        module,
+        _event(f"/api/enterprise/cases/{case['id']}/export", "GET", claims=auditor),
+    )
+    assert tampered["statusCode"] == 500
+    table.items[event_key] = original_event
+
+    original_case_record = module._case_record
+    case_reads = 0
+
+    def changed_case_record(case_tenant: str, case_id: str) -> dict[str, Any]:
+        nonlocal case_reads
+        case_reads += 1
+        record = original_case_record(case_tenant, case_id)
+        return {**record, "revision": int(record["revision"]) + 1} if case_reads > 1 else record
+
+    monkeypatch.setattr(module, "_case_record", changed_case_record)
+    with pytest.raises(module.PolicyConflict, match="changed during export"):
+        module._case_export(tenant, case["id"], "auditor-a")
+    monkeypatch.setattr(module, "_case_record", original_case_record)
+
+    original_case_events = module._case_events
+    bounded_events = [
+        module._case_timeline_record(
+            tenant,
+            case["id"],
+            "synthetic_event",
+            "auditor-a",
+            {"index": index},
+            now=now - 1,
+            sequence=index + 1,
+        )
+        for index in range(module._CASE_EXPORT_RECORD_LIMIT + 1)
+    ]
+    monkeypatch.setattr(module, "_case_events", lambda *_args: bounded_events)
+    with pytest.raises(RuntimeError, match="timeline exceeds"):
+        module._case_export(tenant, case["id"], "auditor-a")
+    monkeypatch.setattr(module, "_case_events", original_case_events)
 
     monkeypatch.setattr(
         module,
