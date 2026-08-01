@@ -2338,19 +2338,26 @@ the central team's operating workflows.</p>
 <p>The recommended navigation is:</p>
 <ul>
 <li>Dashboard</li>
-<li>Policies</li>
+<li>Coverage</li>
 <li>Groups</li>
 <li>Agents</li>
-<li>Deployments</li>
-<li>Integrations</li>
 <li>Approvals</li>
-<li>Audit and evidence</li>
-<li>Credentials</li>
-<li>Isolation</li>
-<li>Configuration history</li>
-<li>Emergency controls</li>
-<li>Settings</li>
+<li>Incidents</li>
+<li>Audit trail</li>
+<li>Policies</li>
+<li>Skills and MCP</li>
+<li>Connect agents</li>
+<li>Identity and access</li>
+<li>Deployments</li>
+<li>SDK runtime</li>
 </ul>
+<p>The <strong>Identity and access</strong> page must not be one continuous administration
+form. Its overview shows verified identity foundations and one next-best
+action. Separate workspaces cover <strong>Entra setup</strong>, <strong>Directory &amp; roles</strong>,
+<strong>Delegated access</strong>, <strong>Emergency access</strong>, and <strong>Access reviews</strong>. This keeps
+rare emergency and certification work out of the routine federation journey.
+The parked Splunk stub belongs to integration posture, not identity readiness,
+and must not appear as a failed identity control.</p>
 <h2 id="enterprise-managed-features">Enterprise-managed features</h2>
 <table>
 <thead>
@@ -2501,6 +2508,26 @@ the central team's operating workflows.</p>
 <td>Operators, roles, bearer tokens and enterprise SSO integration.</td>
 </tr>
 <tr>
+<td>Microsoft Entra onboarding</td>
+<td>A non-secret, task-focused setup workspace with redirect URI, server-owned tenant binding, downloadable manifest, guarded deployment commands and explicit live-acceptance gate.</td>
+</tr>
+<tr>
+<td>Directory authority</td>
+<td>SCIM lifecycle, exact group-to-role mappings, canonical capabilities and degraded/not-configured states.</td>
+</tr>
+<tr>
+<td>Delegated administration</td>
+<td>Expiring organization/project/deployment grants, live scope, rationale, revocation and retained history.</td>
+</tr>
+<tr>
+<td>Emergency access</td>
+<td>Recent-MFA, four-eyes, exact-capability, maximum-60-minute break-glass workflow.</td>
+</tr>
+<tr>
+<td>Access certification</td>
+<td>Complete-or-explicitly-incomplete digest-bound operator, role, delegation and emergency evidence export.</td>
+</tr>
+<tr>
 <td>CORS/origin restriction</td>
 <td>Allowed browser origins and deployment environment.</td>
 </tr>
@@ -2548,6 +2575,11 @@ confirmation for emergency operations, produce audit events, and expose
 health/error state rather than silently accepting configuration. Secrets should
 be stored as references to an enterprise secret/IAM system, never displayed or
 persisted in browser state.</p>
+<p>Identity setup may copy or download non-secret deployment values, but the
+browser never accepts an OIDC client secret, SCIM bearer, tenant authority or
+role claim. Configuration status is not acceptance evidence: the UI continues
+to distinguish deployed federation from completed OIDC, joiner/mover/leaver,
+role-denial and two-person MFA exercises.</p>
 
 
 

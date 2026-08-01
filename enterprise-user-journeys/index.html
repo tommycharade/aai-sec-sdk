@@ -1402,6 +1402,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#journey-0-connect-microsoft-entra-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journey 0: Connect Microsoft Entra ID
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#journey-1-onboard-an-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2302,6 +2313,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#journey-0-connect-microsoft-entra-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journey 0: Connect Microsoft Entra ID
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#journey-1-onboard-an-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2407,6 +2429,33 @@
 <h1 id="enterprise-user-journeys">Enterprise user journeys</h1>
 <p>These journeys describe the intended low-friction workflow for a central
 security or platform team managing many agent deployments.</p>
+<h2 id="journey-0-connect-microsoft-entra-id">Journey 0: Connect Microsoft Entra ID</h2>
+<p><strong>Actor:</strong> Enterprise identity or platform administrator.</p>
+<ol>
+<li>Open <strong>Identity and access</strong>. The overview shows the verified foundations
+   and directs an unconfigured tenant to <strong>Entra setup</strong>.</li>
+<li>Register a single-tenant Entra application using the displayed Cognito
+   redirect URI and bind pilot administrators to an MFA-enforcing Conditional
+   Access policy.</li>
+<li>Create separate OIDC and SCIM secrets in AWS Secrets Manager. Neither value
+   is pasted into the browser.</li>
+<li>Download the secret-free deployment manifest and populate the Entra tenant,
+   client, secret-resource names, AAI tenant and retained Conditional Access
+   evidence reference outside the repository.</li>
+<li>Copy and run the read-only preflight, reviewed-reference persistence and
+   guarded deployment commands from the setup workspace.</li>
+<li>Configure Entra automatic provisioning with the deployed SCIM endpoint.</li>
+<li>Open <strong>Directory &amp; roles</strong>, confirm current lifecycle evidence, and map
+   exact provisioned groups to the smallest canonical roles.</li>
+<li>Exercise a joiner, mover and leaver, including one permitted and one denied
+   API action for each role transition.</li>
+<li>Use <strong>Emergency access</strong> for the separate two-person recent-MFA exercise and
+   <strong>Access reviews</strong> to export the digest-bound certification artifact.</li>
+</ol>
+<p>Success means OIDC, SCIM lifecycle, role transition, role denial and
+independently approved emergency access have live retained evidence. A
+downloaded manifest, configured identity provider or successful synthetic
+SCIM contract alone is never displayed as acceptance.</p>
 <h2 id="journey-1-onboard-an-agent">Journey 1: Onboard an agent</h2>
 <p><strong>Actor:</strong> Platform engineer or local developer using an approved enrollment
 link.</p>

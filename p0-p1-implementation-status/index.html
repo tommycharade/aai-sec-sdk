@@ -2536,7 +2536,7 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.</p>
 <td>P0-06</td>
 <td>Entra SSO, SCIM and granular RBAC</td>
 <td>Partial</td>
-<td>Tenant-specific Entra OIDC; tenant-bound SCIM lifecycle and canonical-role mapping; five-minute token reconciliation; expiring organization/project/deployment role delegation with live revocation and scoped reads; cross-organization group authority-edge denial; recent-MFA, four-eyes, maximum-60-minute break glass; schema-v2 digest-bound access export; persistent secret-free deployment manifest with tenant-specific OIDC/secret/AAI-tenant preflight and missing-manifest removal guard; adversarial contracts, deployed synthetic scope acceptance and Identity &amp; Trust UI</td>
+<td>Tenant-specific Entra OIDC; tenant-bound SCIM lifecycle and canonical-role mapping; five-minute token reconciliation; expiring organization/project/deployment role delegation with live revocation and scoped reads; cross-organization group authority-edge denial; recent-MFA, four-eyes, maximum-60-minute break glass; schema-v2 digest-bound access export; persistent secret-free deployment manifest with tenant-specific OIDC/secret/AAI-tenant preflight and missing-manifest removal guard; adversarial contracts, deployed synthetic scope acceptance and focused Identity &amp; Access workspaces for setup, directory roles, delegation, emergency access and reviews</td>
 <td>Supply and configure the pilot tenant; prove real OIDC and SCIM joiner/mover/leaver; run deployed two-person MFA, delegated multi-business-unit and certification exercises</td>
 </tr>
 <tr>
@@ -2738,8 +2738,10 @@ with Microsoft Entra ID as the first adapter:</p>
 <li>Access and ID tokens expire after five minutes, bounding mover/leaver
    convergence when refresh repeats the lifecycle lookup.</li>
 <li>The UI reports lifecycle counts, sync posture and role mappings while
-   preserving honest degraded and not-configured states. Splunk remains a
-   non-delivering stub.</li>
+   preserving honest degraded and not-configured states. The UI separates the
+   overview, Entra setup, directory roles, delegated access, emergency access
+   and certification journeys; Splunk remains a non-delivering stub outside
+   identity readiness.</li>
 <li>Emergency access is self-targeted, exact-capability, conditional,
     recent-MFA, four-eyes and bounded to 60 minutes; the server rechecks it on
     every mutation and revocation takes effect immediately.</li>
