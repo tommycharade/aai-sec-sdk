@@ -154,6 +154,8 @@ def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path)
         enterprise_control_plane_url="https://fleet.example.test/api",
         deployment_id="deployment-prod-eu",
         agent_id="claude-platform-prod",
+        tenant_id="tenant-prod",
+        policy_trust_bundle=Path("/etc/aai-security/policy-trust.json"),
     )
 
     settings = json.loads((tmp_path / ".claude/settings.json").read_text())
@@ -165,6 +167,8 @@ def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path)
         "AAI_SEC_DEPLOYMENT_ID": "deployment-prod-eu",
         "AAI_SEC_AGENT_ID": "claude-platform-prod",
         "AAI_SEC_AGENT_SESSION_MODE": "aws",
+        "AAI_SEC_TENANT_ID": "tenant-prod",
+        "AAI_SEC_POLICY_TRUST_BUNDLE": str(Path("/etc/aai-security/policy-trust.json").resolve()),
     }
     assert "AAI_SEC_AGENT_TOKEN" not in environment
     hook_command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
@@ -172,13 +176,15 @@ def test_onboard_writes_deployment_scoped_enterprise_environment(tmp_path: Path)
     assert "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL" in hook_command
     assert "deployment-prod-eu" in hook_command
     command_tokens = shlex.split(hook_command)
-    assert command_tokens[:6] == [
+    assert command_tokens[:8] == [
         "env",
         f"PYTHONPATH={Path.cwd() / 'src'}",
         "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL=https://fleet.example.test/api",
         "AAI_SEC_DEPLOYMENT_ID=deployment-prod-eu",
         "AAI_SEC_AGENT_ID=claude-platform-prod",
         "AAI_SEC_AGENT_SESSION_MODE=aws",
+        "AAI_SEC_TENANT_ID=tenant-prod",
+        f"AAI_SEC_POLICY_TRUST_BUNDLE={Path('/etc/aai-security/policy-trust.json').resolve()}",
     ]
 
 
@@ -206,6 +212,8 @@ def test_onboard_secures_ui_session_outside_project_configuration(
         enterprise_control_plane_url="https://fleet.example.test/api",
         deployment_id="deployment-prod-eu",
         agent_id="claude-platform-prod",
+        tenant_id="tenant-prod",
+        policy_trust_bundle=Path("/etc/aai-security/policy-trust.json"),
     )
 
     cache = AgentSessionStore(
@@ -243,6 +251,8 @@ def test_repeat_enterprise_onboarding_stays_aws_and_replaces_managed_hook(
             enterprise_control_plane_url="https://fleet.example.test/api",
             deployment_id="deployment-prod-eu",
             agent_id="claude-platform-prod",
+            tenant_id="tenant-prod",
+            policy_trust_bundle=Path("/etc/aai-security/policy-trust.json"),
         )
 
     run_onboarding()

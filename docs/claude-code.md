@@ -98,7 +98,11 @@ For an enterprise deployment, onboard the project with a deployment scope:
 First, have an authenticated platform operator create a one-time bootstrap
 token for the registered deployment. The AWS hosted control plane exposes this
 as `POST /enterprise/agents/bootstrap`; the response contains the token once
-and it must not be stored in the project. Then run onboarding with that token:
+and it must not be stored in the project. Before onboarding, a platform
+administrator must export the deployed KMS public key and install the trust
+bundle as a root-owned, non-writable file. The project and Claude process must
+not create or replace this file. See [signed policy bundles](signed-policy-bundles-design.md)
+and [AWS deployment](aws-deployment.md#policy-signing-trust). Then run:
 
 ```bash
 python3 /path/to/aai-sec-sdk/scripts/onboard_claude.py \
@@ -106,6 +110,7 @@ python3 /path/to/aai-sec-sdk/scripts/onboard_claude.py \
   --enterprise-control-plane-url https://<api-id>.execute-api.eu-west-2.amazonaws.com \
   --deployment-id deployment-prod-eu \
   --agent-id claude-platform-prod \
+  --policy-trust-bundle "/Library/Application Support/AAISecurity/policy-trust.json" \
   --bootstrap-token "<one-time-token>"
 claude
 ```
@@ -122,6 +127,12 @@ Claude. The MCP heartbeat rotates the cache and each native hook process reads
 the current value, so a healthy session continues beyond the original bearer.
 Use the exact value from `pwd -P` when registering the agent; broad, relative,
 or lexically non-canonical roots are rejected.
+
+Bootstrap enrollment derives the tenant ID from the authenticated server
+response. Repeat onboarding without a new bootstrap must also supply
+`--tenant-id <server-assigned-tenant>` (or `AAI_SEC_TENANT_ID`). The generated
+hook and MCP process refuse unsigned, altered, cross-tenant, unknown-key or
+untrusted policy responses before policy is loaded.
 
 The real-device acceptance run for Claude Code 2.1.220 is recorded in
 [real Claude Code acceptance evidence](real-claude-code-acceptance-evidence-2026-07-27.md).

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import ssl
 import sys
 import time
@@ -159,6 +160,11 @@ def main() -> int:
     parser.add_argument("--profile", default=None, help="AWS profile for the boto3 session")
     parser.add_argument("--tenant", default="tenant-demo", help="Provisioned synthetic test tenant")
     parser.add_argument(
+        "--policy-trust-bundle",
+        required=True,
+        help="Public trust bundle exported from the deployed policy-signing KMS key",
+    )
+    parser.add_argument(
         "--allow-unconfigured-runtime-attestation",
         action="store_true",
         help=(
@@ -167,6 +173,13 @@ def main() -> int:
         ),
     )
     arguments = parser.parse_args()
+
+    from agentic_security import PolicyTrustStore
+
+    policy_trust_store = PolicyTrustStore.from_file(
+        arguments.policy_trust_bundle,
+        required_owner_id=os.getuid(),
+    )
 
     import boto3
 
@@ -568,6 +581,8 @@ def main() -> int:
             project_root="/synthetic/project",
             deployment_id=deployment_id,
             aws_agent_session=True,
+            policy_trust_store=policy_trust_store,
+            tenant_id=arguments.tenant,
         )
         if agent_client.register() != session_token:
             raise RuntimeError("AWS agent client attempted an unexpected enrollment")
@@ -653,6 +668,8 @@ def main() -> int:
             deployment_id=deployment_id,
             aws_agent_session=True,
             managed_configuration_provider=lambda: managed_evidence,
+            policy_trust_store=policy_trust_store,
+            tenant_id=arguments.tenant,
         )
         if managed_client.heartbeat(session_token).get("status") != "connected":
             raise RuntimeError("AWS managed-host evidence heartbeat failed")
@@ -707,6 +724,8 @@ def main() -> int:
             deployment_id=deployment_id,
             aws_agent_session=True,
             managed_configuration_provider=lambda: conflicting_evidence,
+            policy_trust_store=policy_trust_store,
+            tenant_id=arguments.tenant,
         )
         conflicting_client.heartbeat(session_token)
         conflict_status, _ = _request(

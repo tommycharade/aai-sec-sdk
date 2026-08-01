@@ -175,6 +175,13 @@ from .runtime_attestation import (
     RuntimeAttestationEvidence,
     RuntimeAttestor,
 )
+from .signed_policy import (
+    PolicyBundleVerificationError,
+    PolicyTrustStore,
+    SignedPolicyBundle,
+    TrustedPolicyKey,
+    canonical_policy_payload,
+)
 from .telemetry import CompositeAuditSink, OpenTelemetryAuditSink
 from .tools import OutputValidator, ReconciliationHandler, ToolDefinition, ToolRegistry
 from .types import (
@@ -239,6 +246,11 @@ __all__ = [
     "RuntimeAttestationError",
     "RuntimeAttestationEvidence",
     "RuntimeAttestor",
+    "PolicyBundleVerificationError",
+    "PolicyTrustStore",
+    "SignedPolicyBundle",
+    "TrustedPolicyKey",
+    "canonical_policy_payload",
     "CompositeAuditSink",
     "CredentialBroker",
     "CredentialPreparation",

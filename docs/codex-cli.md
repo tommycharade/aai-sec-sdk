@@ -25,7 +25,9 @@ python3 /absolute/path/to/aai-sec-sdk/scripts/onboard_codex.py \
   --sdk-root /absolute/path/to/aai-sec-sdk \
   --enterprise-control-plane-url https://control.example.test \
   --deployment-id deployment-example \
-  --agent-id codex-example
+  --agent-id codex-example \
+  --tenant-id tenant-example \
+  --policy-trust-bundle "/Library/Application Support/AAISecurity/policy-trust.json"
 unset AAI_SEC_AGENT_TOKEN
 ```
 
@@ -50,6 +52,13 @@ registered root, so a cache copied from another checkout fails closed.
 Existing TOML outside the marked block is preserved.
 Invalid TOML, ambiguous ownership, unsafe identifiers, unsafe cache state and
 configuration symlinks fail closed.
+
+The trust bundle must be exported from the deployed asymmetric KMS signing key
+and installed by an administrator before this command runs. Codex, the project
+and the browser cannot select the trusted signer. Every central policy is
+verified locally against that pinned key and tenant before either the native
+hook or MCP gateway accepts it as authority. See
+[signed policy bundles](signed-policy-bundles-design.md).
 
 Codex ignores the complete project `.codex` layer—including the security MCP
 and hook—until the project is trusted. After onboarding:

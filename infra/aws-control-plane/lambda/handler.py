@@ -21,6 +21,7 @@ from pathlib import Path
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from policy_signing import bundle_from_record, sign_policy_bundle
 
 CONTROL_TABLE_NAME = os.environ["CONTROL_TABLE"]
 TABLE = boto3.resource("dynamodb").Table(CONTROL_TABLE_NAME)
@@ -31,6 +32,8 @@ SCIM = boto3.resource("dynamodb").Table(SCIM_TABLE_NAME) if SCIM_TABLE_NAME else
 DYNAMODB = boto3.client("dynamodb")
 S3 = boto3.client("s3")
 SNS = boto3.client("sns")
+KMS = boto3.client("kms")
+POLICY_SIGNING_KEY_ARN = os.environ.get("POLICY_SIGNING_KEY_ARN", "")
 
 # Tenant list reads are deliberately finite. Callers that require complete
 # security state fail closed once either bound is reached; they never authorize
@@ -2946,6 +2949,10 @@ def _ensure_policy_governance(tenant, policy):
         raise PolicyConflict("legacy policy cannot be migrated safely")
     now = int(policy.get("updatedAt", policy.get("createdAt", time.time())))
     author = str(policy.get("author", "legacy-migration"))
+    effective_configuration = _managed_policy_configuration(tenant, policy["configuration"])
+    bundle = _sign_policy_bundle(
+        tenant, policy["id"], active_version, effective_configuration, now
+    )
     version_record = {
         **_item_key(
             tenant,
@@ -2961,6 +2968,7 @@ def _ensure_policy_governance(tenant, policy):
         "name": policy.get("name", policy["id"]),
         "configuration": _json(policy["configuration"]),
         "content_hash": _configuration_hash(_json(policy["configuration"])),
+        **_bundle_record_fields(bundle),
         "state": "active",
         "author": author,
         "created_at": now,
@@ -2985,7 +2993,110 @@ def _ensure_policy_governance(tenant, policy):
         "governance_schema_version": 1,
     }
     TABLE.put_item(Item=migrated)
-    return migrated
+    return _ensure_active_policy_signature(tenant, migrated)
+
+
+def _sign_policy_bundle(tenant, policy_id, version, configuration, signed_at):
+    """Sign exact resolved authority through the deployment-owned KMS key."""
+    if not POLICY_SIGNING_KEY_ARN:
+        raise RuntimeError("policy signing key is not configured")
+    return sign_policy_bundle(
+        KMS,
+        POLICY_SIGNING_KEY_ARN,
+        tenant,
+        policy_id,
+        version,
+        _json(configuration),
+        signed_at,
+    )
+
+
+def _bundle_record_fields(bundle):
+    """Project a signed wire bundle into immutable DynamoDB-safe fields."""
+    return {
+        "effective_configuration": _json(bundle["configuration"]),
+        "effective_content_hash": bundle["contentHash"],
+        "bundle_integrity": _json(bundle["integrity"]),
+    }
+
+
+def _ensure_active_policy_signature(tenant, policy):
+    """Backfill exact existing active authority without changing its permissions."""
+    version = int(policy.get("version", 0))
+    if version <= 0:
+        raise PolicyConflict("active policy has no valid version")
+    record = _policy_version_record(tenant, policy["id"], version)
+    try:
+        bundle_from_record(tenant, policy["id"], version, record)
+        return policy
+    except RuntimeError:
+        pass
+    effective = _managed_policy_configuration(tenant, record.get("configuration"))
+    bundle = _sign_policy_bundle(
+        tenant,
+        policy["id"],
+        version,
+        effective,
+        int(time.time()),
+    )
+    updated = {**record, **_bundle_record_fields(bundle)}
+    try:
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="#state = :active AND attribute_not_exists(bundle_integrity)",
+            ExpressionAttributeNames={"#state": "state"},
+            ExpressionAttributeValues={":active": "active"},
+        )
+        _audit(
+            tenant,
+            "policy_bundle_backfilled",
+            "policy-signing-migration",
+            {
+                "policy_id": policy["id"],
+                "version": version,
+                "content_hash": bundle["contentHash"],
+                "key_id": bundle["integrity"]["keyId"],
+            },
+        )
+    except Exception as error:
+        if not _is_conditional_conflict(error):
+            raise
+        current = _policy_version_record(tenant, policy["id"], version)
+        bundle_from_record(tenant, policy["id"], version, current)
+    return policy
+
+
+def _active_policy_bundle(tenant, policy):
+    """Return only persisted, internally consistent signed active authority."""
+    governed = _ensure_policy_governance(tenant, policy)
+    governed = _ensure_active_policy_signature(tenant, governed)
+    version = int(governed.get("version", 0))
+    record = _policy_version_record(tenant, governed["id"], version)
+    return bundle_from_record(tenant, governed["id"], version, record)
+
+
+def _policy_trust_metadata():
+    """Expose public signer provenance without making HTTP a runtime trust anchor."""
+    if not POLICY_SIGNING_KEY_ARN:
+        raise RuntimeError("policy signing key is not configured")
+    result = KMS.get_public_key(KeyId=POLICY_SIGNING_KEY_ARN)
+    public_key = result.get("PublicKey")
+    if (
+        result.get("KeyId") != POLICY_SIGNING_KEY_ARN
+        or result.get("KeyUsage") != "SIGN_VERIFY"
+        or result.get("KeySpec", result.get("CustomerMasterKeySpec"))
+        != "ECC_NIST_P256"
+        or result.get("SigningAlgorithms") != ["ECDSA_SHA_256"]
+        or not isinstance(public_key, bytes)
+    ):
+        raise RuntimeError("KMS returned incompatible policy verification key metadata")
+    return {
+        "keyId": POLICY_SIGNING_KEY_ARN,
+        "algorithm": "ECDSA_SHA_256",
+        "publicKeyDer": base64.b64encode(public_key).decode("ascii"),
+        "fingerprintSha256": hashlib.sha256(public_key).hexdigest(),
+        "trustSource": "administrator-installation-required",
+    }
 
 
 def _policy_version_view(tenant, record, versions=None):
@@ -3010,6 +3121,7 @@ def _policy_version_view(tenant, record, versions=None):
         and record.get("state") in {"approved", "staged", "active"}
         else None
     )
+    integrity = record.get("bundle_integrity")
     return {
         "policyId": record["policy_id"],
         "organizationId": record.get("organization_id", ""),
@@ -3033,6 +3145,13 @@ def _policy_version_view(tenant, record, versions=None):
         "activatedBy": record.get("activated_by"),
         "activatedAt": record.get("activated_at"),
         "changeSummary": semantic_change,
+        "integrity": {
+            "status": "signed" if isinstance(integrity, dict) else "unsigned",
+            "contentHash": record.get("effective_content_hash"),
+            "keyId": integrity.get("keyId") if isinstance(integrity, dict) else None,
+            "algorithm": integrity.get("algorithm") if isinstance(integrity, dict) else None,
+            "signedAt": integrity.get("signedAt") if isinstance(integrity, dict) else None,
+        },
     }
 
 
@@ -3444,8 +3563,13 @@ def _activate_policy_version(tenant, policy_id, version, body, actor):
     ):
         raise PolicyConflict("policy active version changed before activation")
     now = int(time.time())
+    effective_configuration = _managed_policy_configuration(tenant, candidate["configuration"])
+    bundle = _sign_policy_bundle(
+        tenant, policy_id, version, effective_configuration, now
+    )
     active_candidate = {
         **candidate,
+        **_bundle_record_fields(bundle),
         "state": "active",
         "activated_by": actor,
         "activated_at": now,
@@ -10305,11 +10429,7 @@ def handler(event, context):
                         "agentId": agent_id,
                         "deploymentId": deployment_id,
                         "groupId": group["id"],
-                        "policyId": policy["id"],
-                        "version": policy["version"],
-                        "configuration": _managed_policy_configuration(
-                            tenant, policy["configuration"]
-                        ),
+                        "policyBundle": _active_policy_bundle(tenant, policy),
                     },
                 )
             if method == "POST" and action == ["approvals", "request"]:
@@ -10488,6 +10608,8 @@ def handler(event, context):
         if path.startswith("/enterprise/") or path.startswith("/api/enterprise/"):
             suffix = path.split("/enterprise/", 1)[1]
             parts = [p for p in suffix.split("/") if p]
+            if method == "GET" and parts == ["policy-trust"]:
+                return _response(200, _policy_trust_metadata())
             if (
                 method == "GET"
                 and len(parts) == 1
@@ -11962,9 +12084,7 @@ def handler(event, context):
                         "agentId": parts[2],
                         "deploymentId": parts[1],
                         "groupId": group["id"],
-                        "policyId": policy["id"],
-                        "version": policy["version"],
-                        "configuration": policy["configuration"],
+                        "policyBundle": _active_policy_bundle(tenant, policy),
                     },
                 )
             if (

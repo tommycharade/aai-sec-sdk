@@ -1,5 +1,13 @@
 # Changelog
 
+- Added tenant-bound signed policy bundles using a retained asymmetric AWS KMS
+  P-256 key. Activation atomically freezes and signs registry-resolved policy,
+  existing active versions migrate without authority changes, safe trial
+  policy is signed before persistence, and Claude Code/Codex runtimes verify
+  signatures against administrator-installed public trust before loading
+  policy. The UI exposes signed/unsigned provenance without treating browser
+  or control-plane key bytes as a trust anchor.
+
 - Added tenant-bound, non-mutating historical policy simulation over a bounded
   redacted decision window, with explicit indeterminate outcomes for evidence
   that cannot be reconstructed.

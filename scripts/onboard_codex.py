@@ -71,6 +71,8 @@ def _managed_block(
     control_plane_url: str,
     deployment_id: str,
     agent_id: str,
+    tenant_id: str,
+    policy_trust_bundle: Path,
 ) -> str:
     """Build the non-secret project-scoped MCP and native-hook block."""
     source_root = hook.parents[1] / "src"
@@ -81,6 +83,8 @@ def _managed_block(
         "AAI_SEC_DEPLOYMENT_ID": deployment_id,
         "AAI_SEC_AGENT_ID": agent_id,
         "AAI_SEC_PROJECT_ROOT": str(project_root),
+        "AAI_SEC_TENANT_ID": tenant_id,
+        "AAI_SEC_POLICY_TRUST_BUNDLE": str(policy_trust_bundle),
         # The documented onboarding flow runs directly from a checkout. Pin
         # imports to that checkout for both MCP and hook subprocesses instead
         # of relying on an unrelated or absent global package installation.
@@ -163,6 +167,8 @@ def onboard(
     control_plane_url: str,
     deployment_id: str,
     agent_id: str,
+    tenant_id: str,
+    policy_trust_bundle: Path,
     dry_run: bool,
 ) -> Path:
     """Create or update a non-secret, project-scoped Codex MCP configuration.
@@ -181,6 +187,8 @@ def onboard(
         raise SystemExit(f"SDK Codex integration was not found under {sdk_root}")
     deployment_id = _validate_identifier(deployment_id, "deployment ID")
     agent_id = _validate_identifier(agent_id, "agent ID")
+    tenant_id = _validate_identifier(tenant_id, "tenant ID")
+    policy_trust_bundle = policy_trust_bundle.expanduser().resolve()
     control_plane_url = _validate_control_plane_url(control_plane_url)
     # Validate host credential protection before touching project state, even
     # on repeat onboarding where the rotating session already exists.
@@ -202,6 +210,8 @@ def onboard(
         control_plane_url=control_plane_url,
         deployment_id=deployment_id,
         agent_id=agent_id,
+        tenant_id=tenant_id,
+        policy_trust_bundle=policy_trust_bundle,
     )
     merged = _merge_configuration(existing, block)
     try:
@@ -251,6 +261,8 @@ def main() -> int:
     parser.add_argument("--enterprise-control-plane-url", required=True)
     parser.add_argument("--deployment-id", required=True)
     parser.add_argument("--agent-id", required=True)
+    parser.add_argument("--tenant-id", required=True)
+    parser.add_argument("--policy-trust-bundle", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     onboard(
@@ -260,6 +272,8 @@ def main() -> int:
         control_plane_url=args.enterprise_control_plane_url,
         deployment_id=args.deployment_id,
         agent_id=args.agent_id,
+        tenant_id=args.tenant_id,
+        policy_trust_bundle=args.policy_trust_bundle,
         dry_run=args.dry_run,
     )
     return 0

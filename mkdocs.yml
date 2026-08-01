@@ -61,6 +61,7 @@ nav:
   - Policy governance design: policy-governance-design.md
   - Policy change assurance: policy-change-assurance-design.md
   - Policy change assurance live acceptance: policy-change-assurance-acceptance-2026-08-01.md
+  - Signed policy bundles: signed-policy-bundles-design.md
   - Managed Claude resources: claude-managed-resources.md
   - Wider enterprise UI: enterprise-ui.md
   - Enterprise integration design: enterprise-integration-design.md

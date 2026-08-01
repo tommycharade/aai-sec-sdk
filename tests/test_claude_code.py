@@ -20,6 +20,7 @@ from agentic_security import (
     ClaudeHookResult,
     InMemoryAuditSink,
     JsonlAuditSink,
+    PolicyTrustStore,
     ReplicatedAuditSink,
     command_rule,
     exact_tool_rule,
@@ -640,6 +641,8 @@ def test_claude_native_hook_prefers_rotated_host_session(
     monkeypatch.setenv("AAI_SEC_DEPLOYMENT_ID", "deployment-a")
     monkeypatch.setenv("AAI_SEC_AGENT_ID", "claude-a")
     monkeypatch.setenv("AAI_SEC_AGENT_SESSION_MODE", "aws")
+    monkeypatch.setenv("AAI_SEC_TENANT_ID", "tenant-a")
+    monkeypatch.setenv("AAI_SEC_POLICY_TRUST_BUNDLE", "/etc/aai-security/policy-trust.json")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path.resolve()))
     rotated = "synthetic-rotated-token-5678"
     store = AgentSessionStore(
@@ -656,6 +659,11 @@ def test_claude_native_hook_prefers_rotated_host_session(
             self.session_store = kwargs.get("session_store")
 
     monkeypatch.setattr(claude_hook_example, "ControlPlaneAgentClient", Client)
+    monkeypatch.setattr(
+        PolicyTrustStore,
+        "from_file",
+        lambda _path: object(),
+    )
 
     client = claude_hook_example._control_plane_client(tmp_path)
 

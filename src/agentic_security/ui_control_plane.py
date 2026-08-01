@@ -48,6 +48,11 @@ from .integrations import AgentHost
 from .managed_configuration import ManagedConfigurationEvidence, ManagedPlatform
 from .managed_deployment import ManagedDeploymentPackage
 from .runtime_attestation import RuntimeAttestor
+from .signed_policy import (
+    PolicyBundleVerificationError,
+    PolicyTrustStore,
+    SignedPolicyBundle,
+)
 
 try:  # pragma: no cover - platform branch; control-plane reference targets Unix hosts.
     import fcntl
@@ -459,6 +464,8 @@ class ControlPlaneAgentClient:
         session_store: AgentSessionStore | None = None,
         attestor: RuntimeAttestor | None = None,
         managed_configuration_provider: Callable[[], ManagedConfigurationEvidence] | None = None,
+        policy_trust_store: PolicyTrustStore | None = None,
+        tenant_id: str | None = None,
         host: AgentHost | str = AgentHost.CLAUDE_CODE,
         timeout_seconds: float = 5,
     ) -> None:
@@ -472,6 +479,10 @@ class ControlPlaneAgentClient:
         ``managed_configuration_provider`` must be a deployment-owned callback
         that re-measures administrator-owned host files for every heartbeat.
         The client accepts only typed evidence for its bound host identity.
+        ``policy_trust_store`` and ``tenant_id`` are deployment-owned trust
+        context used to verify AWS policy bundles before they become runtime
+        authority. They are required when :meth:`effective_policy` is called
+        for an AWS agent session, but heartbeat-only clients may omit them.
         """
         parsed = urlsplit(base_url.rstrip("/"))
         local_http = parsed.scheme == "http" and parsed.hostname in {
@@ -511,6 +522,10 @@ class ControlPlaneAgentClient:
             raise ValueError("runtime attestation requires an AWS agent session")
         if managed_configuration_provider is not None and not aws_agent_session:
             raise ValueError("managed configuration evidence requires an AWS agent session")
+        if (policy_trust_store is None) != (tenant_id is None):
+            raise ValueError("policy trust store and tenant ID must be supplied together")
+        if policy_trust_store is not None and not aws_agent_session:
+            raise ValueError("signed policy trust context requires an AWS agent session")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.agent_id = agent_id
@@ -521,6 +536,8 @@ class ControlPlaneAgentClient:
         self.session_store = session_store
         self.attestor = attestor
         self.managed_configuration_provider = managed_configuration_provider
+        self.policy_trust_store = policy_trust_store
+        self.tenant_id = tenant_id
         self.timeout_seconds = timeout_seconds
 
     def register(self) -> str:
@@ -721,19 +738,38 @@ class ControlPlaneAgentClient:
         except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
             raise ControlPlaneDependencyError("effective policy lookup failed") from exc
         response = dict(_mapping(value, "effective policy response"))
-        if self.aws_agent_session and "policy" not in response:
-            # Normalize the AWS route's flat response to the provider-neutral
-            # shape consumed by host integrations.
-            configuration = response.get("configuration")
-            if isinstance(configuration, Mapping):
-                return {
-                    "emergencyStop": False,
-                    "policy": {
-                        "id": response.get("policyId"),
-                        "version": response.get("version"),
-                        "configuration": dict(configuration),
+        if self.aws_agent_session:
+            if self.policy_trust_store is None or self.tenant_id is None:
+                raise ControlPlaneDependencyError(
+                    "AWS effective policy requires deployment-pinned signing trust"
+                )
+            try:
+                bundle = SignedPolicyBundle.from_wire(response.get("policyBundle"))
+                verified = self.policy_trust_store.verify(bundle, expected_tenant_id=self.tenant_id)
+            except PolicyBundleVerificationError as exc:
+                raise ControlPlaneDependencyError(
+                    "effective policy signature verification failed"
+                ) from exc
+            emergency_stop = response.get("emergencyStop", False)
+            if not isinstance(emergency_stop, bool):
+                raise ControlPlaneDependencyError(
+                    "effective policy returned invalid emergency-stop state"
+                )
+            return {
+                "emergencyStop": emergency_stop,
+                "policy": {
+                    "id": verified.policy_id,
+                    "version": verified.version,
+                    "configuration": dict(verified.configuration),
+                    "integrity": {
+                        "status": "verified",
+                        "contentHash": verified.content_hash,
+                        "keyId": verified.key_id,
+                        "algorithm": verified.algorithm,
+                        "signedAt": verified.signed_at,
                     },
-                }
+                },
+            }
         return response
 
     def managed_deployment_package(

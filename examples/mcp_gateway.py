@@ -24,6 +24,8 @@ from agentic_security import (
     ExecutionContext,
     GuardedRuntime,
     InMemoryAuditSink,
+    PolicyBundleVerificationError,
+    PolicyTrustStore,
     Principal,
     ReplicatedAuditSink,
     RuntimeAttestor,
@@ -131,6 +133,8 @@ if __name__ == "__main__":
             )
             session_store = None
             agent_token = os.environ.get("AAI_SEC_AGENT_TOKEN")
+            policy_trust_store: PolicyTrustStore | None = None
+            tenant_id: str | None = None
             if aws_session:
                 if not deployment_id:
                     raise SystemExit("AWS agent session requires AAI_SEC_DEPLOYMENT_ID")
@@ -146,6 +150,16 @@ if __name__ == "__main__":
                     raise SystemExit("AWS agent session cache is unsafe or invalid") from exc
                 if cached is not None:
                     agent_token = cached.token
+                trust_path = os.environ.get("AAI_SEC_POLICY_TRUST_BUNDLE")
+                tenant_id = os.environ.get("AAI_SEC_TENANT_ID")
+                if not trust_path or not tenant_id:
+                    raise SystemExit(
+                        "AWS agent session requires tenant ID and a policy trust bundle"
+                    )
+                try:
+                    policy_trust_store = PolicyTrustStore.from_file(trust_path)
+                except PolicyBundleVerificationError as exc:
+                    raise SystemExit("policy trust bundle is unsafe or invalid") from exc
             if not agent_token:
                 raise SystemExit(
                     "an enrolled agent session is required when registration is enabled"
@@ -158,6 +172,8 @@ if __name__ == "__main__":
                 deployment_id=deployment_id,
                 aws_agent_session=aws_session,
                 session_store=session_store,
+                policy_trust_store=policy_trust_store,
+                tenant_id=tenant_id,
                 attestor=(
                     RuntimeAttestor(
                         sdk_root=Path(__file__).resolve().parents[1],

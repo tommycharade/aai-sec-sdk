@@ -25,6 +25,8 @@ def _onboard(project: Path) -> Path:
         control_plane_url="https://fleet.example.test/api",
         deployment_id="deployment-test",
         agent_id="codex-test",
+        tenant_id="tenant-test",
+        policy_trust_bundle=Path("/etc/aai-security/policy-trust.json"),
         dry_run=False,
     )
 
@@ -46,6 +48,10 @@ def test_onboard_codex_uses_host_cache_without_project_bearer_configuration(
     assert "env_vars" not in server
     assert server["env"]["AAI_SEC_AGENT_HOST"] == "codex-cli"
     assert server["env"]["AAI_SEC_DEPLOYMENT_ID"] == "deployment-test"
+    assert server["env"]["AAI_SEC_TENANT_ID"] == "tenant-test"
+    assert server["env"]["AAI_SEC_POLICY_TRUST_BUNDLE"] == (
+        str(Path("/etc/aai-security/policy-trust.json").resolve())
+    )
     assert server["env"]["PYTHONPATH"] == str(Path.cwd() / "src")
     assert "synthetic-token" not in content
     assert config_path.stat().st_mode & 0o777 == 0o600
