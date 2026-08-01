@@ -629,6 +629,10 @@ configuration outage, run the bounded Batch Replication repair using the stack
 outputs `AuditBucketName`, `EvidenceReportBucketName` and
 `AuditBatchReplicationRoleArn`:
 
+The repair also reprocesses versions already marked `COMPLETED`. This is
+necessary when source Object Lock retention was extended after their first
+replication; a matching object count alone does not prove retention parity.
+
 ```bash
 AWS_PROFILE=p1 python3 scripts/backfill_aws_audit_replication.py \
   --source-bucket <primary-audit-bucket> \

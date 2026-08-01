@@ -42,7 +42,13 @@ class _S3:
 
 def test_backfill_count_is_cutoff_bound_and_fails_before_unbounded_work() -> None:
     module = _load("backfill_aws_audit_replication")
+    assert module._REPAIR_REPLICATION_STATUSES == ("NONE", "FAILED", "COMPLETED")
     cutoff = datetime.now(UTC)
+    assert module.repair_filter(cutoff) == {
+        "EligibleForReplication": True,
+        "ObjectReplicationStatuses": ["NONE", "FAILED", "COMPLETED"],
+        "CreatedBefore": cutoff,
+    }
     s3 = _S3(
         [
             {
