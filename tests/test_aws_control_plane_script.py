@@ -46,3 +46,32 @@ def test_request_sends_project_root_digest_only_when_explicitly_bound(monkeypatc
 
     assert requests[0].get_header("X-aai-project-root-digest") is None
     assert requests[1].get_header("X-aai-project-root-digest") == "a" * 64
+
+
+def test_agent_stop_requires_typed_server_owned_control_state() -> None:
+    """The live harness must reject legacy or incomplete stop responses."""
+    valid = {
+        "controlState": {
+            "executionAllowed": False,
+            "evidenceAllowed": True,
+            "activeStopScopes": ["deployment", "agent"],
+            "quarantine": None,
+        }
+    }
+
+    assert test_aws_control_plane._agent_stop_is_enforced(409, valid) is True
+    assert test_aws_control_plane._agent_stop_is_enforced(409, {"emergencyStop": True}) is False
+    assert (
+        test_aws_control_plane._agent_stop_is_enforced(
+            409,
+            {
+                "controlState": {
+                    "executionAllowed": False,
+                    "evidenceAllowed": True,
+                    "activeStopScopes": ["group"],
+                }
+            },
+        )
+        is False
+    )
+    assert test_aws_control_plane._agent_stop_is_enforced(200, valid) is False
