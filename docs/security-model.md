@@ -180,6 +180,16 @@ persist changed gap states and publish non-healthy transitions to the durable
 alert channel. This software assurance does not replace live cross-region
 recovery proof. See [Durable evidence governance](durable-evidence-governance-design.md).
 
+Cross-region recovery configuration is persistent deployment authority. The
+deployer strips ambient replica variables, reloads one reviewed Parameter Store
+manifest and refuses to update a previously replicated stack if that authority
+is missing. The destination must independently prove versioning and a 365-day
+COMPLIANCE floor. Historical gaps use a bounded S3 Batch Replication role, and
+acceptance independently compares every source and replica version's identity,
+bytes, digest metadata and retention. This proves evidence recoverability, not
+regional API failover or a contractual RTO/RPO. See the
+[audit-recovery deployment guard](audit-recovery-deployment-guard-design.md).
+
 Mass-retention extension is a separate irreversible boundary. The API
 atomically binds a longer future-write policy to an idempotent job, waits longer
 than any evidence-writing Lambda can run and then extends every pre-cutover S3
