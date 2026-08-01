@@ -2,9 +2,9 @@
 
 This design advances P0-08 by turning the AWS Object Lock foundation into a
 tenant-visible records-management control. It covers tenant retention,
-exact-version legal hold, live integrity assurance and complete bounded export.
-It does **not** claim that cross-region recovery or evidence-loss monitoring has
-passed for a customer environment.
+exact-version legal hold, live integrity assurance, asynchronous tenant-wide
+export and scheduled evidence-gap monitoring. It does **not** claim that
+cross-region recovery has passed for a customer environment.
 
 ## Threat and trust boundary
 
@@ -18,6 +18,9 @@ S3 Object Lock in `COMPLIANCE` mode is the enforcement boundary. DynamoDB stores
 the tenant policy and optimistic revision, but cannot shorten the bucket's
 365-day default. The Lambda receives only exact-version S3 permissions needed to
 read retention/legal-hold state and extend retention or change legal hold.
+Asynchronous work is authorized by an SQS event-source mapping, not by fields in
+the queue body. The worker reloads the server-owned tenant job and requires its
+exact optimistic revision before every state transition.
 
 ## Invariants
 
@@ -42,6 +45,20 @@ read retention/legal-hold state and extend retention or change legal hold.
 - Export verifies every bounded version, orders records deterministically and
   binds the complete manifest with a canonical SHA-256 digest. The browser
   independently verifies that digest before download.
+- Tenant-wide jobs fix a server-time snapshot cutoff, traverse S3 object
+  versions in pages, and exclude later writes by S3 `LastModified`. Each page is
+  canonically hashed; an ordered rolling hash binds every page into a final
+  index. A substituted, reordered or omitted page fails client verification.
+- Derived report pages live in a separate private, encrypted, versioned bucket
+  for 30 days. They are convenience artifacts, not the source record. The final
+  index hash is written to retained Object-Lock audit evidence.
+- Scheduled scans run every 15 minutes, permit only one active job per tenant,
+  regard a successful result as fresh for six hours, and fail jobs with no
+  progress for 30 minutes. Empty evidence, a decrease from the previous
+  completed record count, at-risk versions and delete markers are explicit gap
+  reasons. A changed non-healthy state is delivered to the
+  durable security-alert SNS/SQS channel; a delivery failure remains visible as
+  pending and is never represented as healthy.
 
 ## Operator API
 
@@ -51,6 +68,10 @@ read retention/legal-hold state and extend retention or change legal hold.
 | `PUT /api/enterprise/evidence/retention` | `evidence_admin` | Optimistic, increase-only retention update applied to existing and future records |
 | `POST /api/enterprise/evidence/legal-hold` | `evidence_admin` | Legal-hold change for one exact tenant object version |
 | `GET /api/enterprise/evidence/export` | `evidence_read` | Complete integrity-bound manifest, or a fail-closed conflict/error |
+| `POST /api/enterprise/evidence/jobs` | `evidence_admin` | Idempotently start a tenant-wide point-in-time assurance/export job |
+| `GET /api/enterprise/evidence/jobs` | `evidence_read` | List the 50 newest tenant jobs and progress states |
+| `GET /api/enterprise/evidence/jobs/{jobId}` | `evidence_read` | Read one exact tenant-bound job and its completed export index |
+| `GET /api/enterprise/evidence/jobs/{jobId}/pages/{page}` | `evidence_read` | Read one completed page after server-side schema and digest verification |
 
 The hosted **Evidence** workspace leads with assurance instead of a raw audit
 table. It shows verified versions, retention, legal holds and delete markers;
@@ -64,17 +85,23 @@ truncated inventory, stale policy revision or unauthorized role never produces a
 positive assurance result. Audit writes also resolve the live tenant retention
 policy before persisting the object.
 
-The 250-version synchronous path is intentionally a pilot boundary, not the
-long-term export architecture. Production-scale tenants need asynchronous S3
-Inventory/Batch Operations, a monitored assurance schedule, explicit evidence-
-gap alerts and replay, and a new live cross-region recovery exercise proving
-count, ordering, hashes and retention. Those items remain open in the P0 ledger.
+The 250-version synchronous path remains the fast path. Above that boundary the
+UI must use the asynchronous assurance/export job; it must never treat the
+bounded synchronous count as complete. A single job is bounded to 100,000 pages
+(at most 1,000,000 listed versions or delete markers), fails closed on malformed
+pagination or provider errors, retries a page at most three times and then
+records a sanitized terminal reason. Increase-only retention mutation still
+requires the complete synchronous inventory and therefore remains blocked above
+250 versions until a separately reviewed asynchronous retention workflow is
+implemented. Cross-region count/order/hash/retention recovery also remains open.
 
 ## Verification
 
-Contract tests cover the complete positive journey plus weak-role access,
-retention reduction, stale revision, cross-tenant legal hold, absent legacy
-Object Lock properties and post-write byte tampering. CDK synthesis proves the
-least-privilege S3 permissions are deployable. UI tests and desktop/mobile
-browser exercises cover assurance, retention and legal-hold journeys without
+Contract tests cover multi-page completion, idempotent creation, cross-tenant
+denial, page substitution, malformed worker events, stale revisions, retry and
+terminal provider failure, deduplicated scheduling and alert delivery, plus the
+synchronous weak-role, retention, legal-hold and byte-tampering cases. CDK
+synthesis proves the separate worker, FIFO/DLQ, report store, schedule/DLQ,
+alarms and least-privilege permissions are deployable. UI tests and browser
+exercises cover progress, verified download and failed states without
 representing fixture data as live.

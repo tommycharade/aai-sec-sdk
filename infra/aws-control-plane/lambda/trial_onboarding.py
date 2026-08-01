@@ -54,6 +54,7 @@ def build_trial_records(
     policy_digest = hashlib.sha256(
         json.dumps(safe_policy, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+    evidence_shard = hashlib.sha256(tenant.encode()).digest()[1] % 16
     return [
         {
             "pk": f"USER#{subject}",
@@ -71,6 +72,8 @@ def build_trial_records(
             "id": tenant,
             "status": "active",
             "created_at": timestamp,
+            "evidence_assurance_pk": f"EVIDENCE_ASSURANCE#{evidence_shard:02d}",
+            "evidence_assurance_sk": tenant,
         },
         {
             "pk": f"TENANT#{tenant}",

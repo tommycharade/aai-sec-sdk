@@ -10,6 +10,7 @@ import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as lambdaEventSources from "aws-cdk-lib/aws-lambda-event-sources";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -232,6 +233,14 @@ export class AwsControlPlaneStack extends cdk.Stack {
       // Endpoint reports and credentials remain outside this cross-tenant index.
       projectionType: dynamodb.ProjectionType.KEYS_ONLY,
     });
+    table.addGlobalSecondaryIndex({
+      indexName: "EvidenceAssuranceTenants",
+      partitionKey: { name: "evidence_assurance_pk", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "evidence_assurance_sk", type: dynamodb.AttributeType.STRING },
+      // Scheduling needs only the tenant root key; evidence/job content never
+      // crosses tenants through this index.
+      projectionType: dynamodb.ProjectionType.KEYS_ONLY,
+    });
 
     const presence = new dynamodb.Table(this, "PresenceTable", {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
@@ -270,6 +279,18 @@ export class AwsControlPlaneStack extends cdk.Stack {
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      autoDeleteObjects: false,
+    });
+    // Derived assurance pages are private, short-lived and content-bound back
+    // to an immutable audit event. They live outside the Object Lock bucket so
+    // inventory jobs never recursively inventory their own output.
+    const evidenceReports = new s3.Bucket(this, "EvidenceReportBucket", {
+      versioned: true,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      lifecycleRules: [{ expiration: cdk.Duration.days(30), noncurrentVersionExpiration: cdk.Duration.days(7) }],
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       autoDeleteObjects: false,
     });
@@ -352,6 +373,28 @@ export class AwsControlPlaneStack extends cdk.Stack {
       enforceSSL: true,
     });
     const rolloutReconciliationDlq = new sqs.Queue(this, "RolloutReconciliationDlq", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const evidenceWorkerDlq = new sqs.Queue(this, "EvidenceWorkerDlq", {
+      fifo: true,
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const evidenceWorkerQueue = new sqs.Queue(this, "EvidenceWorkerQueue", {
+      fifo: true,
+      contentBasedDeduplication: false,
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      // Six times the worker timeout leaves room for Lambda throttling and
+      // event-source backoff without exposing the same page concurrently.
+      visibilityTimeout: cdk.Duration.minutes(6),
+      retentionPeriod: cdk.Duration.days(4),
+      deadLetterQueue: { queue: evidenceWorkerDlq, maxReceiveCount: 3 },
+      enforceSSL: true,
+    });
+    const evidenceScheduleDlq = new sqs.Queue(this, "EvidenceScheduleDlq", {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
@@ -523,6 +566,25 @@ export class AwsControlPlaneStack extends cdk.Stack {
       }],
     });
 
+    const controlPlaneEnvironment = {
+      CONTROL_TABLE: table.tableName,
+      PRESENCE_TABLE: presence.tableName,
+      IDEMPOTENCY_TABLE: idempotency.tableName,
+      AUDIT_BUCKET: audit.bucketName,
+      EVIDENCE_REPORT_BUCKET: evidenceReports.bucketName,
+      EVIDENCE_QUEUE_URL: evidenceWorkerQueue.queueUrl,
+      ENTRA_PROVIDER_ENABLED: entraProvider ? "true" : "false",
+      ENTRA_TENANT_ID: entraTenantId ?? "",
+      ENTRA_AAI_TENANT_ID: entraAaiTenantId ?? "",
+      ENTRA_STRONG_AUTH_ENFORCED: entraStrongAuthEnforced ? "true" : "false",
+      SCIM_ENABLED: entraScimTokenSecretName ? "true" : "false",
+      SCIM_TABLE: scim.tableName,
+      SPLUNK_STUB_ENABLED: "true",
+      SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn,
+      RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
+      RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
+      POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
+    };
     const handler = new lambda.Function(this, "ControlPlaneHandler", {
       runtime: lambda.Runtime.PYTHON_3_13,
       architecture: lambda.Architecture.ARM_64,
@@ -530,23 +592,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
       timeout: cdk.Duration.seconds(15),
       memorySize: 512,
-      environment: {
-        CONTROL_TABLE: table.tableName,
-        PRESENCE_TABLE: presence.tableName,
-        IDEMPOTENCY_TABLE: idempotency.tableName,
-        AUDIT_BUCKET: audit.bucketName,
-        ENTRA_PROVIDER_ENABLED: entraProvider ? "true" : "false",
-        ENTRA_TENANT_ID: entraTenantId ?? "",
-        ENTRA_AAI_TENANT_ID: entraAaiTenantId ?? "",
-        ENTRA_STRONG_AUTH_ENFORCED: entraStrongAuthEnforced ? "true" : "false",
-        SCIM_ENABLED: entraScimTokenSecretName ? "true" : "false",
-        SCIM_TABLE: scim.tableName,
-        SPLUNK_STUB_ENABLED: "true",
-        SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn,
-        RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
-        RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
-        POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
-      },
+      environment: controlPlaneEnvironment,
       tracing: lambda.Tracing.PASS_THROUGH,
     });
     table.grantReadWriteData(handler);
@@ -568,7 +614,34 @@ export class AwsControlPlaneStack extends cdk.Stack {
       resources: [audit.arnForObjects("tenant=*")],
     }));
     securityAlerts.grantPublish(handler);
+    evidenceReports.grantRead(handler);
+    evidenceWorkerQueue.grantSendMessages(handler);
     handler.addToRolePolicy(new iam.PolicyStatement({ actions: ["sts:AssumeRole"], resources: [scopedToolRole.roleArn] }));
+
+    const evidenceWorker = new lambda.Function(this, "EvidenceWorker", {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: lambda.Architecture.ARM_64,
+      handler: "evidence_worker.handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 1024,
+      environment: controlPlaneEnvironment,
+      tracing: lambda.Tracing.PASS_THROUGH,
+    });
+    table.grantReadWriteData(evidenceWorker);
+    audit.grantRead(evidenceWorker);
+    audit.grantPut(evidenceWorker);
+    evidenceWorker.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["s3:GetObjectRetention", "s3:GetObjectLegalHold"],
+      resources: [audit.arnForObjects("tenant=*")],
+    }));
+    evidenceReports.grantReadWrite(evidenceWorker);
+    securityAlerts.grantPublish(evidenceWorker);
+    evidenceWorkerQueue.grantSendMessages(evidenceWorker);
+    evidenceWorker.addEventSource(new lambdaEventSources.SqsEventSource(evidenceWorkerQueue, {
+      batchSize: 1,
+      reportBatchItemFailures: false,
+    }));
 
     const endpointDetectionRule = new events.Rule(this, "EndpointDetectionSchedule", {
       description: "Reconcile tenant endpoint evidence and persist actionable detections",
@@ -598,6 +671,22 @@ export class AwsControlPlaneStack extends cdk.Stack {
           schemaVersion: 1,
         }),
         deadLetterQueue: rolloutReconciliationDlq,
+        maxEventAge: cdk.Duration.hours(1),
+        retryAttempts: 2,
+      }),
+    );
+    const evidenceAssuranceRule = new events.Rule(this, "EvidenceAssuranceSchedule", {
+      description: "Run tenant-wide asynchronous evidence assurance and gap detection",
+      schedule: events.Schedule.rate(cdk.Duration.minutes(15)),
+      enabled: true,
+    });
+    evidenceAssuranceRule.addTarget(
+      new eventTargets.LambdaFunction(handler, {
+        event: events.RuleTargetInput.fromObject({
+          source: "aai.evidence-assurance",
+          schemaVersion: 1,
+        }),
+        deadLetterQueue: evidenceScheduleDlq,
         maxEventAge: cdk.Duration.hours(1),
         retryAttempts: 2,
       }),
@@ -845,6 +934,30 @@ export class AwsControlPlaneStack extends cdk.Stack {
     rolloutReconciliationDeadLetters.addAlarmAction(
       new cloudwatchActions.SnsAction(securityAlerts),
     );
+    const evidenceWorkerErrors = new cloudwatch.Alarm(this, "EvidenceWorkerErrors", {
+      metric: evidenceWorker.metricErrors({ period: cdk.Duration.minutes(5), statistic: "Sum" }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      alarmDescription: "Asynchronous evidence verification failed and may delay assurance.",
+    });
+    evidenceWorkerErrors.addAlarmAction(new cloudwatchActions.SnsAction(securityAlerts));
+    for (const [id, queue, description] of [
+      ["EvidenceWorkerDeadLetters", evidenceWorkerDlq, "Evidence verification exhausted bounded retries."],
+      ["EvidenceScheduleDeadLetters", evidenceScheduleDlq, "Scheduled evidence assurance exhausted bounded retries."],
+    ] as const) {
+      const alarm = new cloudwatch.Alarm(this, id, {
+        metric: queue.metricApproximateNumberOfMessagesVisible({
+          period: cdk.Duration.minutes(5),
+          statistic: "Maximum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        alarmDescription: description,
+      });
+      alarm.addAlarmAction(new cloudwatchActions.SnsAction(securityAlerts));
+    }
     const controlPlaneThrottles = new cloudwatch.Alarm(this, "ControlPlaneThrottles", {
       metric: handler.metricThrottles({ period: cdk.Duration.minutes(5), statistic: "Sum" }),
       threshold: 1,
@@ -883,6 +996,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "RolloutReconciliationDlqArn", {
       value: rolloutReconciliationDlq.queueArn,
     });
+    new cdk.CfnOutput(this, "EvidenceReportBucketName", { value: evidenceReports.bucketName });
+    new cdk.CfnOutput(this, "EvidenceWorkerDlqArn", { value: evidenceWorkerDlq.queueArn });
+    new cdk.CfnOutput(this, "EvidenceScheduleDlqArn", { value: evidenceScheduleDlq.queueArn });
     new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });
     new cdk.CfnOutput(this, "PolicySigningKeyArn", { value: policySigningKey.keyArn });
     new cdk.CfnOutput(this, "DiscoveryProviderSecretNamePrefix", {
