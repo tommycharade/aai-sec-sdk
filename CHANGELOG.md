@@ -508,6 +508,12 @@ authorization.
 
 ## Unreleased
 
+- Reworked the enterprise identity console into focused Overview, Entra setup,
+  Directory & roles, Delegated access, Emergency access and Access reviews
+  workspaces. The Entra-first journey exposes only non-secret deployment
+  values, keeps the deferred Splunk stub out of identity readiness and raises
+  mobile setup typography without moving identity authority into the browser.
+
 - Added a production-shaped endpoint installation/process evidence path for
   discovery. A root/administrator sensor measures exact configured
   Claude/Codex binaries and processes without invoking a shell, emits no raw
