@@ -748,6 +748,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../incident-case-containment-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Incident cases and containment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -2170,18 +2197,23 @@ from absence alone.</p>
 <h2 id="journey-5-respond-to-an-incident">Journey 5: Respond to an incident</h2>
 <p><strong>Actor:</strong> Security operations engineer.</p>
 <ol>
-<li>Open the alert or suspicious audit event.</li>
-<li>Review the agent, deployment, group, policy version, action, resource and
-   evidence chain.</li>
-<li>Choose <strong>Stop deployment</strong>, <strong>Stop group</strong> or <strong>Stop agent</strong> according to
-   the incident scope.</li>
-<li>Confirm the action and record the incident reason.</li>
-<li>The UI shows the stop state and affected agents immediately.</li>
-<li>Revoke or rotate dependent credentials through the configured broker.</li>
-<li>Roll back the policy or SDK configuration if the change is implicated.</li>
-<li>Run a synthetic verification before clearing the stop.</li>
-<li>Clear the stop only with explicit confirmation.</li>
-<li>Export the redacted incident evidence and retain the audit reference.</li>
+<li>Open <strong>Incidents</strong> and select an uncased endpoint alert.</li>
+<li>Record an investigation rationale to create a retained case.</li>
+<li>Review the server-derived endpoint-to-agent binding, policy, groups,
+   evidence age and timeline. If the binding is missing, ambiguous or changed,
+   response controls remain disabled; the operator cannot select an agent.</li>
+<li>Choose <strong>Quarantine execution</strong> for the exactly bound agent. This withholds
+   SDK execution authority but preserves heartbeat and attestation evidence.</li>
+<li>Revoke the agent's existing sessions when compromise is plausible.</li>
+<li>Use independent fleet, deployment, group or agent stops only when the
+   incident scope requires them. Clearing one control does not clear another.</li>
+<li>Remediate the endpoint, policy or SDK configuration and acknowledge or
+   resolve the source alert as appropriate.</li>
+<li>Select <strong>Release quarantine</strong>. The server rechecks binding, endpoint health,
+   agent verification, independent stop scopes and alert readiness.</li>
+<li>Resolve and then close the case; the revisioned timeline remains retained.</li>
+<li>Export the redacted incident evidence and use MDM/EDR separately if device,
+    process or network isolation is required.</li>
 </ol>
 <p>The UI should make the safe response the shortest path, while requiring
 stronger confirmation for broader scope and irreversible actions.</p>

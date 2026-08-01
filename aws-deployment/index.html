@@ -748,6 +748,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../incident-case-containment-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Incident cases and containment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -2409,6 +2436,19 @@ cache. Claude hooks and Codex/MCP processes can therefore adopt the current
 bearer without writing credentials into project configuration. Missed
 heartbeats, failed renewal, an unsafe cache, and emergency stops remain
 fail-closed.</p>
+<p>The heartbeat response also carries server-owned <code>controlState</code>. A normal AWS
+agent client requires an explicit boolean <code>executionAllowed</code>; missing state is
+not interpreted as a legacy allow. Quarantined agents may submit heartbeat and
+attestation evidence, but the client then fails closed before normal service
+continues. Effective policy, approval and managed-package routes independently
+recheck the same live response controls.</p>
+<p>Security operators manage endpoint-derived cases through
+<code>/enterprise/cases</code>. Containment creates an exact agent quarantine without
+rewriting deployment, group or fleet stop state. Session revocation increments
+the agent's authority revision, invalidating old bearer and bootstrap material.
+Release performs live recovery checks. These controls do not isolate the
+device or terminate arbitrary local processes; integrate an MDM/EDR adapter
+before making that operational claim.</p>
 <p>Agent identity lifecycle is independent from presence and emergency stop. A
 fleet operator can call <code>POST /enterprise/agents/{deployment}/{agent}/revoke</code>
 with <code>expectedLifecycleRevision</code> and a bounded reason. The transition is

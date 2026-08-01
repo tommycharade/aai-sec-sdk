@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/getting-started/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/incident-case-containment-design/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../endpoint-detection-response/">
       
       
-        <link rel="next" href="../security-model/">
+        <link rel="next" href="../endpoint-evidence-acceptance-2026-08-01/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Getting started - Agentic AI Security SDK</title>
+        <title>Incident cases and containment - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#getting-started" class="md-skip">
+        <a href="#incident-cases-and-containment" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Getting started
+              Incident cases and containment
             
           </span>
         </div>
@@ -286,37 +286,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Getting started
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   
@@ -332,37 +305,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#run-the-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run the example
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -803,10 +745,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../incident-case-containment-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Incident cases and containment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -822,6 +791,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#security-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#case-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Case model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#independent-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Independent controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-revocation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session revocation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#release-safeguards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release safeguards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1933,10 +1999,76 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#run-the-example" class="md-nav__link">
+  <a href="#security-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Run the example
+        Security boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#case-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Case model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#independent-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Independent controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-revocation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session revocation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#release-safeguards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release safeguards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-guarantees
       
     </span>
   </a>
@@ -1963,30 +2095,112 @@
   
 
 
-<h1 id="getting-started">Getting started</h1>
-<p>The SDK is released under Apache-2.0. Clone the
-repository, install the development dependencies, and validate the project:</p>
-<pre><code class="language-bash">git clone https://github.com/tommycharade/aai-sec-sdk.git
-cd aai-sec-sdk
-python3 -m pip install -e '.[dev,docs]'
-make check
-</code></pre>
-<p>When using the runtime, the intended integration shape is:</p>
+<h1 id="incident-cases-and-containment">Incident cases and containment</h1>
+<p>This design turns a server-derived endpoint alert into a governed investigation
+without allowing endpoint evidence, browser input or model output to choose the
+agent that loses authority. It covers the hosted AWS control plane and the
+enrolled Claude Code and Codex runtime client.</p>
+<h2 id="security-boundary">Security boundary</h2>
+<p>Endpoint evidence is an authenticated observation. It is not execution
+authority. A case may be created for any retained endpoint alert, but a response
+action is enabled only when the control plane independently resolves exactly one
+active enrolled agent from current trusted facts:</p>
 <ol>
-<li>Create an authenticated execution context.</li>
-<li>Register tools explicitly with typed arguments and impact metadata.</li>
-<li>Pass model proposals to the SDK execution boundary.</li>
-<li>Handle structured executed, denied, approval-required, and failed outcomes.</li>
-<li>Export the resulting trace and audit events.</li>
+<li>the device is present and managed in current endpoint inventory;</li>
+<li>its newest HMAC-verified report is fresh;</li>
+<li>one reported installation supplies a host and project-root digest;</li>
+<li>one active enrolled agent has that exact host and a server-hashed registered
+   project root; and</li>
+<li>the resulting binding is unique across the tenant.</li>
 </ol>
-<p>The SDK does not make an LLM trustworthy. It limits what an incorrect or manipulated model can cause at the execution boundary.</p>
-<h2 id="run-the-example">Run the example</h2>
-<pre><code class="language-bash">python examples/support_agent.py
+<p>Zero matches are <code>unbound</code>. Multiple matches are <code>ambiguous</code>. Both fail closed.
+The UI cannot submit an agent identifier to override either result. Every
+response mutation compares the live binding digest and case revision again.</p>
+<pre><code class="language-text">signed endpoint report       enrolled-agent registry
+          |                           |
+          +-- host + project digest --+
+                         |
+             unique server-side binding
+                         |
+alert -&gt; case -&gt; operator confirmation -&gt; independent control record
+                                            |
+                       heartbeat evidence remains available
+                       execution authority is withheld
 </code></pre>
-<p>The example demonstrates read, write, approval, credential, idempotency, audit,
-cross-tenant, and emergency-stop paths using synthetic data. It deliberately
-does not connect to a model or network. Read <a href="../production-readiness/">Production readiness</a>
-before connecting real tools.</p>
+<h2 id="case-model">Case model</h2>
+<p>A case is tenant-scoped, revisioned and content-minimised. It retains:</p>
+<ul>
+<li>the source alert ID, type, severity, reason code and device ID;</li>
+<li>the authenticated owner and lifecycle status;</li>
+<li>the endpoint-to-agent binding snapshot and its digest;</li>
+<li>the affected deployment, group and active policy version when uniquely known;</li>
+<li>response actions and their resulting authority state; and</li>
+<li>an ordered, append-only timeline of fixed event types and bounded operator
+  rationale.</li>
+</ul>
+<p>Case statuses are <code>open</code>, <code>investigating</code>, <code>contained</code>, <code>resolved</code> and <code>closed</code>.
+Creation is deterministic per alert, so concurrent requests cannot create two
+active cases for one detection. Every mutation uses optimistic concurrency.</p>
+<h2 id="independent-controls">Independent controls</h2>
+<p>Emergency stops and investigative quarantine are separate server-owned records:</p>
+<ul>
+<li><strong>fleet stop</strong> blocks every enrolled agent in the tenant;</li>
+<li><strong>deployment stop</strong> blocks one deployment;</li>
+<li><strong>group stop</strong> blocks current and future members of one group;</li>
+<li><strong>agent stop</strong> blocks one enrolled identity; and</li>
+<li><strong>quarantine</strong> is owned by one case and one uniquely bound agent.</li>
+</ul>
+<p>Clearing one scope never clears another. Legacy agent stop flags remain a
+fail-closed compatibility input, but new deployment and group operations never
+rewrite agent flags.</p>
+<p>Quarantine permits only the authenticated heartbeat and attestation evidence
+path. Effective policy, approvals, decision reporting and managed-package
+retrieval are withheld. The heartbeat returns the exact server-owned authority
+state and the SDK client fails closed before continuing normal service.</p>
+<h2 id="session-revocation">Session revocation</h2>
+<p>A responder may separately revoke sessions from a bound case. Each agent has a
+server-owned session revision copied into bootstrap and session records. The
+control plane compares it on every request. Incrementing the revision
+invalidates all old sessions and unused bootstrap material without scanning for
+bearer-token hashes. New enrollment material is unavailable while quarantine
+is active.</p>
+<p>Session revocation is deliberately not implicit in investigative quarantine:
+the evidence channel stays available unless the responder explicitly chooses
+the stronger action.</p>
+<h2 id="release-safeguards">Release safeguards</h2>
+<p>Quarantine release requires all of the following live server evidence:</p>
+<ul>
+<li>the case and containment revisions match;</li>
+<li>the endpoint-to-agent binding is still unique and unchanged;</li>
+<li>endpoint inventory and the signed report are current;</li>
+<li>the enrolled agent passes identity, attestation, managed-configuration,
+  ownership and policy checks when the quarantine itself is excluded; and</li>
+<li>the source posture alert is resolved, or an event alert has been
+  acknowledged by incident response.</li>
+</ul>
+<p>Release does not close the case. Resolution and closure are explicit, audited
+transitions, and closure is denied while any case-owned containment remains
+active.</p>
+<h2 id="api-contract">API contract</h2>
+<p>The hosted API provides:</p>
+<pre><code class="language-text">GET  /api/enterprise/cases
+POST /api/enterprise/cases
+GET  /api/enterprise/cases/{caseId}
+POST /api/enterprise/cases/{caseId}/contain
+POST /api/enterprise/cases/{caseId}/release
+POST /api/enterprise/cases/{caseId}/sessions/revoke
+POST /api/enterprise/cases/{caseId}/resolve
+POST /api/enterprise/cases/{caseId}/close
+</code></pre>
+<p>Mutations require <code>incident_response</code>. Security operators, incident responders
+and auditors may read cases; auditors cannot mutate them. Exact request schemas,
+bounded rationale and secret-shaped-text rejection are enforced server-side.</p>
+<h2 id="non-guarantees">Non-guarantees</h2>
+<p>This control plane cannot isolate a laptop at the operating-system or network
+layer. It withholds AAI-governed Claude Code and Codex authority when those
+runtimes refresh policy or heartbeat. Customer MDM/EDR isolation, hardware-
+backed device identity and independently verified response latency remain
+deployment acceptance work. Splunk remains a non-delivering stub.</p>
 
 
 
