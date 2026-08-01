@@ -102,18 +102,23 @@ from absence alone.
 
 **Actor:** Security operations engineer.
 
-1. Open the alert or suspicious audit event.
-2. Review the agent, deployment, group, policy version, action, resource and
-   evidence chain.
-3. Choose **Stop deployment**, **Stop group** or **Stop agent** according to
-   the incident scope.
-4. Confirm the action and record the incident reason.
-5. The UI shows the stop state and affected agents immediately.
-6. Revoke or rotate dependent credentials through the configured broker.
-7. Roll back the policy or SDK configuration if the change is implicated.
-8. Run a synthetic verification before clearing the stop.
-9. Clear the stop only with explicit confirmation.
-10. Export the redacted incident evidence and retain the audit reference.
+1. Open **Incidents** and select an uncased endpoint alert.
+2. Record an investigation rationale to create a retained case.
+3. Review the server-derived endpoint-to-agent binding, policy, groups,
+   evidence age and timeline. If the binding is missing, ambiguous or changed,
+   response controls remain disabled; the operator cannot select an agent.
+4. Choose **Quarantine execution** for the exactly bound agent. This withholds
+   SDK execution authority but preserves heartbeat and attestation evidence.
+5. Revoke the agent's existing sessions when compromise is plausible.
+6. Use independent fleet, deployment, group or agent stops only when the
+   incident scope requires them. Clearing one control does not clear another.
+7. Remediate the endpoint, policy or SDK configuration and acknowledge or
+   resolve the source alert as appropriate.
+8. Select **Release quarantine**. The server rechecks binding, endpoint health,
+   agent verification, independent stop scopes and alert readiness.
+9. Resolve and then close the case; the revisioned timeline remains retained.
+10. Export the redacted incident evidence and use MDM/EDR separately if device,
+    process or network isolation is required.
 
 The UI should make the safe response the shortest path, while requiring
 stronger confirmation for broader scope and irreversible actions.

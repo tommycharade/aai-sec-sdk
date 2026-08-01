@@ -262,6 +262,21 @@ bearer without writing credentials into project configuration. Missed
 heartbeats, failed renewal, an unsafe cache, and emergency stops remain
 fail-closed.
 
+The heartbeat response also carries server-owned `controlState`. A normal AWS
+agent client requires an explicit boolean `executionAllowed`; missing state is
+not interpreted as a legacy allow. Quarantined agents may submit heartbeat and
+attestation evidence, but the client then fails closed before normal service
+continues. Effective policy, approval and managed-package routes independently
+recheck the same live response controls.
+
+Security operators manage endpoint-derived cases through
+`/enterprise/cases`. Containment creates an exact agent quarantine without
+rewriting deployment, group or fleet stop state. Session revocation increments
+the agent's authority revision, invalidating old bearer and bootstrap material.
+Release performs live recovery checks. These controls do not isolate the
+device or terminate arbitrary local processes; integrate an MDM/EDR adapter
+before making that operational claim.
+
 Agent identity lifecycle is independent from presence and emergency stop. A
 fleet operator can call `POST /enterprise/agents/{deployment}/{agent}/revoke`
 with `expectedLifecycleRevision` and a bounded reason. The transition is

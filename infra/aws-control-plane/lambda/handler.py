@@ -165,6 +165,8 @@ _ENDPOINT_EVIDENCE_FUTURE_SKEW_SECONDS = 5 * 60
 _ENDPOINT_DETECTION_INDEX = "EndpointDetectionTenants"
 _ENDPOINT_DETECTION_SHARDS = 16
 _ENDPOINT_DETECTION_TENANT_LIMIT = 2_000
+_CASE_STATUSES = frozenset({"open", "investigating", "contained", "resolved", "closed"})
+_ENDPOINT_EVENT_REASONS = frozenset({"signature_invalid", "report_replayed"})
 _ENDPOINT_ALERT_DEFINITIONS = {
     "credential_not_configured": (
         "medium",
@@ -747,6 +749,17 @@ def _agent_lifecycle_state(agent):
     return state if state in _AGENT_LIFECYCLE_STATES else "invalid"
 
 
+def _agent_session_revision(value):
+    """Normalize legacy session authority to revision one and reject corruption."""
+    raw = value.get("session_revision", 1) if isinstance(value, dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, (int, Decimal)):
+        return None
+    if isinstance(raw, Decimal) and raw != raw.to_integral_value():
+        return None
+    revision = int(raw)
+    return revision if revision > 0 else None
+
+
 def _require_active_agent(agent):
     """Reject any missing, revoked, deleted or malformed agent authority."""
     if not agent:
@@ -793,6 +806,10 @@ def _agent_identity(path, event):
         # digest. The authoritative agent record is therefore the immediate
         # revocation point for every previously issued session.
         raise PermissionError("agent identity is revoked or offboarded")
+    session_revision = _agent_session_revision(session)
+    current_revision = _agent_session_revision(agent)
+    if session_revision is None or current_revision is None or session_revision != current_revision:
+        raise PermissionError("agent session authority has been revoked")
     registered_root = agent.get("project_root") if agent else None
     if (
         not isinstance(registered_root, str)
@@ -901,6 +918,8 @@ def _required_mutation_capability(path):
     if "/emergency-stop" in normalized or normalized.endswith("/alerts/dispatch"):
         return "incident_response"
     if normalized.startswith("/enterprise/alerts/"):
+        return "incident_response"
+    if normalized.startswith("/enterprise/cases"):
         return "incident_response"
     if normalized.startswith("/enterprise/approvals/"):
         return "approval_decision"
@@ -1123,6 +1142,7 @@ _DELEGATED_READ_ROLES = {
     "SLO": frozenset({"fleet-operator", "incident-responder", "security-operator", "auditor"}),
     "APPROVAL": frozenset({"policy-approver", "security-operator", "auditor"}),
     "ALERT": frozenset({"incident-responder", "security-operator", "auditor"}),
+    "CASE": frozenset({"incident-responder", "security-operator", "auditor"}),
     "AUDIT": frozenset({"security-operator", "auditor"}),
 }
 
@@ -2465,14 +2485,11 @@ def _publish_managed_package(tenant, deployment_id, body, actor):
 
 def _agent_managed_package(tenant, deployment_id, agent_id, agent):
     """Return a current package to one exact rollout-selected enrolled agent."""
-    if _fleet_emergency_stop_active(tenant) or agent.get("emergencyStop") is True:
-        raise ManagedPackageConflict("emergency stop blocks managed package retrieval")
+    try:
+        _require_agent_execution_authority(tenant, agent)
+    except PermissionError as error:
+        raise ManagedPackageConflict("response control blocks managed package retrieval") from error
     agent_key = f"{deployment_id}:{agent_id}"
-    groups = [
-        group for group in _fleet(tenant)["groups"] if agent_key in group.get("agent_keys", [])
-    ]
-    if any(group.get("emergencyStop") is True for group in groups):
-        raise ManagedPackageConflict("emergency stop blocks managed package retrieval")
     desired, configuration = _desired_managed_host(tenant, deployment_id)
     state = configuration.get("rolloutState")
     percentage = _managed_integer(
@@ -4575,19 +4592,132 @@ def _fleet_emergency_stop_active(tenant):
     return bool(item and item.get("active") is True)
 
 
-def _set_fleet_emergency_stop(tenant, active, actor):
-    """Persist a reversible fleet stop and return the authoritative state."""
-    return _put(
+def _scope_control_id(scope, identifier):
+    """Return one unambiguous identifier for an independent response scope."""
+    if scope not in {"fleet", "deployment", "group", "agent"}:
+        raise ValueError("emergency-stop scope is unsupported")
+    value = "all" if scope == "fleet" else _bounded_identifier(identifier, f"{scope}Id")
+    return f"emergency-stop:{scope}:{value}"
+
+
+def _scope_emergency_stop(tenant, scope, identifier="all"):
+    """Read one server-owned stop without inferring another scope's state."""
+    legacy_id = "fleet-emergency-stop" if scope == "fleet" else None
+    key = _scope_control_id(scope, identifier)
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "CONTROL", legacy_id or key),
+        ConsistentRead=True,
+    ).get("Item")
+    return bool(item and item.get("active") is True)
+
+
+def _set_scope_emergency_stop(tenant, scope, identifier, active, actor):
+    """Persist an independent reversible stop and return its revisioned view."""
+    control_id = _scope_control_id(scope, identifier)
+    # Preserve the established fleet key so existing deployments keep the same
+    # immediate authority record. Narrower scopes use separate records and can
+    # therefore never erase each other by rewriting an agent flag.
+    stored_id = "fleet-emergency-stop" if scope == "fleet" else control_id
+    current = TABLE.get_item(Key=_item_key(tenant, "CONTROL", stored_id), ConsistentRead=True).get(
+        "Item"
+    )
+    record = _put(
         tenant,
         "CONTROL",
-        "fleet-emergency-stop",
+        stored_id,
         {
-            "id": "fleet-emergency-stop",
+            "id": stored_id,
+            "scope": scope,
+            "scopeId": "all" if scope == "fleet" else identifier,
             "active": bool(active),
+            "revision": int(current.get("revision", 0)) + 1 if current else 1,
             "updatedAt": int(time.time()),
             "updatedBy": actor,
         },
     )
+    return {
+        "scope": scope,
+        "scopeId": record["scopeId"],
+        "active": record["active"],
+        "revision": int(record["revision"]),
+        "updatedAt": int(record["updatedAt"]),
+        "updatedBy": record["updatedBy"],
+    }
+
+
+def _active_agent_containment(tenant, agent_key):
+    """Return one active case-owned quarantine for an exact agent identity."""
+    item = TABLE.get_item(Key=_item_key(tenant, "CONTAINMENT", agent_key), ConsistentRead=True).get(
+        "Item"
+    )
+    return item if item and item.get("active") is True else None
+
+
+def _agent_control_state(tenant, agent):
+    """Derive exact execution authority from every independent response scope."""
+    if not agent:
+        return {
+            "executionAllowed": False,
+            "evidenceAllowed": False,
+            "activeStopScopes": ["missing_agent"],
+            "quarantine": None,
+        }
+    deployment_id = str(agent.get("deployment_id", ""))
+    agent_key = f"{deployment_id}:{agent.get('id', '')}"
+    scopes = []
+    if _scope_emergency_stop(tenant, "fleet"):
+        scopes.append("fleet")
+    if deployment_id and _scope_emergency_stop(tenant, "deployment", deployment_id):
+        scopes.append("deployment")
+    groups = [
+        group
+        for group in _list(tenant, "GROUP", consistent_read=True)
+        if agent_key in group.get("agent_keys", [])
+    ]
+    if any(
+        group.get("emergencyStop") is True
+        or _scope_emergency_stop(tenant, "group", group.get("id", ""))
+        for group in groups
+    ):
+        scopes.append("group")
+    if agent.get("emergencyStop") is True or _scope_emergency_stop(tenant, "agent", agent_key):
+        scopes.append("agent")
+    containment = _active_agent_containment(tenant, agent_key)
+    quarantine = (
+        {
+            "active": True,
+            "mode": "quarantine",
+            "caseId": containment.get("caseId"),
+            "revision": int(containment.get("revision", 0)),
+            "activatedAt": int(containment.get("activatedAt", 0)),
+        }
+        if containment
+        else None
+    )
+    return {
+        "executionAllowed": not scopes and quarantine is None,
+        # Quarantine intentionally preserves the signed heartbeat/attestation
+        # channel. Emergency stop also preserves evidence in the current host
+        # protocol but withholds all execution authority.
+        "evidenceAllowed": True,
+        "activeStopScopes": scopes,
+        "quarantine": quarantine,
+    }
+
+
+def _require_agent_execution_authority(tenant, agent):
+    """Fail closed before any governed authority is returned or consumed."""
+    state = _agent_control_state(tenant, agent)
+    if state["quarantine"] is not None:
+        raise PermissionError("agent is in incident quarantine")
+    if state["activeStopScopes"]:
+        raise PermissionError("agent emergency stop is active")
+    return state
+
+
+def _set_fleet_emergency_stop(tenant, active, actor):
+    """Persist a reversible fleet stop and return the authoritative state."""
+    return _set_scope_emergency_stop(tenant, "fleet", "all", active, actor)
 
 
 def _audit(tenant, event_type, actor, payload):
@@ -5709,6 +5839,7 @@ def _seed(tenant):
             "emergencyStop": False,
             "lifecycle_state": "active",
             "lifecycle_revision": 1,
+            "session_revision": 1,
             "owner_id": "system-owner",
             "owner_name": "Platform owner",
             "business_contact": "platform@example.invalid",
@@ -6151,6 +6282,7 @@ def _endpoint_alert_view(item):
         "acknowledgedBy": item.get("acknowledgedBy"),
         "acknowledgementReason": item.get("acknowledgementReason"),
         "resolvedAt": item.get("resolvedAt"),
+        "caseId": item.get("caseId"),
         "deliveryStatus": item.get("deliveryStatus", "pending"),
         "deliveredAt": item.get("deliveredAt"),
     }
@@ -6410,6 +6542,742 @@ def _acknowledge_endpoint_alert(tenant, alert_id, body, actor):
         {"alert_id": alert_id, "device_id": alert.get("deviceId"), "revision": expected + 1},
     )
     return _endpoint_alert_view(acknowledged)
+
+
+def _case_reason(value, field="reason"):
+    """Return bounded investigation text after rejecting credential-shaped content."""
+    reason = _bounded_text(value, field, 500)
+    if len(reason) < 20:
+        raise ValueError(f"{field} must contain at least 20 characters")
+    if re.search(
+        r"(?i)(authorization\s*:\s*bearer|-----BEGIN [A-Z ]+PRIVATE KEY-----|"
+        r"(?:token|secret|password|api[_ -]?key)\s*[:=]\s*\S+)",
+        reason,
+    ):
+        raise ValueError(f"{field} must not contain credential material")
+    return reason
+
+
+def _endpoint_agent_binding(tenant, device_id, *, now=None):
+    """Resolve one endpoint installation to exactly one active enrolled agent.
+
+    The device report is observational. This resolver derives correlation only
+    from a current MDM device, a fresh signed report, an exact host and the
+    server-side digest of a registered project root. It never accepts an agent
+    identifier from an operator request or endpoint payload.
+    """
+    current_time = int(time.time()) if now is None else int(now)
+    base = {
+        "status": "unbound",
+        "reasonCode": "binding_unavailable",
+        "deviceId": device_id,
+        "agentKey": None,
+        "deploymentId": None,
+        "agentId": None,
+        "host": None,
+        "projectRootDigest": None,
+        "installationIds": [],
+        "evidenceRevision": None,
+        "evidenceObservedAt": None,
+        "evidenceDigest": None,
+        "agentLifecycleRevision": None,
+        "groupIds": [],
+        "policyId": None,
+        "policyVersion": None,
+    }
+    try:
+        devices = _authoritative_endpoint_devices(tenant, now=current_time)
+    except (LookupError, PolicyConflict, ValueError):
+        return {**base, "reasonCode": "endpoint_inventory_not_current"}
+    device = devices.get(device_id)
+    if not device or device.get("managed") is not True:
+        return {**base, "reasonCode": "managed_device_not_current"}
+    report = TABLE.get_item(
+        Key=_item_key(tenant, "ENDPOINT_EVIDENCE", device_id), ConsistentRead=True
+    ).get("Item")
+    if not report:
+        return {**base, "reasonCode": "signed_report_missing"}
+    observed_at = int(report.get("observedAt", 0))
+    if (
+        observed_at <= current_time - _ENDPOINT_EVIDENCE_MAX_AGE_SECONDS
+        or observed_at > current_time + _ENDPOINT_EVIDENCE_FUTURE_SKEW_SECONDS
+    ):
+        return {**base, "reasonCode": "signed_report_not_current"}
+    payload = report.get("payload")
+    installations = payload.get("installations", []) if isinstance(payload, dict) else []
+    agents = [
+        agent
+        for agent in _all_agents(tenant, consistent_read=True)
+        if _agent_lifecycle_state(agent) == "active"
+        # Incident response must not claim a usable binding for a legacy
+        # identity that lacks explicit optimistic-concurrency or session
+        # authority. Those records remain visible for migration but cannot be
+        # selected for a consequential response mutation.
+        and _stored_agent_lifecycle_revision(agent.get("lifecycle_revision")) is not None
+        and _agent_session_revision(agent) is not None
+    ]
+    candidates = {}
+    installation_ids = {}
+    for installation in installations:
+        if not isinstance(installation, dict):
+            continue
+        digest = installation.get("projectRootDigest")
+        host = installation.get("host")
+        if not isinstance(digest, str) or not isinstance(host, str):
+            continue
+        for agent in agents:
+            project_root = agent.get("project_root")
+            if (
+                agent.get("host") == host
+                and isinstance(project_root, str)
+                and project_root
+                and secrets.compare_digest(
+                    hashlib.sha256(project_root.encode()).hexdigest(), digest
+                )
+            ):
+                key = f"{agent.get('deployment_id')}:{agent.get('id')}"
+                candidates[key] = (agent, host, digest)
+                installation_ids.setdefault(key, set()).add(installation.get("id", ""))
+    if not candidates:
+        return {
+            **base,
+            "reasonCode": "no_enrolled_agent_match",
+            "evidenceRevision": int(report.get("revision", 0)),
+            "evidenceObservedAt": observed_at,
+            "evidenceDigest": report.get("reportDigest"),
+        }
+    if len(candidates) != 1:
+        return {
+            **base,
+            "status": "ambiguous",
+            "reasonCode": "multiple_enrolled_agent_matches",
+            "evidenceRevision": int(report.get("revision", 0)),
+            "evidenceObservedAt": observed_at,
+            "evidenceDigest": report.get("reportDigest"),
+        }
+    agent_key, (agent, host, project_digest) = next(iter(candidates.items()))
+    groups = [
+        group
+        for group in _list(tenant, "GROUP", consistent_read=True)
+        if agent_key in group.get("agent_keys", [])
+    ]
+    policy = None
+    if len(groups) == 1:
+        policy = TABLE.get_item(
+            Key=_item_key(tenant, "POLICY", groups[0].get("policyId", "")),
+            ConsistentRead=True,
+        ).get("Item")
+    binding = {
+        **base,
+        "status": "bound",
+        "reasonCode": "unique_current_match",
+        "agentKey": agent_key,
+        "deploymentId": agent.get("deployment_id"),
+        "agentId": agent.get("id"),
+        "host": host,
+        "projectRootDigest": project_digest,
+        "installationIds": sorted(value for value in installation_ids[agent_key] if value),
+        "evidenceRevision": int(report.get("revision", 0)),
+        "evidenceObservedAt": observed_at,
+        "evidenceDigest": report.get("reportDigest"),
+        "agentLifecycleRevision": int(agent.get("lifecycle_revision", 0)),
+        "groupIds": sorted(str(group.get("id")) for group in groups),
+        "policyId": policy.get("id") if policy else None,
+        "policyVersion": int(policy.get("version", 0)) if policy else None,
+    }
+    digest_material = {key: value for key, value in binding.items() if key != "bindingDigest"}
+    return {
+        **binding,
+        "bindingDigest": hashlib.sha256(
+            json.dumps(digest_material, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+
+
+def _case_timeline_record(tenant, case_id, event_type, actor, payload, *, now, sequence):
+    """Build one append-only, content-minimised case timeline event."""
+    event_id = str(uuid.uuid4())
+    return {
+        **_item_key(tenant, "CASE_EVENT", f"{case_id}:{sequence:08d}:{event_id}"),
+        "tenant_id": tenant,
+        "id": event_id,
+        "case_id": case_id,
+        "eventType": event_type,
+        "actor": actor,
+        "occurredAt": now,
+        "sequence": sequence,
+        "payload": payload,
+        "payloadHash": hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+
+
+def _transaction_condition(key, *, condition, names=None, values=None):
+    """Build one explicit DynamoDB transaction condition check."""
+    operation = {
+        "TableName": CONTROL_TABLE_NAME,
+        "Key": _ddb_item(key),
+        "ConditionExpression": condition,
+    }
+    if names:
+        operation["ExpressionAttributeNames"] = names
+    if values:
+        operation["ExpressionAttributeValues"] = _ddb_item(values)
+    return {"ConditionCheck": operation}
+
+
+def _transact_incident_response(operations):
+    """Atomically commit case authority and its primary timeline evidence."""
+    try:
+        DYNAMODB.transact_write_items(TransactItems=operations)
+    except Exception as error:
+        code = getattr(error, "response", {}).get("Error", {}).get("Code")
+        if code in {"ConditionalCheckFailedException", "TransactionCanceledException"}:
+            raise PolicyConflict("incident response state changed concurrently") from error
+        raise
+
+
+def _case_events(tenant, case_id):
+    """Return a bounded ordered timeline for one tenant case."""
+    events = [
+        item
+        for item in _list(tenant, "CASE_EVENT", consistent_read=True)
+        if item.get("case_id") == case_id
+    ]
+    if len(events) > 500:
+        raise RuntimeError("case timeline exceeds its safe bound")
+    return sorted(events, key=lambda item: (int(item.get("sequence", 0)), str(item.get("id"))))
+
+
+def _case_view(tenant, case, *, detailed=False):
+    """Project one case without endpoint payloads, project roots or credentials."""
+    binding = _json(case.get("binding", {}))
+    current_binding = _endpoint_agent_binding(tenant, case.get("deviceId", ""))
+    binding_current = bool(
+        binding.get("status") == "bound"
+        and current_binding.get("status") == "bound"
+        and secrets.compare_digest(
+            str(binding.get("bindingDigest", "")),
+            str(current_binding.get("bindingDigest", "")),
+        )
+    )
+    result = {
+        "id": case.get("id"),
+        "alertId": case.get("alertId"),
+        "title": case.get("title"),
+        "severity": case.get("severity"),
+        "reasonCode": case.get("reasonCode"),
+        "deviceId": case.get("deviceId"),
+        "ownerId": case.get("ownerId"),
+        "status": case.get("status"),
+        "revision": int(case.get("revision", 0)),
+        "createdAt": int(case.get("createdAt", 0)),
+        "updatedAt": int(case.get("updatedAt", 0)),
+        "binding": binding,
+        "bindingCurrent": binding_current,
+        "currentBindingStatus": current_binding.get("status"),
+        "containment": case.get("containment"),
+        "sessionRevokedAt": case.get("sessionRevokedAt"),
+        "resolvedAt": case.get("resolvedAt"),
+        "closedAt": case.get("closedAt"),
+    }
+    if not detailed:
+        return result
+    alert = TABLE.get_item(
+        Key=_item_key(tenant, "ALERT", case.get("alertId", "")), ConsistentRead=True
+    ).get("Item")
+    agent_key = binding.get("agentKey")
+    decisions, decisions_truncated = _decision_window(tenant)
+    correlated_decisions = [
+        _decision_view(item)
+        for item in decisions
+        if agent_key
+        and item.get("deployment_id") == binding.get("deploymentId")
+        and item.get("agent_id") == binding.get("agentId")
+    ][:100]
+    approvals = [
+        _approval_view(item, int(time.time()))
+        for item in _list(tenant, "APPROVAL", consistent_read=True)
+        if agent_key and item.get("agent_key") == agent_key
+    ][:100]
+    return {
+        **result,
+        "alert": _endpoint_alert_view(alert) if alert else None,
+        "timeline": [_json(item) for item in _case_events(tenant, case["id"])],
+        "decisions": correlated_decisions,
+        "decisionsTruncated": decisions_truncated or len(correlated_decisions) == 100,
+        "approvals": approvals,
+        "evidence": {
+            "endpointReportDigest": binding.get("evidenceDigest"),
+            "endpointReportRevision": binding.get("evidenceRevision"),
+            "endpointObservedAt": binding.get("evidenceObservedAt"),
+            "projectRootDigest": binding.get("projectRootDigest"),
+            "rawContentIncluded": False,
+            "credentialsIncluded": False,
+        },
+    }
+
+
+def _create_case(tenant, body, actor):
+    """Create one deterministic case from a live endpoint alert."""
+    if not isinstance(body, dict) or set(body) != {"alertId", "expectedAlertRevision", "reason"}:
+        raise ValueError("case creation request has an invalid schema")
+    alert_id = _bounded_identifier(body.get("alertId"), "alertId")
+    expected = _discovery_integer(
+        body.get("expectedAlertRevision"), "expectedAlertRevision", minimum=1
+    )
+    reason = _case_reason(body.get("reason"))
+    alert_key = _item_key(tenant, "ALERT", alert_id)
+    alert = TABLE.get_item(Key=alert_key, ConsistentRead=True).get("Item")
+    if not alert or alert.get("source") != "endpoint_evidence":
+        raise LookupError("endpoint alert not found")
+    if int(alert.get("revision", 0)) != expected:
+        raise PolicyConflict("endpoint alert revision changed")
+    if alert.get("status") == "resolved":
+        raise PolicyConflict("a resolved endpoint alert cannot open a case")
+    case_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"aai-case:{tenant}:{alert_id}"))
+    now = int(time.time())
+    binding = _endpoint_agent_binding(tenant, alert.get("deviceId", ""), now=now)
+    case = {
+        **_item_key(tenant, "CASE", case_id),
+        "tenant_id": tenant,
+        "id": case_id,
+        "alertId": alert_id,
+        "title": alert.get("message"),
+        "severity": alert.get("severity"),
+        "reasonCode": alert.get("reasonCode"),
+        "deviceId": alert.get("deviceId"),
+        "ownerId": actor,
+        "status": "open",
+        "revision": 1,
+        "createdAt": now,
+        "updatedAt": now,
+        "binding": binding,
+        "containment": None,
+    }
+    updated_alert = {**alert, "caseId": case_id, "revision": expected + 1}
+    event = _case_timeline_record(
+        tenant,
+        case_id,
+        "case_created",
+        actor,
+        {
+            "alertId": alert_id,
+            "reason": reason,
+            "bindingStatus": binding.get("status"),
+            "agentKey": binding.get("agentKey"),
+        },
+        now=now,
+        sequence=1,
+    )
+    _transact_incident_response(
+        [
+            _transaction_put(case, condition="attribute_not_exists(pk)"),
+            _transaction_put(event, condition="attribute_not_exists(pk)"),
+            _transaction_put(
+                updated_alert,
+                condition="revision = :revision AND attribute_not_exists(caseId)",
+                values={":revision": expected},
+            ),
+        ]
+    )
+    _audit(
+        tenant,
+        "incident_case_created",
+        actor,
+        {"case_id": case_id, "alert_id": alert_id, "binding_status": binding.get("status")},
+    )
+    return _case_view(tenant, case, detailed=True)
+
+
+def _case_record(tenant, case_id):
+    """Load one exact tenant case or report it as unavailable."""
+    case_id = _bounded_identifier(case_id, "caseId")
+    case = TABLE.get_item(Key=_item_key(tenant, "CASE", case_id), ConsistentRead=True).get("Item")
+    if not case or case.get("status") not in _CASE_STATUSES:
+        raise LookupError("incident case not found")
+    return case
+
+
+def _contain_case(tenant, case_id, body, actor):
+    """Quarantine the one agent selected by a still-current server binding."""
+    if not isinstance(body, dict) or set(body) != {
+        "expectedCaseRevision",
+        "expectedBindingDigest",
+        "reason",
+    }:
+        raise ValueError("case containment request has an invalid schema")
+    expected = _discovery_integer(
+        body.get("expectedCaseRevision"), "expectedCaseRevision", minimum=1
+    )
+    expected_binding = body.get("expectedBindingDigest")
+    if not isinstance(expected_binding, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_binding):
+        raise ValueError("expectedBindingDigest must be SHA-256")
+    reason = _case_reason(body.get("reason"))
+    case = _case_record(tenant, case_id)
+    if int(case.get("revision", 0)) != expected or case.get("status") not in {
+        "open",
+        "investigating",
+    }:
+        raise PolicyConflict("incident case is not available for containment")
+    binding = _endpoint_agent_binding(tenant, case.get("deviceId", ""))
+    stored_binding = case.get("binding", {})
+    if (
+        binding.get("status") != "bound"
+        or stored_binding.get("status") != "bound"
+        or not secrets.compare_digest(str(binding.get("bindingDigest", "")), expected_binding)
+        or not secrets.compare_digest(
+            str(stored_binding.get("bindingDigest", "")), expected_binding
+        )
+    ):
+        raise PolicyConflict("endpoint-to-agent binding is unavailable, ambiguous, or changed")
+    agent_key = binding["agentKey"]
+    agent_record = TABLE.get_item(
+        Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True
+    ).get("Item")
+    if not agent_record or _agent_lifecycle_state(agent_record) != "active":
+        raise PolicyConflict("bound agent identity is not active")
+    containment_key = _item_key(tenant, "CONTAINMENT", agent_key)
+    existing = TABLE.get_item(Key=containment_key, ConsistentRead=True).get("Item")
+    if existing and existing.get("active") is True:
+        raise PolicyConflict("bound agent already has active containment")
+    now = int(time.time())
+    containment_revision = int(existing.get("revision", 0)) + 1 if existing else 1
+    containment = {
+        **containment_key,
+        "tenant_id": tenant,
+        "id": agent_key,
+        "agentKey": agent_key,
+        "deploymentId": binding["deploymentId"],
+        "agentId": binding["agentId"],
+        "caseId": case["id"],
+        "mode": "quarantine",
+        "active": True,
+        "revision": containment_revision,
+        "bindingDigest": expected_binding,
+        "activatedAt": now,
+        "activatedBy": actor,
+        "reason": reason,
+    }
+    updated_case = {
+        **case,
+        "status": "contained",
+        "revision": expected + 1,
+        "updatedAt": now,
+        "containment": {
+            "mode": "quarantine",
+            "active": True,
+            "agentKey": agent_key,
+            "revision": containment_revision,
+            "activatedAt": now,
+            "activatedBy": actor,
+        },
+    }
+    event = _case_timeline_record(
+        tenant,
+        case["id"],
+        "agent_quarantined",
+        actor,
+        {"agentKey": agent_key, "reason": reason, "bindingDigest": expected_binding},
+        now=now,
+        sequence=expected + 1,
+    )
+    containment_condition = (
+        "revision = :revision AND active = :false" if existing else "attribute_not_exists(pk)"
+    )
+    containment_values = (
+        {":revision": int(existing.get("revision", 0)), ":false": False} if existing else None
+    )
+    _transact_incident_response(
+        [
+            _transaction_condition(
+                _item_key(tenant, "AGENT", agent_key),
+                condition="lifecycle_state = :active AND lifecycle_revision = :revision",
+                values={":active": "active", ":revision": int(binding["agentLifecycleRevision"])},
+            ),
+            _transaction_put(
+                updated_case,
+                condition="revision = :revision",
+                values={":revision": expected},
+            ),
+            _transaction_put(
+                containment,
+                condition=containment_condition,
+                values=containment_values,
+            ),
+            _transaction_put(event, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _audit(
+        tenant, "incident_agent_quarantined", actor, {"case_id": case["id"], "agent_key": agent_key}
+    )
+    return _case_view(tenant, updated_case, detailed=True)
+
+
+def _case_release_ready(tenant, case, containment):
+    """Prove live endpoint and agent recovery while excluding this quarantine."""
+    binding = _endpoint_agent_binding(tenant, case.get("deviceId", ""))
+    if binding.get("status") != "bound" or not secrets.compare_digest(
+        str(binding.get("bindingDigest", "")), str(containment.get("bindingDigest", ""))
+    ):
+        raise PolicyConflict("endpoint-to-agent binding is not current")
+    health = _endpoint_evidence_health(tenant)
+    device = next(
+        (item for item in health.get("items", []) if item.get("deviceId") == case.get("deviceId")),
+        None,
+    )
+    if not device or device.get("status") != "healthy":
+        raise PolicyConflict("endpoint health has not recovered")
+    verification = _verify_agent(tenant, binding["deploymentId"], binding["agentId"])
+    non_response_checks = [
+        check for name, check in verification["checks"].items() if name != "emergencyStop"
+    ]
+    control = verification.get("controlState") or {}
+    if not all(check.get("passed") is True for check in non_response_checks) or control.get(
+        "activeStopScopes"
+    ):
+        raise PolicyConflict("bound agent has not passed recovery verification")
+    alert = TABLE.get_item(
+        Key=_item_key(tenant, "ALERT", case.get("alertId", "")), ConsistentRead=True
+    ).get("Item")
+    if not alert:
+        raise PolicyConflict("source alert is unavailable")
+    if alert.get("reasonCode") in _ENDPOINT_EVENT_REASONS:
+        if alert.get("status") not in {"acknowledged", "resolved"}:
+            raise PolicyConflict("security event alert has not been acknowledged")
+    elif alert.get("status") != "resolved":
+        raise PolicyConflict("endpoint posture alert has not resolved")
+    return binding
+
+
+def _release_case(tenant, case_id, body, actor):
+    """Release one case-owned quarantine only after server-derived recovery."""
+    if not isinstance(body, dict) or set(body) != {
+        "expectedCaseRevision",
+        "expectedContainmentRevision",
+        "reason",
+    }:
+        raise ValueError("case release request has an invalid schema")
+    expected_case = _discovery_integer(
+        body.get("expectedCaseRevision"), "expectedCaseRevision", minimum=1
+    )
+    expected_containment = _discovery_integer(
+        body.get("expectedContainmentRevision"), "expectedContainmentRevision", minimum=1
+    )
+    reason = _case_reason(body.get("reason"))
+    case = _case_record(tenant, case_id)
+    if int(case.get("revision", 0)) != expected_case or case.get("status") != "contained":
+        raise PolicyConflict("incident case is not in contained state")
+    containment_summary = case.get("containment") or {}
+    agent_key = containment_summary.get("agentKey")
+    containment = TABLE.get_item(
+        Key=_item_key(tenant, "CONTAINMENT", agent_key or ""), ConsistentRead=True
+    ).get("Item")
+    if (
+        not containment
+        or containment.get("caseId") != case["id"]
+        or containment.get("active") is not True
+        or int(containment.get("revision", 0)) != expected_containment
+    ):
+        raise PolicyConflict("case containment revision changed")
+    _case_release_ready(tenant, case, containment)
+    now = int(time.time())
+    released = {
+        **containment,
+        "active": False,
+        "revision": expected_containment + 1,
+        "releasedAt": now,
+        "releasedBy": actor,
+        "releaseReason": reason,
+    }
+    updated_case = {
+        **case,
+        "status": "investigating",
+        "revision": expected_case + 1,
+        "updatedAt": now,
+        "containment": {
+            **containment_summary,
+            "active": False,
+            "revision": expected_containment + 1,
+            "releasedAt": now,
+            "releasedBy": actor,
+        },
+    }
+    event = _case_timeline_record(
+        tenant,
+        case["id"],
+        "agent_quarantine_released",
+        actor,
+        {"agentKey": agent_key, "reason": reason},
+        now=now,
+        sequence=expected_case + 1,
+    )
+    _transact_incident_response(
+        [
+            _transaction_put(
+                updated_case, condition="revision = :revision", values={":revision": expected_case}
+            ),
+            _transaction_put(
+                released,
+                condition="revision = :revision AND active = :true",
+                values={":revision": expected_containment, ":true": True},
+            ),
+            _transaction_put(event, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _audit(
+        tenant,
+        "incident_agent_quarantine_released",
+        actor,
+        {"case_id": case["id"], "agent_key": agent_key},
+    )
+    return _case_view(tenant, updated_case, detailed=True)
+
+
+def _revoke_case_sessions(tenant, case_id, body, actor):
+    """Invalidate every old session/bootstrap revision for the bound agent."""
+    if not isinstance(body, dict) or set(body) != {"expectedCaseRevision", "reason"}:
+        raise ValueError("case session revocation request has an invalid schema")
+    expected_case = _discovery_integer(
+        body.get("expectedCaseRevision"), "expectedCaseRevision", minimum=1
+    )
+    reason = _case_reason(body.get("reason"))
+    case = _case_record(tenant, case_id)
+    if int(case.get("revision", 0)) != expected_case or case.get("status") in {
+        "resolved",
+        "closed",
+    }:
+        raise PolicyConflict("incident case is not active")
+    binding = _endpoint_agent_binding(tenant, case.get("deviceId", ""))
+    stored = case.get("binding", {})
+    if binding.get("status") != "bound" or not secrets.compare_digest(
+        str(binding.get("bindingDigest", "")), str(stored.get("bindingDigest", ""))
+    ):
+        raise PolicyConflict("endpoint-to-agent binding is unavailable or changed")
+    agent_key = binding["agentKey"]
+    agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
+        "Item"
+    )
+    current_session_revision = _agent_session_revision(agent)
+    if not agent or current_session_revision is None or _agent_lifecycle_state(agent) != "active":
+        raise PolicyConflict("bound agent session authority is unavailable")
+    now = int(time.time())
+    updated_agent = {
+        **agent,
+        "session_revision": current_session_revision + 1,
+        "status": "offline",
+        "last_heartbeat": 0,
+        "expires_at": 0,
+    }
+    updated_case = {
+        **case,
+        "revision": expected_case + 1,
+        "updatedAt": now,
+        "sessionRevokedAt": now,
+        "sessionRevokedBy": actor,
+    }
+    event = _case_timeline_record(
+        tenant,
+        case["id"],
+        "agent_sessions_revoked",
+        actor,
+        {"agentKey": agent_key, "reason": reason, "sessionRevision": current_session_revision + 1},
+        now=now,
+        sequence=expected_case + 1,
+    )
+    _transact_incident_response(
+        [
+            _transaction_put(
+                updated_case, condition="revision = :revision", values={":revision": expected_case}
+            ),
+            _transaction_put(
+                updated_agent,
+                condition=(
+                    "lifecycle_state = :active AND lifecycle_revision = :lifecycle AND "
+                    "(attribute_not_exists(session_revision) OR session_revision = :session)"
+                ),
+                values={
+                    ":active": "active",
+                    ":lifecycle": int(agent["lifecycle_revision"]),
+                    ":session": current_session_revision,
+                },
+            ),
+            _transaction_put(event, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _audit(
+        tenant,
+        "incident_agent_sessions_revoked",
+        actor,
+        {
+            "case_id": case["id"],
+            "agent_key": agent_key,
+            "session_revision": current_session_revision + 1,
+        },
+    )
+    return _case_view(tenant, updated_case, detailed=True)
+
+
+def _transition_case(tenant, case_id, body, actor, target):
+    """Resolve or close a case while preserving response-state safeguards."""
+    if target not in {"resolved", "closed"}:
+        raise ValueError("case transition target is unsupported")
+    if not isinstance(body, dict) or set(body) != {"expectedCaseRevision", "reason"}:
+        raise ValueError("case transition request has an invalid schema")
+    expected = _discovery_integer(
+        body.get("expectedCaseRevision"), "expectedCaseRevision", minimum=1
+    )
+    reason = _case_reason(body.get("reason"))
+    case = _case_record(tenant, case_id)
+    if int(case.get("revision", 0)) != expected:
+        raise PolicyConflict("incident case revision changed")
+    if case.get("containment", {}).get("active") is True:
+        raise PolicyConflict("active containment must be released before case transition")
+    if target == "resolved" and case.get("status") not in {"open", "investigating"}:
+        raise PolicyConflict("incident case cannot be resolved from its current state")
+    if target == "closed" and case.get("status") != "resolved":
+        raise PolicyConflict("incident case must be resolved before closure")
+    alert = TABLE.get_item(
+        Key=_item_key(tenant, "ALERT", case.get("alertId", "")), ConsistentRead=True
+    ).get("Item")
+    if target == "resolved" and alert:
+        if alert.get("reasonCode") in _ENDPOINT_EVENT_REASONS:
+            ready = alert.get("status") in {"acknowledged", "resolved"}
+        else:
+            ready = alert.get("status") == "resolved"
+        if not ready:
+            raise PolicyConflict("source alert is not ready for case resolution")
+    now = int(time.time())
+    timestamp_field = "resolvedAt" if target == "resolved" else "closedAt"
+    actor_field = "resolvedBy" if target == "resolved" else "closedBy"
+    updated = {
+        **case,
+        "status": target,
+        "revision": expected + 1,
+        "updatedAt": now,
+        timestamp_field: now,
+        actor_field: actor,
+    }
+    event = _case_timeline_record(
+        tenant,
+        case["id"],
+        f"case_{target}",
+        actor,
+        {"reason": reason},
+        now=now,
+        sequence=expected + 1,
+    )
+    _transact_incident_response(
+        [
+            _transaction_put(
+                updated, condition="revision = :revision", values={":revision": expected}
+            ),
+            _transaction_put(event, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _audit(tenant, f"incident_case_{target}", actor, {"case_id": case["id"]})
+    return _case_view(tenant, updated, detailed=True)
 
 
 def _endpoint_detection_cycle():
@@ -6786,6 +7654,10 @@ def _fleet(tenant):
     agents = _all_agents(tenant)
     groups = []
     for group in _list(tenant, "GROUP"):
+        group["emergencyStop"] = bool(
+            group.get("emergencyStop") is True
+            or _scope_emergency_stop(tenant, "group", group.get("id", ""))
+        )
         group["membershipRevision"] = _group_membership_revision(group)
         group["membershipMode"] = _group_membership_mode(group)
         group["dynamicRule"] = group.get("dynamic_rule")
@@ -6796,6 +7668,12 @@ def _fleet(tenant):
             a for a in agents if f"{a['deployment_id']}:{a['id']}" in group.get("agent_keys", [])
         ]
         groups.append(group)
+    for agent in agents:
+        control_state = _agent_control_state(tenant, agent)
+        agent["controlState"] = control_state
+        # Preserve the established summary field while deriving it from exact
+        # independent controls rather than a browser-mutated presentation flag.
+        agent["effectiveEmergencyStop"] = bool(control_state["activeStopScopes"])
     policy_versions = _list(tenant, "POLICY_VERSION")
     policies = []
     for policy in _list(tenant, "POLICY"):
@@ -6824,7 +7702,9 @@ def _fleet(tenant):
             {
                 "deploymentId": d["id"],
                 "emergencyStop": any(
-                    a.get("emergencyStop") for a in agents if a["deployment_id"] == d["id"]
+                    not a.get("controlState", {}).get("executionAllowed", True)
+                    for a in agents
+                    if a["deployment_id"] == d["id"]
                 ),
                 "status": "healthy",
             }
@@ -6832,6 +7712,7 @@ def _fleet(tenant):
         ],
         "slo": [],
         "alerts": [],
+        "cases": [_case_view(tenant, item) for item in _list(tenant, "CASE")],
         "complianceEvidence": {
             "schemaVersion": 1,
             "organizationId": "org-demo",
@@ -6883,8 +7764,7 @@ def _verify_agent(tenant, deployment_id, agent_id):
             ConsistentRead=True,
         ).get("Item")
         policy_assigned = bool(policy)
-    fleet_stopped = _fleet_emergency_stop_active(tenant)
-    agent_stopped = bool(agent and agent.get("emergencyStop", False))
+    control_state = _agent_control_state(tenant, agent) if agent else None
     registered = bool(agent)
     lifecycle_active = bool(agent and _agent_lifecycle_state(agent) == "active")
     heartbeat_current = bool(
@@ -6982,16 +7862,11 @@ def _verify_agent(tenant, deployment_id, agent_id):
             "detail": policy_detail,
         },
         "emergencyStop": {
-            "passed": bool(agent and not fleet_stopped and not agent_stopped),
-            "detail": "No emergency stop is active."
-            if agent and not fleet_stopped and not agent_stopped
-            else (
-                "A fleet-wide emergency stop is active."
-                if fleet_stopped
-                else (
-                    "An agent, group, or deployment emergency stop is active "
-                    "or the agent is missing."
-                )
+            "passed": bool(agent and control_state and control_state["executionAllowed"]),
+            "detail": (
+                "No emergency stop or incident quarantine is active."
+                if agent and control_state and control_state["executionAllowed"]
+                else "A server-owned response control withholds execution authority."
             ),
         },
     }
@@ -7016,6 +7891,7 @@ def _verify_agent(tenant, deployment_id, agent_id):
         },
         "managedConfiguration": managed_configuration,
         "ownership": ownership,
+        "controlState": control_state,
     }
 
 
@@ -7457,6 +8333,7 @@ def _replace_agent(tenant, deployment_id, agent_id, body, actor):
         "created_at": now,
         "lifecycle_state": "active",
         "lifecycle_revision": 1,
+        "session_revision": 1,
         "successor_of": agent_id,
         "owner_id": agent.get("owner_id", ""),
         "owner_name": agent.get("owner_name", ""),
@@ -7533,6 +8410,11 @@ def _issue_agent_bootstrap(tenant, body, actor):
     if not agent:
         raise ValueError("agent must be registered before enrollment")
     _require_active_agent(agent)
+    session_revision = _agent_session_revision(agent)
+    if session_revision is None:
+        raise PolicyConflict("agent session authority record is malformed")
+    if _active_agent_containment(tenant, agent_key):
+        raise PolicyConflict("incident quarantine blocks new enrollment material")
     project_root = agent.get("project_root")
     if not isinstance(project_root, str) or not project_root:
         raise ValueError("agent must have a project root before enrollment")
@@ -7546,6 +8428,7 @@ def _issue_agent_bootstrap(tenant, body, actor):
             "deployment_id": deployment_id,
             "agent_id": agent_id,
             "project_root_hash": hashlib.sha256(project_root.encode()).hexdigest(),
+            "session_revision": session_revision,
             "expires_at": expires_at,
             "ttl": expires_at,
         }
@@ -7592,6 +8475,16 @@ def _enroll_agent(event):
         raise PermissionError("agent identity is revoked or offboarded")
     if agent.get("project_root") != project_root:
         raise PermissionError("registered agent project scope mismatch")
+    if _active_agent_containment(tenant, f"{deployment_id}:{agent_id}"):
+        raise PermissionError("incident quarantine blocks agent enrollment")
+    current_session_revision = _agent_session_revision(agent)
+    bootstrap_session_revision = _agent_session_revision(item)
+    if (
+        current_session_revision is None
+        or bootstrap_session_revision is None
+        or current_session_revision != bootstrap_session_revision
+    ):
+        raise PermissionError("bootstrap session authority has been revoked")
     # Validate immutable scope before consuming the one-time secret. The
     # conditional delete then makes successful exchange one-shot under races.
     TABLE.delete_item(
@@ -7610,16 +8503,18 @@ def _enroll_agent(event):
             "deployment_id": deployment_id,
             "agent_id": agent_id,
             "project_root_hash": project_root_hash,
+            "session_revision": current_session_revision,
             "issued_at": now,
             "expires_at": session_expires,
             "ttl": session_expires,
         }
     )
     # Exchanging a bootstrap proves possession of enrollment material, not
-    # that the runtime process is alive. Only the authenticated agent
-    # heartbeat route may transition presence to connected.
-    agent.update({"status": "offline", "last_heartbeat": 0, "expires_at": 0})
-    TABLE.put_item(Item=agent)
+    # that the runtime process is alive. Enrollment deliberately does not
+    # rewrite the agent record: doing so would create a second authority
+    # mutation after the session was issued and would make legacy agents fail
+    # enrollment merely because they pre-date lifecycle revision fields. Only
+    # an authenticated heartbeat may transition presence to connected.
     _audit(
         tenant,
         "agent_enrolled",
@@ -7656,6 +8551,7 @@ def _renew_agent_session(tenant, session, current_token):
             "deployment_id": session["deployment_id"],
             "agent_id": session["agent_id"],
             "project_root_hash": session["project_root_hash"],
+            "session_revision": session.get("session_revision", 1),
             "issued_at": now,
             "expires_at": refreshed_expires,
             "ttl": refreshed_expires,
@@ -7768,14 +8664,20 @@ def handler(event, context):
                     }
                 )
                 try:
+                    session_revision = _agent_session_revision(item)
+                    if session_revision is None:
+                        raise PermissionError("agent session authority record is malformed")
                     TABLE.put_item(
                         Item=item,
                         ConditionExpression=(
-                            "lifecycle_state = :active AND lifecycle_revision = :revision"
+                            "lifecycle_state = :active AND lifecycle_revision = :revision "
+                            "AND (attribute_not_exists(session_revision) OR "
+                            "session_revision = :session_revision)"
                         ),
                         ExpressionAttributeValues={
                             ":active": "active",
                             ":revision": int(item["lifecycle_revision"]),
+                            ":session_revision": session_revision,
                         },
                     )
                 except Exception as error:
@@ -7784,14 +8686,37 @@ def handler(event, context):
                             "agent identity changed while heartbeat was processed"
                         ) from error
                     raise
+                control_state = _agent_control_state(tenant, item)
+                heartbeat_status = (
+                    "quarantined"
+                    if control_state["quarantine"]
+                    else "stopped"
+                    if control_state["activeStopScopes"]
+                    else "connected"
+                )
                 return _response(
-                    200, {**item, **_renew_agent_session(tenant, session, _bearer(event))}
+                    200,
+                    {
+                        **item,
+                        **_renew_agent_session(tenant, session, _bearer(event)),
+                        "status": heartbeat_status,
+                        "controlState": control_state,
+                    },
                 )
             governed_agent = TABLE.get_item(
                 Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True
             ).get("Item")
             if not governed_agent:
                 return _response(404, {"error": "agent not found"})
+            control_state = _agent_control_state(tenant, governed_agent)
+            if not control_state["executionAllowed"]:
+                return _response(
+                    409,
+                    {
+                        "error": "server-owned response control withholds agent execution",
+                        "controlState": control_state,
+                    },
+                )
             _require_current_attestation(tenant, deployment_id, governed_agent)
             if method == "GET" and action == ["managed-package"]:
                 return _response(
@@ -7804,24 +8729,6 @@ def handler(event, context):
                 return _response(409 if recorded.get("conflict") else 202, recorded)
             if method == "GET" and action == ["effective-policy"]:
                 agent = governed_agent
-                if _fleet_emergency_stop_active(tenant):
-                    return _response(
-                        409,
-                        {
-                            "error": "fleet-wide emergency stop is active",
-                            "emergencyStop": True,
-                            "scope": "fleet",
-                        },
-                    )
-                if agent.get("emergencyStop") is True:
-                    return _response(
-                        409,
-                        {
-                            "error": "agent emergency stop is active",
-                            "emergencyStop": True,
-                            "scope": "agent",
-                        },
-                    )
                 groups = [
                     group
                     for group in _fleet(tenant)["groups"]
@@ -8050,6 +8957,7 @@ def handler(event, context):
                     "health",
                     "slo",
                     "alerts",
+                    "cases",
                     "audit",
                     "approvals",
                 }
@@ -8069,6 +8977,7 @@ def handler(event, context):
                     "health": "HEALTH",
                     "slo": "SLO",
                     "alerts": "ALERT",
+                    "cases": "CASE",
                     "audit": "AUDIT",
                     "approvals": "APPROVAL",
                 }[parts[0]]
@@ -8084,6 +8993,15 @@ def handler(event, context):
                             int(item.get("lastObservedAt", 0)),
                             str(item.get("id", "")),
                         ),
+                        reverse=True,
+                    )
+                elif parts[0] == "cases":
+                    items = [
+                        _case_view(tenant, item)
+                        for item in _list(tenant, "CASE", consistent_read=True)
+                    ]
+                    items.sort(
+                        key=lambda item: (int(item.get("updatedAt", 0)), str(item.get("id", ""))),
                         reverse=True,
                     )
                 else:
@@ -8148,6 +9066,33 @@ def handler(event, context):
                 health = _endpoint_evidence_health(tenant)
                 _reconcile_endpoint_alerts(tenant, health)
                 return _response(200, health)
+            if method == "POST" and parts == ["cases"]:
+                return _response(201, _create_case(tenant, _body(event), actor))
+            if method == "GET" and len(parts) == 2 and parts[0] == "cases":
+                return _response(
+                    200, _case_view(tenant, _case_record(tenant, parts[1]), detailed=True)
+                )
+            if method == "POST" and len(parts) == 3 and parts[0] == "cases":
+                operation = parts[2]
+                if operation == "contain":
+                    return _response(200, _contain_case(tenant, parts[1], _body(event), actor))
+                if operation == "release":
+                    return _response(200, _release_case(tenant, parts[1], _body(event), actor))
+                if operation == "resolve":
+                    return _response(
+                        200, _transition_case(tenant, parts[1], _body(event), actor, "resolved")
+                    )
+                if operation == "close":
+                    return _response(
+                        200, _transition_case(tenant, parts[1], _body(event), actor, "closed")
+                    )
+            if (
+                method == "POST"
+                and len(parts) == 4
+                and parts[0] == "cases"
+                and parts[2:] == ["sessions", "revoke"]
+            ):
+                return _response(200, _revoke_case_sessions(tenant, parts[1], _body(event), actor))
             if (
                 method == "POST"
                 and len(parts) == 3
@@ -8548,25 +9493,40 @@ def handler(event, context):
                 return _response(200, item)
             if method == "POST" and parts == ["emergency-stop"]:
                 body = _body(event)
-                deployment_id = body.get("deploymentId")
+                deployment_id = _bounded_identifier(body.get("deploymentId"), "deploymentId")
                 active = bool(body.get("active", True))
+                deployment = TABLE.get_item(
+                    Key=_item_key(tenant, "DEPLOYMENT", deployment_id), ConsistentRead=True
+                ).get("Item")
+                if not deployment:
+                    return _response(404, {"error": "deployment not found"})
                 agents = [
                     item
                     for item in _list(tenant, "AGENT")
                     if item.get("deployment_id") == deployment_id
                 ]
-                for item in agents:
-                    item["emergencyStop"] = active
-                    TABLE.put_item(Item=item)
+                control = _set_scope_emergency_stop(
+                    tenant, "deployment", deployment_id, active, actor
+                )
                 _audit(
                     tenant,
                     "deployment_emergency_stop",
                     actor,
-                    {"deployment_id": deployment_id, "active": active, "agent_count": len(agents)},
+                    {
+                        "deployment_id": deployment_id,
+                        "active": active,
+                        "agent_count": len(agents),
+                        "control_revision": control["revision"],
+                    },
                 )
                 return _response(
                     200,
-                    {"deploymentId": deployment_id, "active": active, "agentCount": len(agents)},
+                    {
+                        "deploymentId": deployment_id,
+                        "active": active,
+                        "agentCount": len(agents),
+                        "control": control,
+                    },
                 )
             if (
                 method == "POST"
@@ -8579,16 +9539,26 @@ def handler(event, context):
                 active = bool(body.get("active", True))
                 if not group:
                     return _response(404, {"error": "group not found"})
-                for key in group.get("agent_keys", []):
-                    item = TABLE.get_item(Key=_item_key(tenant, "AGENT", key)).get("Item")
-                    if item:
-                        item["emergencyStop"] = active
-                        TABLE.put_item(Item=item)
+                control = _set_scope_emergency_stop(tenant, "group", parts[1], active, actor)
                 _audit(
-                    tenant, "group_emergency_stop", actor, {"group_id": parts[1], "active": active}
+                    tenant,
+                    "group_emergency_stop",
+                    actor,
+                    {
+                        "group_id": parts[1],
+                        "active": active,
+                        "control_revision": control["revision"],
+                    },
                 )
                 return _response(
-                    200, {"id": parts[1], "active": active, "agents": group.get("agent_keys", [])}
+                    200,
+                    {
+                        **group,
+                        "emergencyStop": active,
+                        "active": active,
+                        "agents": group.get("agent_keys", []),
+                        "control": control,
+                    },
                 )
             if (
                 method == "GET"
@@ -9198,6 +10168,7 @@ def handler(event, context):
                             "created_at": now,
                             "lifecycle_state": "active",
                             "lifecycle_revision": 1,
+                            "session_revision": 1,
                             **ownership,
                             "ownership_revision": 1,
                         },
@@ -9272,22 +10243,13 @@ def handler(event, context):
                     scope is None or not _delegated_operator_can_read(tenant, event, "AGENT", scope)
                 ):
                     return _response(403, {"error": "operator scope does not permit this read"})
-                if _fleet_emergency_stop_active(tenant):
+                control_state = _agent_control_state(tenant, agent)
+                if not control_state["executionAllowed"]:
                     return _response(
                         409,
                         {
-                            "error": "fleet-wide emergency stop is active",
-                            "emergencyStop": True,
-                            "scope": "fleet",
-                        },
-                    )
-                if agent.get("emergencyStop") is True:
-                    return _response(
-                        409,
-                        {
-                            "error": "agent emergency stop is active",
-                            "emergencyStop": True,
-                            "scope": "agent",
+                            "error": "server-owned response control withholds agent execution",
+                            "controlState": control_state,
                         },
                     )
                 groups = [
@@ -9336,8 +10298,15 @@ def handler(event, context):
                 if _agent_lifecycle_state(agent) != "active":
                     return _response(409, {"error": "agent identity is revoked or offboarded"})
                 agent = _require_active_agent(_explicit_agent_lifecycle(tenant, parts[1], parts[2]))
-                agent["emergencyStop"] = bool(_body(event).get("active", True))
-                try:
+                active = bool(_body(event).get("active", True))
+                control = _set_scope_emergency_stop(
+                    tenant, "agent", f"{parts[1]}:{parts[2]}", active, actor
+                )
+                # An old agent-scoped stop used this field directly. Clear it
+                # only through the exact agent endpoint; broader scope clears
+                # never touch agent records.
+                if not active and agent.get("emergencyStop") is True:
+                    agent["emergencyStop"] = False
                     TABLE.put_item(
                         Item=agent,
                         ConditionExpression=(
@@ -9348,12 +10317,6 @@ def handler(event, context):
                             ":revision": int(agent["lifecycle_revision"]),
                         },
                     )
-                except Exception as error:
-                    if _is_conditional_conflict(error):
-                        raise PolicyConflict(
-                            "agent lifecycle state changed concurrently"
-                        ) from error
-                    raise
                 _audit(
                     tenant,
                     "agent_emergency_stop",
@@ -9361,10 +10324,18 @@ def handler(event, context):
                     {
                         "deployment_id": parts[1],
                         "agent_id": parts[2],
-                        "active": agent["emergencyStop"],
+                        "active": active,
+                        "control_revision": control["revision"],
                     },
                 )
-                return _response(200, agent)
+                return _response(
+                    200,
+                    {
+                        **agent,
+                        "emergencyStop": active,
+                        "controlState": _agent_control_state(tenant, agent),
+                    },
+                )
             if (
                 method == "GET"
                 and len(parts) == 4

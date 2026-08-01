@@ -33,6 +33,60 @@ class ConditionalFailure(Exception):
     response = {"Error": {"Code": "ConditionalCheckFailedException"}}
 
 
+def _condition_parts(expression: str, separator: str) -> list[str]:
+    """Split a synthetic DynamoDB condition only at its top-level operators."""
+    parts: list[str] = []
+    start = 0
+    depth = 0
+    for index, character in enumerate(expression):
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif depth == 0 and expression.startswith(separator, index):
+            parts.append(expression[start:index].strip())
+            start = index + len(separator)
+    if parts:
+        parts.append(expression[start:].strip())
+    return parts
+
+
+def _condition_permitted(
+    condition: str,
+    current: dict[str, Any],
+    names: dict[str, str],
+    values: dict[str, Any],
+) -> bool:
+    """Evaluate the bounded condition grammar emitted by the Lambda contract."""
+    expression = condition.strip()
+    while expression.startswith("(") and expression.endswith(")"):
+        expression = expression[1:-1].strip()
+    conjunction = _condition_parts(expression, " AND ")
+    if conjunction:
+        return all(_condition_permitted(item, current, names, values) for item in conjunction)
+    disjunction = _condition_parts(expression, " OR ")
+    if disjunction:
+        return any(_condition_permitted(item, current, names, values) for item in disjunction)
+    if expression.startswith("attribute_not_exists("):
+        field = expression.removeprefix("attribute_not_exists(").removesuffix(")")
+        return names.get(field, field) not in current
+    if expression.startswith("attribute_exists("):
+        field = expression.removeprefix("attribute_exists(").removesuffix(")")
+        return names.get(field, field) in current
+    for operator in (" <> ", " > ", " = "):
+        if operator not in expression:
+            continue
+        field_name, expected_name = expression.split(operator, 1)
+        actual = current.get(names.get(field_name, field_name))
+        expected = values[expected_name]
+        if operator == " <> ":
+            return bool(actual != expected)
+        if operator == " > ":
+            return bool(actual is not None and actual > expected)
+        return bool(actual == expected)
+    raise AssertionError(f"unsupported DynamoDB condition: {condition}")
+
+
 class FakeTable:
     """DynamoDB table double covering the handler's conditional operations."""
 
@@ -221,6 +275,24 @@ class FakeDynamoClient:
         snapshot = {key: dict(item) for key, item in self.table.items.items()}
         try:
             for operation in TransactItems:
+                if "ConditionCheck" in operation:
+                    check = operation["ConditionCheck"]
+                    key_shape = {
+                        key: _decode_ddb_value(value) for key, value in check["Key"].items()
+                    }
+                    checked_item = self.table.items.get(
+                        (key_shape["pk"], key_shape.get("sk", "")), {}
+                    )
+                    names = check.get("ExpressionAttributeNames", {})
+                    values = {
+                        key: _decode_ddb_value(value)
+                        for key, value in check.get("ExpressionAttributeValues", {}).items()
+                    }
+                    if not _condition_permitted(
+                        check["ConditionExpression"], checked_item, names, values
+                    ):
+                        raise ConditionalFailure()
+                    continue
                 put = operation["Put"]
                 record = {key: _decode_ddb_value(value) for key, value in put["Item"].items()}
                 key = (record["pk"], record.get("sk", ""))
@@ -231,32 +303,7 @@ class FakeDynamoClient:
                     key: _decode_ddb_value(value)
                     for key, value in put.get("ExpressionAttributeValues", {}).items()
                 }
-                if condition == "attribute_not_exists(pk)":
-                    permitted = existing is None
-                else:
-                    permitted = existing is not None
-                    current = existing or {}
-                    for clause in condition.split(" AND "):
-                        if clause.startswith("attribute_not_exists("):
-                            field = clause.removeprefix("attribute_not_exists(").removesuffix(")")
-                            permitted = permitted and field not in current
-                            continue
-                        if " <> " in clause:
-                            field_name, expected_name = clause.split(" <> ")
-                            comparison = "not_equal"
-                        elif " > " in clause:
-                            field_name, expected_name = clause.split(" > ")
-                            comparison = "greater_than"
-                        else:
-                            field_name, expected_name = clause.split(" = ")
-                            comparison = "equal"
-                        field = names.get(field_name, field_name)
-                        if comparison == "not_equal":
-                            permitted = permitted and current.get(field) != values[expected_name]
-                        elif comparison == "greater_than":
-                            permitted = permitted and current.get(field, 0) > values[expected_name]
-                        else:
-                            permitted = permitted and current.get(field) == values[expected_name]
+                permitted = _condition_permitted(condition, existing or {}, names, values)
                 if not permitted:
                     raise ConditionalFailure()
                 self.table.items[key] = record
@@ -3138,7 +3185,7 @@ def test_agent_enrollment_is_one_time_and_identity_bound(monkeypatch: Any) -> No
         ),
     )
     assert stop_response["statusCode"] == 409
-    assert json.loads(stop_response["body"])["emergencyStop"] is True
+    assert json.loads(stop_response["body"])["controlState"]["executionAllowed"] is False
     wrong_identity = _invoke(
         module, _event("/agent/dep-a/other-agent/heartbeat", "POST", token=payload["accessToken"])
     )
@@ -4653,6 +4700,332 @@ def test_endpoint_alerts_are_deduplicated_delivered_acknowledged_and_resolved(
     assert resolved[0]["resolvedAt"] == now
 
 
+def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
+    monkeypatch: Any,
+) -> None:
+    """A case can act only through a unique, current server-derived endpoint binding."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-incident-response"
+    now = 2_150_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    responder = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["incident-responder"],
+        "sub": "responder-a",
+    }
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-a",
+    }
+    project_root = "/synthetic/contained-project"
+    project_digest = hashlib.sha256(project_root.encode()).hexdigest()
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "deployment-a:agent-a")
+        | {
+            "tenant_id": tenant,
+            "id": "agent-a",
+            "deployment_id": "deployment-a",
+            "host": "claude-code",
+            "project_root": project_root,
+            "status": "connected",
+            "last_heartbeat": now,
+            "expires_at": now + 300,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            "session_revision": 1,
+        }
+    )
+    snapshot = _discovery_snapshot(
+        "endpoint", [{"kind": "device", "id": "device-a", "managed": True}], now=now
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/discovery/sources/intune/snapshots",
+                "POST",
+                body=snapshot,
+                claims=platform,
+            ),
+        )["statusCode"]
+        == 201
+    )
+    credential_path = "/api/enterprise/endpoint-evidence/devices/device-a/credential"
+    issued = json.loads(
+        _invoke(
+            module,
+            _event(credential_path, "POST", body={"expectedRevision": 0}, claims=platform),
+        )["body"]
+    )
+    evidence_payload = {
+        "schemaVersion": 1,
+        "observedAt": now,
+        "device": {"id": "device-a", "managed": True},
+        "installations": [
+            {
+                "id": "installation-a",
+                "deviceId": "device-a",
+                "host": "claude-code",
+                "projectRootDigest": project_digest,
+                "binaryPresent": True,
+                "processActive": True,
+            }
+        ],
+    }
+    evidence = {
+        "keyId": issued["keyId"],
+        "payload": evidence_payload,
+        "signature": hmac.new(
+            issued["secret"].encode(),
+            json.dumps(evidence_payload, sort_keys=True, separators=(",", ":")).encode(),
+            hashlib.sha256,
+        ).hexdigest(),
+    }
+    assert (
+        _invoke(
+            module,
+            _event(
+                f"/api/endpoint-evidence/{tenant}/device-a",
+                "POST",
+                body=evidence,
+                token=issued["secret"],
+            ),
+        )["statusCode"]
+        == 202
+    )
+    alert_id = "endpoint-alert-a"
+    table.put_item(
+        Item=module._item_key(tenant, "ALERT", alert_id)
+        | {
+            "tenant_id": tenant,
+            "id": alert_id,
+            "source": "endpoint_evidence",
+            "severity": "high",
+            "type": "endpoint_runtime_stopped",
+            "deviceId": "device-a",
+            "message": "The protected agent runtime stopped reporting.",
+            "reasonCode": "process_inactive",
+            "status": "acknowledged",
+            "revision": 1,
+            "firstObservedAt": now,
+            "lastObservedAt": now,
+        }
+    )
+    denied_case = _invoke(
+        module,
+        _event(
+            "/api/enterprise/cases",
+            "POST",
+            body={
+                "alertId": alert_id,
+                "expectedAlertRevision": 1,
+                "reason": "Fleet-only authority must not open response cases.",
+            },
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["fleet-operator"],
+                "sub": "fleet-only",
+            },
+        ),
+    )
+    assert denied_case["statusCode"] == 403
+    created = _invoke(
+        module,
+        _event(
+            "/api/enterprise/cases",
+            "POST",
+            body={
+                "alertId": alert_id,
+                "expectedAlertRevision": 1,
+                "reason": "Investigating the synthetic endpoint runtime condition.",
+            },
+            claims=responder,
+        ),
+    )
+    assert created["statusCode"] == 201
+    case = json.loads(created["body"])
+    assert case["binding"]["agentKey"] == "deployment-a:agent-a"
+    assert case["bindingCurrent"] is True
+    assert case["evidence"]["rawContentIncluded"] is False
+    assert (
+        json.loads(
+            _invoke(module, _event("/api/enterprise/alerts", "GET", claims=responder))["body"]
+        )["items"][0]["caseId"]
+        == case["id"]
+    )
+    bootstrap = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/agents/bootstrap",
+                "POST",
+                body={"deploymentId": "deployment-a", "agentId": "agent-a"},
+                claims=platform,
+            ),
+        )["body"]
+    )["bootstrapToken"]
+
+    contained = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case['id']}/contain",
+            "POST",
+            body={
+                "expectedCaseRevision": 1,
+                "expectedBindingDigest": case["binding"]["bindingDigest"],
+                "reason": "Quarantine execution while preserving heartbeat evidence.",
+            },
+            claims=responder,
+        ),
+    )
+    assert contained["statusCode"] == 200
+    contained_case = json.loads(contained["body"])
+    assert contained_case["status"] == "contained"
+    control = module._agent_control_state(
+        tenant, table.items[(f"TENANT#{tenant}", "AGENT#deployment-a:agent-a")]
+    )
+    assert control["executionAllowed"] is False
+    assert control["evidenceAllowed"] is True
+    assert control["quarantine"]["caseId"] == case["id"]
+
+    session_token = "synthetic-agent-session-token-123456"  # noqa: S105
+    table.put_item(
+        Item={
+            "pk": module._token_key("AGENT_SESSION", session_token),
+            "sk": "SESSION",
+            "tenant_id": tenant,
+            "deployment_id": "deployment-a",
+            "agent_id": "agent-a",
+            "project_root_hash": project_digest,
+            "session_revision": 1,
+            "expires_at": now + 900,
+        }
+    )
+    revoked = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case['id']}/sessions/revoke",
+            "POST",
+            body={
+                "expectedCaseRevision": 2,
+                "reason": "Invalidate all current sessions during investigation.",
+            },
+            claims=responder,
+        ),
+    )
+    assert revoked["statusCode"] == 200
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/agent/deployment-a/agent-a/heartbeat",
+                "POST",
+                token=session_token,
+                project_root=project_root,
+            ),
+        )["statusCode"]
+        == 403
+    )
+    detail = json.loads(
+        _invoke(module, _event(f"/api/enterprise/cases/{case['id']}", "GET", claims=responder))[
+            "body"
+        ]
+    )
+    assert [event["eventType"] for event in detail["timeline"]] == [
+        "case_created",
+        "agent_quarantined",
+        "agent_sessions_revoked",
+    ]
+
+    monkeypatch.setattr(
+        module,
+        "_verify_agent",
+        lambda *_args: {
+            "verified": True,
+            "checks": {
+                "identity": {"passed": True},
+                "heartbeat": {"passed": True},
+                "emergencyStop": {"passed": False},
+            },
+            "controlState": {"activeStopScopes": []},
+        },
+    )
+    released = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case['id']}/release",
+            "POST",
+            body={
+                "expectedCaseRevision": 3,
+                "expectedContainmentRevision": 1,
+                "reason": "Recovery evidence passed the server-side release gates.",
+            },
+            claims=responder,
+        ),
+    )
+    assert released["statusCode"] == 200
+    released_case = json.loads(released["body"])
+    assert released_case["status"] == "investigating"
+    assert released_case["containment"]["active"] is False
+    assert (
+        module._agent_control_state(
+            tenant, table.items[(f"TENANT#{tenant}", "AGENT#deployment-a:agent-a")]
+        )["executionAllowed"]
+        is True
+    )
+    revoked_bootstrap = _invoke(
+        module,
+        _event(
+            "/agent/enroll",
+            "POST",
+            body={"bootstrapToken": bootstrap, "projectRoot": project_root},
+        ),
+    )
+    assert revoked_bootstrap["statusCode"] == 403
+    assert "session authority has been revoked" in json.loads(revoked_bootstrap["body"])["error"]
+
+    recontained = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case['id']}/contain",
+            "POST",
+            body={
+                "expectedCaseRevision": 4,
+                "expectedBindingDigest": case["binding"]["bindingDigest"],
+                "reason": "Reapply quarantine to test changed-correlation denial.",
+            },
+            claims=responder,
+        ),
+    )
+    assert recontained["statusCode"] == 200
+    assert json.loads(recontained["body"])["containment"]["revision"] == 3
+
+    # A new matching agent makes the binding ambiguous. Subsequent authority
+    # changes fail closed even though the browser still has the old case.
+    duplicate = dict(table.items[(f"TENANT#{tenant}", "AGENT#deployment-a:agent-a")])
+    duplicate.update(
+        {"pk": f"TENANT#{tenant}", "sk": "AGENT#deployment-a:agent-b", "id": "agent-b"}
+    )
+    table.put_item(Item=duplicate)
+    release = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case['id']}/release",
+            "POST",
+            body={
+                "expectedCaseRevision": 5,
+                "expectedContainmentRevision": 3,
+                "reason": "Attempt release after correlation became ambiguous.",
+            },
+            claims=responder,
+        ),
+    )
+    assert release["statusCode"] == 409
+    assert "binding" in json.loads(release["body"])["error"]
+
+
 def test_endpoint_detection_schedule_materializes_stale_health(monkeypatch: Any) -> None:
     """The bounded scheduled path finds registered tenants without a browser poll."""
     module, table = _load_handler(monkeypatch)
@@ -5567,10 +5940,12 @@ def test_fleet_emergency_stop_is_reversible_durable_and_enforced(monkeypatch: An
     )
     denied_payload = json.loads(denied["body"])
     assert denied["statusCode"] == 409
-    assert denied_payload == {
-        "error": "fleet-wide emergency stop is active",
-        "emergencyStop": True,
-        "scope": "fleet",
+    assert denied_payload["error"] == "server-owned response control withholds agent execution"
+    assert denied_payload["controlState"] == {
+        "activeStopScopes": ["fleet"],
+        "evidenceAllowed": True,
+        "executionAllowed": False,
+        "quarantine": None,
     }
     verification = _invoke(
         module,
@@ -5580,7 +5955,7 @@ def test_fleet_emergency_stop_is_reversible_durable_and_enforced(monkeypatch: An
     assert verification_payload["verified"] is False
     assert verification_payload["checks"]["emergencyStop"] == {
         "passed": False,
-        "detail": "A fleet-wide emergency stop is active.",
+        "detail": "A server-owned response control withholds execution authority.",
     }
     narrower_stop = _invoke(
         module,
@@ -5603,7 +5978,7 @@ def test_fleet_emergency_stop_is_reversible_durable_and_enforced(monkeypatch: An
         _event("/agent/dep-a/agent-a/effective-policy", "GET", token=session_value),
     )
     assert still_denied["statusCode"] == 409
-    assert json.loads(still_denied["body"])["scope"] == "agent"
+    assert json.loads(still_denied["body"])["controlState"]["activeStopScopes"] == ["agent"]
     narrower_clear = _invoke(
         module,
         _event(
@@ -5621,6 +5996,50 @@ def test_fleet_emergency_stop_is_reversible_durable_and_enforced(monkeypatch: An
     assert restored["statusCode"] == 200
     fleet_events = [event for event in audit_events if event[1] == "fleet_emergency_stop"]
     assert [event[3]["active"] for event in fleet_events] == [True, False]
+
+
+def test_response_stop_scopes_are_independent_and_follow_live_group_membership(
+    monkeypatch: Any,
+) -> None:
+    """Clearing one response scope cannot erase another or exempt a new member."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-independent-response-controls"
+    agent_a = module._item_key(tenant, "AGENT", "dep-a:agent-a") | {
+        "tenant_id": tenant,
+        "id": "agent-a",
+        "deployment_id": "dep-a",
+        "lifecycle_state": "active",
+        "lifecycle_revision": 1,
+    }
+    agent_b = module._item_key(tenant, "AGENT", "dep-a:agent-b") | {
+        **agent_a,
+        "sk": "AGENT#dep-a:agent-b",
+        "id": "agent-b",
+    }
+    group = module._item_key(tenant, "GROUP", "group-a") | {
+        "id": "group-a",
+        "agent_keys": ["dep-a:agent-a"],
+    }
+    for item in (agent_a, agent_b, group):
+        table.put_item(Item=item)
+
+    module._set_scope_emergency_stop(tenant, "deployment", "dep-a", True, "responder")
+    module._set_scope_emergency_stop(tenant, "group", "group-a", True, "responder")
+    assert module._agent_control_state(tenant, agent_a)["activeStopScopes"] == [
+        "deployment",
+        "group",
+    ]
+
+    module._set_scope_emergency_stop(tenant, "deployment", "dep-a", False, "responder")
+    assert module._agent_control_state(tenant, agent_a)["activeStopScopes"] == ["group"]
+
+    group["agent_keys"].append("dep-a:agent-b")
+    table.put_item(Item=group)
+    assert module._agent_control_state(tenant, agent_b)["activeStopScopes"] == ["group"]
+
+    module._set_scope_emergency_stop(tenant, "group", "group-a", False, "responder")
+    assert module._agent_control_state(tenant, agent_a)["executionAllowed"] is True
+    assert module._agent_control_state(tenant, agent_b)["executionAllowed"] is True
 
 
 def test_deployment_configuration_rollout_tracks_drift_and_activation(monkeypatch: Any) -> None:

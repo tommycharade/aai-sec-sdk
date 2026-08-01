@@ -428,7 +428,12 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
                     "configuration": {"runtime": {"allowedTools": ["read_repository"]}},
                 }
             )
-        return Response({"status": "connected"})
+        return Response(
+            {
+                "status": "connected",
+                "controlState": {"executionAllowed": True},
+            }
+        )
 
     monkeypatch.setattr(control_plane, "urlopen", aws_urlopen)
     aws_client = ControlPlaneAgentClient(
@@ -440,7 +445,7 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
         aws_agent_session=True,
     )
     assert aws_client.register() == TOKEN
-    assert aws_client.heartbeat(TOKEN) == {"status": "connected"}
+    assert aws_client.heartbeat(TOKEN)["status"] == "connected"
     assert aws_client.effective_policy()["policy"]["id"] == "policy-aws"
     assert aws_requests == [
         "https://control.example.test/api/agent/deployment-prod/claude-code-local/heartbeat",
@@ -532,7 +537,7 @@ def test_agent_client_remeasures_and_reports_typed_managed_configuration(
             return None
 
         def read(self, _limit: int) -> bytes:
-            return b'{"status":"connected"}'
+            return b'{"status":"connected","controlState":{"executionAllowed":true}}'
 
     def fake_urlopen(request: Any, **_kwargs: object) -> Response:
         bodies.append(json.loads(request.data))
@@ -1109,7 +1114,11 @@ def test_agent_client_adopts_rotated_session_from_heartbeat(
 
         def read(self, _limit: int) -> bytes:
             return json.dumps(
-                {"status": "connected", "accessToken": "new-session-token-123456"}
+                {
+                    "status": "connected",
+                    "accessToken": "new-session-token-123456",
+                    "controlState": {"executionAllowed": True},
+                }
             ).encode()
 
     def fake_urlopen(request: Any, *, timeout: float, **_kwargs: Any) -> Response:
@@ -1132,6 +1141,48 @@ def test_agent_client_adopts_rotated_session_from_heartbeat(
     assert response["accessToken"] == "new-session-token-123456"
     client.heartbeat("new-session-token-123456")
     assert seen_authorizations == [f"Bearer {TOKEN}", "Bearer new-session-token-123456"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"status": "connected"}, "no valid execution authority"),
+        (
+            {"status": "quarantined", "controlState": {"executionAllowed": False}},
+            "withholds agent execution",
+        ),
+    ],
+)
+def test_agent_client_fails_closed_without_server_execution_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, object],
+    message: str,
+) -> None:
+    """An AWS runtime cannot treat missing or denied authority as advisory."""
+    import agentic_security.ui_control_plane as control_plane
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(payload).encode()
+
+    monkeypatch.setattr(control_plane, "urlopen", lambda *_args, **_kwargs: Response())
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-code-local",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+    )
+
+    with pytest.raises(ControlPlaneDependencyError, match=message):
+        client.heartbeat(TOKEN)
 
 
 def test_agent_client_sends_fresh_challenge_bound_runtime_attestation(
@@ -1170,7 +1221,13 @@ def test_agent_client_sends_fresh_challenge_bound_runtime_attestation(
         requests.append((request.full_url, body))
         if request.full_url.endswith("/attestation/challenge"):
             return Response({"nonce": nonce, "expiresAt": 1_900_000_060})
-        return Response({"status": "connected", "expiresAt": 1_900_000_900})
+        return Response(
+            {
+                "status": "connected",
+                "expiresAt": 1_900_000_900,
+                "controlState": {"executionAllowed": True},
+            }
+        )
 
     monkeypatch.setattr(control_plane, "urlopen", fake_urlopen)
     client = ControlPlaneAgentClient(
@@ -1212,6 +1269,7 @@ def test_agent_client_secures_rotation_for_native_hook_processes(
                     "status": "connected",
                     "accessToken": "new-session-token-123456",
                     "expiresAt": 2_000,
+                    "controlState": {"executionAllowed": True},
                 }
             ).encode()
 
