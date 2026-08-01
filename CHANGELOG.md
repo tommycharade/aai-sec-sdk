@@ -1,5 +1,11 @@
 # Changelog
 
+- Added revisioned incident cases with authoritative endpoint-to-agent
+  correlation, evidence-preserving quarantine, independent response scopes,
+  session-authority revocation, guarded recovery/release and content-minimised
+  investigation timelines. The enrolled AWS client now fails closed when the
+  server omits or denies execution authority.
+
 - Added scheduled, tenant-isolated endpoint detections with deduplicated
   durable alert lifecycle, SNS/SQS delivery, audited incident-response
   acknowledgement, monitored retry exhaustion and an operator-first

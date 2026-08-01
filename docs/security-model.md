@@ -758,3 +758,20 @@ Endpoint detections are also server-derived. A device cannot choose severity,
 alert state, acknowledgement or containment. Scheduled reconciliation uses a
 deployment-owned sharded tenant index. Notification failure leaves a durable
 pending alert for retry; it never converts the health condition into success.
+
+Incident response does not upgrade endpoint observation into authority. Case
+creation records a server-derived correlation, but containment re-derives it
+from current authoritative inventory and signed evidence. Zero matches,
+multiple matches, stale evidence, a changed binding digest, inactive lifecycle
+authority or concurrent case state all deny the action. The browser never
+submits an agent identity.
+
+Quarantine, fleet stop, deployment stop, group stop and agent stop are
+independent server records. Clearing one scope cannot erase another, and a new
+group member inherits the live group stop. Quarantine withholds execution
+authority while retaining the heartbeat/attestation channel so responders do
+not destroy their own evidence. Session revocation is a separate monotonically
+increasing authority revision; a bearer or bootstrap issued under an earlier
+revision fails closed. Release requires a current binding and independently
+derived recovery evidence. This is SDK/control-plane containment, not an MDM,
+EDR, operating-system process kill or network-isolation claim.

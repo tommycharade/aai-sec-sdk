@@ -596,6 +596,21 @@ class ControlPlaneAgentClient:
                 raise ControlPlaneDependencyError(
                     "rotated agent session could not be secured on this host"
                 ) from exc
+        if self.aws_agent_session:
+            control_state = response.get("controlState")
+            if not isinstance(control_state, Mapping) or not isinstance(
+                control_state.get("executionAllowed"), bool
+            ):
+                raise ControlPlaneDependencyError(
+                    "control-plane heartbeat returned no valid execution authority state"
+                )
+            if control_state["executionAllowed"] is False:
+                # The heartbeat has already delivered fresh evidence. Failing
+                # after that boundary lets incident response retain visibility
+                # while preventing the caller from continuing normal service.
+                raise ControlPlaneDependencyError(
+                    "server-owned response control withholds agent execution"
+                )
         return response
 
     def report_decision(

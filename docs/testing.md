@@ -179,6 +179,16 @@ The standalone AWS Lambda validator is checked against real SDK-generated
 packages. These are protocol tests, not evidence that MDM installed the package
 or that a live Claude Code or Codex process loaded it.
 
+Incident-response contracts cover deterministic case creation, exact
+endpoint-to-agent correlation, content-minimised timelines, quarantine,
+session-revision revocation, independent emergency-stop scopes and guarded
+release. Positive tests prove evidence-preserving containment and successful
+release after recovery checks. Adversarial tests prove missing or ambiguous
+bindings, changed correlation, stale revisions, missing execution authority
+and denied authority cannot become execution. The enrolled AWS client treats a
+missing or false `controlState.executionAllowed` as a dependency failure after
+submitting heartbeat evidence.
+
 The local contract suite uses synthetic fakes for OPA, Cedar, approval, IAM,
 idempotency, remote audit, and isolation boundaries. These tests verify request
 shape, binding, malformed-response handling, and fail-closed behavior. They do

@@ -516,3 +516,34 @@ detections to authorized security operators. `POST
 live revision and a redaction-safe investigation rationale. Acknowledgement is
 ownership evidence, not remediation. See [Endpoint detection and
 response](endpoint-detection-response.md).
+
+## Incident cases and response authority
+
+The hosted AWS adapter exposes a revisioned case API for endpoint detections:
+
+- `POST /enterprise/cases` opens one deterministic case from an exact live
+  alert revision. The server, not the browser, correlates the endpoint to an
+  agent using current managed-device inventory, fresh signed evidence, exact
+  host identity and the SHA-256 of the registered project root.
+- `GET /enterprise/cases` and `GET /enterprise/cases/{caseId}` return case
+  metadata, authoritative binding state, a content-minimised timeline and
+  correlated decision/approval references. Raw endpoint payloads, project
+  roots and credentials are excluded.
+- `POST /enterprise/cases/{caseId}/contain` requires the current case revision
+  and binding digest. It creates a server-owned quarantine for the exactly
+  bound agent. Policy delivery, approvals and managed-package retrieval fail
+  closed while heartbeat and attestation evidence remain available.
+- `POST /enterprise/cases/{caseId}/sessions/revoke` increments server-owned
+  session authority. Existing sessions and unused bootstrap material then fail
+  on their next live-authority check.
+- `POST /enterprise/cases/{caseId}/release` requires exact case and
+  containment revisions. Release is denied unless binding remains current,
+  endpoint evidence is healthy, non-response verification checks pass, no
+  independent stop scope is active and the source alert is ready.
+- `resolve` and `close` preserve the case timeline and cannot bypass active
+  containment.
+
+All mutations require `incident_response`, a 20–500 character redaction-safe
+rationale and optimistic concurrency. There is intentionally no `agentId` in a
+containment request. See
+[Incident case and containment design](incident-case-containment-design.md).
