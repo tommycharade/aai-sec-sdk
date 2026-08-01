@@ -61,6 +61,7 @@ nav:
   - Policy governance design: policy-governance-design.md
   - Policy change assurance: policy-change-assurance-design.md
   - Policy change assurance live acceptance: policy-change-assurance-acceptance-2026-08-01.md
+  - Time-limited policy exceptions: time-limited-policy-exceptions-design.md
   - Signed policy bundles: signed-policy-bundles-design.md
   - Signed policy bundle acceptance: signed-policy-acceptance-2026-08-01.md
   - Managed Claude resources: claude-managed-resources.md

@@ -142,7 +142,7 @@ Engineering can continue autonomously on:
 - bulk enrollment import and dynamic groups;
 - production identity, endpoint and source-control connector packaging for the
   implemented orphan/leaver reconciler;
-- managed upgrades and expiring exceptions;
+- managed upgrades and live acceptance of implemented expiring exceptions;
 - policy inheritance, scheduling and signed bundles;
 - credential-revocation workflows and broader tool/MCP anomaly response;
 - executive and auditor reporting;

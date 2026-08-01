@@ -844,3 +844,15 @@ fingerprints, but browser-returned key bytes never become trust automatically.
 Key rotation requires an explicit old/new overlap rollout. A process that can
 replace the administrator trust bundle remains able to choose a signer, so
 endpoint file protection and managed deployment are part of the control.
+
+Temporary exceptions never rewrite or masquerade as an immutable active
+policy version. The AWS control plane binds one exception to an exact enrolled
+agent, sole group, policy ID, base version and base content hash, requires a
+different authenticated subject to approve it, and signs a distinct derived
+policy identity with KMS at activation. Only tool, Claude resource/command and
+maximum-action fields may differ; identity, credentials, isolation, approval
+provider, capture, telemetry and redaction remain inherited and are rechecked
+by the API. Server-clock expiry, revocation, agent lifecycle change, group
+reassignment or base-policy change restores the ordinary signed bundle.
+Corrupt derived signing evidence fails the refresh closed rather than falling
+back silently. See [Time-limited policy exceptions](time-limited-policy-exceptions-design.md).

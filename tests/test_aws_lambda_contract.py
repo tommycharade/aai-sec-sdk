@@ -2140,6 +2140,7 @@ def test_break_glass_requires_mfa_four_eyes_scope_and_immediate_revocation(
         _event(f"{request_path}/{request_id}/approve", "POST", claims=approver),
     )
     assert replay["statusCode"] == 409
+
     revoked = _invoke(
         module,
         _event(f"{request_path}/{request_id}/revoke", "POST", claims=approver),
@@ -2781,6 +2782,370 @@ def test_aws_policy_governance_requires_independent_review_and_atomic_activation
     )
     assert secret_policy["statusCode"] == 400
     assert "must not contain secrets" in json.loads(secret_policy["body"])["error"]
+
+
+def test_time_limited_policy_exception_is_independently_signed_and_expires(
+    monkeypatch: Any,
+) -> None:
+    """One exact agent receives reviewed derived authority only until server expiry."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-policy-exception"
+    clock = [2_200_000_000]
+    monkeypatch.setattr(module.time, "time", lambda: clock[0])
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    base = {
+        "policy": {"allowedPrincipals": ["developer"], "denyByDefault": True},
+        "tools": {"allowed": ["Read"], "denied": ["Write"]},
+        "approvals": {"requiredFor": ["Bash"], "ttlSeconds": 120},
+        "budgets": {"maxActions": 10},
+        "audit": {"captureToolContent": False, "redactSensitiveData": True},
+        "telemetry": {"captureToolContent": False, "redactSensitiveData": True},
+        "claudeCode": {
+            "allowedBuiltInTools": ["Read"],
+            "allowedSkills": [],
+            "allowedMcpServers": [],
+        },
+    }
+    candidate = {
+        **base,
+        "tools": {"allowed": ["Read", "Write"], "denied": []},
+        "budgets": {"maxActions": 20},
+        "claudeCode": {
+            "allowedBuiltInTools": ["Read", "Write"],
+            "allowedSkills": [],
+            "allowedMcpServers": [],
+        },
+    }
+    base_bundle = module._sign_policy_bundle(tenant, "policy-a", 1, base, clock[0] - 100)
+    version = {
+        **module._item_key(
+            tenant, "POLICY_VERSION", module._policy_version_identifier("policy-a", 1)
+        ),
+        "tenant_id": tenant,
+        "id": module._policy_version_identifier("policy-a", 1),
+        "policy_id": "policy-a",
+        "organization_id": "org-a",
+        "version": 1,
+        "base_version": 0,
+        "name": "Safe base",
+        "configuration": base,
+        "content_hash": module._configuration_hash(base),
+        **module._bundle_record_fields(base_bundle),
+        "state": "active",
+        "author": "bootstrap",
+        "created_at": clock[0] - 100,
+        "activated_by": "bootstrap",
+        "activated_at": clock[0] - 100,
+    }
+    table.put_item(Item=version)
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-a")
+        | {
+            "tenant_id": tenant,
+            "id": "policy-a",
+            "organization_id": "org-a",
+            "name": "Safe base",
+            "configuration": base,
+            "version": 1,
+            "activeVersion": 1,
+            "latestVersion": 1,
+            "governanceState": "active",
+            "governance_schema_version": 1,
+            "createdAt": clock[0] - 100,
+            "author": "bootstrap",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "tenant_id": tenant,
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "host": "claude-code",
+            "status": "connected",
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            "session_revision": 1,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-a")
+        | {
+            "tenant_id": tenant,
+            "id": "group-a",
+            "organization_id": "org-a",
+            "policyId": "policy-a",
+            "agent_keys": ["dep-a:agent-a"],
+        }
+    )
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-author"],
+        "sub": "exception-author",
+    }
+    approver = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-approver"],
+        "sub": "exception-approver",
+    }
+    create_body = {
+        "exceptionId": "temporary-write-access",
+        "deploymentId": "dep-a",
+        "agentId": "agent-a",
+        "owner": "Platform engineering",
+        "purpose": "Complete a bounded synthetic migration during the approved window.",
+        "expiresAt": clock[0] + 1_800,
+        "configuration": candidate,
+    }
+    created = _invoke(
+        module,
+        _event("/api/enterprise/policy-exceptions", "POST", body=create_body, claims=author),
+    )
+    assert created["statusCode"] == 201, created
+    created_body = json.loads(created["body"])
+    assert created_body["state"] == "draft"
+    assert created_body["changeSummary"]["summary"]["authorityExpanded"] >= 2
+    duplicate = _invoke(
+        module,
+        _event(
+            "/api/enterprise/policy-exceptions",
+            "POST",
+            body={**create_body, "exceptionId": "overlapping-access"},
+            claims=author,
+        ),
+    )
+    assert duplicate["statusCode"] == 409
+    path = "/api/enterprise/policy-exceptions/temporary-write-access"
+    assert _invoke(module, _event(f"{path}/submit", "POST", claims=author))["statusCode"] == 200
+    self_approval = _invoke(
+        module,
+        _event(
+            f"{path}/decision",
+            "POST",
+            body={"decision": "approved", "reason": "Self approval must fail closed."},
+            claims=author,
+        ),
+    )
+    assert self_approval["statusCode"] == 403
+    approved = _invoke(
+        module,
+        _event(
+            f"{path}/decision",
+            "POST",
+            body={
+                "decision": "approved",
+                "reason": "Scope, authority change and bounded lifetime are acceptable.",
+            },
+            claims=approver,
+        ),
+    )
+    assert approved["statusCode"] == 200
+    activated = _invoke(module, _event(f"{path}/activate", "POST", body={}, claims=approver))
+    assert activated["statusCode"] == 200, activated
+    assert json.loads(activated["body"])["state"] == "active"
+    assert module._fake_kms.calls[-1]["SigningAlgorithm"] == "ECDSA_SHA_256"
+
+    effective_path = "/api/enterprise/agents/dep-a/agent-a/effective-policy"
+    effective = _invoke(module, _event(effective_path, "GET", claims=approver))
+    assert effective["statusCode"] == 200, effective
+    effective_body = json.loads(effective["body"])
+    assert effective_body["effectiveSource"] == "temporary_exception"
+    assert effective_body["exception"]["id"] == "temporary-write-access"
+    assert effective_body["policyBundle"]["policyId"].startswith("exception:")
+    assert effective_body["policyBundle"]["configuration"]["tools"]["allowed"] == [
+        "Read",
+        "Write",
+    ]
+
+    expiry_events: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "_audit",
+        lambda _tenant, event_type, _actor, _payload: expiry_events.append(event_type),
+    )
+    clock[0] += 1_801
+    restored = _invoke(module, _event(effective_path, "GET", claims=approver))
+    assert restored["statusCode"] == 200, restored
+    restored_body = json.loads(restored["body"])
+    assert restored_body["effectiveSource"] == "active_policy"
+    assert restored_body["exception"] is None
+    assert restored_body["policyBundle"]["policyId"] == "policy-a"
+    listed = json.loads(
+        _invoke(
+            module,
+            _event("/api/enterprise/policy-exceptions", "GET", claims=approver),
+        )["body"]
+    )["items"]
+    assert listed[0]["state"] == "expired"
+    assert listed[0]["effective"] is False
+    assert expiry_events == ["policy_exception_expired"]
+
+
+def test_policy_exception_invalidates_on_base_change_and_rejects_unsafe_input(
+    monkeypatch: Any,
+) -> None:
+    """Secrets, stale bindings, wrong roles and transition replay never grant authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-policy-exception-denial"
+    now = 2_210_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    base = {"policy": {"denyByDefault": True}, "tools": {"allowed": ["Read"]}}
+    bundle = module._sign_policy_bundle(tenant, "policy-a", 1, base, now - 10)
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-a")
+        | {
+            "id": "policy-a",
+            "organization_id": "org-a",
+            "name": "Policy A",
+            "configuration": base,
+            "version": 1,
+            "governance_schema_version": 1,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(
+            tenant, "POLICY_VERSION", module._policy_version_identifier("policy-a", 1)
+        )
+        | {
+            "id": module._policy_version_identifier("policy-a", 1),
+            "policy_id": "policy-a",
+            "organization_id": "org-a",
+            "version": 1,
+            "base_version": 0,
+            "name": "Policy A",
+            "configuration": base,
+            "content_hash": module._configuration_hash(base),
+            **module._bundle_record_fields(bundle),
+            "state": "active",
+            "author": "bootstrap",
+            "created_at": now - 10,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-a")
+        | {"id": "group-a", "policyId": "policy-a", "agent_keys": ["dep-a:agent-a"]}
+    )
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-author"],
+        "sub": "author-a",
+    }
+    fleet = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-a",
+    }
+    request = {
+        "exceptionId": "exception-a",
+        "deploymentId": "dep-a",
+        "agentId": "agent-a",
+        "owner": "Synthetic owner",
+        "purpose": "Exercise stale authority handling without production data.",
+        "expiresAt": now + 1_800,
+        "configuration": {
+            "policy": {"denyByDefault": True},
+            "tools": {"allowed": ["Read", "Write"]},
+        },
+    }
+    assert (
+        _invoke(
+            module,
+            _event("/api/enterprise/policy-exceptions", "POST", body=request, claims=fleet),
+        )["statusCode"]
+        == 403
+    )
+    unsafe = _invoke(
+        module,
+        _event(
+            "/api/enterprise/policy-exceptions",
+            "POST",
+            body={**request, "configuration": {"token": "synthetic-secret"}},
+            claims=author,
+        ),
+    )
+    assert unsafe["statusCode"] == 400
+    assert "must not contain secrets" in json.loads(unsafe["body"])["error"]
+    weakened = _invoke(
+        module,
+        _event(
+            "/api/enterprise/policy-exceptions",
+            "POST",
+            body={
+                **request,
+                "configuration": {
+                    **base,
+                    "tools": {"allowed": ["Read", "Write"]},
+                    "isolation": {"requiredForHighRisk": False, "mode": "optional"},
+                },
+            },
+            claims=author,
+        ),
+    )
+    assert weakened["statusCode"] == 400
+    assert "may change only temporary tool" in json.loads(weakened["body"])["error"]
+    created = _invoke(
+        module,
+        _event("/api/enterprise/policy-exceptions", "POST", body=request, claims=author),
+    )
+    assert created["statusCode"] == 201
+    policy = table.items[(f"TENANT#{tenant}", "POLICY#policy-a")]
+    policy["version"] = 2
+    table.put_item(Item=policy)
+    listed = json.loads(
+        _invoke(
+            module,
+            _event("/api/enterprise/policy-exceptions", "GET", claims=author),
+        )["body"]
+    )["items"]
+    assert listed[0]["state"] == "invalidated"
+    replay = _invoke(
+        module,
+        _event(
+            "/api/enterprise/policy-exceptions/exception-a/submit",
+            "POST",
+            claims=author,
+        ),
+    )
+    assert replay["statusCode"] == 409
+
+    # Corrupt lifecycle evidence must fail closed. It must never be interpreted
+    # as a terminal record that permits replacement of the per-agent slot.
+    policy["version"] = 1
+    table.put_item(Item=policy)
+    corrupt_key = (f"TENANT#{tenant}", "POLICY_EXCEPTION#exception-a")
+    table.items[corrupt_key]["state"] = "unknown-corrupt-state"
+    corrupt_list = _invoke(
+        module,
+        _event("/api/enterprise/policy-exceptions", "GET", claims=author),
+    )
+    assert corrupt_list["statusCode"] == 500
+    replacement = _invoke(
+        module,
+        _event(
+            "/api/enterprise/policy-exceptions",
+            "POST",
+            body={**request, "exceptionId": "exception-b"},
+            claims=author,
+        ),
+    )
+    assert replacement["statusCode"] == 500
+    assert (
+        table.items[(f"TENANT#{tenant}", "POLICY_EXCEPTION_SLOT#dep-a:agent-a")]["exception_id"]
+        == "exception-a"
+    )
+    assert (f"TENANT#{tenant}", "POLICY_EXCEPTION#exception-b") not in table.items
 
 
 def test_policy_semantic_diff_and_historical_simulation_are_bounded_and_honest(
