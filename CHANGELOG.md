@@ -508,6 +508,11 @@ authorization.
 
 ## Unreleased
 
+- Add tenant-governed durable evidence assurance: increase-only Object Lock
+  retention, exact-version legal hold, live content verification, fail-closed
+  complete export, least-privilege AWS permissions and the hosted Evidence
+  operator workflow.
+
 - Reworked the enterprise identity console into focused Overview, Entra setup,
   Directory & roles, Delegated access, Emergency access and Access reviews
   workspaces. The Entra-first journey exposes only non-secret deployment

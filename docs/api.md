@@ -573,6 +573,28 @@ containment request. See
 Artifact schema, refusal bounds and offline verification are specified in
 [Audit-ready incident case export](incident-case-export-design.md).
 
+### Durable evidence governance
+
+The AWS control plane exposes a tenant-bound records-management contract:
+
+- `GET /api/enterprise/evidence` verifies the live bounded S3 version inventory
+  and returns retention, legal-hold, delete-marker and content-integrity posture;
+- `PUT /api/enterprise/evidence/retention` accepts exactly
+  `expectedRevision`, `retentionDays` and `rationale`, permits 365–3,650 days,
+  and never permits a reduction;
+- `POST /api/enterprise/evidence/legal-hold` sets or clears hold for one exact
+  tenant key/version after rejecting cross-tenant identity; and
+- `GET /api/enterprise/evidence/export` returns a canonical content-hashed
+  complete manifest only when every record fits the 250-version synchronous
+  boundary and no content mismatch exists.
+
+Security operators and platform administrators manage retention and legal hold.
+Auditors may read assurance and export evidence but cannot mutate it. Rationale
+text is content-hashed before audit persistence. See
+[Durable evidence governance](durable-evidence-governance-design.md) for trust
+boundaries, failure behavior and the production-scale asynchronous work that
+remains.
+
 ## Automatic response rules
 
 The hosted adapter exposes an independently governed automatic-response API:

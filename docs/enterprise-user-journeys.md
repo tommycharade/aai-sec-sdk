@@ -171,3 +171,26 @@ stronger confirmation for broader scope and irreversible actions.
 
 The upgrade view must separate SDK version, host configuration version and
 policy version so operators can identify which change caused a failure.
+
+## Journey 7: Govern durable evidence
+
+1. Open **Evidence**. Do not use the decision table as proof until the assurance
+   banner has completed its live object-version verification.
+2. Confirm **Integrity verified**, **Retention**, **Legal holds**, **Delete
+   markers** and inventory completeness match the records schedule.
+3. To extend retention, select the longer period and enter the approved records
+   schedule/change reference. The control plane extends all bounded existing
+   versions before changing future-record policy; it refuses reductions.
+4. Select one retained version to place or release legal hold. Confirm the exact
+   object version and provide the approved legal authority. The rationale is
+   hashed rather than stored as case narrative.
+5. Choose **Export verified manifest**. The API refuses partial or mismatched
+   evidence, and the browser independently verifies the canonical digest before
+   download.
+6. Use **Decision evidence** below the assurance controls for redacted runtime
+   investigation. Tool arguments, credentials and sensitive output are not
+   included.
+
+For more than 250 retained versions, the current synchronous path deliberately
+shows `incomplete` and blocks export/retention mutation. Never accept a sampled
+UI list as the complete tenant record.

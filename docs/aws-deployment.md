@@ -627,6 +627,22 @@ change before the authenticated UI can be exercised interactively.
 
 ## Important production limitations
 
+### Tenant evidence governance
+
+The hosted **Evidence** workspace and `/api/enterprise/evidence` routes inspect
+live retained object versions. New audit objects explicitly apply the tenant's
+365–3,650-day COMPLIANCE retention and carry a creation-time SHA-256 metadata
+binding. Security operators can only increase tenant retention and can place or
+release legal hold on one exact tenant object version. Auditors can verify and
+export but cannot mutate.
+
+The current synchronous assurance/export boundary is 250 versions. It returns
+`incomplete` and refuses retention mutation or export above that bound. This is
+a pilot-safe fail-closed limit; deploy asynchronous S3 Inventory/Batch
+Operations before production scale. Follow
+[Durable evidence governance](durable-evidence-governance-design.md) and retain
+separate live cross-region recovery evidence.
+
 This is the first AWS deployment slice, not a production security
 certification. Before production use:
 

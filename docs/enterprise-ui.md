@@ -117,6 +117,24 @@ human-readable rule for deterministic reevaluation.
 
 ## Operational safeguards
 
+### Evidence workspace
+
+**Evidence** replaces a decision-only audit page with an assurance-first
+records-management journey. The page verifies the live immutable inventory
+before displaying a positive state, clearly distinguishes incomplete and
+at-risk posture, and exposes:
+
+- integrity-verified versus total retained versions;
+- increase-only tenant retention;
+- exact-version legal hold with hashed rationale;
+- delete-marker visibility;
+- complete digest-bound manifest export; and
+- redacted runtime and lifecycle decision evidence.
+
+The browser cannot submit tenant identity, integrity status or completeness.
+It cannot shorten retention or bypass the 365-day COMPLIANCE floor. A failed or
+truncated assurance request remains visibly failed closed.
+
 Enterprise actions should require role-based authorization, use explicit
 confirmation for emergency operations, produce audit events, and expose
 health/error state rather than silently accepting configuration. Secrets should
