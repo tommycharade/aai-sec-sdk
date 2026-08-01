@@ -807,3 +807,28 @@ SHA-256 digest before download; `scripts/verify_incident_case_export.py`
 repeats content, count, timeline and audit-receipt checks offline. The digest
 detects modification but is not a KMS signature or a claim of legal
 admissibility.
+
+## Signed central policy threat model
+
+An authenticated control-plane response is transport, not runtime policy
+authority. A compromised database, proxy, browser, project repository or model
+could otherwise replace policy bytes, replay another tenant's policy, or alter
+a registered Skill or MCP server after review.
+
+AWS activation resolves the exact effective configuration and signs a
+canonical tenant, policy ID, version, content hash and configuration payload
+with a non-exportable P-256 KMS key. The active version, resolved configuration
+and signing evidence commit in the same DynamoDB transaction. Existing active
+versions are signed without changing their stored authority; KMS failure or
+inconsistent content blocks migration and retrieval. Trial provisioning signs
+before writing any tenant record.
+
+Claude Code and Codex receive public verification keys only through an
+administrator-owned trust bundle. The SDK rejects missing trust, unsafe file
+ownership/mode, symlinks, unknown keys or algorithms, malformed envelopes,
+invalid signatures, altered hashes/content/identity/version and cross-tenant
+replay before returning effective policy. The operator UI may show signer
+fingerprints, but browser-returned key bytes never become trust automatically.
+Key rotation requires an explicit old/new overlap rollout. A process that can
+replace the administrator trust bundle remains able to choose a signer, so
+endpoint file protection and managed deployment are part of the control.

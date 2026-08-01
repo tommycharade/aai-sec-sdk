@@ -30,6 +30,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Policy governance design](docs/policy-governance-design.md)
 - [Policy change assurance](docs/policy-change-assurance-design.md)
 - [Policy change assurance live acceptance — 2026-08-01](docs/policy-change-assurance-acceptance-2026-08-01.md)
+- [Signed policy bundles](docs/signed-policy-bundles-design.md)
 - [Wider enterprise UI](docs/enterprise-ui.md)
 - [Enterprise integration design](docs/enterprise-integration-design.md)
 - [Runtime attestation design](docs/runtime-attestation-design.md)
@@ -79,6 +80,11 @@ Copilot CLI/cloud agent, and Codex CLI; see [Agent integrations](docs/integratio
 The enterprise fleet layer adds tenant-scoped organization, project,
 deployment, agent, rollout, drift, health, alert, and emergency-stop controls;
 see [Enterprise fleet control plane](docs/enterprise-fleet.md).
+AWS policy activation freezes registry-resolved Skills and MCP servers and
+signs the exact tenant, policy version and effective configuration with a
+non-exportable asymmetric KMS key. Claude Code and Codex verify that bundle
+locally against administrator-installed public trust before loading it; see
+[Signed policy bundles](docs/signed-policy-bundles-design.md).
 
 ## Development
 

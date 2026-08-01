@@ -25,6 +25,8 @@ from agentic_security import (
     ControlPlaneDecisionExporter,
     ControlPlaneDependencyError,
     JsonlAuditSink,
+    PolicyBundleVerificationError,
+    PolicyTrustStore,
     ReplicatedAuditSink,
     codex_command_rule,
     codex_patch_within_rule,
@@ -74,6 +76,18 @@ def _control_plane_client(project_dir: Path) -> ControlPlaneAgentClient | None:
             token = cached.token
     if not token:
         return None
+    aws_session = os.environ.get("AAI_SEC_AGENT_SESSION_MODE") == "aws"
+    trust_store = None
+    tenant_id = None
+    if aws_session:
+        trust_path = os.environ.get("AAI_SEC_POLICY_TRUST_BUNDLE")
+        tenant_id = os.environ.get("AAI_SEC_TENANT_ID")
+        if not trust_path or not tenant_id:
+            return None
+        try:
+            trust_store = PolicyTrustStore.from_file(trust_path)
+        except PolicyBundleVerificationError:
+            return None
     try:
         return ControlPlaneAgentClient(
             control_plane_url,
@@ -81,8 +95,10 @@ def _control_plane_client(project_dir: Path) -> ControlPlaneAgentClient | None:
             agent_id=agent_id,
             project_root=str(project_dir),
             deployment_id=deployment_id,
-            aws_agent_session=os.environ.get("AAI_SEC_AGENT_SESSION_MODE") == "aws",
+            aws_agent_session=aws_session,
             session_store=session_store,
+            policy_trust_store=trust_store,
+            tenant_id=tenant_id,
             timeout_seconds=3,
         )
     except ValueError:

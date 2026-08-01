@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, utils
 
 from agentic_security import (
     AgentHost,
@@ -37,7 +39,10 @@ from agentic_security import (
     NativeActionDecision,
     NativeActionRule,
     OperatorIdentity,
+    PolicyTrustStore,
     StaticBearerAuthenticator,
+    TrustedPolicyKey,
+    canonical_policy_payload,
     validate_configuration,
 )
 from agentic_security.ui_control_plane import (
@@ -52,6 +57,48 @@ from agentic_security.ui_control_plane import (
 )
 
 TOKEN = "synthetic-local-token-1234"  # noqa: S105 - synthetic test credential
+POLICY_KEY_ID = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789abc"
+
+
+def signed_policy_fixture() -> tuple[dict[str, object], PolicyTrustStore]:
+    """Return one synthetic AWS wire bundle and its pinned public trust."""
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    configuration = {"runtime": {"allowedTools": ["read_repository"]}}
+    payload, content_hash = canonical_policy_payload(
+        tenant_id="tenant-a",
+        policy_id="policy-aws",
+        version=3,
+        configuration=configuration,
+    )
+    signature = private_key.sign(
+        hashlib.sha256(payload).digest(),
+        ec.ECDSA(utils.Prehashed(hashes.SHA256())),
+    )
+    public_pem = (
+        private_key.public_key()
+        .public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("ascii")
+    )
+    return (
+        {
+            "schemaVersion": 1,
+            "tenantId": "tenant-a",
+            "policyId": "policy-aws",
+            "version": 3,
+            "configuration": configuration,
+            "contentHash": content_hash,
+            "integrity": {
+                "algorithm": "ECDSA_SHA_256",
+                "keyId": POLICY_KEY_ID,
+                "signature": base64.b64encode(signature).decode("ascii"),
+                "signedAt": 1_786_000_000,
+            },
+        },
+        PolicyTrustStore((TrustedPolicyKey(POLICY_KEY_ID, public_pem),)),
+    )
 
 
 def deployment_package() -> ManagedDeploymentPackage:
@@ -414,6 +461,7 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
     )
 
     aws_requests: list[str] = []
+    policy_bundle, trust_store = signed_policy_fixture()
 
     def aws_urlopen(request: Any, *, timeout: float, **_kwargs: Any) -> Response:
         aws_requests.append(request.full_url)
@@ -421,13 +469,7 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
             request.headers["X-aai-project-root-digest"] == sha256(b"/workspace/kratos").hexdigest()
         )
         if request.full_url.endswith("/effective-policy"):
-            return Response(
-                {
-                    "policyId": "policy-aws",
-                    "version": 3,
-                    "configuration": {"runtime": {"allowedTools": ["read_repository"]}},
-                }
-            )
+            return Response({"policyBundle": policy_bundle})
         return Response(
             {
                 "status": "connected",
@@ -443,6 +485,8 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
         project_root="/workspace/kratos",
         deployment_id="deployment-prod",
         aws_agent_session=True,
+        policy_trust_store=trust_store,
+        tenant_id="tenant-a",
     )
     assert aws_client.register() == TOKEN
     assert aws_client.heartbeat(TOKEN)["status"] == "connected"
@@ -453,6 +497,50 @@ def test_agent_client_sends_bounded_authenticated_registration_and_heartbeat(
         "https://control.example.test/api/agent/deployment-prod/claude-code-local/effective-policy",
     ]
     assert aws_client.disconnect(TOKEN) == {"status": "disconnect_pending_expiry"}
+
+
+def test_aws_agent_client_rejects_unsigned_or_cross_tenant_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Authenticated transport cannot replace pinned signing and tenant trust."""
+    import agentic_security.ui_control_plane as control_plane
+
+    policy_bundle, trust_store = signed_policy_fixture()
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps({"policyBundle": policy_bundle}).encode()
+
+    monkeypatch.setattr(control_plane, "urlopen", lambda *_args, **_kwargs: Response())
+    missing_trust = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-code-local",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+    )
+    with pytest.raises(ControlPlaneDependencyError, match="pinned signing trust"):
+        missing_trust.effective_policy()
+
+    cross_tenant = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-code-local",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+        policy_trust_store=trust_store,
+        tenant_id="tenant-other",
+    )
+    with pytest.raises(ControlPlaneDependencyError, match="signature verification"):
+        cross_tenant.effective_policy()
 
 
 def test_agent_client_verifies_managed_package_response_and_target(

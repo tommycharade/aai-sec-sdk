@@ -19,6 +19,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,14 @@ from agentic_security import (  # noqa: E402
     AgentSessionStore,
     AgentSessionStoreError,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _Enrollment:
+    """Bind a short-lived session to its server-derived tenant identity."""
+
+    credential: AgentSessionCredential
+    tenant_id: str
 
 
 def _timestamp() -> str:
@@ -145,7 +154,7 @@ def _enroll_agent(
     base_url: str,
     bootstrap_token: str,
     project_root: Path,
-) -> AgentSessionCredential:
+) -> _Enrollment:
     """Consume one AWS bootstrap token and return the short-lived session."""
     parsed = urlsplit(base_url.rstrip("/"))
     local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
@@ -170,14 +179,17 @@ def _enroll_agent(
         raise SystemExit("agent bootstrap enrollment failed") from exc
     token = value.get("accessToken") if isinstance(value, dict) else None
     expires_at = value.get("expiresAt") if isinstance(value, dict) else None
+    tenant_id = value.get("tenantId") if isinstance(value, dict) else None
     if (
         not isinstance(token, str)
         or len(token) < 16
         or isinstance(expires_at, bool)
         or not isinstance(expires_at, int)
+        or not isinstance(tenant_id, str)
+        or not tenant_id
     ):
-        raise SystemExit("agent enrollment returned no valid session token")
-    return AgentSessionCredential(token, expires_at)
+        raise SystemExit("agent enrollment returned no valid session or tenant identity")
+    return _Enrollment(AgentSessionCredential(token, expires_at), tenant_id)
 
 
 def onboard(
@@ -191,6 +203,8 @@ def onboard(
     deployment_id: str | None = None,
     agent_id: str = "claude-code-local",
     bootstrap_token: str | None = None,
+    tenant_id: str | None = None,
+    policy_trust_bundle: Path | None = None,
 ) -> None:
     """Create or update Claude hook and MCP configuration for one project."""
     project_root = project_root.expanduser().resolve()
@@ -216,6 +230,13 @@ def onboard(
             )
         except (ValueError, AgentSessionStoreError) as exc:
             raise SystemExit(f"enterprise session storage is unavailable: {exc}") from exc
+        if policy_trust_bundle is None:
+            raise SystemExit(
+                "enterprise onboarding requires --policy-trust-bundle from an administrator"
+            )
+        policy_trust_bundle = policy_trust_bundle.expanduser().resolve()
+        if not policy_trust_bundle.is_absolute():  # pragma: no cover - resolve guarantees this.
+            raise SystemExit("policy trust bundle path must be absolute")
 
     agent_session: AgentSessionCredential | None = None
     if bootstrap_token:
@@ -224,9 +245,15 @@ def onboard(
                 "--bootstrap-token requires --enterprise-control-plane-url and --deployment-id"
             )
         if not dry_run:
-            agent_session = _enroll_agent(
-                enterprise_control_plane_url, bootstrap_token, project_root
-            )
+            enrollment = _enroll_agent(enterprise_control_plane_url, bootstrap_token, project_root)
+            agent_session = enrollment.credential
+            tenant_id = enrollment.tenant_id
+
+    tenant_id = tenant_id or os.environ.get("AAI_SEC_TENANT_ID")
+    if enterprise_control_plane_url and not tenant_id:
+        raise SystemExit(
+            "enterprise onboarding requires --tenant-id unless bootstrap enrollment supplies it"
+        )
 
     inherited_token = os.environ.get("AAI_SEC_AGENT_TOKEN")
     if agent_session is None and inherited_token:
@@ -257,6 +284,8 @@ def onboard(
                 "AAI_SEC_DEPLOYMENT_ID": deployment_id or "",
                 "AAI_SEC_AGENT_ID": agent_id,
                 "AAI_SEC_AGENT_SESSION_MODE": "aws",
+                "AAI_SEC_TENANT_ID": tenant_id or "",
+                "AAI_SEC_POLICY_TRUST_BUNDLE": str(policy_trust_bundle),
             }
         )
     command_parts = [
@@ -302,6 +331,8 @@ def onboard(
                 enterprise_control_plane_url.rstrip("/")
             )
             server["env"]["AAI_SEC_AGENT_SESSION_MODE"] = "aws"
+            server["env"]["AAI_SEC_TENANT_ID"] = tenant_id
+            server["env"]["AAI_SEC_POLICY_TRUST_BUNDLE"] = str(policy_trust_bundle)
         elif control_plane_url:
             server["env"]["AAI_SEC_CONTROL_PLANE_URL"] = control_plane_url.rstrip("/")
         if deployment_id:
@@ -383,6 +414,15 @@ def main() -> int:
         help="One-time AWS agent bootstrap token; exchange it for a short-lived session",
     )
     parser.add_argument(
+        "--tenant-id",
+        help="Server-assigned tenant identity (derived automatically during bootstrap enrollment)",
+    )
+    parser.add_argument(
+        "--policy-trust-bundle",
+        type=Path,
+        help="Absolute administrator-installed public policy trust bundle",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="Print changes without writing files"
     )
     args = parser.parse_args()
@@ -396,6 +436,8 @@ def main() -> int:
         deployment_id=args.deployment_id,
         agent_id=args.agent_id,
         bootstrap_token=args.bootstrap_token,
+        tenant_id=args.tenant_id,
+        policy_trust_bundle=args.policy_trust_bundle,
     )
     return 0
 

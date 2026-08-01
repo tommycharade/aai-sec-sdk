@@ -397,6 +397,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
         description,
       });
     }
+    // Runtime policy trust is asymmetric: only these two service roles may
+    // sign, while enrolled hosts receive a separately pinned public key.
+    const policySigningKey = new kms.Key(this, "PolicySigningKey", {
+      alias: "alias/aai-sec-policy-signing",
+      description: "Signs immutable tenant-bound AAI Security policy bundles",
+      keySpec: kms.KeySpec.ECC_NIST_P256,
+      keyUsage: kms.KeyUsage.SIGN_VERIFY,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
     const trialOnboarding = new lambda.Function(this, "TrialOnboarding", {
       runtime: lambda.Runtime.PYTHON_3_13,
       architecture: lambda.Architecture.ARM_64,
@@ -404,9 +413,14 @@ export class AwsControlPlaneStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
       timeout: cdk.Duration.seconds(10),
       memorySize: 256,
-      environment: { CONTROL_TABLE: table.tableName, TRIAL_DAYS: "14" },
+      environment: {
+        CONTROL_TABLE: table.tableName,
+        TRIAL_DAYS: "14",
+        POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
+      },
     });
     table.grantReadWriteData(trialOnboarding);
+    policySigningKey.grant(trialOnboarding, "kms:Sign");
     // Do not reference userPool.userPoolArn here: Cognito embeds the trigger
     // Lambda in the pool resource, so that reference creates a CloudFormation
     // cycle. The trigger receives and validates the originating pool ID from
@@ -526,10 +540,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
         SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn,
         RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
         RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
+        POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
       },
       tracing: lambda.Tracing.PASS_THROUGH,
     });
     table.grantReadWriteData(handler);
+    policySigningKey.grant(handler, "kms:Sign", "kms:GetPublicKey");
     // CDK's read/write convenience grant excludes TransactWriteItems. Policy
     // activation uses one same-table transaction so active authority, the
     // immutable candidate, and the retired predecessor cannot diverge.
@@ -819,6 +835,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "SecurityAlertsDlqArn", { value: securityAlertsDlq.queueArn });
     new cdk.CfnOutput(this, "EndpointDetectionDlqArn", { value: endpointDetectionDlq.queueArn });
     new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });
+    new cdk.CfnOutput(this, "PolicySigningKeyArn", { value: policySigningKey.keyArn });
     new cdk.CfnOutput(this, "DiscoveryProviderSecretNamePrefix", {
       value: providerSecretPrefix,
     });

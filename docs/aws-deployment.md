@@ -457,6 +457,30 @@ bearer tokens must not be placed in Vite environment files or source control.
 
 ## Verification
 
+### Policy signing trust
+
+The stack creates a retained asymmetric P-256 KMS key and outputs
+`PolicySigningKeyArn`. Export its public key using an operator AWS profile:
+
+```bash
+POLICY_KEY_ARN="$(aws cloudformation describe-stacks \
+  --stack-name AaiSecControlPlane --profile p1 --region eu-west-2 \
+  --query 'Stacks[0].Outputs[?OutputKey==`PolicySigningKeyArn`].OutputValue' \
+  --output text)"
+python3 scripts/export_policy_trust_bundle.py \
+  --profile p1 --region eu-west-2 --key-arn "$POLICY_KEY_ARN" \
+  --output "$PWD/policy-trust.json"
+sudo install -d -o root -g wheel -m 0755 "/Library/Application Support/AAISecurity"
+sudo install -o root -g wheel -m 0644 "$PWD/policy-trust.json" \
+  "/Library/Application Support/AAISecurity/policy-trust.json"
+```
+
+Use `root:root` and `/etc/aai-security/policy-trust.json` on Linux. Public key
+bytes are not secret, but the installed file is authority-sensitive: a process
+that can replace it can choose a different signer. Do not download and trust a
+key from an effective-policy response. Rotation distributes an overlapping
+old/new trust bundle before the control plane selects the new signer.
+
 The reproducible deployment smoke test requires AWS credentials with access
 to invoke the control-plane Lambda and the two DynamoDB tables. It creates and
 removes synthetic records and must be run against a non-production tenant:
@@ -470,6 +494,7 @@ AWS_PROFILE=p1 AWS_REGION=eu-west-2 python scripts/test_aws_control_plane.py \
   --audit-bucket <audit-bucket> \
   --alerts-topic-arn <security-alerts-topic-arn> \
   --alerts-queue-arn <security-alerts-queue-arn> \
+  --policy-trust-bundle "$PWD/policy-trust.json" \
   --region eu-west-2 --profile p1
 ```
 
@@ -483,6 +508,8 @@ replay, terminal write, and a `GuardedRuntime` execution that replays the typed
 checks the deployed audit bucket's compliance retention, versioning, and
 inability to delete a retained object version, and publishes a synthetic alert
 through SNS to verify delivery into the durable SQS operations queue.
+It also verifies the tenant-bound KMS signature locally against the explicitly
+supplied public trust bundle; successful HTTPS transport alone is insufficient.
 
 Endpoint detection adds a five-minute EventBridge rule, a sharded tenant GSI,
 a dedicated retry-exhaustion DLQ and a CloudWatch alarm. New endpoint alerts

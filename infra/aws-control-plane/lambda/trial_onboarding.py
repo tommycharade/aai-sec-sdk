@@ -13,6 +13,8 @@ import secrets
 import time
 from typing import Any
 
+from policy_signing import sign_policy_bundle
+
 
 def build_trial_records(
     subject: str, email: str, *, now: int | None = None, trial_days: int = 14
@@ -145,9 +147,31 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     ).get("Item")
     if existing:
         return event
-    for item in build_trial_records(
+    records = build_trial_records(
         subject, email, trial_days=int(os.environ.get("TRIAL_DAYS", "14"))
-    ):
+    )
+    # Sign before the first database write. A KMS outage therefore creates no
+    # partially provisioned tenant and never leaves unsigned active authority.
+    policy_version = next(item for item in records if item["sk"].startswith("POLICY_VERSION#"))
+    tenant_id = policy_version["tenant_id"]
+    key_id = os.environ.get("POLICY_SIGNING_KEY_ARN", "")
+    bundle = sign_policy_bundle(
+        boto3.client("kms"),
+        key_id,
+        tenant_id,
+        policy_version["policy_id"],
+        int(policy_version["version"]),
+        policy_version["configuration"],
+        int(policy_version["activated_at"]),
+    )
+    policy_version.update(
+        {
+            "effective_configuration": bundle["configuration"],
+            "effective_content_hash": bundle["contentHash"],
+            "bundle_integrity": bundle["integrity"],
+        }
+    )
+    for item in records:
         table.put_item(Item=item)
     # Group membership is the coarse RBAC gate; _tenant still enforces the
     # per-user mapping on every API request, preventing cross-tenant access.

@@ -340,6 +340,32 @@ class FakeSns:
         return {"MessageId": "synthetic-message"}
 
 
+class FakeKms:
+    """Capture exact digest signing calls without exposing private key material."""
+
+    def __init__(self, key_id: str) -> None:
+        self.key_id = key_id
+        self.calls: list[dict[str, Any]] = []
+
+    def sign(self, **value: Any) -> dict[str, Any]:
+        self.calls.append(dict(value))
+        return {
+            "KeyId": self.key_id,
+            "SigningAlgorithm": "ECDSA_SHA_256",
+            "Signature": b"synthetic-ecdsa-signature",
+        }
+
+    def get_public_key(self, **value: Any) -> dict[str, Any]:
+        self.calls.append(dict(value))
+        return {
+            "KeyId": self.key_id,
+            "KeyUsage": "SIGN_VERIFY",
+            "CustomerMasterKeySpec": "ECC_NIST_P256",
+            "SigningAlgorithms": ["ECDSA_SHA_256"],
+            "PublicKey": b"synthetic-p256-subject-public-key-info",
+        }
+
+
 class FakeCondition:
     """Composable placeholder for boto3 key expressions ignored by FakeTable."""
 
@@ -360,10 +386,14 @@ def _load_handler(monkeypatch: Any) -> Any:
         lambda *_args, **_kwargs: types.SimpleNamespace(Table=lambda _name: table)
     )
     fake_sns = FakeSns()
+    policy_key_id = "arn:aws:kms:eu-west-2:111111111111:key/12345678-1234-1234-1234-123456789abc"
+    fake_kms = FakeKms(policy_key_id)
     boto3.client = (  # type: ignore[attr-defined]
         lambda service, *_args, **_kwargs: (
             FakeDynamoClient(table)
             if service == "dynamodb"
+            else fake_kms
+            if service == "kms"
             else fake_sns
             if service == "sns"
             else FakeS3()
@@ -389,12 +419,15 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("SCIM_ENABLED", "false")
     monkeypatch.setenv("SCIM_TABLE", "")
     monkeypatch.setenv("SPLUNK_STUB_ENABLED", "true")
+    monkeypatch.setenv("POLICY_SIGNING_KEY_ARN", policy_key_id)
     monkeypatch.setenv("SECURITY_ALERTS_TOPIC_ARN", "arn:aws:sns:eu-west-2:111111111111:test")
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/handler.py"
+    monkeypatch.syspath_prepend(str(path.parent))
     spec = importlib.util.spec_from_file_location("aai_lambda_handler", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    cast(Any, module)._fake_kms = fake_kms
     return module, table
 
 
@@ -2983,6 +3016,8 @@ def test_aws_policy_governance_migrates_existing_active_authority(monkeypatch: A
     ]
     assert version["state"] == "active"
     assert version["author"] == "legacy-author"
+    assert version["bundle_integrity"]["algorithm"] == "ECDSA_SHA_256"
+    assert version["effective_configuration"] == policy["configuration"]
     assert (
         version["content_hash"]
         == hashlib.sha256(
@@ -2997,6 +3032,150 @@ def test_aws_policy_governance_deployment_grants_transaction_authority() -> None
         Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
     ).read_text(encoding="utf-8")
     assert 'table.grant(handler, "dynamodb:TransactWriteItems")' in stack
+
+
+def test_policy_activation_signs_atomically_and_freezes_registry_resolution(
+    monkeypatch: Any,
+) -> None:
+    """KMS failure changes nothing; success freezes exact MCP authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-signed-activation"
+    policy_id = "policy-signed"
+    policy = module._item_key(tenant, "POLICY", policy_id) | {
+        "tenant_id": tenant,
+        "id": policy_id,
+        "name": "Signed policy",
+        "configuration": {"tools": {"allowed": ["read_repository"]}},
+        "version": 1,
+        "activeVersion": 1,
+        "latestVersion": 2,
+        "governanceState": "staged",
+        "pendingVersion": 2,
+        "pendingAuthor": "author-a",
+        "governance_schema_version": 1,
+    }
+    active = module._item_key(
+        tenant, "POLICY_VERSION", module._policy_version_identifier(policy_id, 1)
+    ) | {
+        "tenant_id": tenant,
+        "id": module._policy_version_identifier(policy_id, 1),
+        "policy_id": policy_id,
+        "version": 1,
+        "base_version": 0,
+        "name": "Signed policy",
+        "configuration": policy["configuration"],
+        "content_hash": module._configuration_hash(policy["configuration"]),
+        "state": "active",
+        "author": "author-a",
+    }
+    candidate_configuration = {
+        "tools": {"allowed": ["read_repository"]},
+        "claudeCode": {"allowedMcpServers": ["github"]},
+    }
+    candidate = module._item_key(
+        tenant, "POLICY_VERSION", module._policy_version_identifier(policy_id, 2)
+    ) | {
+        "tenant_id": tenant,
+        "id": module._policy_version_identifier(policy_id, 2),
+        "policy_id": policy_id,
+        "version": 2,
+        "base_version": 1,
+        "name": "Signed policy v2",
+        "configuration": candidate_configuration,
+        "content_hash": module._configuration_hash(candidate_configuration),
+        "state": "staged",
+        "author": "author-a",
+        "decided_by": "reviewer-b",
+    }
+    mcp = module._item_key(tenant, "MCP", "github") | {
+        "tenant_id": tenant,
+        "id": "github",
+        "name": "GitHub",
+        "enabled": True,
+        "transport": "stdio",
+        "command": "github-mcp-server",
+    }
+    for item in (policy, active, candidate, mcp):
+        table.put_item(Item=item)
+
+    snapshot = {key: dict(value) for key, value in table.items.items()}
+    original_sign = module.KMS.sign
+    module.KMS.sign = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("KMS unavailable"))
+    with pytest.raises(RuntimeError, match="KMS unavailable"):
+        module._activate_policy_version(
+            tenant,
+            policy_id,
+            2,
+            {"expectedActiveVersion": 1},
+            "reviewer-b",
+        )
+    assert table.items == snapshot
+
+    module.KMS.sign = original_sign
+    module._activate_policy_version(
+        tenant,
+        policy_id,
+        2,
+        {"expectedActiveVersion": 1},
+        "reviewer-b",
+    )
+    stored = table.items[(f"TENANT#{tenant}", "POLICY_VERSION#policy-signed:00000000000000000002")]
+    assert stored["state"] == "active"
+    assert stored["bundle_integrity"]["algorithm"] == "ECDSA_SHA_256"
+    assert (
+        stored["effective_configuration"]["claudeCode"]["managedMcpServers"][0]["command"]
+        == "github-mcp-server"
+    )
+    call = module._fake_kms.calls[-1]
+    assert call["MessageType"] == "DIGEST"
+    assert call["SigningAlgorithm"] == "ECDSA_SHA_256"
+    assert len(call["Message"]) == 32
+
+    changed_mcp = dict(mcp)
+    changed_mcp["command"] = "attacker-replacement"
+    table.put_item(Item=changed_mcp)
+    active_policy = table.items[(f"TENANT#{tenant}", "POLICY#policy-signed")]
+    bundle = module._active_policy_bundle(tenant, active_policy)
+    assert bundle["configuration"]["claudeCode"]["managedMcpServers"][0]["command"] == (
+        "github-mcp-server"
+    )
+
+
+def test_policy_signing_key_is_asymmetric_retained_and_least_privileged() -> None:
+    """Infrastructure exposes no signing private key and grants only required KMS calls."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    assert "keySpec: kms.KeySpec.ECC_NIST_P256" in stack
+    assert "keyUsage: kms.KeyUsage.SIGN_VERIFY" in stack
+    assert "removalPolicy: cdk.RemovalPolicy.RETAIN" in stack
+    assert 'policySigningKey.grant(trialOnboarding, "kms:Sign")' in stack
+    assert 'policySigningKey.grant(handler, "kms:Sign", "kms:GetPublicKey")' in stack
+    assert "POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn" in stack
+    assert 'new cdk.CfnOutput(this, "PolicySigningKeyArn"' in stack
+
+
+def test_operator_policy_trust_metadata_is_public_provenance_not_private_authority(
+    monkeypatch: Any,
+) -> None:
+    """Operators can identify the signer while hosts still require pinned trust."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-policy-trust"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["auditor"],
+        "sub": "auditor-a",
+    }
+
+    response = _invoke(module, _event("/enterprise/policy-trust", "GET", claims=claims))
+
+    assert response["statusCode"] == 200
+    value = json.loads(response["body"])
+    assert value["algorithm"] == "ECDSA_SHA_256"
+    assert value["trustSource"] == "administrator-installation-required"
+    assert len(value["fingerprintSha256"]) == 64
+    assert "private" not in json.dumps(value).lower()
 
 
 def test_aws_managed_discovery_secret_tagging_is_least_privileged() -> None:
@@ -7389,6 +7568,61 @@ def test_trial_provisioner_builds_restrictive_credential_free_records(monkeypatc
         r"^git[ \t]+log[ \t]+--oneline$",
     ]
     assert all("credential" not in str(item).lower() for item in records)
+
+
+def test_trial_handler_signs_before_any_tenant_record_is_written(monkeypatch: Any) -> None:
+    """A signing outage cannot leave an unsigned or partially active trial tenant."""
+    path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/trial_onboarding.py"
+    monkeypatch.syspath_prepend(str(path.parent))
+    key_id = "arn:aws:kms:eu-west-2:111111111111:key/12345678-1234-1234-1234-123456789abc"
+
+    class Cognito:
+        def admin_add_user_to_group(self, **_value: Any) -> None:
+            return None
+
+    def load_trial(table: FakeTable, kms: object, name: str) -> Any:
+        boto3 = types.ModuleType("boto3")
+        boto3.resource = (  # type: ignore[attr-defined]
+            lambda *_args, **_kwargs: types.SimpleNamespace(Table=lambda _name: table)
+        )
+        boto3.client = (  # type: ignore[attr-defined]
+            lambda service, *_args, **_kwargs: kms if service == "kms" else Cognito()
+        )
+        monkeypatch.setitem(sys.modules, "boto3", boto3)
+        monkeypatch.setenv("CONTROL_TABLE", "control")
+        monkeypatch.setenv("POLICY_SIGNING_KEY_ARN", key_id)
+        spec = importlib.util.spec_from_file_location(name, path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    event = {
+        "userPoolId": "eu-west-2_synthetic",
+        "userName": "subject-a",
+        "request": {"userAttributes": {"sub": "subject-a", "email": "trial@example.test"}},
+    }
+    failing_table = FakeTable()
+
+    class FailingKms:
+        def sign(self, **_value: Any) -> dict[str, Any]:
+            raise RuntimeError("synthetic KMS outage")
+
+    failing = load_trial(failing_table, FailingKms(), "aai_trial_failure")
+    with pytest.raises(RuntimeError, match="synthetic KMS outage"):
+        failing.handler(event, None)
+    assert failing_table.items == {}
+
+    successful_table = FakeTable()
+    successful_kms = FakeKms(key_id)
+    successful = load_trial(successful_table, successful_kms, "aai_trial_success")
+    assert successful.handler(event, None) == event
+    version = next(
+        item for item in successful_table.items.values() if item["sk"].startswith("POLICY_VERSION#")
+    )
+    assert version["bundle_integrity"]["algorithm"] == "ECDSA_SHA_256"
+    assert version["effective_content_hash"] == version["content_hash"]
+    assert successful_kms.calls[0]["MessageType"] == "DIGEST"
 
 
 def test_demo_seed_uses_the_same_narrow_native_read_commands(monkeypatch: Any) -> None:
