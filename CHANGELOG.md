@@ -1,5 +1,9 @@
 # Changelog
 
+- Completed live cross-region audit recovery acceptance: 603 exact S3 versions
+  passed independent identity, ordering, SHA-256, metadata, COMPLIANCE retention
+  and replica-provenance verification after bounded historical repair.
+
 - Historical audit repair now reprocesses previously completed replicas so
   later source-side Object Lock extensions cannot leave recovery retention
   shorter despite matching object counts and hashes.

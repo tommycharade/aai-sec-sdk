@@ -3,9 +3,10 @@
 This design advances P0-08 by turning the AWS Object Lock foundation into a
 tenant-visible records-management control. It covers tenant retention,
 exact-version legal hold, live integrity assurance, asynchronous tenant-wide
-export, mass-retention extension and scheduled evidence-gap monitoring. It does
-**not** claim that
-cross-region recovery has passed for a customer environment. Replica authority
+export, mass-retention extension and scheduled evidence-gap monitoring. The
+development AWS environment passed a complete
+[cross-region recovery acceptance](cross-region-audit-recovery-acceptance-2026-08-01.md)
+for 603 versions. Replica authority
 must use the [persistent recovery deployment guard](audit-recovery-deployment-guard-design.md);
 an ephemeral deployment variable is not an acceptable recovery control.
 
@@ -105,8 +106,9 @@ future-write policy authoritative before scanning, waits 65 seconds to drain
 writers that may have read the old policy and then extends every version at or
 before that cutover. A failed job leaves the longer future policy active and
 visible; retry reconciles existing versions without rollback. See
-[Asynchronous tenant retention](asynchronous-retention-design.md). Cross-region
-count/order/hash/retention recovery remains open.
+[Asynchronous tenant retention](asynchronous-retention-design.md). The separate
+cross-region exercise verified count, order, bytes, metadata, provenance and
+retention parity for the complete deployed evidence set.
 
 The evidence worker is an intentional Lambda-to-FIFO-to-Lambda continuation
 workflow. Its Lambda recursive-loop setting is therefore explicitly `Allow`;
