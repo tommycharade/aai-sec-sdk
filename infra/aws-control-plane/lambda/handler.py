@@ -332,6 +332,10 @@ _POLICY_VERSION_STATES = frozenset(
     {"draft", "review", "approved", "staged", "active", "rejected", "retired"}
 )
 _POLICY_PENDING_STATES = frozenset({"draft", "review", "approved", "staged"})
+_POLICY_EXCEPTION_OPEN_STATES = frozenset({"draft", "review", "approved", "active"})
+_POLICY_EXCEPTION_TERMINAL_STATES = frozenset({"rejected", "revoked", "expired", "invalidated"})
+_POLICY_EXCEPTION_MIN_SECONDS = 15 * 60
+_POLICY_EXCEPTION_MAX_SECONDS = 7 * 24 * 60 * 60
 _POLICY_SECRET_KEYS = frozenset(
     {
         "token",
@@ -965,6 +969,13 @@ def _required_mutation_capability(path):
         normalized,
     ):
         return "policy_approval"
+    if re.fullmatch(
+        r"/enterprise/policy-exceptions/[^/]+/(decision|activate|revoke)",
+        normalized,
+    ):
+        return "policy_approval"
+    if normalized.startswith("/enterprise/policy-exceptions"):
+        return "policy_write"
     if re.fullmatch(
         r"/enterprise/policies/[^/]+/versions/[1-9][0-9]*/simulate",
         normalized,
@@ -2950,9 +2961,7 @@ def _ensure_policy_governance(tenant, policy):
     now = int(policy.get("updatedAt", policy.get("createdAt", time.time())))
     author = str(policy.get("author", "legacy-migration"))
     effective_configuration = _managed_policy_configuration(tenant, policy["configuration"])
-    bundle = _sign_policy_bundle(
-        tenant, policy["id"], active_version, effective_configuration, now
-    )
+    bundle = _sign_policy_bundle(tenant, policy["id"], active_version, effective_configuration, now)
     version_record = {
         **_item_key(
             tenant,
@@ -3084,8 +3093,7 @@ def _policy_trust_metadata():
     if (
         result.get("KeyId") != POLICY_SIGNING_KEY_ARN
         or result.get("KeyUsage") != "SIGN_VERIFY"
-        or result.get("KeySpec", result.get("CustomerMasterKeySpec"))
-        != "ECC_NIST_P256"
+        or result.get("KeySpec", result.get("CustomerMasterKeySpec")) != "ECC_NIST_P256"
         or result.get("SigningAlgorithms") != ["ECDSA_SHA_256"]
         or not isinstance(public_key, bytes)
     ):
@@ -3564,9 +3572,7 @@ def _activate_policy_version(tenant, policy_id, version, body, actor):
         raise PolicyConflict("policy active version changed before activation")
     now = int(time.time())
     effective_configuration = _managed_policy_configuration(tenant, candidate["configuration"])
-    bundle = _sign_policy_bundle(
-        tenant, policy_id, version, effective_configuration, now
-    )
+    bundle = _sign_policy_bundle(tenant, policy_id, version, effective_configuration, now)
     active_candidate = {
         **candidate,
         **_bundle_record_fields(bundle),
@@ -3621,6 +3627,462 @@ def _activate_policy_version(tenant, policy_id, version, body, actor):
         {"policy_id": policy_id, "version": version, "previous_version": expected},
     )
     return _policy_summary(tenant, active_policy)
+
+
+def _policy_exception_record(tenant, exception_id):
+    """Load one tenant-scoped exception with a strongly consistent read."""
+    exception_id = _bounded_identifier(exception_id, "exceptionId")
+    record = TABLE.get_item(
+        Key=_item_key(tenant, "POLICY_EXCEPTION", exception_id),
+        ConsistentRead=True,
+    ).get("Item")
+    if not record:
+        raise LookupError("policy exception not found")
+    return record
+
+
+def _policy_exception_scope(tenant, deployment_id, agent_id):
+    """Resolve exact server-owned agent, group and active policy authority."""
+    deployment_id = _bounded_identifier(deployment_id, "deploymentId")
+    agent_id = _bounded_identifier(agent_id, "agentId")
+    agent_key = f"{deployment_id}:{agent_id}"
+    agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
+        "Item"
+    )
+    if not agent or _agent_lifecycle_state(agent) != "active":
+        raise PolicyConflict("policy exception requires an active enrolled agent")
+    groups = [
+        group
+        for group in _list(tenant, "GROUP", consistent_read=True)
+        if agent_key in group.get("agent_keys", [])
+    ]
+    if len(groups) != 1:
+        raise PolicyConflict("policy exception requires exactly one assigned policy group")
+    group = groups[0]
+    policy = TABLE.get_item(
+        Key=_item_key(tenant, "POLICY", group.get("policyId", "")),
+        ConsistentRead=True,
+    ).get("Item")
+    if not policy:
+        raise PolicyConflict("policy exception base policy is unavailable")
+    policy = _ensure_policy_governance(tenant, policy)
+    version = int(policy.get("version", 0))
+    if version <= 0:
+        raise PolicyConflict("policy exception base policy has no active version")
+    version_record = _policy_version_record(tenant, policy["id"], version)
+    return agent, group, policy, version_record
+
+
+def _policy_exception_view(record, now=None):
+    """Return bounded lifecycle, scope and authority-change metadata."""
+    current = int(time.time()) if now is None else int(now)
+    state = record.get("state", "invalidated")
+    if state not in _POLICY_EXCEPTION_OPEN_STATES | _POLICY_EXCEPTION_TERMINAL_STATES:
+        raise RuntimeError("policy exception state is invalid")
+    expires_at = int(record.get("expires_at", 0))
+    return {
+        "id": record.get("id", ""),
+        "deploymentId": record.get("deployment_id", ""),
+        "agentId": record.get("agent_id", ""),
+        "agentKey": record.get("agent_key", ""),
+        "groupId": record.get("group_id", ""),
+        "policyId": record.get("policy_id", ""),
+        "basePolicyVersion": int(record.get("base_policy_version", 0)),
+        "baseContentHash": record.get("base_content_hash", ""),
+        "derivedPolicyId": record.get("derived_policy_id"),
+        "configuration": _json(record.get("configuration", {})),
+        "contentHash": record.get("content_hash", ""),
+        "changeSummary": _semantic_policy_diff(
+            record.get("base_configuration", {}), record.get("configuration", {})
+        ),
+        "state": state,
+        "effective": state == "active" and expires_at > current,
+        "owner": record.get("owner", ""),
+        "purpose": record.get("purpose", ""),
+        "author": record.get("author", ""),
+        "createdAt": int(record.get("created_at", 0)),
+        "expiresAt": expires_at,
+        "remainingSeconds": max(0, expires_at - current),
+        "submittedBy": record.get("submitted_by"),
+        "submittedAt": record.get("submitted_at"),
+        "decidedBy": record.get("decided_by"),
+        "decidedAt": record.get("decided_at"),
+        "decisionReason": record.get("decision_reason"),
+        "activatedBy": record.get("activated_by"),
+        "activatedAt": record.get("activated_at"),
+        "endedBy": record.get("ended_by"),
+        "endedAt": record.get("ended_at"),
+        "endReason": record.get("end_reason"),
+    }
+
+
+def _validate_policy_exception_delta(base_configuration, candidate_configuration):
+    """Permit only the focused temporary authority fields exposed by the UI.
+
+    Identity scope, approval provider, credentials, isolation, data capture,
+    telemetry and every immutable safeguard remain inherited from the reviewed
+    base policy. Enforcing this again at the API boundary prevents an advanced
+    client from bypassing the typed editor.
+    """
+    base = _json(base_configuration)
+    candidate = _json(candidate_configuration)
+    mutable_fields = {
+        "tools": {"allowed", "denied", "builtIn"},
+        "claudeCode": {
+            "allowedBuiltInTools",
+            "allowedSkills",
+            "allowedMcpServers",
+            "allowedCommandPatterns",
+            "deniedCommandPatterns",
+            "approvalCommandPatterns",
+        },
+        "budgets": {"maxActions"},
+    }
+    for section, fields in mutable_fields.items():
+        for document in (base, candidate):
+            section_value = document.get(section)
+            if isinstance(section_value, dict):
+                for field in fields:
+                    section_value.pop(field, None)
+                if not section_value:
+                    document.pop(section, None)
+    if base != candidate:
+        raise ValueError(
+            "policy exception may change only temporary tool, Claude command/resource, "
+            "and maximum-action fields"
+        )
+
+
+def _put_policy_exception_transition(tenant, record, expected_state, updated, event, actor):
+    """Compare-and-swap one exception transition before emitting audit evidence."""
+    if expected_state not in _POLICY_EXCEPTION_OPEN_STATES:
+        raise ValueError("policy exception expected state is invalid")
+    try:
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="#state = :expected",
+            ExpressionAttributeNames={"#state": "state"},
+            ExpressionAttributeValues={":expected": expected_state},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("policy exception state changed concurrently") from error
+        raise
+    _audit(
+        tenant,
+        event,
+        actor,
+        {
+            "exception_id": record["id"],
+            "deployment_id": record["deployment_id"],
+            "agent_id": record["agent_id"],
+            "policy_id": record["policy_id"],
+            "base_policy_version": int(record["base_policy_version"]),
+            "expires_at": int(record["expires_at"]),
+        },
+    )
+    return updated
+
+
+def _reconcile_policy_exception(tenant, record, now=None):
+    """Expire or invalidate an open exception from live server-owned facts."""
+    state = record.get("state")
+    if state not in _POLICY_EXCEPTION_OPEN_STATES:
+        return record
+    current = int(time.time()) if now is None else int(now)
+    terminal_state = None
+    reason = None
+    if int(record.get("expires_at", 0)) <= current:
+        terminal_state, reason = "expired", "server-clock expiry restored base policy"
+    else:
+        try:
+            _, group, policy, version_record = _policy_exception_scope(
+                tenant, record.get("deployment_id"), record.get("agent_id")
+            )
+            bindings_match = (
+                group.get("id") == record.get("group_id")
+                and policy.get("id") == record.get("policy_id")
+                and int(policy.get("version", 0)) == int(record.get("base_policy_version", -1))
+                and secrets.compare_digest(
+                    str(version_record.get("content_hash", "")),
+                    str(record.get("base_content_hash", "")),
+                )
+            )
+        except (LookupError, PolicyConflict, ValueError):
+            bindings_match = False
+        if not bindings_match:
+            terminal_state, reason = "invalidated", "agent, group or base policy changed"
+    if terminal_state is None:
+        return record
+    updated = {
+        **record,
+        "state": terminal_state,
+        "ended_by": "policy-exception-reconciler",
+        "ended_at": current,
+        "end_reason": reason,
+    }
+    try:
+        return _put_policy_exception_transition(
+            tenant,
+            record,
+            state,
+            updated,
+            f"policy_exception_{terminal_state}",
+            "policy-exception-reconciler",
+        )
+    except PolicyConflict:
+        return _policy_exception_record(tenant, record["id"])
+
+
+def _create_policy_exception(tenant, body, actor):
+    """Create one inactive exception bound to current exact fleet authority."""
+    required = {
+        "exceptionId",
+        "deploymentId",
+        "agentId",
+        "owner",
+        "purpose",
+        "expiresAt",
+        "configuration",
+    }
+    if not isinstance(body, dict) or set(body) != required:
+        raise ValueError("policy exception request has an invalid schema")
+    exception_id = _bounded_identifier(body.get("exceptionId"), "exceptionId")
+    owner = _bounded_text(body.get("owner"), "owner", 256)
+    purpose = _bounded_text(body.get("purpose"), "purpose", 512)
+    expires_at = body.get("expiresAt")
+    now = int(time.time())
+    if isinstance(expires_at, bool) or not isinstance(expires_at, int):
+        raise ValueError("expiresAt must be a server-comparable epoch second")
+    if not now + _POLICY_EXCEPTION_MIN_SECONDS <= expires_at <= now + _POLICY_EXCEPTION_MAX_SECONDS:
+        raise ValueError("policy exception expiry must be between 15 minutes and 7 days")
+    agent, group, policy, version_record = _policy_exception_scope(
+        tenant, body.get("deploymentId"), body.get("agentId")
+    )
+    configuration = _policy_configuration(tenant, body.get("configuration"))
+    base_configuration = _json(policy.get("configuration", {}))
+    _validate_policy_exception_delta(base_configuration, configuration)
+    if secrets.compare_digest(
+        _configuration_hash(configuration), _configuration_hash(base_configuration)
+    ):
+        raise ValueError("policy exception must change the effective policy")
+    agent_key = f"{agent['deployment_id']}:{agent['id']}"
+    slot_key = _item_key(tenant, "POLICY_EXCEPTION_SLOT", agent_key)
+    slot = TABLE.get_item(Key=slot_key, ConsistentRead=True).get("Item")
+    previous_id = None
+    if slot:
+        previous_id = slot.get("exception_id")
+        previous = _policy_exception_record(tenant, previous_id)
+        previous = _reconcile_policy_exception(tenant, previous, now)
+        previous_state = previous.get("state")
+        if previous_state in _POLICY_EXCEPTION_OPEN_STATES:
+            raise PolicyConflict("agent already has an open policy exception")
+        if previous_state not in _POLICY_EXCEPTION_TERMINAL_STATES:
+            raise RuntimeError("existing policy exception state is invalid")
+    derived_policy_id = f"exception:{hashlib.sha256(exception_id.encode()).hexdigest()[:32]}"
+    record = {
+        **_item_key(tenant, "POLICY_EXCEPTION", exception_id),
+        "tenant_id": tenant,
+        "id": exception_id,
+        "deployment_id": agent["deployment_id"],
+        "agent_id": agent["id"],
+        "agent_key": agent_key,
+        "group_id": group["id"],
+        "policy_id": policy["id"],
+        "base_policy_version": int(policy["version"]),
+        "base_content_hash": version_record["content_hash"],
+        "base_configuration": base_configuration,
+        "derived_policy_id": derived_policy_id,
+        "configuration": configuration,
+        "content_hash": _configuration_hash(configuration),
+        "state": "draft",
+        "owner": owner,
+        "purpose": purpose,
+        "author": actor,
+        "created_at": now,
+        "expires_at": expires_at,
+        "ttl": expires_at + (30 * 86400),
+    }
+    slot_record = {
+        **slot_key,
+        "tenant_id": tenant,
+        "id": agent_key,
+        "exception_id": exception_id,
+        "updated_at": now,
+    }
+    slot_condition = (
+        "attribute_not_exists(pk)" if previous_id is None else "exception_id = :previous"
+    )
+    slot_values = None if previous_id is None else {":previous": previous_id}
+    _transact_policy_records(
+        [
+            _transaction_put(record, condition="attribute_not_exists(pk)"),
+            _transaction_put(slot_record, condition=slot_condition, values=slot_values),
+        ]
+    )
+    _audit(
+        tenant,
+        "policy_exception_draft_created",
+        actor,
+        {
+            "exception_id": exception_id,
+            "deployment_id": agent["deployment_id"],
+            "agent_id": agent["id"],
+            "policy_id": policy["id"],
+            "base_policy_version": int(policy["version"]),
+            "expires_at": expires_at,
+        },
+    )
+    return _policy_exception_view(record, now)
+
+
+def _submit_policy_exception(tenant, exception_id, actor):
+    """Freeze one exception draft for independent review."""
+    record = _reconcile_policy_exception(tenant, _policy_exception_record(tenant, exception_id))
+    if record.get("state") != "draft":
+        raise PolicyConflict("policy exception is not a draft")
+    now = int(time.time())
+    updated = {**record, "state": "review", "submitted_by": actor, "submitted_at": now}
+    return _policy_exception_view(
+        _put_policy_exception_transition(
+            tenant, record, "draft", updated, "policy_exception_submitted", actor
+        ),
+        now,
+    )
+
+
+def _decide_policy_exception(tenant, exception_id, body, actor):
+    """Approve or reject one exception while enforcing two-subject review."""
+    if not isinstance(body, dict) or set(body) != {"decision", "reason"}:
+        raise ValueError("policy exception decision has an invalid schema")
+    decision = body.get("decision")
+    if decision not in {"approved", "rejected"}:
+        raise ValueError("policy exception decision must be approved or rejected")
+    reason = _bounded_text(body.get("reason"), "reason", 512)
+    record = _reconcile_policy_exception(tenant, _policy_exception_record(tenant, exception_id))
+    if record.get("state") != "review":
+        raise PolicyConflict("policy exception is not awaiting review")
+    if decision == "approved" and secrets.compare_digest(str(record.get("author", "")), actor):
+        raise PermissionError("policy exception authors cannot approve their own request")
+    now = int(time.time())
+    updated = {
+        **record,
+        "state": decision,
+        "decided_by": actor,
+        "decided_at": now,
+        "decision_reason": reason,
+    }
+    return _policy_exception_view(
+        _put_policy_exception_transition(
+            tenant, record, "review", updated, "policy_exception_decided", actor
+        ),
+        now,
+    )
+
+
+def _activate_policy_exception(tenant, exception_id, body, actor):
+    """Sign and activate an approved exception against its exact live base."""
+    if body != {}:
+        raise ValueError("policy exception activation accepts no mutable content")
+    record = _reconcile_policy_exception(tenant, _policy_exception_record(tenant, exception_id))
+    if record.get("state") != "approved":
+        raise PolicyConflict("policy exception is not approved")
+    if record.get("decided_by") in {None, record.get("author")}:
+        raise PermissionError("policy exception lacks independent approval")
+    _, group, policy, version_record = _policy_exception_scope(
+        tenant, record["deployment_id"], record["agent_id"]
+    )
+    if not (
+        group.get("id") == record.get("group_id")
+        and policy.get("id") == record.get("policy_id")
+        and int(policy.get("version", 0)) == int(record.get("base_policy_version", -1))
+        and secrets.compare_digest(
+            str(version_record.get("content_hash", "")), str(record.get("base_content_hash", ""))
+        )
+    ):
+        raise PolicyConflict("policy exception scope or base authority changed before activation")
+    now = int(time.time())
+    if int(record.get("expires_at", 0)) <= now:
+        raise PolicyConflict("policy exception expired before activation")
+    effective = _managed_policy_configuration(tenant, record["configuration"])
+    bundle = _sign_policy_bundle(tenant, record["derived_policy_id"], 1, effective, now)
+    updated = {
+        **record,
+        **_bundle_record_fields(bundle),
+        "state": "active",
+        "activated_by": actor,
+        "activated_at": now,
+    }
+    return _policy_exception_view(
+        _put_policy_exception_transition(
+            tenant, record, "approved", updated, "policy_exception_activated", actor
+        ),
+        now,
+    )
+
+
+def _revoke_policy_exception(tenant, exception_id, body, actor):
+    """End an open exception immediately and restore normal policy resolution."""
+    if not isinstance(body, dict) or set(body) != {"reason"}:
+        raise ValueError("policy exception revocation has an invalid schema")
+    reason = _bounded_text(body.get("reason"), "reason", 512)
+    record = _reconcile_policy_exception(tenant, _policy_exception_record(tenant, exception_id))
+    state = record.get("state")
+    if state not in _POLICY_EXCEPTION_OPEN_STATES:
+        raise PolicyConflict("policy exception is not open")
+    now = int(time.time())
+    updated = {
+        **record,
+        "state": "revoked",
+        "ended_by": actor,
+        "ended_at": now,
+        "end_reason": reason,
+    }
+    return _policy_exception_view(
+        _put_policy_exception_transition(
+            tenant, record, state, updated, "policy_exception_revoked", actor
+        ),
+        now,
+    )
+
+
+def _policy_exceptions(tenant):
+    """List reconciled exception lifecycle records newest first."""
+    now = int(time.time())
+    records = [
+        _reconcile_policy_exception(tenant, record, now)
+        for record in _list(tenant, "POLICY_EXCEPTION", consistent_read=True)
+    ]
+    records.sort(
+        key=lambda item: (int(item.get("created_at", 0)), item.get("id", "")),
+        reverse=True,
+    )
+    return [_policy_exception_view(record, now) for record in records]
+
+
+def _active_policy_exception_bundle(tenant, deployment_id, agent_id):
+    """Return one live signed derived bundle or no exception after reconciliation."""
+    agent_key = f"{deployment_id}:{agent_id}"
+    slot = TABLE.get_item(
+        Key=_item_key(tenant, "POLICY_EXCEPTION_SLOT", agent_key), ConsistentRead=True
+    ).get("Item")
+    if not slot:
+        return None
+    record = _reconcile_policy_exception(
+        tenant, _policy_exception_record(tenant, slot.get("exception_id"))
+    )
+    if record.get("state") != "active":
+        return None
+    # Reconstructing the persisted bundle is intentionally strict. Corrupted
+    # signing evidence must fail the entire refresh, not silently broaden or
+    # preserve uncertain authority through a browser-generated fallback.
+    bundle = bundle_from_record(
+        tenant,
+        record["derived_policy_id"],
+        1,
+        _json(record),
+    )
+    return {"exception": _policy_exception_view(record), "policyBundle": bundle}
 
 
 def _put(tenant, kind, identifier, item):
@@ -10423,13 +10885,18 @@ def handler(event, context):
                 policy = _ensure_policy_governance(tenant, policy)
                 if int(policy.get("version", 0)) <= 0:
                     return _response(409, {"error": "assigned policy has no active version"})
+                exception = _active_policy_exception_bundle(tenant, deployment_id, agent_id)
                 return _response(
                     200,
                     {
                         "agentId": agent_id,
                         "deploymentId": deployment_id,
                         "groupId": group["id"],
-                        "policyBundle": _active_policy_bundle(tenant, policy),
+                        "policyBundle": exception["policyBundle"]
+                        if exception
+                        else _active_policy_bundle(tenant, policy),
+                        "effectiveSource": "temporary_exception" if exception else "active_policy",
+                        "exception": exception["exception"] if exception else None,
                     },
                 )
             if method == "POST" and action == ["approvals", "request"]:
@@ -10621,6 +11088,7 @@ def handler(event, context):
                     "deployments",
                     "agents",
                     "policies",
+                    "policy-exceptions",
                     "groups",
                     "skills",
                     "mcp-servers",
@@ -10643,6 +11111,7 @@ def handler(event, context):
                     "deployments": "DEPLOYMENT",
                     "agents": "AGENT",
                     "policies": "POLICY",
+                    "policy-exceptions": "POLICY_EXCEPTION",
                     "groups": "GROUP",
                     "skills": "SKILL",
                     "mcp-servers": "MCP",
@@ -10658,7 +11127,9 @@ def handler(event, context):
                     "audit": "AUDIT",
                     "approvals": "APPROVAL",
                 }[parts[0]]
-                if parts[0] == "alerts":
+                if parts[0] == "policy-exceptions":
+                    items = _policy_exceptions(tenant)
+                elif parts[0] == "alerts":
                     _reconcile_endpoint_alerts(tenant, _endpoint_evidence_health(tenant))
                     items = [
                         _endpoint_alert_view(item)
@@ -10730,6 +11201,26 @@ def handler(event, context):
                         reverse=True,
                     )
                 return _response(200, {"items": items, "nextCursor": None})
+            if method == "POST" and parts == ["policy-exceptions"]:
+                return _response(201, _create_policy_exception(tenant, _body(event), actor))
+            if (
+                method == "POST"
+                and len(parts) == 3
+                and parts[0] == "policy-exceptions"
+                and parts[2] in {"submit", "decision", "activate", "revoke"}
+            ):
+                action = parts[2]
+                if action == "submit":
+                    if _body(event) != {}:
+                        raise ValueError("policy exception submission accepts no mutable content")
+                    result = _submit_policy_exception(tenant, parts[1], actor)
+                elif action == "decision":
+                    result = _decide_policy_exception(tenant, parts[1], _body(event), actor)
+                elif action == "activate":
+                    result = _activate_policy_exception(tenant, parts[1], _body(event), actor)
+                else:
+                    result = _revoke_policy_exception(tenant, parts[1], _body(event), actor)
+                return _response(200, result)
             if method == "GET" and parts == ["capabilities"]:
                 return _response(200, _fleet(tenant)["capabilities"])
             if method == "GET" and parts in (["discovery"], ["discovery", "export"]):
@@ -12078,13 +12569,18 @@ def handler(event, context):
                 policy = _ensure_policy_governance(tenant, policy)
                 if int(policy.get("version", 0)) <= 0:
                     return _response(409, {"error": "assigned policy has no active version"})
+                exception = _active_policy_exception_bundle(tenant, parts[1], parts[2])
                 return _response(
                     200,
                     {
                         "agentId": parts[2],
                         "deploymentId": parts[1],
                         "groupId": group["id"],
-                        "policyBundle": _active_policy_bundle(tenant, policy),
+                        "policyBundle": exception["policyBundle"]
+                        if exception
+                        else _active_policy_bundle(tenant, policy),
+                        "effectiveSource": "temporary_exception" if exception else "active_policy",
+                        "exception": exception["exception"] if exception else None,
                     },
                 )
             if (

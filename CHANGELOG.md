@@ -1,5 +1,13 @@
 # Changelog
 
+- Added independently reviewed, exact-agent temporary policy exceptions. The
+  AWS control plane permits only a closed set of tool, Claude resource/command
+  and action-budget changes, signs a distinct derived bundle with KMS, rejects
+  overlapping or stale scope, and restores the ordinary signed policy on
+  server-clock expiry, revocation, reassignment or base-policy change. The
+  Policy UI provides typed creation, semantic review, lifecycle evidence and a
+  live restoration countdown.
+
 - Added a persistent Microsoft Entra deployment guard. A strict secret-free
   manifest is preflighted against tenant-specific OIDC metadata, separate
   Secrets Manager values and an existing AAI tenant, then stored as an

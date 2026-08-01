@@ -79,10 +79,11 @@ The detail view shows the stored configuration as a human-readable summary
 grouped into policy sections, along with the groups assigned to it and the
 total affected-agent count. Choose **View JSON** when raw configuration
 inspection is needed, or **Edit policy** to open the typed form.
-When the review is complete, choose **Apply changes**. The control plane
-validates the configuration, records an audit event, increments the policy
-version and makes that version effective for the groups already assigned to
-the policy. A cancel action leaves the current version unchanged.
+Saving validates the configuration and creates an immutable pending draft; it
+does not change fleet authority. The author submits it, a different subject
+approves or rejects with rationale, an approver stages the exact version, and
+explicit activation atomically replaces the active central policy. A cancel
+action leaves the current version unchanged.
 
 ## Review and activation
 
@@ -113,6 +114,25 @@ and selected lookback window.
 Saving a policy is not the same as activating it. Activation should be an
 explicit, audited operation with validation, version selection and a clear
 rollback path.
+
+## Time-limited exceptions
+
+Temporary exceptions are managed separately beneath the policy inventory. The
+typed workflow selects one exact enrolled agent, loads its sole group and
+current base policy, and permits temporary edits only to SDK tools, Claude
+built-in tools, registered Skills/MCP servers, command allow/deny/approval
+patterns and the maximum-action budget. Identity scope, approval provider,
+credentials, isolation, data capture, telemetry and redaction remain inherited
+and the API repeats this closed-field validation.
+
+Every request includes an accountable owner, business purpose and expiry from
+15 minutes to seven days. A different authenticated policy approver must
+approve it. Activation creates a distinct KMS-signed derived policy bundle;
+the UI then shows its exact scope, semantic authority diff, lifecycle evidence
+and server-clock countdown. Expiry, revocation, agent/group reassignment or a
+base-policy change restores the normal signed policy automatically. The UI
+does not describe an approved draft as applied and does not treat an active
+control-plane exception as endpoint-convergence evidence.
 
 ## Out of scope
 

@@ -47,7 +47,15 @@ def _claim_worker(payload: Mapping[str, Any]) -> str:
     return DynamoDbIdempotencyStore(table).claim(record).status.value
 
 
-def _event(path: str, method: str, body: Mapping[str, Any], tenant: str) -> dict[str, Any]:
+def _event(
+    path: str,
+    method: str,
+    body: Mapping[str, Any],
+    tenant: str,
+    *,
+    subject: str = "aws-control-plane-smoke",
+    groups: tuple[str, ...] = ("platform-admin",),
+) -> dict[str, Any]:
     """Build an API Gateway v2 event for an operator-only smoke operation."""
     return {
         "rawPath": path,
@@ -58,8 +66,8 @@ def _event(path: str, method: str, body: Mapping[str, Any], tenant: str) -> dict
                 "jwt": {
                     "claims": {
                         "custom:tenant_id": tenant,
-                        "cognito:groups": ["platform-admin"],
-                        "sub": "aws-control-plane-smoke",
+                        "cognito:groups": list(groups),
+                        "sub": subject,
                     }
                 }
             },
@@ -203,6 +211,8 @@ def main() -> int:
     replacement_agent_id = f"{agent_id}-replacement"
     group_assigned = False
     membership_request_id = f"aws-smoke-membership-{suffix}"
+    policy_exception_id = f"aws-smoke-exception-{suffix}"
+    policy_exception_created = False
     operation_key = f"aws-smoke-operation-{suffix}"
     try:
         unauthenticated, _ = _request(f"{arguments.api_url.rstrip('/')}/enterprise/agents", "GET")
@@ -687,6 +697,155 @@ def main() -> int:
         effective = managed_client.effective_policy()
         if effective.get("policy", {}).get("id") != "policy-safe-default":
             raise RuntimeError("AWS agent client did not receive the assigned policy")
+
+        base_configuration = json.loads(
+            json.dumps(effective_body.get("policyBundle", {}).get("configuration", {}))
+        )
+        candidate_configuration = json.loads(json.dumps(base_configuration))
+        tools = candidate_configuration.setdefault("tools", {})
+        allowed_tools = list(tools.get("allowed", []))
+        if "SyntheticExceptionTool" not in allowed_tools:
+            allowed_tools.append("SyntheticExceptionTool")
+        tools["allowed"] = allowed_tools
+        exception_path = f"/enterprise/policy-exceptions/{policy_exception_id}"
+        exception_author = "aws-control-plane-exception-author"
+        exception_approver = "aws-control-plane-exception-approver"
+        exception_created_response = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                "/enterprise/policy-exceptions",
+                "POST",
+                {
+                    "exceptionId": policy_exception_id,
+                    "deploymentId": deployment_id,
+                    "agentId": agent_id,
+                    "owner": "Automated acceptance",
+                    "purpose": "Prove exact-agent temporary authority and automatic restoration.",
+                    "expiresAt": int(time.time()) + 1_200,
+                    "configuration": candidate_configuration,
+                },
+                arguments.tenant,
+                subject=exception_author,
+                groups=("policy-author",),
+            ),
+        )
+        policy_exception_created = exception_created_response["statusCode"] == 201
+        if not policy_exception_created:
+            raise RuntimeError(
+                f"policy exception draft creation failed: {exception_created_response}"
+            )
+        submitted_exception = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                f"{exception_path}/submit",
+                "POST",
+                {},
+                arguments.tenant,
+                subject=exception_author,
+                groups=("policy-author",),
+            ),
+        )
+        if submitted_exception["statusCode"] != 200:
+            raise RuntimeError(f"policy exception submission failed: {submitted_exception}")
+        self_approval = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                f"{exception_path}/decision",
+                "POST",
+                {"decision": "approved", "reason": "Self approval must fail closed."},
+                arguments.tenant,
+                subject=exception_author,
+                groups=("policy-approver",),
+            ),
+        )
+        if self_approval["statusCode"] != 403:
+            raise RuntimeError(f"policy exception self approval was accepted: {self_approval}")
+        approved_exception = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                f"{exception_path}/decision",
+                "POST",
+                {
+                    "decision": "approved",
+                    "reason": "Independent synthetic acceptance review completed.",
+                },
+                arguments.tenant,
+                subject=exception_approver,
+                groups=("policy-approver",),
+            ),
+        )
+        if approved_exception["statusCode"] != 200:
+            raise RuntimeError(f"policy exception approval failed: {approved_exception}")
+        activated_exception = _invoke(
+            lambda_client,
+            arguments.function_name,
+            _event(
+                f"{exception_path}/activate",
+                "POST",
+                {},
+                arguments.tenant,
+                subject=exception_approver,
+                groups=("policy-approver",),
+            ),
+        )
+        activated_body = json.loads(activated_exception["body"])
+        if (
+            activated_exception["statusCode"] != 200
+            or activated_body.get("state") != "active"
+            or not str(activated_body.get("derivedPolicyId", "")).startswith("exception:")
+        ):
+            raise RuntimeError(f"policy exception activation failed: {activated_exception}")
+        exception_effective_status, exception_effective = _request(
+            f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/effective-policy",
+            "GET",
+            token=session_token,
+            project_root_digest=project_root_digest,
+        )
+        if (
+            exception_effective_status != 200
+            or exception_effective.get("effectiveSource") != "temporary_exception"
+            or "SyntheticExceptionTool"
+            not in exception_effective.get("policyBundle", {})
+            .get("configuration", {})
+            .get("tools", {})
+            .get("allowed", [])
+        ):
+            raise RuntimeError(
+                "signed temporary authority was not returned to the exact agent: "
+                f"{exception_effective_status}, {exception_effective}"
+            )
+        exception_key = {
+            "pk": f"TENANT#{arguments.tenant}",
+            "sk": f"POLICY_EXCEPTION#{policy_exception_id}",
+        }
+        control_table.update_item(
+            Key=exception_key,
+            UpdateExpression="SET expires_at = :expired",
+            ExpressionAttributeValues={":expired": int(time.time()) - 1},
+        )
+        restored_status, restored_policy = _request(
+            f"{arguments.api_url.rstrip('/')}/agent/{deployment_id}/{agent_id}/effective-policy",
+            "GET",
+            token=session_token,
+            project_root_digest=project_root_digest,
+        )
+        if (
+            restored_status != 200
+            or restored_policy.get("effectiveSource") != "active_policy"
+            or restored_policy.get("exception") is not None
+            or restored_policy.get("policyBundle", {}).get("policyId") != "policy-safe-default"
+        ):
+            raise RuntimeError(
+                "server-clock policy exception expiry did not restore base authority: "
+                f"{restored_status}, {restored_policy}"
+            )
+        expired_record = control_table.get_item(Key=exception_key, ConsistentRead=True).get("Item")
+        if not expired_record or expired_record.get("state") != "expired":
+            raise RuntimeError("durable policy exception expiry evidence is missing")
         connected_verification = _invoke(
             lambda_client,
             arguments.function_name,
@@ -1226,6 +1385,19 @@ def main() -> int:
         control_table.delete_item(
             Key={"pk": f"TENANT#{arguments.tenant}", "sk": f"APPROVAL#{approval_id}"}
         )
+        if policy_exception_created:
+            control_table.delete_item(
+                Key={
+                    "pk": f"TENANT#{arguments.tenant}",
+                    "sk": f"POLICY_EXCEPTION#{policy_exception_id}",
+                }
+            )
+            control_table.delete_item(
+                Key={
+                    "pk": f"TENANT#{arguments.tenant}",
+                    "sk": f"POLICY_EXCEPTION_SLOT#{agent_key}",
+                }
+            )
         control_table.delete_item(
             Key={
                 "pk": f"TENANT#{arguments.tenant}",

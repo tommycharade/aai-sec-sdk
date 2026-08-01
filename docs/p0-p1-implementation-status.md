@@ -77,8 +77,8 @@ installation or live host-load acceptance.
 
 | Workstream | Status | Implemented foundation | Major remaining work |
 | --- | --- | --- | --- |
-| Fleet lifecycle | Partial | Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and deterministic reevaluation, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, source-reconciled orphan/leaver detection, AWS-managed Entra/Intune/GitHub discovery connectors, signed endpoint installation/process collection, per-device credential lifecycle and server-derived evidence health | Bulk enrollment import, scheduled dynamic reevaluation, managed upgrades, exception expiry, MDM sensor packaging/rollout, real-provider population coverage and response automation |
-| Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, self-approval denial, semantic authority diff, bounded redacted historical simulation with explicit indeterminacy, staging, atomic activation, tenant-bound asymmetric signed bundles with locally pinned verification, assignment impact and rollback | Scheduling, inheritance, expiring exceptions and measured endpoint convergence |
+| Fleet lifecycle | Partial | Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and deterministic reevaluation, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, server-clock-expiring exact-agent policy exceptions, source-reconciled orphan/leaver detection, AWS-managed Entra/Intune/GitHub discovery connectors, signed endpoint installation/process collection, per-device credential lifecycle and server-derived evidence health | Bulk enrollment import, scheduled dynamic reevaluation, managed upgrades, MDM sensor packaging/rollout, real-provider population coverage and response automation |
+| Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, self-approval denial, semantic authority diff, bounded redacted historical simulation with explicit indeterminacy, staging, atomic activation, tenant-bound asymmetric signed bundles with locally pinned verification, independently approved KMS-signed temporary agent exceptions with automatic secure restoration, assignment impact and rollback | Scheduling, inheritance and measured endpoint convergence |
 | Security operations | Partial | Approvals, audit timeline, independent scoped emergency stops, scheduled server-derived endpoint detections, deduplicated alert lifecycle, audited acknowledgement, durable SNS/SQS delivery, revisioned cases, authoritative endpoint-to-agent binding, evidence-preserving agent quarantine, independently approved versioned endpoint-response rules with preview, action limits, cooldown, idempotent evidence, disable and rollback, session revocation, recovery-gated release and integrity-verifiable content-minimised case export | Broader tool/MCP/repository/configuration anomaly rules, credential-broker response, maintenance windows, baselines, MDM/EDR isolation and external workflow integrations |
 | Reporting and administration | Partial | Fleet posture, health, SLO and compliance summaries plus fail-closed population coverage and content-hashed export | Executive/auditor report packs, connector service identities, Terraform, CMK/residency and private access |
 
@@ -109,6 +109,21 @@ manual-route bypass and transaction races. UI tests prove typed authoring,
 preview-before-apply and exact request-ID reuse. Scheduled service-driven
 reevaluation and endpoint posture attributes remain outstanding and are not
 claimed.
+
+### P1-FLT-09 and P1-POL-10 implementation evidence
+
+The AWS authority boundary permits one open temporary exception per exact
+enrolled agent. Creation derives the sole group and current active policy from
+server-owned state, retains owner, purpose and expiry, and permits only the
+focused tool, Claude resource/command and maximum-action fields exposed by the
+typed UI. `draft -> review -> approved -> active` is compare-and-swap governed
+and self-approval is denied. Activation signs a distinct derived policy bundle
+with KMS. Effective-policy retrieval rechecks agent lifecycle, assignment,
+base version/content hash and server-clock expiry; expiry, revocation or stale
+scope restores the normal signed policy and records lifecycle evidence.
+Contracts cover overlap, role denial, secrets, immutable-field weakening,
+transition replay, signing and expiry. Live deployed acceptance remains
+required before these rows are described as complete for an enterprise pilot.
 
 ## Current delivery slice — Entra identity and trust
 
