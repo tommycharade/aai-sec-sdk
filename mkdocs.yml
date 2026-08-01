@@ -56,6 +56,7 @@ nav:
   - Audit-ready incident case export: incident-case-export-design.md
   - Durable evidence governance: durable-evidence-governance-design.md
   - Asynchronous tenant retention: asynchronous-retention-design.md
+  - Asynchronous mass-retention acceptance — 2026-08-01: async-retention-acceptance-2026-08-01.md
   - Asynchronous evidence assurance acceptance — 2026-08-01: async-evidence-acceptance-2026-08-01.md
   - Approved automatic response rules: automatic-response-rules-design.md
   - Endpoint evidence publisher acceptance — 2026-08-01: endpoint-evidence-acceptance-2026-08-01.md
