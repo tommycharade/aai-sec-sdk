@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "synth": "npm run build && cdk synth",
-    "deploy": "npm run build && cdk deploy --require-approval never",
+    "deploy": "python3 ../../scripts/deploy_aws_control_plane.py deploy",
     "deploy:replica": "npm run build && cdk --app 'npx ts-node --prefer-ts-exts bin/audit-replica.ts' deploy AaiSecAuditReplica --require-approval never",
     "destroy": "npm run build && cdk destroy --force"
   },

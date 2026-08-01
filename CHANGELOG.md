@@ -1,5 +1,11 @@
 # Changelog
 
+- Added a persistent Microsoft Entra deployment guard. A strict secret-free
+  manifest is preflighted against tenant-specific OIDC metadata, separate
+  Secrets Manager values and an existing AAI tenant, then stored as an
+  encrypted SSM parameter. Supported AWS deployments reload it automatically
+  and refuse to remove configured federation when the manifest is missing.
+
 - Added tenant-bound signed policy bundles using a retained asymmetric AWS KMS
   P-256 key. Activation atomically freezes and signs registry-resolved policy,
   existing active versions migrate without authority changes, safe trial

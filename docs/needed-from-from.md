@@ -32,6 +32,12 @@ These inputs are required to replace the deployed `not-configured` Entra OIDC
 and SCIM posture with real joiner, mover, leaver, role-transition, four-eyes
 and access-certification evidence.
 
+Engineering no longer needs six values to be re-entered for every deployment.
+Once supplied, the deployment guard validates the secret references, tenant
+binding and Microsoft OIDC metadata and stores the secret-free configuration in
+encrypted Parameter Store. See the
+[persistent Entra deployment guard](entra-deployment-guard-design.md).
+
 ### Managed Claude Code and Codex hosts
 
 - Confirmation that `/Users/tommooney/dev/kratos` remains the first local

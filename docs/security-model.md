@@ -65,6 +65,18 @@ Access and ID tokens expire after five minutes, bounding mover and leaver
 convergence when refresh reruns lifecycle checks. This is not immediate global
 revocation.
 
+Entra deployment authority is persistent rather than shell-local. A strict,
+secret-free schema binds one canonical Entra tenant and client, separate OIDC
+and SCIM secret resource names, one existing AAI tenant and an opaque
+Conditional Access evidence reference. The supported deployment command stores
+that schema in encrypted AWS Parameter Store and reloads it for every CDK
+deployment. If the stack reports federation configured but the manifest is
+missing, deployment fails closed instead of removing the identity provider.
+Preflight verifies exact tenant-specific Microsoft OIDC metadata and bounded
+secret shape without printing secret values. This protects deployment
+continuity; it does not independently prove the customer's Conditional Access
+policy or prevent an AWS administrator from bypassing the supported command.
+
 Break-glass authority is not represented by a role claim. A strongly
 authenticated incident responder requests exact capabilities for their own
 signed subject, and a different strongly authenticated identity administrator
