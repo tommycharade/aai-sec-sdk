@@ -1504,6 +1504,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../entra-deployment-guard-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Persistent Microsoft Entra deployment guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../access-governance-runbook/" class="md-nav__link">
         
   
@@ -2390,6 +2417,9 @@ deployment.</p>
 npm install
 AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 </code></pre>
+<p><code>npm run deploy</code> is the supported deployment boundary. It loads persistent
+identity configuration through <code>scripts/deploy_aws_control_plane.py</code>; do not
+replace it with a direct <code>npx cdk deploy</code> command.</p>
 <p>The stack creates:</p>
 <ul>
 <li>Cognito User Pool Managed Login with authorization-code OAuth;</li>
@@ -2433,21 +2463,32 @@ authority.</p>
 <p>Create a single-tenant Microsoft Entra application registration. Configure its
 web redirect URI as the Cognito domain followed by <code>/oauth2/idpresponse</code>. Store
 the client secret in AWS Secrets Manager. To enable lifecycle provisioning,
-create a different 32-character-or-longer SCIM bearer secret, enforce MFA for
-the enterprise application with Conditional Access, and deploy with all six
-variables:</p>
-<pre><code class="language-bash">ENTRA_TENANT_ID=&lt;entra-directory-uuid&gt; \
-ENTRA_CLIENT_ID=&lt;entra-application-client-id&gt; \
-ENTRA_CLIENT_SECRET_NAME=&lt;secrets-manager-secret-name&gt; \
-ENTRA_AAI_TENANT_ID=&lt;provisioned-aai-tenant-id&gt; \
-ENTRA_SCIM_TOKEN_SECRET_NAME=&lt;scim-bearer-secret-name&gt; \
-ENTRA_STRONG_AUTH_ENFORCED=true \
+create a different 32-character-or-longer SCIM bearer secret and enforce MFA
+for the enterprise application with Conditional Access.</p>
+<p>Copy <code>infra/aws-control-plane/entra-deployment.example.json</code> to a protected
+location outside the repository and fill in the IDs, secret resource names and
+an opaque Conditional Access evidence reference. Validate and persist it:</p>
+<pre><code class="language-bash">python3 scripts/deploy_aws_control_plane.py check \
+  --config /secure/path/entra-deployment.json \
+  --profile p1 --region eu-west-2
+
+python3 scripts/deploy_aws_control_plane.py configure \
+  --config /secure/path/entra-deployment.json \
+  --confirm-conditional-access \
+  --profile p1 --region eu-west-2
+
+cd infra/aws-control-plane
 AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 </code></pre>
-<p>The deployment fails if only some values are present or if the Entra tenant is
-not a tenant-specific UUID. The generated OIDC provider requests only
+<p>The encrypted Parameter Store manifest keeps identity references present on
+subsequent deployments. A configured stack with a missing manifest fails
+closed instead of silently removing federation. Preflight also requires both
+secrets, the bound AAI tenant and exact tenant-specific Microsoft OIDC metadata.
+The generated OIDC provider requests only
 <code>openid</code>, <code>email</code>, and <code>profile</code>; its secret is a CloudFormation dynamic
 reference and is not copied to Lambda or output values.</p>
+<p>See the <a href="../entra-deployment-guard-design/">persistent Entra deployment guard</a>
+for guarantees, non-guarantees and recovery.</p>
 <p>The pre-token trigger emits a server-owned strong-authentication assertion
 only when <code>ENTRA_STRONG_AUTH_ENFORCED=true</code> and the exact configured Entra
 provider authenticated the operator. No mutable user attribute or browser

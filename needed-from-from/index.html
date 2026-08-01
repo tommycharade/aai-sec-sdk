@@ -1656,6 +1656,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../entra-deployment-guard-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Persistent Microsoft Entra deployment guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../access-governance-runbook/" class="md-nav__link">
         
   
@@ -2342,6 +2369,11 @@ the approved secrets manager and provide only the secret resource name.</p>
 <p>These inputs are required to replace the deployed <code>not-configured</code> Entra OIDC
 and SCIM posture with real joiner, mover, leaver, role-transition, four-eyes
 and access-certification evidence.</p>
+<p>Engineering no longer needs six values to be re-entered for every deployment.
+Once supplied, the deployment guard validates the secret references, tenant
+binding and Microsoft OIDC metadata and stores the secret-free configuration in
+encrypted Parameter Store. See the
+<a href="../entra-deployment-guard-design/">persistent Entra deployment guard</a>.</p>
 <h3 id="managed-claude-code-and-codex-hosts">Managed Claude Code and Codex hosts</h3>
 <ul>
 <li>Confirmation that <code>/Users/tommooney/dev/kratos</code> remains the first local

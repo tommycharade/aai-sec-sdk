@@ -16,7 +16,7 @@
         <link rel="prev" href="../managed-intune-discovery-acceptance-2026-08-01/">
       
       
-        <link rel="next" href="../access-governance-runbook/">
+        <link rel="next" href="../entra-deployment-guard-design/">
       
       
         
@@ -1667,6 +1667,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../entra-deployment-guard-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Persistent Microsoft Entra deployment guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../access-governance-runbook/" class="md-nav__link">
         
   
@@ -2363,17 +2390,27 @@ fleet workflow.</p>
 <p>Create a random SCIM bearer of at least 32 characters and store it as either a
 raw Secrets Manager <code>SecretString</code> or JSON with one <code>token</code> field. Restrict
 read access to the generated SCIM Lambda role.</p>
-<p>Deploy all OIDC variables plus the SCIM secret name:</p>
-<pre><code class="language-bash">ENTRA_TENANT_ID=&lt;entra-directory-uuid&gt; \
-ENTRA_CLIENT_ID=&lt;entra-application-client-id&gt; \
-ENTRA_CLIENT_SECRET_NAME=&lt;oidc-secret-name&gt; \
-ENTRA_AAI_TENANT_ID=&lt;provisioned-aai-tenant-id&gt; \
-ENTRA_SCIM_TOKEN_SECRET_NAME=&lt;scim-bearer-secret-name&gt; \
-ENTRA_STRONG_AUTH_ENFORCED=true \
+<p>Create a strict secret-free deployment manifest from
+<code>infra/aws-control-plane/entra-deployment.example.json</code>. Keep the populated
+file outside the repository. Run read-only preflight, explicitly confirm the
+retained Conditional Access review, and persist the references before deploy:</p>
+<pre><code class="language-bash">python3 scripts/deploy_aws_control_plane.py check \
+  --config /secure/path/entra-deployment.json \
+  --profile p1 --region eu-west-2
+
+python3 scripts/deploy_aws_control_plane.py configure \
+  --config /secure/path/entra-deployment.json \
+  --confirm-conditional-access \
+  --profile p1 --region eu-west-2
+
+cd infra/aws-control-plane
 AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 </code></pre>
 <p>Record the <code>MicrosoftEntraScimEndpoint</code> stack output. The stack rejects a SCIM
-secret configured without the complete Entra OIDC binding.</p>
+secret configured without the complete Entra OIDC binding. The supported
+deployment path reloads the encrypted manifest on every run and refuses a
+configured stack whose manifest is missing. See the
+<a href="../entra-deployment-guard-design/">deployment guard design</a>.</p>
 <h2 id="entra-enterprise-application-setup">Entra enterprise application setup</h2>
 <ol>
 <li>Use a single-tenant enterprise application and the Cognito callback ending

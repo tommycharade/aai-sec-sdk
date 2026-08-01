@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/getting-started/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/entra-deployment-guard-design/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../entra-scim-runbook/">
       
       
-        <link rel="next" href="../security-model/">
+        <link rel="next" href="../access-governance-runbook/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Getting started - Agentic AI Security SDK</title>
+        <title>Persistent Microsoft Entra deployment guard - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#getting-started" class="md-skip">
+        <a href="#persistent-microsoft-entra-deployment-guard" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Getting started
+              Persistent Microsoft Entra deployment guard
             
           </span>
         </div>
@@ -286,37 +286,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Getting started
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   
@@ -332,37 +305,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#run-the-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run the example
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1559,10 +1501,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../entra-deployment-guard-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Persistent Microsoft Entra deployment guard
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1578,6 +1547,92 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#typed-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typed manifest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-and-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure and recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2122,10 +2177,65 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#run-the-example" class="md-nav__link">
+  <a href="#decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Run the example
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#typed-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Typed manifest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-and-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure and recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test evidence
       
     </span>
   </a>
@@ -2152,30 +2262,95 @@
   
 
 
-<h1 id="getting-started">Getting started</h1>
-<p>The SDK is released under Apache-2.0. Clone the
-repository, install the development dependencies, and validate the project:</p>
-<pre><code class="language-bash">git clone https://github.com/tommycharade/aai-sec-sdk.git
-cd aai-sec-sdk
-python3 -m pip install -e '.[dev,docs]'
-make check
+<h1 id="persistent-microsoft-entra-deployment-guard">Persistent Microsoft Entra deployment guard</h1>
+<h2 id="decision">Decision</h2>
+<p>Microsoft Entra identity configuration is deployment-owned, but it must not be
+ephemeral. The supported AWS deployment workflow stores a strict, secret-free
+manifest in an encrypted AWS Systems Manager Parameter Store parameter and
+reloads it for every deployment. OIDC and SCIM secret values remain in AWS
+Secrets Manager and are never copied into the manifest, repository, browser,
+Lambda environment or command output.</p>
+<p>The parameter name is stack-specific:</p>
+<pre><code class="language-text">/aai-sec/&lt;stack-name&gt;/entra-deployment
 </code></pre>
-<p>When using the runtime, the intended integration shape is:</p>
+<p>This closes an operational authority gap in the original environment-variable
+workflow: a routine CDK deployment from a clean shell could otherwise omit the
+six Entra variables and remove federation from the Cognito client.</p>
+<h2 id="typed-manifest">Typed manifest</h2>
+<p>Use <code>infra/aws-control-plane/entra-deployment.example.json</code> as the schema-v1
+template. The parser rejects unknown, missing and duplicate fields; noncanonical
+UUIDs; reused OIDC/SCIM secrets; invalid AWS secret names; an absent AAI tenant;
+and a deployment that does not explicitly assert reviewed Conditional Access.</p>
+<p><code>conditionalAccessEvidenceRef</code> is an opaque change, ticket or evidence
+identifier. It must not contain a password, token or exported sign-in record.
+The confirmation records deployment intent; it does not independently inspect
+the customer's Conditional Access policy or prove that MFA occurred.</p>
+<h2 id="workflow">Workflow</h2>
 <ol>
-<li>Create an authenticated execution context.</li>
-<li>Register tools explicitly with typed arguments and impact metadata.</li>
-<li>Pass model proposals to the SDK execution boundary.</li>
-<li>Handle structured executed, denied, approval-required, and failed outcomes.</li>
-<li>Export the resulting trace and audit events.</li>
+<li>Deploy the base stack and provision the AAI tenant that will own the
+   enterprise directory.</li>
+<li>Create separate OIDC and SCIM secret values in AWS Secrets Manager.</li>
+<li>Copy the example manifest outside the repository and populate only IDs,
+   secret resource names and the Conditional Access evidence reference.</li>
+<li>Run a read-only preflight:</li>
 </ol>
-<p>The SDK does not make an LLM trustworthy. It limits what an incorrect or manipulated model can cause at the execution boundary.</p>
-<h2 id="run-the-example">Run the example</h2>
-<pre><code class="language-bash">python examples/support_agent.py
+<p><code>bash
+   python3 scripts/deploy_aws_control_plane.py check \
+     --config /secure/path/entra-deployment.json \
+     --profile p1 --region eu-west-2</code></p>
+<ol>
+<li>After reviewing the MFA-enforcing policy evidence, persist the manifest:</li>
+</ol>
+<p><code>bash
+   python3 scripts/deploy_aws_control_plane.py configure \
+     --config /secure/path/entra-deployment.json \
+     --confirm-conditional-access \
+     --profile p1 --region eu-west-2</code></p>
+<ol>
+<li>Deploy from <code>infra/aws-control-plane</code> with <code>npm run deploy</code>. The command
+   reloads the manifest, repeats preflight, injects only secret names into CDK,
+   and verifies that CloudFormation reports OIDC and SCIM configured.</li>
+<li>Run the live SCIM acceptance command and the real OIDC joiner, mover, leaver
+   and two-person MFA exercises in the Entra runbook.</li>
+</ol>
+<p><code>status</code> reports only configuration posture:</p>
+<pre><code class="language-bash">python3 scripts/deploy_aws_control_plane.py status \
+  --profile p1 --region eu-west-2
 </code></pre>
-<p>The example demonstrates read, write, approval, credential, idempotency, audit,
-cross-tenant, and emergency-stop paths using synthetic data. It deliberately
-does not connect to a model or network. Read <a href="../production-readiness/">Production readiness</a>
-before connecting real tools.</p>
+<h2 id="security-invariants">Security invariants</h2>
+<ul>
+<li>A configured stack without its persisted manifest cannot use the supported
+  deployment command. Missing deployment state fails closed instead of
+  silently removing enterprise SSO.</li>
+<li>The preflight requires an exact tenant-specific Microsoft issuer and fixed
+  authorization, token and signing-key endpoints. <code>common</code>, <code>organizations</code>,
+  redirects and foreign hosts are rejected.</li>
+<li>OIDC and SCIM secret values are read only into bounded process memory for
+  shape validation. They are never sent to CDK or rendered in output.</li>
+<li>The manifest binds one Entra directory to one existing server-owned AAI
+  tenant. Browser state cannot select the tenant.</li>
+<li>Persistence requires an explicit Conditional Access confirmation. The
+  deployment flag is still an administrator assertion and must be backed by
+  retained customer evidence and live MFA acceptance.</li>
+<li>Direct use of <code>npx cdk deploy</code> is an unsupported administrative bypass. CI,
+  runbooks and operators must use <code>npm run deploy</code>; AWS IAM and change control
+  remain responsible for restricting who may update the stack directly.</li>
+</ul>
+<h2 id="failure-and-recovery">Failure and recovery</h2>
+<p>Malformed persisted state, inaccessible secrets, a missing AAI tenant,
+unexpected OIDC metadata and incomplete post-deployment outputs all stop the
+workflow. No command automatically creates or rotates secret values.</p>
+<p>If the SSM parameter is lost while Entra remains configured, recover it from
+approved change evidence and run <code>check</code> before <code>configure</code>. Do not disable the
+guard or redeploy with empty Entra variables. Parameter and stack updates are
+visible in AWS CloudTrail; the product's access-certification export remains a
+separate application-level record.</p>
+<h2 id="test-evidence">Test evidence</h2>
+<p><code>tests/test_deploy_aws_control_plane.py</code> covers strict parsing, duplicate fields,
+MFA confirmation, separate secret references, bounded secret shapes, exact
+tenant-specific discovery, existing AAI tenant binding, missing-manifest
+denial, deployment environment contents and post-deployment verification.
+Synthetic values are used throughout.</p>
 
 
 
