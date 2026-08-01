@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/managed-endpoint-deployment-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/signed-policy-bundles-design/">
       
       
-        <link rel="prev" href="../managed-host-configuration/">
+        <link rel="prev" href="../policy-change-assurance-acceptance-2026-08-01/">
       
       
-        <link rel="next" href="../managed-package-distribution-design/">
+        <link rel="next" href="../claude-managed-resources/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Managed endpoint deployment design - Agentic AI Security SDK</title>
+        <title>Signed policy bundles - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#managed-endpoint-deployment-design" class="md-skip">
+        <a href="#signed-policy-bundles" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Managed endpoint deployment design
+              Signed policy bundles
             
           </span>
         </div>
@@ -988,10 +988,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../signed-policy-bundles-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Signed policy bundles
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1007,6 +1034,125 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#canonical-signed-payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Canonical signed payload
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runtime-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#existing-active-policies-and-trials" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Existing active policies and trials
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rotation-and-compromise-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotation and compromise response
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1150,37 +1296,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Managed endpoint deployment design
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../managed-endpoint-deployment-design/" class="md-nav__link">
         
   
   
@@ -1196,81 +1315,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#threat-and-trust-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Threat and trust boundary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#package-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Package contract
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#installation-transaction" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Installation transaction
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#creating-a-package" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Creating a package
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#evidence-and-remaining-work" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Evidence and remaining work
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2112,10 +2156,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#threat-and-trust-boundary" class="md-nav__link">
+  <a href="#decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Threat and trust boundary
+        Decision
       
     </span>
   </a>
@@ -2123,10 +2167,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#package-contract" class="md-nav__link">
+  <a href="#trust-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Package contract
+        Trust boundary
       
     </span>
   </a>
@@ -2134,10 +2178,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#installation-transaction" class="md-nav__link">
+  <a href="#canonical-signed-payload" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Installation transaction
+        Canonical signed payload
       
     </span>
   </a>
@@ -2145,10 +2189,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#creating-a-package" class="md-nav__link">
+  <a href="#runtime-verification" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Creating a package
+        Runtime verification
       
     </span>
   </a>
@@ -2156,10 +2200,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#evidence-and-remaining-work" class="md-nav__link">
+  <a href="#existing-active-policies-and-trials" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Evidence and remaining work
+        Existing active policies and trials
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rotation-and-compromise-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotation and compromise response
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required evidence
       
     </span>
   </a>
@@ -2186,126 +2274,148 @@
   
 
 
-<h1 id="managed-endpoint-deployment-design">Managed endpoint deployment design</h1>
-<p>This design connects a centrally compiled Claude Code or Codex policy to
-administrator-owned endpoint files without treating desired state as proof of
-enforcement. It introduces a deterministic deployment package and an optional
-offline privileged installer. It does not turn the SDK process, model, browser,
-or package file into an endpoint administrator.</p>
-<h2 id="threat-and-trust-boundary">Threat and trust boundary</h2>
-<p>The package file, its path, its JSON fields and every embedded artifact are
-untrusted input. An attacker may alter bytes, add duplicate JSON keys, replace
-paths, target another host, substitute a hook, race a symlink or interrupt a
-multi-file update. The installer grants no authority from those values alone.</p>
-<p>Endpoint management must deliver these four expected values through an
-authenticated, administrator-controlled channel:</p>
-<ul>
-<li>package SHA-256;</li>
-<li>compiled bundle SHA-256;</li>
-<li>exact host (<code>claude-code</code> or <code>codex-cli</code>); and</li>
-<li>exact platform (<code>macos</code> or <code>linux</code>).</li>
-</ul>
-<p>Delivering a package and its expected digest together over an unauthenticated
-channel provides no integrity. A production adapter should pin the digest in
-MDM, signed device-management metadata or a future control-plane signature.
-The current AWS desired-state contract does not yet distribute package bytes;
-that remains the next control-plane integration slice.</p>
-<h2 id="package-contract">Package contract</h2>
-<p><code>ManagedDeploymentPackage</code> serializes canonical schema-1 JSON containing:</p>
-<ul>
-<li>host, host version and operating-system family;</li>
-<li>policy ID and immutable policy version;</li>
-<li>the compiler's complete bundle digest;</li>
-<li>the complete ordered set of documented managed files, including exact UTF-8
-  content and individual digests; and</li>
-<li>one to eight administrator-owned executable prerequisites with absolute path
-  and digest.</li>
-</ul>
-<p>The package contains no credentials, bearer tokens or environment values. It
-rejects unknown or duplicate fields, non-canonical JSON, unknown hosts,
-incomplete artifact sets, unsafe paths, duplicate executables, oversized data,
-digest mismatches and cross-platform executable locations.</p>
-<p>The package deliberately does not embed executable code. Endpoint management
-installs the reviewed native hook and MCP gateway first under
-<code>/opt/aai-security/</code>. The installer verifies regular-file type, administrator
-ownership, restrictive write permissions, executable mode and exact bytes
-before touching host configuration. This prevents a valid configuration from
-activating an unreviewed local enforcement process.</p>
-<h2 id="installation-transaction">Installation transaction</h2>
-<p><code>scripts/install_managed_host_package.py</code> has two explicit modes:</p>
-<ul>
-<li><code>--check</code> performs target, prerequisite and filesystem preflight without
-  changing endpoint state; and</li>
-<li><code>--install</code> additionally requires administrator identity and performs the
-  update.</li>
-</ul>
-<p>Before the first write it validates every package field, prerequisite,
-existing target and parent directory. It rejects symlinks, devices, foreign
-ownership and group/world-writable state. New files are staged beside their
-targets with administrator ownership and mode <code>0644</code>, flushed to disk and then
-replaced with same-filesystem renames. Existing files are moved to unique
-same-directory backups. Any later replacement or directory-sync failure rolls
-back every changed target in reverse order. Backups are removed only after all
-artifacts are installed.</p>
-<p>Windows installation remains fail-closed until an ACL-aware adapter can prove
-owner SID, inherited ACLs and protected path semantics. The package format can
-represent Windows targets, but the POSIX installer cannot apply them.</p>
-<h2 id="creating-a-package">Creating a package</h2>
-<p>This abbreviated example assumes the native hook has already been built and
-reviewed. The package digest must be copied into authenticated MDM metadata,
-not derived from the downloaded package on the endpoint:</p>
-<pre><code class="language-python">import hashlib
-from pathlib import Path
-
-from agentic_security import (
-    ManagedDeploymentPackage,
-    ManagedExecutableRequirement,
-)
-
-# `bundle` is the result of ManagedConfigurationCompiler.compile(...).
-hook_bytes = Path(&quot;/staging/native-policy&quot;).read_bytes()
-package = ManagedDeploymentPackage.from_bundle(
-    bundle,
-    required_executables=(
-        ManagedExecutableRequirement(
-            &quot;/opt/aai-security/hooks/native-policy&quot;,
-            hashlib.sha256(hook_bytes).hexdigest(),
-        ),
-    ),
-)
-Path(&quot;managed-endpoint-package.json&quot;).write_bytes(package.to_json())
-print(package.package_sha256)
+<h1 id="signed-policy-bundles">Signed policy bundles</h1>
+<h2 id="decision">Decision</h2>
+<p>Every newly activated AWS policy is frozen into one canonical effective
+configuration and signed by a deployment-owned asymmetric AWS KMS key. An
+enrolled runtime must verify the signature, tenant, policy identity, version and
+content hash against an administrator-pinned trust bundle before it constructs
+or replaces runtime policy authority.</p>
+<p>This closes P1-POL-08 for the implemented AWS and Python runtime boundary. A
+configuration hash remains useful evidence, but it is not an authenticity
+control and is never accepted as a substitute for a valid trusted signature.</p>
+<h2 id="trust-boundary">Trust boundary</h2>
+<p>The model, project repository and browser are outside the trust boundary. They
+cannot choose the signing key, signature, tenant identity or accepted trust
+anchor.</p>
+<pre><code class="language-text">reviewed policy + enabled registry resources
+                    |
+                    v
+          canonical effective bundle
+                    |
+             AWS KMS Sign
+                    |
+                    v
+       immutable active version record
+                    |
+           authenticated retrieval
+                    |
+                    v
+ administrator-pinned public trust bundle
+                    |
+        local signature verification
+                    |
+                    v
+          runtime policy replacement
 </code></pre>
-<p>On the endpoint, first run no-write preflight and compare the reported policy,
-bundle and package identifiers with the rollout record:</p>
-<pre><code class="language-bash">PYTHONPATH=src python scripts/install_managed_host_package.py \
-  --package /var/lib/aai-security/managed-endpoint-package.json \
-  --expected-package-sha256 &lt;digest-from-authenticated-mdm&gt; \
-  --expected-bundle-hash &lt;desired-bundle-digest&gt; \
-  --host claude-code \
-  --platform macos \
-  --check
+<p>The private signing key remains inside KMS. The Lambda receives only
+<code>kms:Sign</code> for the exact key. Runtime hosts receive public verification keys
+through an endpoint-management or other administrator-owned channel; they do
+not trust a key merely because the policy response contains it.</p>
+<h2 id="canonical-signed-payload">Canonical signed payload</h2>
+<p>The signed payload is UTF-8 JSON with sorted keys and compact separators:</p>
+<pre><code class="language-json">{
+  &quot;configuration&quot;: {},
+  &quot;contentHash&quot;: &quot;&lt;sha256&gt;&quot;,
+  &quot;policyId&quot;: &quot;policy-safe-default&quot;,
+  &quot;schemaVersion&quot;: 1,
+  &quot;tenantId&quot;: &quot;tenant-example&quot;,
+  &quot;version&quot;: 2
+}
 </code></pre>
-<p>After approval, repeat with <code>sudo</code> and <code>--install</code>. Restart the host, use
-<code>measure_managed_configuration</code> to prove exact protected bytes, then run live
-allowed, denied, approval-required and unapproved-MCP probes. File installation
-alone is never recorded as proof that Claude Code or Codex loaded the policy.</p>
-<h2 id="evidence-and-remaining-work">Evidence and remaining work</h2>
-<p>Automated contracts cover canonical parsing, package and artifact tampering,
-duplicate keys, traversal, cross-target substitution, missing or changed
-executables, symlink targets, non-administrator calls, restrictive installed
-modes and complete rollback after a synthetic second-file failure.</p>
-<p>This closes the repository's package/install transaction gap but does not
-complete P0-01 through P0-03. Authenticated package publication and enrolled
-agent retrieval are now provided by the
-<a href="../managed-package-distribution-design/">managed package distribution</a>
-contract. Remaining acceptance requires:</p>
+<p><code>contentHash</code> is SHA-256 over the separately canonicalized configuration. KMS
+signs the SHA-256 digest of the complete payload using <code>ECDSA_SHA_256</code> and a
+P-256 key. The wire envelope adds the KMS key ARN, algorithm, base64 signature
+and signing time; none of those fields can alter the payload meaning.</p>
+<p>The effective configuration is resolved and frozen at activation. Referenced
+Skills and MCP servers therefore cannot silently change an active policy.
+Changing a registry resource requires a new governed policy version and a new
+signature.</p>
+<h2 id="runtime-verification">Runtime verification</h2>
+<p>The Python SDK accepts a bounded trust bundle containing one or more explicit
+KMS key ARNs and P-256 public keys. Multiple keys permit planned rotation. The
+runtime rejects:</p>
 <ul>
-<li>MDM deployment of the SDK wheel, gateway, native hook and package;</li>
-<li>approved-launch enforcement, including Codex flag restrictions;</li>
-<li>real root-owned macOS/Linux installation and host restart evidence;</li>
-<li>live Claude/Codex effective-source and action probes; and</li>
-<li>Windows ACL installation plus hardware-backed endpoint identity.</li>
+<li>missing signing metadata;</li>
+<li>unknown keys or algorithms;</li>
+<li>malformed or duplicate trust-bundle entries;</li>
+<li>invalid public keys or signatures;</li>
+<li>modified configuration, content hash, tenant, policy ID or version;</li>
+<li>booleans or non-positive values where an integer version is required;</li>
+<li>oversized, deeply nested or non-JSON policy content; and</li>
+<li>a response for a tenant other than the constructor-owned expected tenant.</li>
+</ul>
+<p>Verification happens before returning effective policy to the host integration.
+A failed refresh cannot preserve an unverified replacement as authority. The
+existing runtime outage behavior remains fail closed.</p>
+<p>Export the public trust bundle with
+<code>scripts/export_policy_trust_bundle.py</code>, then install it through MDM, endpoint
+management or another administrator-owned channel. The exporter validates KMS
+key usage, P-256 key spec and the sole <code>ECDSA_SHA_256</code> algorithm before writing
+a new file; it refuses to overwrite an existing trust bundle. Production
+runtimes require root ownership and reject group/world-writable files and
+symlinks. The operator API may display a key ARN and SHA-256 fingerprint for
+provenance, but the SDK never automatically trusts those network-returned
+bytes.</p>
+<h2 id="existing-active-policies-and-trials">Existing active policies and trials</h2>
+<p>Activation writes signed metadata atomically with the active version. Trial
+provisioning signs the safe default before any policy record is stored. Existing
+active versions are migrated once by signing their exact stored configuration;
+the migration changes no policy authority and records an audit event. If KMS is
+unavailable or the stored content hash is inconsistent, migration and effective
+policy retrieval fail closed.</p>
+<h2 id="rotation-and-compromise-response">Rotation and compromise response</h2>
+<p>Rotation is explicit because runtimes must receive the new public key before
+the control plane uses it:</p>
+<ol>
+<li>Create the replacement KMS signing key.</li>
+<li>Distribute a trust bundle containing old and new public keys.</li>
+<li>Verify endpoint adoption and trust-bundle digest.</li>
+<li>Configure the control plane to sign new activations with the new key.</li>
+<li>Re-sign or replace active policies through governed activation.</li>
+<li>Remove the old key only after no active bundle references it.</li>
+</ol>
+<p>Emergency response may disable the KMS key and activate server-owned stops.
+Disabling a key prevents new signatures; already signed bundles remain
+cryptographically valid until the old public trust anchor is removed. Incident
+runbooks must therefore combine key disablement with session revocation,
+emergency stop and trust-bundle rollout.</p>
+<h2 id="guarantees">Guarantees</h2>
+<ul>
+<li>An altered or unsigned bundle cannot be loaded by a correctly configured SDK
+  runtime.</li>
+<li>Signature verification is local and does not depend on the model or browser.</li>
+<li>Tenant, policy ID, version, configuration and content hash are inseparable
+  under the signature.</li>
+<li>Registry-resolved execution configuration is immutable for the active
+  version.</li>
+<li>The private signing key is non-exportable and is not stored in DynamoDB,
+  project files, Lambda environment values or telemetry.</li>
+</ul>
+<h2 id="non-guarantees">Non-guarantees</h2>
+<ul>
+<li>A signature does not prove that policy content is safe, correctly reviewed or
+  deployed to every endpoint.</li>
+<li>A user-writable trust bundle is not an enterprise trust anchor. Production
+  deployments must install it through an administrator-owned channel.</li>
+<li>This control does not replace runtime attestation, managed-host enforcement,
+  endpoint convergence monitoring, emergency stop or independent approval.</li>
+<li>ECDSA authenticity does not make ordinary DynamoDB records WORM evidence.</li>
+<li>A compromised process with authority to replace the pinned trust bundle can
+  choose a different signer; file ownership and endpoint management remain
+  required controls.</li>
+</ul>
+<h2 id="required-evidence">Required evidence</h2>
+<ul>
+<li>SDK unit and adversarial tests with a real P-256 key pair.</li>
+<li>AWS contract tests proving exact KMS key/algorithm/digest use, atomic signed
+  activation, signed trial defaults and no unsigned effective-policy response.</li>
+<li>Tests for modified payloads, untrusted keys, malformed signatures, tenant
+  replay, resource mutation after activation and KMS outage.</li>
+<li>UI evidence that operators can distinguish signed, unsigned and migration
+  failure states and identify the active key without exposing private material.</li>
+<li>Live AWS acceptance proving signing, local verification and cleanup with
+  synthetic data.</li>
 </ul>
 
 

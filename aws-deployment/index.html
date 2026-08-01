@@ -991,6 +991,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../signed-policy-bundles-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Signed policy bundles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../claude-managed-resources/" class="md-nav__link">
         
   
@@ -1756,6 +1783,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#policy-signing-trust" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy signing trust
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#cross-region-audit-recovery" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2223,6 +2261,17 @@
   
     <nav class="md-nav" aria-label="Verification">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#policy-signing-trust" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy signing trust
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#cross-region-audit-recovery" class="md-nav__link">
@@ -2709,6 +2758,25 @@ rate limits and domain or invitation policy.</p>
 the claim-bearing Cognito identity token in memory and uses PKCE; long-lived
 bearer tokens must not be placed in Vite environment files or source control.</p>
 <h2 id="verification">Verification</h2>
+<h3 id="policy-signing-trust">Policy signing trust</h3>
+<p>The stack creates a retained asymmetric P-256 KMS key and outputs
+<code>PolicySigningKeyArn</code>. Export its public key using an operator AWS profile:</p>
+<pre><code class="language-bash">POLICY_KEY_ARN=&quot;$(aws cloudformation describe-stacks \
+  --stack-name AaiSecControlPlane --profile p1 --region eu-west-2 \
+  --query 'Stacks[0].Outputs[?OutputKey==`PolicySigningKeyArn`].OutputValue' \
+  --output text)&quot;
+python3 scripts/export_policy_trust_bundle.py \
+  --profile p1 --region eu-west-2 --key-arn &quot;$POLICY_KEY_ARN&quot; \
+  --output &quot;$PWD/policy-trust.json&quot;
+sudo install -d -o root -g wheel -m 0755 &quot;/Library/Application Support/AAISecurity&quot;
+sudo install -o root -g wheel -m 0644 &quot;$PWD/policy-trust.json&quot; \
+  &quot;/Library/Application Support/AAISecurity/policy-trust.json&quot;
+</code></pre>
+<p>Use <code>root:root</code> and <code>/etc/aai-security/policy-trust.json</code> on Linux. Public key
+bytes are not secret, but the installed file is authority-sensitive: a process
+that can replace it can choose a different signer. Do not download and trust a
+key from an effective-policy response. Rotation distributes an overlapping
+old/new trust bundle before the control plane selects the new signer.</p>
 <p>The reproducible deployment smoke test requires AWS credentials with access
 to invoke the control-plane Lambda and the two DynamoDB tables. It creates and
 removes synthetic records and must be run against a non-production tenant:</p>
@@ -2720,6 +2788,7 @@ removes synthetic records and must be run against a non-production tenant:</p>
   --audit-bucket &lt;audit-bucket&gt; \
   --alerts-topic-arn &lt;security-alerts-topic-arn&gt; \
   --alerts-queue-arn &lt;security-alerts-queue-arn&gt; \
+  --policy-trust-bundle &quot;$PWD/policy-trust.json&quot; \
   --region eu-west-2 --profile p1
 </code></pre>
 <p>The test prints one passing result only after it has checked unauthenticated
@@ -2731,7 +2800,9 @@ replay, terminal write, and a <code>GuardedRuntime</code> execution that replays
 <code>ExecutionResult</code> without invoking the synthetic side effect twice. It also
 checks the deployed audit bucket's compliance retention, versioning, and
 inability to delete a retained object version, and publishes a synthetic alert
-through SNS to verify delivery into the durable SQS operations queue.</p>
+through SNS to verify delivery into the durable SQS operations queue.
+It also verifies the tenant-bound KMS signature locally against the explicitly
+supplied public trust bundle; successful HTTPS transport alone is insufficient.</p>
 <p>Endpoint detection adds a five-minute EventBridge rule, a sharded tenant GSI,
 a dedicated retry-exhaustion DLQ and a CloudWatch alarm. New endpoint alerts
 are normalized onto the existing SNS/SQS operations channel. This is a real

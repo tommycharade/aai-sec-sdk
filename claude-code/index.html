@@ -1287,6 +1287,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../signed-policy-bundles-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Signed policy bundles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../claude-managed-resources/" class="md-nav__link">
         
   
@@ -2628,12 +2655,17 @@ the connected project under <strong>Agents</strong>; heartbeat expiry changes it
 <p>First, have an authenticated platform operator create a one-time bootstrap
 token for the registered deployment. The AWS hosted control plane exposes this
 as <code>POST /enterprise/agents/bootstrap</code>; the response contains the token once
-and it must not be stored in the project. Then run onboarding with that token:</p>
+and it must not be stored in the project. Before onboarding, a platform
+administrator must export the deployed KMS public key and install the trust
+bundle as a root-owned, non-writable file. The project and Claude process must
+not create or replace this file. See <a href="../signed-policy-bundles-design/">signed policy bundles</a>
+and <a href="../aws-deployment/#policy-signing-trust">AWS deployment</a>. Then run:</p>
 <pre><code class="language-bash">python3 /path/to/aai-sec-sdk/scripts/onboard_claude.py \
   --project-root &quot;$PWD&quot; \
   --enterprise-control-plane-url https://&lt;api-id&gt;.execute-api.eu-west-2.amazonaws.com \
   --deployment-id deployment-prod-eu \
   --agent-id claude-platform-prod \
+  --policy-trust-bundle &quot;/Library/Application Support/AAISecurity/policy-trust.json&quot; \
   --bootstrap-token &quot;&lt;one-time-token&gt;&quot;
 claude
 </code></pre>
@@ -2649,6 +2681,11 @@ Claude. The MCP heartbeat rotates the cache and each native hook process reads
 the current value, so a healthy session continues beyond the original bearer.
 Use the exact value from <code>pwd -P</code> when registering the agent; broad, relative,
 or lexically non-canonical roots are rejected.</p>
+<p>Bootstrap enrollment derives the tenant ID from the authenticated server
+response. Repeat onboarding without a new bootstrap must also supply
+<code>--tenant-id &lt;server-assigned-tenant&gt;</code> (or <code>AAI_SEC_TENANT_ID</code>). The generated
+hook and MCP process refuse unsigned, altered, cross-tenant, unknown-key or
+untrusted policy responses before policy is loaded.</p>
 <p>The real-device acceptance run for Claude Code 2.1.220 is recorded in
 <a href="../real-claude-code-acceptance-evidence-2026-07-27/">real Claude Code acceptance evidence</a>.</p>
 <p>The deployment ID determines which organization/project fleet receives the
