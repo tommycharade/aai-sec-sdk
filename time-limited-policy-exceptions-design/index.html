@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/signed-policy-acceptance-2026-08-01/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/time-limited-policy-exceptions-design/">
       
       
-        <link rel="prev" href="../signed-policy-bundles-design/">
+        <link rel="prev" href="../policy-change-assurance-acceptance-2026-08-01/">
       
       
-        <link rel="next" href="../claude-managed-resources/">
+        <link rel="next" href="../signed-policy-bundles-design/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Signed policy bundle acceptance - Agentic AI Security SDK</title>
+        <title>Time-limited policy exceptions - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#signed-policy-bundle-acceptance-2026-08-01" class="md-skip">
+        <a href="#time-limited-policy-exceptions" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Signed policy bundle acceptance
+              Time-limited policy exceptions
             
           </span>
         </div>
@@ -988,10 +988,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../time-limited-policy-exceptions-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Time-limited policy exceptions
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1007,6 +1034,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threat-and-trust-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threat and trust boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lifecycle-and-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lifecycle and API
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runtime-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime resolution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ui-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guarantees-and-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guarantees and non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1042,37 +1166,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Signed policy bundle acceptance
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../signed-policy-acceptance-2026-08-01/" class="md-nav__link">
         
   
   
@@ -1088,103 +1185,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#outcome" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Outcome
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#reviewed-changes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Reviewed changes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#local-assurance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Local assurance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#aws-deployment-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AWS deployment evidence
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#live-test-result" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Live test result
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#hosted-ui-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Hosted UI evidence
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#explicit-residual-gaps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Explicit residual gaps
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2215,10 +2215,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#outcome" class="md-nav__link">
+  <a href="#decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Outcome
+        Decision
       
     </span>
   </a>
@@ -2226,10 +2226,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#reviewed-changes" class="md-nav__link">
+  <a href="#threat-and-trust-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reviewed changes
+        Threat and trust boundary
       
     </span>
   </a>
@@ -2237,10 +2237,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#local-assurance" class="md-nav__link">
+  <a href="#lifecycle-and-api" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Local assurance
+        Lifecycle and API
       
     </span>
   </a>
@@ -2248,10 +2248,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#aws-deployment-evidence" class="md-nav__link">
+  <a href="#runtime-resolution" class="md-nav__link">
     <span class="md-ellipsis">
       
-        AWS deployment evidence
+        Runtime resolution
       
     </span>
   </a>
@@ -2259,10 +2259,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#live-test-result" class="md-nav__link">
+  <a href="#ui-journey" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Live test result
+        UI journey
       
     </span>
   </a>
@@ -2270,10 +2270,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#hosted-ui-evidence" class="md-nav__link">
+  <a href="#guarantees-and-non-guarantees" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Hosted UI evidence
+        Guarantees and non-guarantees
       
     </span>
   </a>
@@ -2281,10 +2281,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#explicit-residual-gaps" class="md-nav__link">
+  <a href="#required-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Explicit residual gaps
+        Required evidence
       
     </span>
   </a>
@@ -2311,109 +2311,122 @@
   
 
 
-<h1 id="signed-policy-bundle-acceptance-2026-08-01">Signed policy bundle acceptance — 2026-08-01</h1>
-<h2 id="outcome">Outcome</h2>
-<p>The signed-policy bundle boundary passed local, CI, deployed AWS and hosted UI
-acceptance. The deployed control plane signs exact effective policy authority
-with a non-exportable AWS KMS P-256 key. The SDK rejected transport-only trust
-and verified the returned tenant, policy ID, version, configuration hash and
-ECDSA signature locally against an independently exported public key.</p>
-<p>This evidence does <strong>not</strong> claim complete production readiness. Runtime release
-attestation and Microsoft Entra ID remain explicitly unconfigured in this
-deployment.</p>
-<h2 id="reviewed-changes">Reviewed changes</h2>
-<table>
-<thead>
-<tr>
-<th>Repository change</th>
-<th>Evidence</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>SDK signed-policy implementation</td>
-<td>PR <a href="https://github.com/tommycharade/aai-sec-sdk/pull/83">#83</a>, merged as <code>c67919538cabad912514e602a03a5fbdd242b90f</code></td>
-</tr>
-<tr>
-<td>UI signing provenance</td>
-<td>PR <a href="https://github.com/tommycharade/aai-sec-ui/pull/40">#40</a>, merged as <code>5369581</code></td>
-</tr>
-<tr>
-<td>DynamoDB numeric normalization hotfix</td>
-<td>PR <a href="https://github.com/tommycharade/aai-sec-sdk/pull/84">#84</a>, merged as <code>f7d4f60b1abaad8d271362893f0a2728861ee0f7</code></td>
-</tr>
-</tbody>
-</table>
-<p>PR #83 passed documentation, dependency/mutation audit, Python 3.11, 3.12 and
-3.13, Docker isolation and PostgreSQL integration checks. PR #84 repeated the
-same independent gates after the deployment-only defect was fixed. The UI PR
-passed its type, test and production-build gate.</p>
-<h2 id="local-assurance">Local assurance</h2>
+<h1 id="time-limited-policy-exceptions">Time-limited policy exceptions</h1>
+<h2 id="decision">Decision</h2>
+<p>Temporary policy exceptions are independently reviewed, KMS-signed derived
+policy bundles. An exception is bound to one tenant, one enrolled agent, one
+group and one exact active base-policy version. The server clock determines
+expiry. An expired, revoked, stale-base, reassigned or otherwise inconsistent
+exception is never returned as runtime authority; resolution falls back to the
+normal signed active policy.</p>
+<p>This design implements the authority foundation for P1-FLT-09 and P1-POL-10.
+It does not make project configuration an enforcement boundary and does not
+permit immutable SDK safeguards to be disabled.</p>
+<h2 id="threat-and-trust-boundary">Threat and trust boundary</h2>
+<p>Exception identifiers, requested configuration, owner, purpose, expiry and UI
+state are untrusted input. The model and browser cannot choose tenant identity,
+review identity, signing key, server time, active base policy, group membership
+or enrolled-agent identity.</p>
+<p>The control plane therefore:</p>
 <ul>
-<li><code>make check</code>: 859 tests passed and one deployment-dependent PostgreSQL test
-  skipped; coverage, type checking, linting, strict documentation, package
-  validation and all three dependency audits passed.</li>
-<li>Signed-policy adversarial suite: 26 tests covering altered payloads,
-  cross-tenant bundles, unknown and rotated keys, malformed signatures,
-  duplicate JSON keys, unsafe trust files, bounds and fail-closed behavior.</li>
-<li>Mutation gate: 3,275 of 4,010 mutants killed (81.7%) against the required
-  80% threshold.</li>
-<li>AWS CDK TypeScript build and synthesis passed.</li>
-<li>UI gate: 129 tests, type checking and production build passed.</li>
+<li>derives tenant and actor from authenticated context;</li>
+<li>resolves the target agent, sole group and active policy from strongly
+  consistent server-owned state;</li>
+<li>validates the complete proposed effective configuration through the normal
+  policy schema and immutable safeguards;</li>
+<li>binds the request to the exact base policy ID, version and content hash;</li>
+<li>permits only one open exception per agent through a conditional slot record;</li>
+<li>requires <code>draft -&gt; review -&gt; approved -&gt; active</code> and prevents the author from
+  approving their own request;</li>
+<li>signs the exact derived authority with the deployment-owned KMS key only at
+  activation;</li>
+<li>returns the derived bundle only while every binding remains live and its
+  server-clock expiry is in the future; and</li>
+<li>atomically releases the agent's exception slot on expiry, revocation or
+  invalidation so the ordinary secure policy is restored without a browser,
+  agent or model action.</li>
 </ul>
-<h2 id="aws-deployment-evidence">AWS deployment evidence</h2>
-<p>The <code>AaiSecControlPlane</code> stack in <code>eu-west-2</code> completed successfully using the
-<code>p1</code> profile. CloudFormation created retained KMS key alias
-<code>alias/aai-sec-policy-signing</code> and updated the control-plane and trial-onboarding
-Lambdas without replacing the existing data stores or UI distribution.</p>
-<p>The deployed signing key is
-<code>arn:aws:kms:eu-west-2:396510133537:key/98161959-8216-49b9-85ce-c1c7dd27c317</code>.
-<code>GetPublicKey</code> produced SHA-256 public-key fingerprint
-<code>72a5ca43a8afb9cf9d1a324101478cb907c43dd6c15cbe991d5a2be04dbfacb2</code>.
-Only public material was exported for acceptance; the private key remained in
-KMS. The SDK trust file was supplied independently to the host-side verifier,
-not learned from the effective-policy response.</p>
-<h2 id="live-test-result">Live test result</h2>
-<p>The deployed smoke test passed these boundaries:</p>
+<p>The exception envelope uses its own stable signed policy identity. It never
+reuses a base policy ID/version with different content, because doing so would
+break the immutability guarantee of signed policy bundles.</p>
+<h2 id="lifecycle-and-api">Lifecycle and API</h2>
+<pre><code class="language-text">draft -&gt; review -&gt; approved -&gt; active -&gt; expired
+                   |           |       -&gt; revoked
+                   |           -&gt; invalidated (base/group/agent changed)
+                   -&gt; rejected
+</code></pre>
+<pre><code class="language-text">GET  /api/enterprise/policy-exceptions
+POST /api/enterprise/policy-exceptions
+POST /api/enterprise/policy-exceptions/{id}/submit
+POST /api/enterprise/policy-exceptions/{id}/decision
+POST /api/enterprise/policy-exceptions/{id}/activate
+POST /api/enterprise/policy-exceptions/{id}/revoke
+</code></pre>
+<p>Creation accepts an exact deployment and agent, accountable owner, bounded
+purpose, expiry and full candidate effective configuration. The response shows
+the semantic authority diff, base binding, lifecycle attribution and effective
+status without returning signing internals or secrets. Decision and revocation
+require a rationale. Activation accepts no policy content.</p>
+<p>Policy authors create and submit. Policy approvers decide, activate and revoke.
+Platform administrators retain wildcard capability but remain subject to
+self-approval denial.</p>
+<p>The first hosted workflow intentionally permits temporary changes only to SDK
+tool allow/deny lists, Claude built-in tools, registered Skills and MCP servers,
+command allow/deny/approval patterns, and the maximum-action budget. Identity
+scope, approval provider, credentials, isolation, audit capture, telemetry and
+redaction are inherited exactly from the base policy. The API independently
+enforces this closed field set so an advanced client cannot bypass the typed
+UI. Broader changes use the normal versioned policy lifecycle.</p>
+<h2 id="runtime-resolution">Runtime resolution</h2>
+<p>Effective-policy retrieval first establishes the normal active signed bundle.
+It then resolves the target agent's conditional exception slot. The exception
+is usable only when all of these facts match:</p>
+<ol>
+<li>state is <code>active</code>;</li>
+<li>expiry is strictly later than server time;</li>
+<li>agent lifecycle is active;</li>
+<li>deployment, agent and sole group match the request;</li>
+<li>group still points at the bound policy;</li>
+<li>active policy version and content hash match the bound base; and</li>
+<li>the persisted derived bundle is internally consistent.</li>
+</ol>
+<p>Any mismatch fails back to the normal secure bundle and records an expiry or
+invalidation event. A KMS or stored-signature failure fails closed; it is not
+treated as permission to return unsigned exception content.</p>
+<h2 id="ui-journey">UI journey</h2>
+<p>The Policy page presents temporary exceptions separately from ordinary policy
+versions:</p>
+<ol>
+<li>review active, expiring, pending and historical exceptions in one table;</li>
+<li>select one exact enrolled agent and its current policy;</li>
+<li>edit a typed copy of the effective settings and set owner, purpose and
+   expiry;</li>
+<li>review the semantic authority change and affected agent before submission;</li>
+<li>have a second operator approve or reject with rationale;</li>
+<li>activate the signed exception; and</li>
+<li>see the countdown, restoration target and immutable lifecycle evidence.</li>
+</ol>
+<p>The UI never labels a draft or approval as applied. <code>Active</code> means the
+control-plane resolver can currently return the exception; endpoint convergence
+and runtime attestation remain separate evidence.</p>
+<h2 id="guarantees-and-non-guarantees">Guarantees and non-guarantees</h2>
+<p>The control plane guarantees bounded lifetime, independent approval, exact
+scope, signed content, automatic secure fallback and auditable lifecycle for
+the implemented AWS runtime channel. It does not guarantee endpoint receipt,
+MDM enforcement, execution of an already cached policy after its refresh SLO,
+or customer approval of the business justification. Those remain visible
+operational acceptance requirements.</p>
+<h2 id="required-evidence">Required evidence</h2>
 <ul>
-<li>authentication, enrollment and project-root binding;</li>
-<li>accountable ownership and compare-and-swap updates;</li>
-<li>managed-host missing and conflicting evidence denial;</li>
-<li>signed effective-policy retrieval and local SDK verification;</li>
-<li>policy-group assignment and agent verification;</li>
-<li>approval decision binding and replay denial;</li>
-<li>emergency-stop enforcement and recovery;</li>
-<li>durable cross-process idempotency;</li>
-<li>WORM audit retention and SNS/SQS alert delivery; and</li>
-<li>irreversible replacement and offboarding behavior.</li>
-</ul>
-<p>The first deployed run correctly exposed a database-boundary defect: DynamoDB
-returned persisted JSON integers as <code>Decimal</code>, and bundle reconstruction
-validated that storage representation before normalization. The API returned
-HTTP 400 with <code>policy configuration contains a non-JSON value</code>; it did not
-return unsigned authority. PR #84 moved normalization to the DynamoDB boundary,
-added a regression test, passed all CI gates, was deployed, and the complete
-live smoke then passed.</p>
-<h2 id="hosted-ui-evidence">Hosted UI evidence</h2>
-<p>CloudFront invalidation <code>I7BC7S2OTATF1YZDMPKIIBZQBV</code> completed. The hosted
-index referenced the exact merged production assets:</p>
-<ul>
-<li><code>/assets/index-XkjuCc6h.js</code></li>
-<li><code>/assets/index-C7m3zW8W.css</code></li>
-</ul>
-<p>Browser QA found no console warnings or errors. The policy view distinguishes
-signed from unsigned runtime authority, shows bounded signer provenance and
-never presents browser-returned key material as automatically trusted. Claude
-and Codex onboarding commands include the exact tenant and an
-administrator-installed trust-bundle path.</p>
-<h2 id="explicit-residual-gaps">Explicit residual gaps</h2>
-<ul>
-<li>Runtime release attestation reports <code>not-configured</code>; the live test used the
-  explicit acceptance flag and made no release-provenance claim.</li>
-<li>Microsoft Entra ID and SCIM report <code>not-configured</code> in this stack.</li>
-<li>The public trust bundle still requires an administrator-owned distribution
-  and rotation process on enrolled endpoints. Browser delivery is not a trust
-  bootstrap mechanism.</li>
+<li>positive lifecycle and signed-runtime contract tests;</li>
+<li>self-approval, cross-tenant, malformed content and stale-base denial;</li>
+<li>concurrent/open-slot, replay and out-of-order transition denial;</li>
+<li>server-clock boundary, expiry, revocation and reassignment fallback tests;</li>
+<li>altered persisted bundle and signing failure tests;</li>
+<li>UI tests for typed authoring, semantic review, state labels and countdown;</li>
+<li>live AWS synthetic create/review/activate/fetch/expire-or-revoke/fallback
+  evidence with exact cleanup; and</li>
+<li>documentation, threat-model, changelog and P0/P1 ledger updates.</li>
 </ul>
 
 

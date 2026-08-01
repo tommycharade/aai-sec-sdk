@@ -991,6 +991,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../time-limited-policy-exceptions-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Time-limited policy exceptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../signed-policy-bundles-design/" class="md-nav__link">
         
   
@@ -1408,6 +1435,17 @@
     <span class="md-ellipsis">
       
         P1-FLT-02 acceptance evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p1-flt-09-and-p1-pol-10-implementation-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1-FLT-09 and P1-POL-10 implementation evidence
       
     </span>
   </a>
@@ -2271,6 +2309,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#p1-flt-09-and-p1-pol-10-implementation-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1-FLT-09 and P1-POL-10 implementation evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2479,14 +2528,14 @@ installation or live host-load acceptance.</p>
 <tr>
 <td>Fleet lifecycle</td>
 <td>Partial</td>
-<td>Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and deterministic reevaluation, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, source-reconciled orphan/leaver detection, AWS-managed Entra/Intune/GitHub discovery connectors, signed endpoint installation/process collection, per-device credential lifecycle and server-derived evidence health</td>
-<td>Bulk enrollment import, scheduled dynamic reevaluation, managed upgrades, exception expiry, MDM sensor packaging/rollout, real-provider population coverage and response automation</td>
+<td>Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and deterministic reevaluation, health, rollouts, rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, server-clock-expiring exact-agent policy exceptions, source-reconciled orphan/leaver detection, AWS-managed Entra/Intune/GitHub discovery connectors, signed endpoint installation/process collection, per-device credential lifecycle and server-derived evidence health</td>
+<td>Bulk enrollment import, scheduled dynamic reevaluation, managed upgrades, MDM sensor packaging/rollout, real-provider population coverage and response automation</td>
 </tr>
 <tr>
 <td>Policy governance</td>
 <td>Partial</td>
-<td>Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, self-approval denial, semantic authority diff, bounded redacted historical simulation with explicit indeterminacy, staging, atomic activation, tenant-bound asymmetric signed bundles with locally pinned verification, assignment impact and rollback</td>
-<td>Scheduling, inheritance, expiring exceptions and measured endpoint convergence</td>
+<td>Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, self-approval denial, semantic authority diff, bounded redacted historical simulation with explicit indeterminacy, staging, atomic activation, tenant-bound asymmetric signed bundles with locally pinned verification, independently approved KMS-signed temporary agent exceptions with automatic secure restoration, assignment impact and rollback</td>
+<td>Scheduling, inheritance and measured endpoint convergence</td>
 </tr>
 <tr>
 <td>Security operations</td>
@@ -2526,6 +2575,19 @@ manual-route bypass and transaction races. UI tests prove typed authoring,
 preview-before-apply and exact request-ID reuse. Scheduled service-driven
 reevaluation and endpoint posture attributes remain outstanding and are not
 claimed.</p>
+<h3 id="p1-flt-09-and-p1-pol-10-implementation-evidence">P1-FLT-09 and P1-POL-10 implementation evidence</h3>
+<p>The AWS authority boundary permits one open temporary exception per exact
+enrolled agent. Creation derives the sole group and current active policy from
+server-owned state, retains owner, purpose and expiry, and permits only the
+focused tool, Claude resource/command and maximum-action fields exposed by the
+typed UI. <code>draft -&gt; review -&gt; approved -&gt; active</code> is compare-and-swap governed
+and self-approval is denied. Activation signs a distinct derived policy bundle
+with KMS. Effective-policy retrieval rechecks agent lifecycle, assignment,
+base version/content hash and server-clock expiry; expiry, revocation or stale
+scope restores the normal signed policy and records lifecycle evidence.
+Contracts cover overlap, role denial, secrets, immutable-field weakening,
+transition replay, signing and expiry. Live deployed acceptance remains
+required before these rows are described as complete for an enterprise pilot.</p>
 <h2 id="current-delivery-slice-entra-identity-and-trust">Current delivery slice — Entra identity and trust</h2>
 <p>The active implementation establishes the provider-neutral identity boundary
 with Microsoft Entra ID as the first adapter:</p>
