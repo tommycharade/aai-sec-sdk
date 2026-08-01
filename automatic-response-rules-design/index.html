@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/releasing/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/automatic-response-rules-design/">
       
       
-        <link rel="prev" href="../contributing/">
+        <link rel="prev" href="../incident-case-export-design/">
       
       
-        <link rel="next" href="../deployment-evidence/">
+        <link rel="next" href="../endpoint-evidence-acceptance-2026-08-01/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Releasing - Agentic AI Security SDK</title>
+        <title>Approved automatic response rules - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#releasing" class="md-skip">
+        <a href="#approved-automatic-response-rules" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Releasing
+              Approved automatic response rules
             
           </span>
         </div>
@@ -799,10 +799,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../automatic-response-rules-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Approved automatic response rules
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -818,6 +845,114 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#customer-outcome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Customer outcome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deliberately-bounded-rule-language" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deliberately bounded rule language
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#governance-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Governance lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evaluation-and-idempotency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation and idempotency
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fail-closed-safeguards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fail-closed safeguards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preview-and-operator-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preview and operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acceptance-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1744,37 +1879,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Releasing
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
         
   
   
@@ -1790,65 +1898,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#stable-release-checklist" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stable-release checklist
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#supply-chain-boundaries" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Supply-chain boundaries
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Supply-chain boundaries">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#standalone-adopter-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Standalone adopter verification
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2015,10 +2064,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#stable-release-checklist" class="md-nav__link">
+  <a href="#customer-outcome" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Stable-release checklist
+        Customer outcome
       
     </span>
   </a>
@@ -2026,30 +2075,79 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#supply-chain-boundaries" class="md-nav__link">
+  <a href="#deliberately-bounded-rule-language" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Supply-chain boundaries
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Supply-chain boundaries">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#standalone-adopter-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Standalone adopter verification
+        Deliberately bounded rule language
       
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#governance-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Governance lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evaluation-and-idempotency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation and idempotency
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fail-closed-safeguards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fail-closed safeguards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preview-and-operator-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preview and operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acceptance-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance evidence
+      
+    </span>
+  </a>
   
 </li>
       
@@ -2073,97 +2171,121 @@
   
 
 
-<h1 id="releasing">Releasing</h1>
-<h2 id="stable-release-checklist">Stable-release checklist</h2>
-<p>The <code>1.x</code> compatibility policy follows Semantic Versioning: public API
-breaking changes require a major version, and every breaking change must be
-called out in <code>CHANGELOG.md</code> with a migration note. Python 3.11, 3.12, and
-3.13 are the supported CI versions. Security fixes are backported only to the
-latest supported release line.</p>
+<h1 id="approved-automatic-response-rules">Approved automatic response rules</h1>
+<p>This design implements the first production-shaped slice of P1-SOC-02 and
+P1-SOC-06. It permits an independently approved, versioned endpoint detection
+rule to create a case and quarantine exactly one authoritatively correlated
+Claude Code or Codex agent. It never grants authority, selects a browser-
+supplied target, disables evidence collection or claims device isolation.</p>
+<h2 id="customer-outcome">Customer outcome</h2>
+<p>Security teams can author a typed rule, preview it against current retained
+alerts, submit it for independent review and activate an immutable version.
+When a matching server-derived endpoint detection occurs, the control plane:</p>
+<ol>
+<li>re-derives a unique current endpoint-to-agent binding;</li>
+<li>applies the rule's rate and cooldown safeguards;</li>
+<li>creates a deterministic retained incident case owned by that rule version;</li>
+<li>creates case-owned investigative quarantine for the exact bound agent; and</li>
+<li>retains a content-minimised, content-hashed execution outcome and emits the
+   corresponding audit event.</li>
+</ol>
+<p>The agent can continue sending heartbeat and attestation evidence, but policy,
+approval, decision-reporting and managed-package authority fail closed. Release
+remains a deliberate incident-response action guarded by live recovery checks.</p>
+<h2 id="deliberately-bounded-rule-language">Deliberately bounded rule language</h2>
+<p>Version one is a typed form, not executable code or a general expression
+language:</p>
 <ul>
-<li>[ ] <code>make check</code> passes on the release commit.</li>
-<li>[ ] <code>make mutation</code> passes within its declared bound and its raw evidence
-      proves &gt;=80% overall, &gt;=75% per component, 100% critical mutants, and
-      zero timeout/suspicious/skipped/not-checked results; retain the artifact.</li>
-<li>[ ] <code>make package-check</code> builds and validates wheel and source distributions.</li>
-<li>[ ] <code>make security-check</code> reports no unaccepted dependency vulnerabilities;
-      any build-only exception has a named owner, compensating controls,
-      automated upstream monitoring and an unexpired review date.</li>
-<li>[ ] <code>requirements-ci.txt</code> and <code>requirements-docs.txt</code> are reviewed when
-      direct toolchain versions change; direct inputs are exact-pinned.</li>
-<li>[ ] <code>requirements-build.txt</code> matches the exact PEP 517 build requirements.</li>
-<li>[ ] <code>LICENSE</code> and <code>NOTICE</code> are present in both distributions.</li>
-<li>[ ] <code>CHANGELOG.md</code> describes user-visible and security-relevant changes.</li>
-<li>[ ] Public API and migration notes are up to date.</li>
-<li>[ ] Security regressions and known limitations are documented.</li>
-<li>[ ] The release is tagged from a clean, reviewed commit.</li>
-<li>[ ] The package is published through trusted CI credentials, not a developer workstation token.</li>
-<li>[ ] Release artifacts and checksums are retained.</li>
-<li>[ ] An independently verified SBOM is generated and hash-bound for each
-      artifact; dependency provenance is attached by trusted CI.</li>
-<li>[ ] GitHub Actions provenance attestation is present for release artifacts.</li>
-<li>[ ] Wheel installation is tested in clean Python 3.11, 3.12, and 3.13
-      environments.</li>
-<li>[ ] The compatibility policy and migration notes are published.</li>
-<li>[ ] At least two maintainers/code owners review security-sensitive changes.</li>
+<li>source is fixed to <code>endpoint_evidence</code>;</li>
+<li>reason codes come from the server-owned endpoint detection catalogue;</li>
+<li>severities are selected from <code>medium</code>, <code>high</code> and <code>critical</code>;</li>
+<li>host scope is <code>claude-code</code>, <code>codex</code>, or both;</li>
+<li>action is fixed to <code>quarantine_agent</code>;</li>
+<li><code>maxActionsPerHour</code> is between 1 and 25; and</li>
+<li><code>agentCooldownSeconds</code> is between 300 and 86,400.</li>
 </ul>
-<p>Do not describe a release as a security certification. The SDK provides implementation controls; adopters remain responsible for configuring policy, identity, infrastructure, and domain authorization.</p>
-<h2 id="supply-chain-boundaries">Supply-chain boundaries</h2>
-<p>The repository exact-pins direct development, documentation, and PEP 517 build
-inputs and audits all three input files with <code>pip-audit</code>. Release CI builds the
-wheel and source archive, then installs each actual artifact into a fresh
-virtual environment before generating one CycloneDX SBOM per artifact. It also
-writes SHA-256 checksums and requests GitHub provenance attestations for the
-same artifact subjects. Exact hashes for every platform wheel are not
-committed because the supported Python matrix selects different transitive
-wheels; artifact SBOMs, checksums, and provenance are the release evidence.
-PyPI publication, if enabled, must use repository trusted publishing and never
-a developer workstation token.</p>
-<p>Infrastructure tooling is a separate build-time boundary. AWS CDK, its
-construct library and <code>constructs</code> are exact-pinned development dependencies
-and are excluded from deployed SDK, UI and Lambda artifacts. A scanner finding
-in bundled CDK tooling may be accepted only through a dated, owner-approved
-risk record that documents exploitability, preserves full-audit visibility,
-monitors upstream daily and causes CI to fail when the exception expires. The
-current record is <a href="../risk-acceptance-cdk-brace-expansion-2026-07-29/">Temporary risk acceptance: AWS CDK bundled
-brace-expansion</a>.</p>
-<p>The build job adds the raw mutation evidence to <code>dist/</code> before creating
-checksums with <code>scripts/write_checksums.py</code>, excluding only the checksum file
-itself. A separate publish job creates the GitHub Release from that exact
-bundle, and a clean verification job downloads the published assets rather
-than trusting the pre-publication workspace.</p>
-<p><code>verify_release_evidence.py</code> is run in a separate clean-verification job. It
-independently checks that every wheel and source
-archive has a matching SHA-256 entry, a matching SBOM manifest entry, and an
-SBOM containing the artifact filename and digest. It also checks the mutation
-evidence files, clean checkout commit, and exact tag against
-<code>RELEASE-METADATA.json</code>. The workflow then runs <code>gh attestation verify</code> for
-every subject in that same clean job, constraining the signer workflow and full
-<code>refs/tags/...</code> source ref. Release CI runs only for pushed version tags; it
-does not permit an independently selected source ref and release tag. These checks verify artifact
-identity and provenance bindings; they do not certify the package's runtime
-behavior or external provider deployments.</p>
-<h3 id="standalone-adopter-verification">Standalone adopter verification</h3>
-<p>Adopters can verify downloaded release evidence without trusting the build
-workspace:</p>
-<pre><code class="language-bash">git clone https://github.com/tommycharade/aai-sec-sdk.git
-cd aai-sec-sdk
-git checkout --detach vX.Y.Z
-# Copy the published release-evidence bundle into ./dist first.
-python scripts/verify_release_evidence.py dist \
-  --commit &quot;$(git rev-parse HEAD)&quot; --tag &quot;vX.Y.Z&quot;
-gh attestation verify dist/*.whl --repo tommycharade/aai-sec-sdk \
-  --signer-workflow tommycharade/aai-sec-sdk/.github/workflows/release-artifacts.yml \
-  --source-ref refs/tags/vX.Y.Z
-</code></pre>
-<p>Do not use <code>--allow-untagged</code> for a published release; that option is only for
-local pre-tag verification.</p>
-<p><code>make check</code> validates the mutation contract; <code>make mutation</code> executes the
-mutmut run through <code>scripts/run_mutation_check.py</code>, enforces the declared 80%
-killed-mutant threshold, and fails on stale/missing/truncated/timeout,
-unparseable, or other-commit evidence. The run is bounded to two workers and
-600 seconds (10 minutes). No mutation score is claimed unless that command has completed
-successfully for the commit.</p>
+<p>All selected reason codes and severities use OR semantics within their field;
+fields use AND semantics. Empty selections are rejected. Session or brokered-
+credential revocation is not bundled into version one: those stronger actions
+remain explicit until P1-SOC-04 supplies independently tested credential-
+broker adapters.</p>
+<h2 id="governance-lifecycle">Governance lifecycle</h2>
+<p>Each rule has one mutable summary and immutable version records. A version
+moves through <code>draft</code>, <code>review</code>, <code>approved</code>, <code>active</code>, <code>superseded</code> or
+<code>rejected</code>. Its author cannot approve it. Activation requires an independently
+approved version based on the current active version. Activating a replacement
+atomically supersedes the old version. An authorized operator can immediately
+disable the active rule because reducing automatic authority must not wait for
+a new approval cycle; re-enabling requires activation of an approved version.</p>
+<p><code>security-operator</code> and <code>platform-admin</code> may author and independently approve
+rules. <code>incident-responder</code> can read rules and executions but cannot establish
+new autonomous authority. Delegated or upstream Entra claims do not directly
+grant these capabilities; Cognito's canonical product roles remain the source
+of authorization.</p>
+<h2 id="evaluation-and-idempotency">Evaluation and idempotency</h2>
+<p>Evaluation runs after scheduled endpoint reconciliation and after authenticated
+endpoint security-event materialization. Active rules are ordered by priority
+then stable rule ID. One execution identity binds tenant, rule version, alert
+ID and alert occurrence. It is written once and is safe to retry.</p>
+<p>Only an uncased alert can be claimed. If a prior invocation created the exact
+rule-owned case but stopped before quarantine or outcome persistence, a retry
+may resume that same operation. A rule never takes over an operator-owned case
+or a case owned by another rule. Later matching rules retain a skipped outcome
+with an explicit reason.</p>
+<h2 id="fail-closed-safeguards">Fail-closed safeguards</h2>
+<p>Automatic containment is skipped and evidenced when any of these is true:</p>
+<ul>
+<li>the rule is disabled, unapproved, malformed or stale;</li>
+<li>the alert no longer matches the active immutable version;</li>
+<li>endpoint evidence is stale, unmanaged, absent or correlates to zero or more
+  than one active agent;</li>
+<li>the active-version or alert occurrence changed;</li>
+<li>the hourly rule limit or per-agent cooldown is reached;</li>
+<li>another case already owns the alert;</li>
+<li>the agent lifecycle is inactive or another quarantine already owns it; or</li>
+<li>transactional case or containment persistence fails.</li>
+</ul>
+<p>Limits are evaluated from strongly read, bounded tenant records. Exceeding the
+safe tenant bound fails the evaluation rather than silently ignoring older
+actions.</p>
+<p>Hourly and cooldown authority is reserved in one conditional DynamoDB
+transaction before case mutation. A concurrent trigger may consume the final
+slot, forcing the loser to re-read and skip. A dependency failure after
+reservation conservatively consumes that slot and cooldown; it can reduce
+automation but cannot permit the rule to exceed its approved authority.</p>
+<p>The authoritative case timeline and response-execution record are retained in
+DynamoDB. Object-store audit replication is separate: an audit-export failure
+does not erase an already committed quarantine, and the content-hashed response
+record remains available for reconciliation. This release does not claim a
+transaction spanning DynamoDB and S3.</p>
+<h2 id="preview-and-operator-journey">Preview and operator journey</h2>
+<p>Preview never creates a case or containment. It returns current matching alerts
+with the derived binding status and one of: <code>would_contain</code>,
+<code>binding_unavailable</code>, <code>already_cased</code>, <code>hourly_limit</code>, or <code>agent_cooldown</code>.
+The UI explains the resulting SDK authority, shows exact safeguards and makes
+the independent approval boundary visible before activation.</p>
+<p>The Incidents workspace has separate <strong>Cases</strong> and <strong>Response rules</strong> views.
+The rules view starts with governed inventory and health metadata, then opens a
+focused detail/editor with active version, pending change, recent outcomes,
+preview, submit, approve, activate and disable actions.</p>
+<p>Operator reads may reconcile alert presentation but never invoke automatic
+containment. Consequential evaluation is reached only from the five-minute
+scheduled detector or an authenticated endpoint-security event write.</p>
+<h2 id="non-guarantees">Non-guarantees</h2>
+<p>Quarantine is an SDK/control-plane authority restriction. It does not kill a
+process, isolate a laptop, block network traffic, revoke a third-party token or
+prove that an offline endpoint received the change. Splunk remains a clearly
+labelled non-delivering stub. MDM/EDR isolation, credential-broker revocation,
+portable rule signatures and anomaly baselines remain separate requirements.</p>
+<h2 id="acceptance-evidence">Acceptance evidence</h2>
+<p>Contracts must prove two-subject approval, immutable active versions, exact
+matching, preview without mutation, idempotent retries, deterministic ordering,
+hourly and cooldown limits, tenant isolation, unbound/ambiguous denial, no case
+takeover, quarantine authority, manual recovery gates and secret-free evidence.
+AWS acceptance must use real DynamoDB numbers and a real Lambda invocation,
+verify the exact agent is denied execution after automatic containment, release
+the synthetic quarantine through the guarded path, and remove every synthetic
+control record.</p>
 
 
 

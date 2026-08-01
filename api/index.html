@@ -802,6 +802,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../automatic-response-rules-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Approved automatic response rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -5798,6 +5825,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#automatic-response-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic response rules
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -10196,6 +10234,17 @@
     <span class="md-ellipsis">
       
         Incident cases and response authority
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-response-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic response rules
       
     </span>
   </a>
@@ -52557,6 +52606,33 @@ containment request. See
 <a href="../incident-case-containment-design/">Incident case and containment design</a>.
 Artifact schema, refusal bounds and offline verification are specified in
 <a href="../incident-case-export-design/">Audit-ready incident case export</a>.</p>
+<h2 id="automatic-response-rules">Automatic response rules</h2>
+<p>The hosted adapter exposes an independently governed automatic-response API:</p>
+<ul>
+<li><code>GET /enterprise/response-rules</code> lists active authority separately from a
+  pending version; <code>GET /enterprise/response-rules/{ruleId}</code> includes immutable
+  versions and content-minimised execution outcomes.</li>
+<li><code>POST /enterprise/response-rules/preview</code> evaluates one typed configuration
+  against current retained alerts without creating a case or changing agent
+  authority.</li>
+<li><code>POST /enterprise/response-rules</code> creates a rule shell and version-1 draft;
+  <code>POST /enterprise/response-rules/{ruleId}/versions</code> appends a draft based on
+  the current active version.</li>
+<li>version <code>submit</code>, <code>decision</code> and <code>activate</code> routes enforce exact lifecycle
+  state, independent approval, immutable content hash and optimistic active-
+  version comparison.</li>
+<li><code>POST /enterprise/response-rules/{ruleId}/disable</code> immediately removes new
+  automatic authority; <code>rollback</code> atomically restores only an independently
+  approved superseded version.</li>
+<li><code>GET /enterprise/response-executions</code> returns idempotent outcomes for matched,
+  contained and safely skipped alert occurrences without prompts, arguments,
+  results, credentials or raw endpoint payloads.</li>
+</ul>
+<p>The closed schema permits endpoint-evidence reason codes, medium/high/critical
+severity, <code>claude-code</code>/<code>codex</code> host scope, fixed <code>quarantine_agent</code> action,
+1–25 successful actions per hour, a 300–86,400 second per-agent cooldown and
+priority 1–1,000. Unknown fields and empty selections are rejected. See
+<a href="../automatic-response-rules-design/">Approved automatic response rules</a>.</p>
 
 
 
