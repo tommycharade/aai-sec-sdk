@@ -5904,6 +5904,74 @@ def test_discovery_source_authority_revision_and_fail_closed_completeness(
     ]
 
 
+def test_device_population_without_installations_suppresses_coverage(
+    monkeypatch: Any,
+) -> None:
+    """Managed-device facts alone never become complete agent evidence."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_785_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    tenant = "tenant-device-only"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+    digest = hashlib.sha256(b"/synthetic/project").hexdigest()
+    snapshots = {
+        "entra": _discovery_snapshot(
+            "identity",
+            [{"kind": "identity", "id": "user-a", "active": True}],
+            now=now,
+        ),
+        "intune": _discovery_snapshot(
+            "endpoint",
+            [
+                {
+                    "kind": "device",
+                    "id": "device-a",
+                    "managed": True,
+                    "userIds": ["user-a"],
+                }
+            ],
+            now=now,
+        ),
+        "github": _discovery_snapshot(
+            "source_control",
+            [
+                {
+                    "kind": "repository",
+                    "id": "repo-a",
+                    "projectRootDigest": digest,
+                    "expectedHosts": ["claude-code"],
+                }
+            ],
+            now=now,
+        ),
+    }
+    for source_id, snapshot in snapshots.items():
+        response = _invoke(
+            module,
+            _event(
+                f"/api/enterprise/discovery/sources/{source_id}/snapshots",
+                "POST",
+                body=snapshot,
+                claims=claims,
+            ),
+        )
+        assert response["statusCode"] == 201
+
+    report = json.loads(
+        _invoke(module, _event("/api/enterprise/discovery", "GET", claims=claims))["body"]
+    )
+    assert report["summary"]["coverageAvailable"] is False
+    assert report["summary"]["sourceComplete"] is False
+    assert report["summary"]["coveragePercent"] is None
+    assert report["summary"]["orphaned"] == 0
+    assert report["blindSpots"] == ["missing_endpoint_installations"]
+
+
 def test_discovery_connector_cannot_reinterpret_legacy_source_kind(
     monkeypatch: Any,
 ) -> None:
@@ -6050,12 +6118,19 @@ def test_managed_entra_discovery_create_directory_and_disable_are_fail_closed(
     capability_body = json.loads(capabilities["body"])
     assert capability_body["available"] is True
     assert capability_body["providerSecretNamePrefix"] == "aai-sec/discovery/providers/"
-    assert capability_body["providers"] == ["entra", "github"]
+    assert capability_body["providers"] == ["entra", "github", "intune"]
     assert capability_body["providerConfigurations"]["github"] == {
         "sourceKind": "source_control",
         "secretSchema": ["token"],
         "configurationSchema": ["organization", "repositories"],
         "maximumRepositories": 500,
+    }
+    assert capability_body["providerConfigurations"]["intune"] == {
+        "sourceKind": "endpoint",
+        "secretSchema": ["tenantId", "clientId", "clientSecret"],
+        "configurationSchema": ["userBusinessUnits"],
+        "maximumUserBusinessUnits": 500,
+        "installationEvidenceRequired": True,
     }
 
     path = "/api/enterprise/discovery/sources/entra-primary/managed-collector"
@@ -6251,6 +6326,124 @@ def test_managed_github_discovery_binds_repository_mapping_and_redacts_directory
         "projectRootDigest",
     ):
         assert forbidden not in directory["body"]
+
+
+def test_managed_intune_discovery_binds_attribution_and_redacts_user_ids(
+    monkeypatch: Any,
+) -> None:
+    """Intune setup exposes device-source posture without its user mapping."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-managed-intune"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    secret_client, scheduler, provider_arn = _managed_discovery_doubles(
+        monkeypatch, module, tenant, provider_name="intune-primary"
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+    user_id = "33333333-3333-4333-8333-333333333333"
+    path = "/api/enterprise/discovery/sources/intune-primary/managed-collector"
+    created = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                "provider": "intune",
+                "providerSecretArn": provider_arn,
+                "providerConfiguration": {
+                    "userBusinessUnits": [{"userId": user_id, "businessUnit": "Platform"}]
+                },
+                "intervalMinutes": 60,
+                "expectedJobRevision": 0,
+                "expectedCredentialRevision": 0,
+            },
+            claims=claims,
+        ),
+    )
+
+    assert created["statusCode"] == 201
+    body = json.loads(created["body"])
+    assert body["provider"] == "intune"
+    assert body["sourceKind"] == "endpoint"
+    assert body["providerSummary"] == {
+        "userBusinessUnitCount": 1,
+        "installationEvidenceRequired": True,
+    }
+    job = table.items[(f"TENANT#{tenant}", "DISCOVERY_JOB#intune-primary")]
+    assert job["providerConfiguration"] == {
+        "userBusinessUnits": [{"userId": user_id, "businessUnit": "Platform"}]
+    }
+    schedule_input = json.loads(scheduler.created[0]["Target"]["Input"])
+    assert schedule_input["provider"] == "intune"
+    assert schedule_input["providerConfigurationDigest"] == job["providerConfigurationDigest"]
+    assert "providerConfiguration" not in schedule_input
+    assert secret_client.described == [provider_arn]
+
+    directory = _invoke(
+        module,
+        _event("/api/enterprise/discovery/sources", "GET", claims=claims),
+    )
+    assert directory["statusCode"] == 200
+    assert user_id not in directory["body"]
+    assert "providerConfiguration" not in directory["body"]
+
+
+@pytest.mark.parametrize(
+    "provider_configuration",
+    [
+        {},
+        {"userBusinessUnits": "not-a-list"},
+        {"userBusinessUnits": [{"userId": "not-a-uuid", "businessUnit": "Platform"}]},
+        {
+            "userBusinessUnits": [
+                {
+                    "userId": "33333333-3333-4333-8333-333333333333",
+                    "businessUnit": "Platform",
+                },
+                {
+                    "userId": "33333333-3333-4333-8333-333333333333",
+                    "businessUnit": "Risk",
+                },
+            ]
+        },
+    ],
+)
+def test_managed_intune_discovery_rejects_unsafe_mapping_before_aws(
+    monkeypatch: Any, provider_configuration: dict[str, Any]
+) -> None:
+    """Malformed or ambiguous Intune attribution cannot provision resources."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-managed-intune-invalid"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    secret_client, scheduler, provider_arn = _managed_discovery_doubles(
+        monkeypatch, module, tenant, provider_name="intune-primary"
+    )
+    response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/discovery/sources/intune-primary/managed-collector",
+            "POST",
+            body={
+                "provider": "intune",
+                "providerSecretArn": provider_arn,
+                "providerConfiguration": provider_configuration,
+                "intervalMinutes": 60,
+                "expectedJobRevision": 0,
+                "expectedCredentialRevision": 0,
+            },
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["platform-admin"],
+                "sub": "platform-admin-a",
+            },
+        ),
+    )
+    assert response["statusCode"] == 400
+    assert secret_client.described == []
+    assert scheduler.created == []
 
 
 @pytest.mark.parametrize(

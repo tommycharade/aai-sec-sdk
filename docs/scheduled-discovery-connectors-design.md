@@ -2,11 +2,21 @@
 
 ## Decision
 
-The managed discovery providers are Microsoft Entra ID and GitHub. The AWS
+The managed discovery providers are Microsoft Entra ID, Microsoft Intune and GitHub. The AWS
 control plane creates a tenant-scoped EventBridge Scheduler job that invokes a
 dedicated collector Lambda. Entra produces the expected identity population;
-GitHub produces the expected Claude Code and Codex repository population. Both
+Intune produces the managed-device population; GitHub produces the expected
+Claude Code and Codex repository population. All three
 publish through the existing source-scoped atomic ingestion contract.
+
+Intune device enrollment is deliberately not treated as installation evidence.
+Microsoft Graph does not prove that a Claude/Codex binary is present, that a
+process is active, or which project root it serves. The reconciler therefore
+keeps coverage unavailable until a current endpoint source also contains at
+least one normalized `installation` observation. A deployment-owned endpoint
+agent or MDM custom-inventory publisher supplies that evidence through the
+existing connector contract. This prevents an authoritative device list from
+being misrepresented as complete agent coverage.
 
 This is intentionally separate from Entra operator SSO and SCIM. Those
 integrations authenticate and provision console operators. Discovery observes
@@ -20,7 +30,7 @@ collection would combine unrelated authority and make revocation unsafe.
 The browser submits only:
 
 - the stable source ID;
-- the provider enum `entra` or `github`;
+- the provider enum `entra`, `intune` or `github`;
 - an interval from the closed set supported by the service;
 - the ARN of a deployment-owned provider secret; and
 - for GitHub only, a bounded typed repository-to-project mapping; and
@@ -33,7 +43,7 @@ control plane derives every AWS target.
 
 ### Provider secret
 
-An Entra provider secret contains exactly:
+An Entra or Intune provider secret contains exactly:
 
 ```json
 {
@@ -59,6 +69,10 @@ connector secret bytes.
 
 The Entra application receives only Microsoft Graph application permission
 `User.Read.All`, with tenant-admin consent and no directory write permission.
+A separate Intune application receives only
+`DeviceManagementManagedDevices.Read.All`, with tenant-admin consent and no
+device-management write permission. Separate applications and secrets are
+recommended so revoking device discovery cannot disrupt identity discovery.
 A GitHub provider secret contains exactly `{"token":"<secret>"}`. Use an
 organization-approved fine-grained token covering every organization
 repository, with repository metadata read-only and no content, administration,
@@ -94,12 +108,17 @@ The Entra collector may contact only:
   continuation links; and
 - the deployment-owned HTTPS API Gateway origin for discovery ingestion.
 
+The Intune collector may contact only the same fixed token endpoint, the exact
+Microsoft Graph `/v1.0/deviceManagement/managedDevices` collection with the
+service-owned `$select` and `$top` query, validated continuation links for that
+collection, and the deployment-owned ingestion origin.
+
 The GitHub collector may contact only `api.github.com` at the fixed
 `/orgs/{organization}/repos` endpoint and the same deployment-owned ingestion
 origin. The service supplies the API version, sort order, pagination and page
 size; browser input cannot change a hostname, path or query.
 
-Collection is bounded to 20 pages and 2,000 users, applies independent request
+Collection is bounded to 20 pages and 2,000 observations, applies independent request
 timeouts, rejects duplicate or malformed identities, and retains only opaque
 object ID, active state, and optional department. GitHub collection has the
 same 20-page and 2,000-observation limits. It rejects duplicate or malformed
@@ -109,6 +128,13 @@ Archived, unmapped repositories are ignored. Only the numeric repository ID,
 project-root digest, expected hosts and optional business unit are published.
 Names remain transient mapping keys. Email, display name, repository name,
 provider token responses, and arbitrary provider properties are not persisted.
+
+Intune retains only the opaque managed-device ID, whether Intune still reports
+the record as managed, the opaque Entra user ID when present, and an optional
+deployment-owned business-unit mapping keyed by that user ID. Device names,
+serial numbers, email addresses, hardware identifiers, compliance details and
+operating-system properties are rejected rather than persisted. Duplicate,
+malformed or over-limit device records fail the complete generation.
 
 The collector strongly reads the current source revision before publication.
 Partial upload pages remain invisible until the existing hash-bound atomic
@@ -120,8 +146,8 @@ One `DISCOVERY_JOB` record exists per managed source:
 
 | Field | Purpose |
 | --- | --- |
-| `provider` | Closed provider enum: `entra` or `github` |
-| `providerConfiguration` | Canonical non-secret GitHub organization and repository map; absent for Entra |
+| `provider` | Closed provider enum: `entra`, `intune` or `github` |
+| `providerConfiguration` | Canonical non-secret GitHub repository map or Intune user attribution; empty for Entra |
 | `providerConfigurationDigest` | SHA-256 binding used by the schedule and collector |
 | `status` | `provisioning`, `scheduled`, `running`, `healthy`, `degraded`, or `disabled` |
 | `revision` | Optimistic-concurrency revision for operator changes |
@@ -189,6 +215,33 @@ raw project paths, duplicate repositories or digests, unsupported hosts and
 empty host sets fail closed. The response exposes only organization and mapping
 count, never repository names, project digests or secret references.
 
+Intune uses the Entra-shaped secret and a typed, optional privacy-preserving
+business-unit mapping:
+
+```json
+{
+  "provider": "intune",
+  "intervalMinutes": 15,
+  "providerSecretArn": "arn:aws:secretsmanager:eu-west-2:123456789012:secret:aai-sec/discovery/providers/tenant-a/intune-production-AbCdEf",
+  "providerConfiguration": {
+    "userBusinessUnits": [
+      {
+        "userId": "33333333-3333-4333-8333-333333333333",
+        "businessUnit": "Platform"
+      }
+    ]
+  },
+  "expectedJobRevision": 0,
+  "expectedCredentialRevision": 0
+}
+```
+
+At most 500 mappings are accepted. Unknown fields, duplicate user IDs, invalid
+UUIDs and blank or oversized business-unit labels fail closed. The read model
+exposes only the mapping count and digest, never user IDs. The mapping is
+optional because a complete device population is still useful when business
+unit attribution is unavailable.
+
 ### Disable
 
 `DELETE /api/enterprise/discovery/sources/{sourceId}/managed-collector`
@@ -228,14 +281,16 @@ last success, failure count, and fixed reason without exposing provider data.
 
 ## Low-friction operator journey
 
-1. In **Coverage → Inventory sources**, choose **Microsoft Entra ID** or
-   **GitHub organization**, then **AWS-managed schedule**.
+1. In **Coverage → Inventory sources**, choose **Microsoft Entra ID**,
+   **Microsoft Intune** or **GitHub organization**, then **AWS-managed schedule**.
 2. Copy the generated AWS CLI template for the required KMS key, secret prefix,
    and tags; fill the three values locally or through the enterprise secret
    provisioning workflow.
 3. For GitHub, enter the organization and edit or import the typed repository
    map. Paste only the resulting secret ARN, select a cadence, and review the
    exact permission and data-minimisation boundary.
+   For Intune, optionally import the opaque user-to-business-unit map and review
+   the explicit warning that device evidence alone does not prove installation.
 4. Choose **Create managed collector**. The UI reports schedule state separately
    from credential and evidence state.
 5. Wait for the first run or choose a bounded **Run now** action when supported.
@@ -244,7 +299,9 @@ last success, failure count, and fixed reason without exposing provider data.
 
 ## Non-guarantees and remaining work
 
-- Managed Entra and GitHub collection does not prove endpoint coverage.
+- Managed Intune establishes a managed-device population but cannot by itself
+  prove installed binaries, active processes or project roots. Coverage remains
+  unavailable until a current endpoint installation feed is present.
 - GitHub REST responses can prove only repositories visible to the token. A
   token that hides both an unmapped repository and its mapping cannot reveal
   that blind spot. Production acceptance must independently prove that the

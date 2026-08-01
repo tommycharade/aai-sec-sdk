@@ -47,10 +47,13 @@ endpoint records. Enrollment is correlated by hashing the server-owned project
 root and matching the host.
 
 Coverage, health, and compliance percentages are returned only when all three
-required source classes have a current complete snapshot and the denominator is
-non-zero. Otherwise those percentages are `null`, `coverageAvailable` is false,
-and `blindSpots` identifies missing or non-current sources. Incomplete or stale
-evidence never produces orphan conclusions.
+required source classes have a current complete snapshot, current endpoint
+evidence contains both `device` and `installation` observations, and the
+denominator is non-zero. Otherwise those percentages are `null`,
+`coverageAvailable` is false, and `blindSpots` identifies missing, non-current
+or semantically incomplete sources. Incomplete or stale evidence never produces
+orphan conclusions. This means an Intune managed-device collection cannot be
+mistaken for proof that Claude or Codex is installed.
 
 The reconciler reports:
 
@@ -139,7 +142,7 @@ The legacy snapshot route remains for small pilots and compatibility. Connector
 generations remove its 100-record ceiling and are suitable for a bounded pilot;
 very large estates should move immutable pages to dedicated object storage and
 retain the same atomic current-generation pointer. AWS deployments can use the
-[managed Entra and GitHub collectors](scheduled-discovery-connectors-design.md),
+[managed Entra, Intune and GitHub collectors](scheduled-discovery-connectors-design.md),
 which deliver credentials through KMS-encrypted Secrets Manager values and run
 bounded EventBridge schedules. Their application bearers are still revocable
 service credentials, not hardware-backed workload identities. Production

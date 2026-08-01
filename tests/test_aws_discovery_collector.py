@@ -289,6 +289,147 @@ def test_managed_github_collector_uses_digest_bound_mapping(
     ]
 
 
+def test_managed_intune_collector_publishes_only_minimised_device_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Intune collection cannot invent binary, process, or project evidence."""
+    module, table, secrets = _load_collector(monkeypatch)
+    user_id = "33333333-3333-4333-8333-333333333333"
+    provider_configuration = {
+        "userBusinessUnits": [{"userId": user_id, "businessUnit": "Platform"}]
+    }
+    configuration = _configuration(
+        module,
+        sourceId="intune-production",
+        provider="intune",
+        providerSecretArn=(
+            "arn:aws:secretsmanager:eu-west-2:123456789012:secret:"
+            "aai-sec/discovery/providers/tenant-synthetic/intune-AbCdEf"
+        ),
+        providerConfigurationDigest=module._canonical_digest(provider_configuration),
+    )
+    _install_job(table, configuration)
+    job_key = ("TENANT#tenant-synthetic", "DISCOVERY_JOB#intune-production")
+    table.items[job_key]["providerConfiguration"] = provider_configuration
+    secrets.values[configuration["providerSecretArn"]] = json.dumps(
+        {
+            "tenantId": "11111111-1111-4111-8111-111111111111",
+            "clientId": "22222222-2222-4222-8222-222222222222",
+            "clientSecret": "synthetic-client-secret",
+        }
+    )
+    secrets.values[configuration["connectorSecretArn"]] = json.dumps(
+        {"token": "synthetic-connector-token"}
+    )
+    monkeypatch.setattr(module, "_entra_access_token", lambda credentials: "ephemeral-token")
+    monkeypatch.setattr(
+        module,
+        "_open_json",
+        lambda *args, **kwargs: {
+            "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#deviceManagement/managedDevices(id,userId)",
+            "value": [
+                {
+                    "id": "44444444-4444-4444-8444-444444444444",
+                    "userId": user_id,
+                }
+            ],
+        },
+    )
+    published: list[list[dict[str, Any]]] = []
+
+    def publish(
+        config: dict[str, Any], token: str, observations: list[dict[str, Any]], *, now: int
+    ) -> dict[str, Any]:
+        published.append(observations)
+        return {"generation": "intune-synthetic", "revision": 1, "observationCount": 1}
+
+    monkeypatch.setattr(module, "_publish", publish)
+
+    result = module.handler(configuration, None)
+
+    assert result["status"] == "healthy"
+    assert published == [
+        [
+            {
+                "kind": "device",
+                "id": "44444444-4444-4444-8444-444444444444",
+                "managed": True,
+                "userIds": [user_id],
+                "businessUnit": "Platform",
+            }
+        ]
+    ]
+    serialized = json.dumps(published)
+    for forbidden in ("binaryPresent", "processActive", "projectRootDigest", "deviceName"):
+        assert forbidden not in serialized
+
+
+def test_intune_pagination_and_provider_fields_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Intune follows only the exact Graph collection and rejects excess data."""
+    module, _, _ = _load_collector(monkeypatch)
+    invalid_next = (
+        "https://graph.microsoft.com/v1.0/users?$select=id,userId&$top=100&$skiptoken=opaque"
+    )
+    monkeypatch.setattr(
+        module,
+        "_open_json",
+        lambda *args, **kwargs: {"value": [], "@odata.nextLink": invalid_next},
+    )
+    with pytest.raises(module.ManagedDiscoveryError) as escaped:
+        module._collect_intune_devices("synthetic-token", {})
+    assert escaped.value.code == "provider_response_invalid"
+
+    monkeypatch.setattr(
+        module,
+        "_open_json",
+        lambda *args, **kwargs: {
+            "value": [
+                {
+                    "id": "44444444-4444-4444-8444-444444444444",
+                    "userId": None,
+                    "deviceName": "must-not-be-accepted",
+                }
+            ]
+        },
+    )
+    with pytest.raises(module.ManagedDiscoveryError) as overbroad:
+        module._collect_intune_devices("synthetic-token", {})
+    assert overbroad.value.code == "provider_response_invalid"
+
+
+def test_intune_configuration_tamper_fails_before_secret_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale attribution digest cannot cause provider or connector secret reads."""
+    module, table, secrets = _load_collector(monkeypatch)
+    provider_configuration: dict[str, Any] = {"userBusinessUnits": []}
+    configuration = _configuration(
+        module,
+        sourceId="intune-production",
+        provider="intune",
+        providerConfigurationDigest=module._canonical_digest(provider_configuration),
+    )
+    _install_job(table, configuration)
+    table.items[("TENANT#tenant-synthetic", "DISCOVERY_JOB#intune-production")][
+        "providerConfiguration"
+    ] = {
+        "userBusinessUnits": [
+            {
+                "userId": "33333333-3333-4333-8333-333333333333",
+                "businessUnit": "Tampered",
+            }
+        ]
+    }
+    secrets.values[configuration["providerSecretArn"]] = "{}"
+
+    with pytest.raises(RuntimeError, match="configuration_invalid"):
+        module.handler(configuration, None)
+
+    assert secrets.reads == []
+
+
 def test_github_collection_is_bounded_and_requires_complete_mapping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

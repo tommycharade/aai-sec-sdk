@@ -42,7 +42,7 @@ The stack creates:
   bearer resolved only by the SCIM Lambda from AWS Secrets Manager;
 - API Gateway HTTP API with Cognito JWT authorizer;
 - Lambda control-plane handler;
-- an AWS-managed Entra discovery collector, EventBridge Scheduler invocation
+- an AWS-managed Entra, Intune and GitHub discovery collector, EventBridge Scheduler invocation
   role, KMS key, connector dead-letter queue and collector alarms;
 - on-demand DynamoDB control and presence tables; the control table expires
   short-lived records by `ttl` and has a decision-timeline index for bounded
@@ -151,7 +151,7 @@ The current pilot's post-deployment result is recorded in
 and SCIM are not configured in that environment, so the source contracts must
 not be presented as live federation acceptance.
 
-## AWS-managed Entra and GitHub discovery
+## AWS-managed Entra, Intune and GitHub discovery
 
 After deployment, CloudFormation outputs `DiscoverySecretKmsKeyArn` and
 `DiscoveryProviderSecretNamePrefix`. A platform administrator can also obtain
@@ -167,6 +167,15 @@ an exact JSON object:
   "clientSecret": "<secret>"
 }
 ```
+
+For Intune managed-device population, create a separate application with only
+Microsoft Graph application permission
+`DeviceManagementManagedDevices.Read.All`, grant tenant-admin consent, and use
+the same three-field secret schema. The UI optionally accepts opaque Entra user
+ID to business-unit mappings; names and email addresses are not accepted.
+Intune does not prove installed binaries, active processes or project roots, so
+coverage remains unavailable until a separate endpoint publisher commits
+current `installation` evidence.
 
 For GitHub, use an organization-approved fine-grained token covering all
 repositories, with repository metadata read-only and no code-content,
