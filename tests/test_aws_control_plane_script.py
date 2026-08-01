@@ -75,3 +75,13 @@ def test_agent_stop_requires_typed_server_owned_control_state() -> None:
         is False
     )
     assert test_aws_control_plane._agent_stop_is_enforced(200, valid) is False
+
+
+def test_agent_stop_cleanup_key_matches_server_owned_record() -> None:
+    """Synthetic cleanup must remove the independent response-control record."""
+    assert test_aws_control_plane._agent_stop_record_key(
+        "tenant-smoke", "deployment-smoke", "agent-smoke"
+    ) == {
+        "pk": "TENANT#tenant-smoke",
+        "sk": "CONTROL#emergency-stop:agent:deployment-smoke:agent-smoke",
+    }
