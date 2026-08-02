@@ -104,8 +104,9 @@ are not retained evidence.
 
 The phase-5 implementation and its fail-closed job planner are specified in
 [Evidence continuity and recovery-job reconciliation](evidence-continuity-and-job-reconciliation-design.md).
-Source and verifier completion is not live acceptance: the current AWS replica
-remains one-way until the guarded deployment and two-direction canary pass.
+The guarded deployment and retained two-direction canary passed on 2026-08-02;
+see the [phase-5 acceptance](evidence-continuity-acceptance-2026-08-02.md).
+This does not activate or accept the passive control plane.
 
 ### API, UI and routing
 

@@ -101,6 +101,17 @@ authority.
 The synthetic retained objects are evidence and are not deleted. A successful
 template check is not a live recovery acceptance result.
 
+The supported operator entry point is
+`scripts/deploy_aws_evidence_continuity.py`. It requires both strict manifests
+and uses four explicit commands: `check` synthesizes and verifies without AWS
+mutation; `prepare --confirm-authority` persists the reviewed non-activation
+authority; `deploy --confirm-replication-deployment` updates the exact verified
+assemblies and re-reads provider state; and `canary --confirm-retained-canary`
+writes and verifies the two retained synthetic versions. The checked-in
+manifests are
+`infra/aws-control-plane/evidence-continuity.example.json` and
+`infra/aws-control-plane/regional-recovery.example.json`.
+
 ## Threats and controls
 
 | Threat | Control | Failure posture |
@@ -115,7 +126,10 @@ template check is not a live recovery acceptance result.
 
 ## Current status
 
-The infrastructure definitions, independent verifier, adversarial tests and
-standby reconciliation planner are implemented. They have not been deployed to
-the AWS recovery account as phase-5 acceptance. The current live environment
-therefore remains a one-way audit replica and P0-11 remains partial.
+The infrastructure, provider-state deployment guard, independent verifier,
+adversarial tests and standby reconciliation planner are implemented. Both
+directions were deployed from exact verified assemblies and passed the retained
+two-direction canary on 2026-08-02. The acceptance evidence is recorded in
+[Evidence continuity acceptance](evidence-continuity-acceptance-2026-08-02.md).
+P0-11 remains partial because identity, passive-cell activation, routing, load
+and full failover/failback acceptance are separate phases.

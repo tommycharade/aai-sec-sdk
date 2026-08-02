@@ -1,0 +1,9 @@
+{
+  "activationPermitted": false,
+  "approvalEvidenceRef": "CODEX-APPROVAL-2026-08-02-P0-11-EVIDENCE-CONTINUITY",
+  "primaryRegion": "eu-west-2",
+  "primaryStackName": "AaiSecControlPlane",
+  "recoveryRegion": "eu-west-1",
+  "recoveryStackName": "AaiSecAuditReplica",
+  "schemaVersion": 1
+}
