@@ -61,6 +61,7 @@ nav:
   - Regional recovery storage runbook: regional-recovery-storage-runbook.md
   - Regional recovery storage acceptance (2026-08-02): regional-recovery-storage-acceptance-2026-08-02.md
   - Passive regional control-plane cell: passive-regional-cell-design.md
+  - Evidence continuity and recovery-job reconciliation: evidence-continuity-and-job-reconciliation-design.md
   - Managed policy-signing trust convergence: policy-trust-convergence-design.md
   - Managed policy-trust convergence acceptance (2026-08-02): policy-trust-convergence-acceptance-2026-08-02.md
   - Asynchronous tenant retention: asynchronous-retention-design.md

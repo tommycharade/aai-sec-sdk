@@ -1352,6 +1352,125 @@ def test_async_assurance_repairs_a_committed_page_when_next_dispatch_fails(
     assert module._evidence_job_record(tenant, job_id)["page_count"] == 1
 
 
+def test_regional_recovery_rebuilds_queues_only_from_revision_bound_jobs(
+    monkeypatch: Any,
+) -> None:
+    """A recovery Region plans in standby and dispatches only after activation."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-recovery"
+    now = int(time.time())
+    table.items[(f"TENANT#{tenant}", "TENANT#root")] = {
+        "pk": f"TENANT#{tenant}",
+        "sk": "TENANT#root",
+        "evidence_assurance_pk": "EVIDENCE_ASSURANCE#00",
+        "evidence_assurance_sk": tenant,
+    }
+    evidence_key = module._item_key(tenant, "EVIDENCE_JOB", "assurance-a")
+    table.items[(evidence_key["pk"], evidence_key["sk"])] = {
+        **evidence_key,
+        "tenant_id": tenant,
+        "id": "assurance-a",
+        "status": "queued",
+        "revision": 4,
+        "updated_at": now,
+    }
+    retention_key = module._item_key(tenant, "EVIDENCE_RETENTION_JOB", "retention-a")
+    table.items[(retention_key["pk"], retention_key["sk"])] = {
+        **retention_key,
+        "tenant_id": tenant,
+        "id": "retention-a",
+        "status": "settling",
+        "revision": 7,
+        "policy_revision": 2,
+        "cutover_at": now - 1,
+        "updated_at": now,
+    }
+    policy_key = module._item_key(tenant, "EVIDENCE_POLICY", "retention")
+    table.items[(policy_key["pk"], policy_key["sk"])] = {
+        **policy_key,
+        "tenant_id": tenant,
+        "id": "retention",
+        "revision": 2,
+        "application_status": "applying",
+        "application_job_id": "retention-a",
+    }
+    event = {
+        "source": "aai.regional-recovery-jobs",
+        "schemaVersion": 1,
+        "mode": "check",
+        "activationEvidenceRef": "change/INC-1234",
+    }
+    checked = module.handler(event, None)
+    assert checked["plannedActions"] == 2
+    assert checked["dispatchedJobs"] == 0
+    assert checked["queueSource"] == "authoritative-dynamodb-job-records"
+    assert module._fake_sqs.messages == []
+
+    event["mode"] = "apply"
+    with pytest.raises(PermissionError, match="not activated"):
+        module.handler(event, None)
+    monkeypatch.setenv("PASSIVE_CELL_MODE", "active")
+    monkeypatch.setenv("RECOVERY_JOB_RECONCILIATION_ENABLED", "true")
+    applied = module.handler(event, None)
+    assert applied["plannedActions"] == 2
+    assert applied["dispatchedJobs"] == 2
+    assert {message["MessageDeduplicationId"] for message in module._fake_sqs.messages} == {
+        "assurance-a:4",
+        "retention:retention-a:7",
+    }
+
+
+def test_regional_recovery_fails_closed_on_ambiguous_job_authority(monkeypatch: Any) -> None:
+    """Recovery never chooses a live job winner from timestamps."""
+    module, table = _load_handler(monkeypatch)
+    clean_tenant = "tenant-clean"
+    table.items[(f"TENANT#{clean_tenant}", "TENANT#root")] = {
+        "pk": f"TENANT#{clean_tenant}",
+        "sk": "TENANT#root",
+        "evidence_assurance_pk": "EVIDENCE_ASSURANCE#00",
+        "evidence_assurance_sk": clean_tenant,
+    }
+    clean_key = module._item_key(clean_tenant, "EVIDENCE_JOB", "clean-job")
+    table.items[(clean_key["pk"], clean_key["sk"])] = {
+        **clean_key,
+        "tenant_id": clean_tenant,
+        "id": "clean-job",
+        "status": "queued",
+        "revision": 3,
+        "updated_at": int(time.time()),
+    }
+    tenant = "tenant-conflict"
+    table.items[(f"TENANT#{tenant}", "TENANT#root")] = {
+        "pk": f"TENANT#{tenant}",
+        "sk": "TENANT#root",
+        "evidence_assurance_pk": "EVIDENCE_ASSURANCE#00",
+        "evidence_assurance_sk": tenant,
+    }
+    for identifier in ("job-a", "job-b"):
+        key = module._item_key(tenant, "EVIDENCE_JOB", identifier)
+        table.items[(key["pk"], key["sk"])] = {
+            **key,
+            "tenant_id": tenant,
+            "id": identifier,
+            "status": "queued",
+            "revision": 1,
+            "updated_at": int(time.time()),
+        }
+    monkeypatch.setenv("PASSIVE_CELL_MODE", "active")
+    monkeypatch.setenv("RECOVERY_JOB_RECONCILIATION_ENABLED", "true")
+    with pytest.raises(RuntimeError, match="authority contains conflicts"):
+        module.handler(
+            {
+                "source": "aai.regional-recovery-jobs",
+                "schemaVersion": 1,
+                "mode": "apply",
+                "activationEvidenceRef": "change/INC-5678",
+            },
+            None,
+        )
+    assert module._fake_sqs.messages == []
+
+
 def test_async_evidence_job_completes_all_pages_and_binds_export(monkeypatch: Any) -> None:
     """Scan beyond the synchronous bound and verify every derived export page."""
     module, _table = _load_handler(monkeypatch)

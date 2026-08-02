@@ -7529,6 +7529,136 @@ def _evidence_job_page(tenant, job_id, page_number):
     return {**value, "contentSha256": supplied}
 
 
+def _regional_recovery_job_reconciliation(mode, activation_evidence_ref):
+    """Rebuild Region-local evidence delivery from authoritative job records.
+
+    SQS is deliberately never inspected or copied. A check can run in standby,
+    while apply requires two independent activation controls and still relies
+    on revision-bound FIFO messages plus DynamoDB conditional writes.
+    """
+    if mode not in {"check", "apply"}:
+        raise ValueError("regional recovery reconciliation mode is invalid")
+    evidence_ref = _bounded_text(activation_evidence_ref, "activationEvidenceRef", maximum=512)
+    if len(evidence_ref) < 8:
+        raise ValueError("activationEvidenceRef must be at least eight characters")
+    if mode == "apply" and (
+        os.environ.get("PASSIVE_CELL_MODE") != "active"
+        or os.environ.get("RECOVERY_JOB_RECONCILIATION_ENABLED") != "true"
+    ):
+        raise PermissionError("regional recovery job reconciliation is not activated")
+
+    registrations = []
+    for shard in range(_EVIDENCE_ASSURANCE_SHARDS):
+        result = TABLE.query(
+            IndexName=_EVIDENCE_ASSURANCE_INDEX,
+            KeyConditionExpression=Key("evidence_assurance_pk").eq(
+                f"EVIDENCE_ASSURANCE#{shard:02d}"
+            ),
+            Limit=_ENDPOINT_DETECTION_TENANT_LIMIT + 1,
+        )
+        if result.get("LastEvaluatedKey"):
+            raise RuntimeError("regional recovery tenant shard exceeds its safe bound")
+        registrations.extend(result.get("Items", []))
+        if len(registrations) > _ENDPOINT_DETECTION_TENANT_LIMIT:
+            raise RuntimeError("regional recovery tenant inventory exceeds its safe bound")
+
+    now = int(time.time())
+    planned = dispatched = failed_stale = deferred = conflicts = 0
+    actions = []
+    for registration in registrations:
+        tenant = registration.get("evidence_assurance_sk")
+        if not isinstance(tenant, str) or registration.get("pk") != f"TENANT#{tenant}":
+            conflicts += 1
+            continue
+        assurance = [
+            job
+            for job in _list(tenant, "EVIDENCE_JOB", consistent_read=True)
+            if job.get("status") in {"queued", "running"}
+        ]
+        retention = [
+            job
+            for job in _list(tenant, "EVIDENCE_RETENTION_JOB", consistent_read=True)
+            if job.get("status") in {"settling", "queued", "running"}
+        ]
+        # More than one live job of either class is ambiguous server authority.
+        # Do not choose a winner from timestamps during a recovery event.
+        if len(assurance) > 1 or len(retention) > 1:
+            conflicts += 1
+            continue
+
+        if assurance:
+            job = assurance[0]
+            revision = int(job.get("revision", 0))
+            if revision < 1 or job.get("tenant_id") != tenant or not job.get("id"):
+                conflicts += 1
+            elif job.get("status") == "queued":
+                planned += 1
+                actions.append(("dispatch_assurance", tenant, job["id"], revision))
+            elif now - int(job.get("updated_at", 0)) > _EVIDENCE_JOB_STALE_SECONDS:
+                planned += 1
+                actions.append(("fail_stale_assurance", tenant, job["id"], revision))
+            else:
+                deferred += 1
+
+        if retention:
+            job = retention[0]
+            revision = int(job.get("revision", 0))
+            policy = TABLE.get_item(
+                Key=_item_key(tenant, "EVIDENCE_POLICY", "retention"), ConsistentRead=True
+            ).get("Item")
+            bound = bool(
+                policy
+                and policy.get("application_status") == "applying"
+                and policy.get("application_job_id") == job.get("id")
+                and int(policy.get("revision", 0)) == int(job.get("policy_revision", -1))
+            )
+            if revision < 1 or job.get("tenant_id") != tenant or not job.get("id") or not bound:
+                conflicts += 1
+            else:
+                due = job.get("status") != "settling" or now >= int(job.get("cutover_at", 0))
+                stale = (
+                    job.get("status") == "running"
+                    and now - int(job.get("updated_at", 0)) > _EVIDENCE_RETENTION_JOB_STALE_SECONDS
+                )
+                if due or stale:
+                    planned += 1
+                    actions.append(("dispatch_retention", tenant, job["id"], revision))
+                else:
+                    deferred += 1
+
+    if conflicts:
+        raise RuntimeError("regional recovery job authority contains conflicts")
+    if mode == "apply":
+        # Complete the read-only validation pass before the first side effect.
+        # Workers still re-read and condition on revision if state changes
+        # concurrently after this point.
+        for action, tenant, job_id, revision in actions:
+            if action == "dispatch_assurance":
+                _enqueue_evidence_job(tenant, job_id, revision)
+                dispatched += 1
+            elif action == "dispatch_retention":
+                _enqueue_retention_job(tenant, job_id, revision)
+                dispatched += 1
+            else:
+                _fail_evidence_job(
+                    tenant,
+                    job_id,
+                    revision,
+                    "regional_recovery_stale_assurance_job",
+                )
+                failed_stale += 1
+    return {
+        "mode": mode,
+        "activationEvidenceRefSha256": hashlib.sha256(evidence_ref.encode()).hexdigest(),
+        "processedTenants": len(registrations),
+        "plannedActions": planned,
+        "dispatchedJobs": dispatched,
+        "failedStaleJobs": failed_stale,
+        "deferredJobs": deferred,
+        "queueSource": "authoritative-dynamodb-job-records",
+    }
+
+
 def _evidence_schedule_cycle():
     """Start due tenant scans and fail stale jobs on the internal schedule."""
     tenants = []
@@ -13449,6 +13579,21 @@ def handler(event, context):
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("evidence retention schedule event is invalid")
         return _evidence_retention_schedule_cycle()
+    if isinstance(event, dict) and event.get("source") == "aai.regional-recovery-jobs":
+        if (
+            set(event)
+            != {
+                "source",
+                "schemaVersion",
+                "mode",
+                "activationEvidenceRef",
+            }
+            or event.get("schemaVersion") != 1
+        ):
+            raise ValueError("regional recovery job reconciliation event is invalid")
+        return _regional_recovery_job_reconciliation(
+            event.get("mode"), event.get("activationEvidenceRef")
+        )
     try:
         method, path = _method_path(event)
         if method == "OPTIONS":

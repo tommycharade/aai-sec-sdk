@@ -104,6 +104,7 @@ def _template() -> dict[str, Any]:
                 "Environment": {
                     "Variables": {
                         "PASSIVE_CELL_MODE": "standby",
+                        "RECOVERY_JOB_RECONCILIATION_ENABLED": "false",
                         "POLICY_SIGNING_KEY_ARN": "",
                     }
                 },
@@ -230,6 +231,7 @@ def test_passive_stack_source_has_no_activation_or_routing_construct() -> None:
     # separately verified disabled resources.
     assert stack.count("enabled: false") == 3
     assert 'POLICY_SIGNING_KEY_ARN: ""' in stack
+    assert 'RECOVERY_JOB_RECONCILIATION_ENABLED: "false"' in stack
     assert ".grantReadData(target)" in stack
     assert 'actions: ["s3:GetObject", "s3:GetObjectVersion"]' in stack
     assert ".grantReadWriteData(" not in stack

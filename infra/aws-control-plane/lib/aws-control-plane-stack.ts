@@ -347,6 +347,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
             priority: 1,
             filter: { prefix: "" },
             deleteMarkerReplication: { status: "Disabled" },
+            sourceSelectionCriteria: {
+              // Required for bidirectional continuity: retention, legal-hold
+              // and tag changes received from recovery are synchronized back.
+              replicaModifications: { status: "Enabled" },
+            },
             status: "Enabled",
             destination: {
               bucket: auditReplicaArn,
@@ -675,6 +680,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       SCIM_ENABLED: entraScimTokenSecretName ? "true" : "false",
       SCIM_TABLE: scim.tableName,
       SPLUNK_STUB_ENABLED: "true",
+      RECOVERY_JOB_RECONCILIATION_ENABLED: "false",
       SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn,
       RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
       RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,

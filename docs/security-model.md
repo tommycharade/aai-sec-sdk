@@ -223,6 +223,15 @@ table or alternate stack. The verified template SHA-256 is checked again and
 the exact CDK assembly is deployed without re-synthesis. Population continuity is not inferred from matching
 pool configuration; it requires separately retained live identity evidence.
 
+Bidirectional evidence continuity is independently constrained in each S3
+direction. Both Object Lock buckets enable replica-modification sync while
+excluding delete markers, and synthesized CloudFormation is rejected unless
+its destination and least-privilege replication actions match the reviewed
+contract. Recovery queues are never copied: a bounded internal reconciler
+derives exact revision-bound work from the control Global Table, fails on
+ambiguous jobs and cannot apply while the cell is in standby. See
+[Evidence continuity and recovery-job reconciliation](evidence-continuity-and-job-reconciliation-design.md).
+
 Regional signer migration additionally binds the old/new/replica public trust
 set into a schema-v2 managed endpoint package while keeping its expected digest
 as separate server-owned desired state. Root installation is all-or-rollback;
