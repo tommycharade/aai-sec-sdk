@@ -209,6 +209,10 @@ class RegionalFaultAuthority:
             or any(not isinstance(item, str) or not _UUID.fullmatch(item) for item in approvers)
         ):
             raise RegionalFaultAuthorityError("fault authority values are invalid")
+        if expires < current + duration + 30:
+            raise RegionalFaultAuthorityError(
+                "fault authority expires before the fault and cleanup window"
+            )
         return cls(
             fault_id,
             manifest.transition_id,
