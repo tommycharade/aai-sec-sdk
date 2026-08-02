@@ -60,6 +60,8 @@ nav:
   - Regional control-plane recovery design: regional-control-plane-recovery-design.md
   - Regional recovery storage runbook: regional-recovery-storage-runbook.md
   - Regional recovery storage acceptance (2026-08-02): regional-recovery-storage-acceptance-2026-08-02.md
+  - Managed policy-signing trust convergence: policy-trust-convergence-design.md
+  - Managed policy-trust convergence acceptance (2026-08-02): policy-trust-convergence-acceptance-2026-08-02.md
   - Asynchronous tenant retention: asynchronous-retention-design.md
   - Asynchronous mass-retention acceptance — 2026-08-01: async-retention-acceptance-2026-08-01.md
   - Asynchronous evidence assurance acceptance — 2026-08-01: async-evidence-acceptance-2026-08-01.md

@@ -160,6 +160,12 @@ client = ControlPlaneAgentClient(
 client.heartbeat("synthetic-short-lived-agent-session")
 ```
 
+Policy-signing rotation uses a schema-v2 managed package and
+`measure_managed_deployment_package` instead of measuring only the native
+bundle. That verifier additionally requires the exact root-owned trust file and
+adds `policyTrustBundleSha256` to heartbeat evidence. See
+[managed policy-signing trust convergence](policy-trust-convergence-design.md).
+
 The verifier is read-only and supports root-owned macOS/Linux managed files.
 It opens files without following symlinks, verifies regular-file type, root
 ownership, restrictive write permissions, a one-megabyte bound and exact

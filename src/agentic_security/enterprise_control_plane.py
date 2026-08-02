@@ -133,6 +133,7 @@ _FLEET_GOVERNANCE_KEYS: dict[str, frozenset[str]] = {
             "bundleHash",
             "policyId",
             "policyVersion",
+            "policyTrustBundleSha256",
         }
     ),
 }
@@ -613,7 +614,9 @@ def _json_object(value: Mapping[str, Any] | None, name: str) -> str:
 
 def _normalize_managed_host(value: object, name: str = "managedHost") -> dict[str, Any]:
     """Validate desired managed-host identity without treating it as observed state."""
-    if not isinstance(value, Mapping) or set(value) != _FLEET_GOVERNANCE_KEYS["managedHost"]:
+    fields = _FLEET_GOVERNANCE_KEYS["managedHost"]
+    base_fields = fields - {"policyTrustBundleSha256"}
+    if not isinstance(value, Mapping) or frozenset(value) not in {fields, base_fields}:
         raise FleetConfigurationError(f"{name} must contain the complete managed-host schema")
     host = _text(value.get("host"), f"{name}.host")
     platform = _text(value.get("platform"), f"{name}.platform")
@@ -627,7 +630,7 @@ def _normalize_managed_host(value: object, name: str = "managedHost") -> dict[st
         raise FleetConfigurationError(f"{name}.bundleHash must be lowercase SHA-256")
     if not isinstance(version, int) or isinstance(version, bool) or version <= 0:
         raise FleetConfigurationError(f"{name}.policyVersion must be positive")
-    return {
+    result = {
         "host": host,
         "hostVersion": _text(value.get("hostVersion"), f"{name}.hostVersion"),
         "platform": platform,
@@ -635,17 +638,29 @@ def _normalize_managed_host(value: object, name: str = "managedHost") -> dict[st
         "policyId": _text(value.get("policyId"), f"{name}.policyId"),
         "policyVersion": version,
     }
+    if "policyTrustBundleSha256" in value:
+        trust_digest = _text(
+            value.get("policyTrustBundleSha256"), f"{name}.policyTrustBundleSha256"
+        )
+        if _SHA256_HEX.fullmatch(trust_digest) is None:
+            raise FleetConfigurationError(
+                f"{name}.policyTrustBundleSha256 must be lowercase SHA-256"
+            )
+        result["policyTrustBundleSha256"] = trust_digest
+    return result
 
 
 def _normalize_managed_configuration_report(value: object) -> dict[str, Any]:
     """Validate content-minimised endpoint evidence carried by a heartbeat."""
-    required = _FLEET_GOVERNANCE_KEYS["managedHost"] | frozenset(
-        {"source", "verifiedAt", "expiresAt"}
-    )
-    if not isinstance(value, Mapping) or set(value) != required:
+    fields = _FLEET_GOVERNANCE_KEYS["managedHost"]
+    report_fields = frozenset({"source", "verifiedAt", "expiresAt"})
+    if not isinstance(value, Mapping) or frozenset(value) not in {
+        fields | report_fields,
+        (fields - {"policyTrustBundleSha256"}) | report_fields,
+    }:
         raise FleetConfigurationError("managedConfiguration has an invalid schema")
     result = _normalize_managed_host(
-        {key: value.get(key) for key in _FLEET_GOVERNANCE_KEYS["managedHost"]},
+        {key: value.get(key) for key in fields if key in value},
         "managedConfiguration",
     )
     source = _text(value.get("source"), "managedConfiguration.source")

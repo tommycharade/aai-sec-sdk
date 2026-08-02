@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from scripts.verify_incident_case_export import verify_artifact
 
 from agentic_security import (
@@ -26,6 +28,8 @@ from agentic_security import (
     ManagedPolicyIntent,
     NativeActionDecision,
     NativeActionRule,
+    PolicyTrustStore,
+    TrustedPolicyKey,
 )
 
 
@@ -559,6 +563,11 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("SCIM_TABLE", "")
     monkeypatch.setenv("SPLUNK_STUB_ENABLED", "true")
     monkeypatch.setenv("POLICY_SIGNING_KEY_ARN", policy_key_id)
+    monkeypatch.setenv(
+        "REGIONAL_POLICY_SIGNING_KEY_ARN",
+        "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef",
+    )
+    monkeypatch.setenv("RECOVERY_REGION", "eu-west-1")
     monkeypatch.setenv("SECURITY_ALERTS_TOPIC_ARN", "arn:aws:sns:eu-west-2:111111111111:test")
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/handler.py"
     monkeypatch.syspath_prepend(str(path.parent))
@@ -1737,7 +1746,7 @@ def _bound_endpoint_alert(
 
 
 def _managed_package_fixture(
-    *, policy_version: int = 1
+    *, policy_version: int = 1, with_trust: bool = False
 ) -> tuple[ManagedDeploymentPackage, dict[str, Any]]:
     """Build canonical package bytes and matching AWS desired-host metadata."""
     hook_path = "/opt/aai-security/hooks/native-policy"
@@ -1752,13 +1761,37 @@ def _managed_package_fixture(
         platform=ManagedPlatform.LINUX,
         hook_command=hook_path,
     )
+    public_pem = (
+        ec.generate_private_key(ec.SECP256R1())
+        .public_key()
+        .public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("ascii")
+    )
+    trust_store = (
+        PolicyTrustStore(
+            tuple(
+                TrustedPolicyKey(key_id, public_pem)
+                for key_id in (
+                    "arn:aws:kms:eu-west-2:111111111111:key/12345678-1234-1234-1234-123456789abc",
+                    "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef",
+                    "arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef",
+                )
+            )
+        )
+        if with_trust
+        else None
+    )
     package = ManagedDeploymentPackage.from_bundle(
         bundle,
         required_executables=(
             ManagedExecutableRequirement(hook_path, hashlib.sha256(b"synthetic hook").hexdigest()),
         ),
+        policy_trust_store=trust_store,
     )
-    return package, {
+    desired = {
         "host": package.host.value,
         "hostVersion": package.host_version,
         "platform": package.platform.value,
@@ -1766,6 +1799,9 @@ def _managed_package_fixture(
         "policyId": package.policy_id,
         "policyVersion": package.policy_version,
     }
+    if package.policy_trust_bundle_sha256 is not None:
+        desired["policyTrustBundleSha256"] = package.policy_trust_bundle_sha256
+    return package, desired
 
 
 def _set_runtime_manifests(monkeypatch: Any, manifests: list[dict[str, Any]]) -> None:
@@ -4654,6 +4690,8 @@ def test_policy_signing_key_is_asymmetric_retained_and_least_privileged() -> Non
     assert 'policySigningKey.grant(trialOnboarding, "kms:Sign")' in stack
     assert 'policySigningKey.grant(handler, "kms:Sign", "kms:GetPublicKey")' in stack
     assert "POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn" in stack
+    assert "REGIONAL_POLICY_SIGNING_KEY_ARN: regionalPolicySigningKey.keyArn" in stack
+    assert 'RECOVERY_REGION: process.env.AUDIT_REPLICA_REGION ?? "eu-west-1"' in stack
     assert 'new cdk.CfnOutput(this, "PolicySigningKeyArn"' in stack
 
 
@@ -8073,6 +8111,132 @@ def test_aws_managed_configuration_posture_rejects_drift_and_staleness(
         module._managed_host({**desired, "policyVersion": Decimal("3.5")})
 
 
+def test_aws_managed_configuration_requires_exact_policy_trust_convergence(
+    monkeypatch: Any,
+) -> None:
+    """Missing or altered endpoint trust evidence cannot become enforced."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-trust-convergence"
+    desired = {
+        "host": "claude-code",
+        "hostVersion": "2.1.220",
+        "platform": "macos",
+        "bundleHash": "b" * 64,
+        "policyId": "policy-safe",
+        "policyVersion": 4,
+        "policyTrustBundleSha256": "a" * 64,
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "CONFIGURATION", "dep-a")
+        | {"desiredConfiguration": {"managedHost": desired}}
+    )
+    agent: dict[str, Any] = {
+        "deployment_id": "dep-a",
+        "host": "claude-code",
+        "managed_configuration_report": {
+            **{key: value for key, value in desired.items() if key != "policyTrustBundleSha256"},
+            "source": "mdm",
+            "verifiedAt": 90,
+            "expiresAt": 200,
+        },
+    }
+    assert module._managed_configuration_posture(tenant, agent, now=100)["status"] == "conflict"
+    agent["managed_configuration_report"] = {
+        **desired,
+        "source": "mdm",
+        "verifiedAt": 90,
+        "expiresAt": 200,
+    }
+    assert module._managed_configuration_posture(tenant, agent, now=100)["status"] == "enforced"
+    agent["managed_configuration_report"]["policyTrustBundleSha256"] = "f" * 64
+    assert module._managed_configuration_posture(tenant, agent, now=100)["status"] == "conflict"
+
+
+def test_aws_policy_trust_cutover_readiness_requires_every_live_authority(
+    monkeypatch: Any,
+) -> None:
+    """Cutover posture is true only for exact package, rollout and heartbeat trust."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-cutover"
+    now = 1_900_000_000
+    package, desired = _managed_package_fixture(with_trust=True)
+    table.put_item(
+        Item=module._item_key(tenant, "CONFIGURATION", "dep-a")
+        | {
+            "deploymentId": "dep-a",
+            "desiredConfiguration": {"managedHost": desired},
+            "rolloutState": "converged",
+            "rolloutPercentage": 100,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "MANAGED_PACKAGE", "dep-a")
+        | {
+            "deploymentId": "dep-a",
+            "revision": 1,
+            "packageSha256": package.package_sha256,
+            "bundleHash": package.bundle_hash,
+            "host": package.host.value,
+            "hostVersion": package.host_version,
+            "platform": package.platform.value,
+            "policyId": package.policy_id,
+            "policyVersion": package.policy_version,
+            "policyTrustBundleSha256": package.policy_trust_bundle_sha256,
+            "publishedAt": now - 10,
+            "publishedBy": "platform-admin",
+        }
+    )
+    report = {
+        **desired,
+        "source": "mdm",
+        "verifiedAt": now - 10,
+        "expiresAt": now + 200,
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "lifecycle_state": "active",
+            "managed_configuration_report": report,
+        }
+    )
+    posture = module._policy_trust_convergence(tenant, now=now)
+    assert posture["readyForSignerCutover"] is True
+    assert posture["enforcedAgentCount"] == 1
+    assert len(posture["requiredTrustKeyArns"]) == 3
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant, "status": "active"}
+    )
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    claims = {
+        "sub": "platform-admin-a",
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+    }
+    route = _invoke(
+        module,
+        _event("/enterprise/resilience/policy-trust", "GET", claims=claims),
+    )
+    assert route["statusCode"] == 200
+    assert json.loads(route["body"])["readyForSignerCutover"] is True
+    denied = _invoke(
+        module,
+        _event(
+            "/enterprise/resilience/policy-trust",
+            "GET",
+            claims={"sub": "unknown", "custom:tenant_id": tenant},
+        ),
+    )
+    assert denied["statusCode"] == 403
+    agent_key = module._item_key(tenant, "AGENT", "dep-a:agent-a")
+    table.items[(agent_key["pk"], agent_key["sk"])]["managed_configuration_report"][
+        "policyTrustBundleSha256"
+    ] = "f" * 64
+    assert module._policy_trust_convergence(tenant, now=now)["readyForSignerCutover"] is False
+
+
 def test_aws_managed_package_validator_matches_canonical_sdk_contract(monkeypatch: Any) -> None:
     """The standalone Lambda adapter rejects altered and non-canonical package bytes."""
     module, _table = _load_handler(monkeypatch)
@@ -8097,6 +8261,31 @@ def test_aws_managed_package_validator_matches_canonical_sdk_contract(monkeypatc
         module._managed_package(
             base64.b64encode(tampered_bytes).decode(),
             hashlib.sha256(tampered_bytes).hexdigest(),
+        )
+
+
+def test_aws_managed_package_v2_requires_exact_deployment_owned_trust(monkeypatch: Any) -> None:
+    """A package publisher cannot choose an unrelated signer trust root."""
+    module, _table = _load_handler(monkeypatch)
+    package, desired = _managed_package_fixture(with_trust=True)
+    value, target, _encoded = module._managed_package(
+        base64.b64encode(package.to_json()).decode(), package.package_sha256
+    )
+    assert value["schemaVersion"] == 2
+    assert target == desired
+    forged = cast(dict[str, Any], json.loads(package.to_json()))
+    forged["policyTrust"]["content"] = forged["policyTrust"]["content"].replace(
+        "12345678-1234-1234-1234-123456789abc",
+        "ffffffff-ffff-ffff-ffff-ffffffffffff",
+    )
+    forged["policyTrust"]["sha256"] = hashlib.sha256(
+        forged["policyTrust"]["content"].encode()
+    ).hexdigest()
+    forged_bytes = json.dumps(forged, separators=(",", ":"), sort_keys=True).encode()
+    with pytest.raises(ValueError, match="deployment-owned"):
+        module._managed_package(
+            base64.b64encode(forged_bytes).decode(),
+            hashlib.sha256(forged_bytes).hexdigest(),
         )
 
 

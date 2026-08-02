@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from agentic_security import (
     AgentHost,
@@ -20,6 +22,8 @@ from agentic_security import (
     ManagedPolicyIntent,
     NativeActionDecision,
     NativeActionRule,
+    PolicyTrustStore,
+    TrustedPolicyKey,
 )
 
 
@@ -33,7 +37,7 @@ def _load() -> Any:
     return module
 
 
-def _package(version: int, hook: bytes) -> ManagedDeploymentPackage:
+def _package(version: int, hook: bytes, *, with_trust: bool = False) -> ManagedDeploymentPackage:
     bundle = ManagedConfigurationCompiler().compile(
         ManagedPolicyIntent(
             "policy-safe",
@@ -51,6 +55,25 @@ def _package(version: int, hook: bytes) -> ManagedDeploymentPackage:
             ManagedExecutableRequirement(
                 "/opt/aai-security/hooks/native-policy", hashlib.sha256(hook).hexdigest()
             ),
+        ),
+        policy_trust_store=(
+            PolicyTrustStore(
+                (
+                    TrustedPolicyKey(
+                        "arn:aws:kms:eu-west-2:123456789012:key/"
+                        "12345678-1234-1234-1234-123456789abc",
+                        ec.generate_private_key(ec.SECP256R1())
+                        .public_key()
+                        .public_bytes(
+                            serialization.Encoding.PEM,
+                            serialization.PublicFormat.SubjectPublicKeyInfo,
+                        )
+                        .decode("ascii"),
+                    ),
+                )
+            )
+            if with_trust
+            else None
         ),
     )
 
@@ -97,6 +120,38 @@ def test_preflight_and_install_write_exact_restrictive_files(tmp_path: Path) -> 
         assert target.stat().st_uid == uid
     assert not list(root.rglob("*.aai-stage-*"))
     assert not list(root.rglob("*.aai-backup-*"))
+
+
+def test_v2_install_atomically_writes_and_rechecks_policy_trust(tmp_path: Path) -> None:
+    module = _load()
+    hook = b"synthetic executable"
+    package = _package(1, hook, with_trust=True)
+    root, mapper, uid = _endpoint(tmp_path, hook)
+    assert package.policy_trust is not None
+    result = module.install_package(
+        package,
+        expected_host=AgentHost.CLAUDE_CODE,
+        expected_platform=ManagedPlatform.LINUX,
+        expected_bundle_hash=package.bundle_hash,
+        expected_policy_trust_sha256=package.policy_trust_bundle_sha256,
+        path_mapper=mapper,
+        owner_uid=uid,
+        effective_uid=uid,
+    )
+    trust_path = mapper(package.policy_trust.path)
+    assert trust_path.read_text() == package.policy_trust.content
+    assert result.policy_trust_bundle_sha256 == package.policy_trust.sha256
+    trust_path.write_text("{}")
+    with pytest.raises(module.ManagedEndpointInstallError, match="not desired state|validation"):
+        module.preflight_package(
+            package,
+            expected_host=AgentHost.CLAUDE_CODE,
+            expected_platform=ManagedPlatform.LINUX,
+            expected_bundle_hash=package.bundle_hash,
+            expected_policy_trust_sha256="f" * 64,
+            path_mapper=mapper,
+            owner_uid=uid,
+        )
 
 
 def test_install_rejects_non_admin_tampered_hook_and_symlink_target(tmp_path: Path) -> None:
@@ -203,5 +258,47 @@ def test_partial_replacement_failure_restores_every_previous_file(tmp_path: Path
             owner_uid=uid,
             effective_uid=uid,
             replace=fail_fourth,
+        )
+    assert {path: mapper(path).read_bytes() for path in before} == before
+
+
+def test_post_replace_trust_drift_rolls_back_complete_authority(tmp_path: Path) -> None:
+    module = _load()
+    hook = b"synthetic executable"
+    original = _package(1, hook, with_trust=True)
+    _root, mapper, uid = _endpoint(tmp_path, hook)
+    module.install_package(
+        original,
+        expected_host=AgentHost.CLAUDE_CODE,
+        expected_platform=ManagedPlatform.LINUX,
+        expected_bundle_hash=original.bundle_hash,
+        expected_policy_trust_sha256=original.policy_trust_bundle_sha256,
+        path_mapper=mapper,
+        owner_uid=uid,
+        effective_uid=uid,
+    )
+    assert original.policy_trust is not None
+    paths = (*original.artifacts, original.policy_trust)
+    before = {artifact.path: mapper(artifact.path).read_bytes() for artifact in paths}
+    replacement = _package(2, hook, with_trust=True)
+    assert replacement.policy_trust is not None
+    trust_target = mapper(replacement.policy_trust.path)
+
+    def corrupt_trust_after_replace(source: Any, destination: Any) -> None:
+        os.replace(source, destination)
+        if Path(destination) == trust_target and ".aai-stage-" in Path(source).name:
+            trust_target.write_text("{}")
+
+    with pytest.raises(module.ManagedEndpointInstallError, match="rolled back"):
+        module.install_package(
+            replacement,
+            expected_host=AgentHost.CLAUDE_CODE,
+            expected_platform=ManagedPlatform.LINUX,
+            expected_bundle_hash=replacement.bundle_hash,
+            expected_policy_trust_sha256=replacement.policy_trust_bundle_sha256,
+            path_mapper=mapper,
+            owner_uid=uid,
+            effective_uid=uid,
+            replace=corrupt_trust_after_replace,
         )
     assert {path: mapper(path).read_bytes() for path in before} == before

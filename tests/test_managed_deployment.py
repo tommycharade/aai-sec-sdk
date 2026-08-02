@@ -4,24 +4,52 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, cast
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
+import agentic_security.managed_deployment as managed_deployment
 from agentic_security import (
     AgentHost,
     ManagedArtifact,
     ManagedConfigurationCompiler,
+    ManagedConfigurationSource,
     ManagedDeploymentPackage,
     ManagedExecutableRequirement,
     ManagedPlatform,
     ManagedPolicyIntent,
     NativeActionDecision,
     NativeActionRule,
+    PolicyTrustStore,
     SecurityConfigurationError,
+    TrustedPolicyKey,
 )
+
+
+def _trust_store() -> PolicyTrustStore:
+    """Return one synthetic deployment-pinned signing authority."""
+    public_pem = (
+        ec.generate_private_key(ec.SECP256R1())
+        .public_key()
+        .public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("ascii")
+    )
+    return PolicyTrustStore(
+        (
+            TrustedPolicyKey(
+                "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789abc",
+                public_pem,
+            ),
+        )
+    )
 
 
 def _package(
@@ -29,6 +57,7 @@ def _package(
     host: AgentHost = AgentHost.CLAUDE_CODE,
     platform: ManagedPlatform = ManagedPlatform.LINUX,
     policy_version: int = 1,
+    with_trust: bool = False,
 ) -> ManagedDeploymentPackage:
     hook_path = (
         r"C:\Program Files\AAI Security\hooks\native-policy.exe"
@@ -54,6 +83,7 @@ def _package(
         required_executables=(
             ManagedExecutableRequirement(hook_path, hashlib.sha256(b"synthetic hook").hexdigest()),
         ),
+        policy_trust_store=_trust_store() if with_trust else None,
     )
 
 
@@ -75,6 +105,108 @@ def test_package_is_canonical_digest_bound_and_target_bound() -> None:
             "sha256": hashlib.sha256(b"synthetic hook").hexdigest(),
         }
     ]
+
+
+def test_schema_v2_binds_canonical_policy_trust_and_requires_out_of_band_digest() -> None:
+    package = _package(with_trust=True)
+    assert package.to_wire()["schemaVersion"] == 2
+    assert package.policy_trust is not None
+    assert package.policy_trust.path == "/opt/aai-security/trust/policy-signing.json"
+    parsed = ManagedDeploymentPackage.from_json(
+        package.to_json(), expected_package_sha256=package.package_sha256
+    )
+    parsed.require_target(
+        host=AgentHost.CLAUDE_CODE,
+        platform=ManagedPlatform.LINUX,
+        bundle_hash=package.bundle_hash,
+        policy_trust_bundle_sha256=package.policy_trust_bundle_sha256,
+    )
+    with pytest.raises(SecurityConfigurationError, match="trust is not desired"):
+        parsed.require_target(
+            host=AgentHost.CLAUDE_CODE,
+            platform=ManagedPlatform.LINUX,
+            bundle_hash=package.bundle_hash,
+        )
+    with pytest.raises(SecurityConfigurationError, match="trust is not desired"):
+        parsed.require_target(
+            host=AgentHost.CLAUDE_CODE,
+            platform=ManagedPlatform.LINUX,
+            bundle_hash=package.bundle_hash,
+            policy_trust_bundle_sha256="f" * 64,
+        )
+
+
+@pytest.mark.parametrize("field", ["path", "content", "sha256"])
+def test_schema_v2_rejects_policy_trust_tampering(field: str) -> None:
+    package = _package(with_trust=True)
+    value = cast(dict[str, Any], json.loads(package.to_json()))
+    trust = cast(dict[str, Any], value["policyTrust"])
+    trust[field] = {
+        "path": "/untrusted/policy-signing.json",
+        "content": "{}",
+        "sha256": "f" * 64,
+    }[field]
+    encoded = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    with pytest.raises(SecurityConfigurationError, match="policy trust"):
+        ManagedDeploymentPackage.from_json(
+            encoded, expected_package_sha256=hashlib.sha256(encoded).hexdigest()
+        )
+
+
+def test_schema_v2_measurement_reports_exact_trust_digest(monkeypatch: Any) -> None:
+    package = _package(platform=ManagedPlatform.MACOS, with_trust=True)
+    measured: list[str] = []
+    monkeypatch.setattr(
+        managed_deployment,
+        "_measure_artifact",
+        lambda artifact, *, owner_uid: measured.append(f"{owner_uid}:{artifact.path}"),
+    )
+    evidence = managed_deployment.measure_managed_deployment_package(
+        package,
+        source=ManagedConfigurationSource.MDM,
+        now=100.0,
+    )
+    assert len(measured) == len(package.artifacts) + 1
+    assert all(item.startswith("0:") for item in measured)
+    assert evidence.policy_trust_bundle_sha256 == package.policy_trust_bundle_sha256
+    assert evidence.to_wire()["policyTrustBundleSha256"] == package.policy_trust_bundle_sha256
+    with pytest.raises(SecurityConfigurationError, match="schema-v2"):
+        managed_deployment.measure_managed_deployment_package(
+            _package(platform=ManagedPlatform.MACOS),
+            source=ManagedConfigurationSource.MDM,
+            now=100.0,
+        )
+
+
+def test_artifact_measurement_rejects_unprotected_drifted_and_missing_files(
+    tmp_path: Any,
+) -> None:
+    """Exercise the filesystem trust boundary used by endpoint heartbeats."""
+    path = tmp_path / "policy-signing.json"
+    content = '{"schemaVersion":1}'
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o600)
+    artifact = ManagedArtifact(
+        str(path),
+        "application/json",
+        content,
+        hashlib.sha256(content.encode()).hexdigest(),
+    )
+
+    managed_deployment._measure_artifact(artifact, owner_uid=os.getuid())
+
+    path.chmod(0o666)
+    with pytest.raises(SecurityConfigurationError, match="not protected"):
+        managed_deployment._measure_artifact(artifact, owner_uid=os.getuid())
+
+    path.chmod(0o600)
+    path.write_text("tampered", encoding="utf-8")
+    with pytest.raises(SecurityConfigurationError, match="drifted"):
+        managed_deployment._measure_artifact(artifact, owner_uid=os.getuid())
+
+    path.unlink()
+    with pytest.raises(SecurityConfigurationError, match="cannot be measured"):
+        managed_deployment._measure_artifact(artifact, owner_uid=os.getuid())
 
 
 @pytest.mark.parametrize(

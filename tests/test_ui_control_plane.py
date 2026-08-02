@@ -101,7 +101,7 @@ def signed_policy_fixture() -> tuple[dict[str, object], PolicyTrustStore]:
     )
 
 
-def deployment_package() -> ManagedDeploymentPackage:
+def deployment_package(*, with_trust: bool = False) -> ManagedDeploymentPackage:
     """Build one canonical synthetic package for agent-client response tests."""
     hook_path = "/opt/aai-security/hooks/native-policy"
     bundle = ManagedConfigurationCompiler().compile(
@@ -120,6 +120,7 @@ def deployment_package() -> ManagedDeploymentPackage:
         required_executables=(
             ManagedExecutableRequirement(hook_path, hashlib.sha256(b"synthetic hook").hexdigest()),
         ),
+        policy_trust_store=signed_policy_fixture()[1] if with_trust else None,
     )
 
 
@@ -606,6 +607,60 @@ def test_agent_client_verifies_managed_package_response_and_target(
         client.managed_deployment_package(platform=ManagedPlatform.LINUX)
     with pytest.raises(ControlPlaneConfigurationError, match="platform is unsupported"):
         client.managed_deployment_package(platform="android")
+
+
+def test_agent_client_requires_v2_trust_digest_outside_package_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Authenticated package bytes cannot self-assert their signing trust digest."""
+    import agentic_security.ui_control_plane as control_plane
+
+    package = deployment_package(with_trust=True)
+    response_value: dict[str, object] = {
+        "schemaVersion": 2,
+        "deploymentId": "deployment-prod",
+        "agentId": "claude-managed",
+        "revision": 2,
+        "status": "current",
+        "packageSha256": package.package_sha256,
+        "bundleHash": package.bundle_hash,
+        "host": package.host.value,
+        "hostVersion": package.host_version,
+        "platform": package.platform.value,
+        "policyId": package.policy_id,
+        "policyVersion": package.policy_version,
+        "policyTrustBundleSha256": package.policy_trust_bundle_sha256,
+        "publishedAt": 100,
+        "publishedBy": "platform-admin",
+        "packageBase64": base64.b64encode(package.to_json()).decode(),
+    }
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(response_value).encode()
+
+    monkeypatch.setattr(control_plane, "urlopen", lambda *_args, **_kwargs: Response())
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="claude-managed",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+    )
+    assert (
+        client.managed_deployment_package(platform=ManagedPlatform.LINUX).policy_trust_bundle_sha256
+        == package.policy_trust_bundle_sha256
+    )
+    response_value["policyTrustBundleSha256"] = "f" * 64
+    with pytest.raises(ControlPlaneDependencyError, match="verification failed"):
+        client.managed_deployment_package(platform=ManagedPlatform.LINUX)
 
 
 def test_agent_client_remeasures_and_reports_typed_managed_configuration(

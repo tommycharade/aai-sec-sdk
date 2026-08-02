@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import platform as host_platform
 import re
+import stat
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -20,8 +23,11 @@ from .integrations import AgentHost
 from .managed_configuration import (
     ManagedArtifact,
     ManagedConfigurationBundle,
+    ManagedConfigurationEvidence,
+    ManagedConfigurationSource,
     ManagedPlatform,
 )
+from .signed_policy import PolicyTrustStore
 
 _SHA256: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 _VERSION: Final[re.Pattern[str]] = re.compile(r"^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$")
@@ -76,6 +82,28 @@ def _expected_artifact_paths(host: AgentHost, platform: ManagedPlatform) -> tupl
     raise SecurityConfigurationError("managed deployment host is unsupported")
 
 
+def _policy_trust_path(platform: ManagedPlatform) -> str:
+    """Return the administrator-owned signing-trust path for one platform."""
+    return (
+        r"C:\Program Files\AAI Security\trust\policy-signing.json"
+        if platform is ManagedPlatform.WINDOWS
+        else "/opt/aai-security/trust/policy-signing.json"
+    )
+
+
+def _policy_trust_artifact(store: PolicyTrustStore, platform: ManagedPlatform) -> ManagedArtifact:
+    """Return one canonical digest-bound public trust artifact."""
+    if not isinstance(store, PolicyTrustStore):
+        raise SecurityConfigurationError("managed policy trust store must be typed")
+    content = store.to_json()
+    return ManagedArtifact(
+        _policy_trust_path(platform),
+        "application/json",
+        content,
+        hashlib.sha256(content.encode("utf-8")).hexdigest(),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ManagedExecutableRequirement:
     """Digest and path of one administrator-installed runtime prerequisite.
@@ -123,6 +151,7 @@ class ManagedDeploymentPackage:
     bundle_hash: str
     artifacts: tuple[ManagedArtifact, ...]
     required_executables: tuple[ManagedExecutableRequirement, ...]
+    policy_trust: ManagedArtifact | None = None
 
     def __post_init__(self) -> None:
         """Require a complete exact host package with no ambiguous paths."""
@@ -194,6 +223,27 @@ class ManagedDeploymentPackage:
             raise SecurityConfigurationError(
                 "managed executable platform does not match the deployment package"
             )
+        if self.policy_trust is not None:
+            if not isinstance(self.policy_trust, ManagedArtifact):
+                raise SecurityConfigurationError("managed policy trust artifact must be typed")
+            encoded_trust = self.policy_trust.content.encode("utf-8")
+            if (
+                self.policy_trust.path != _policy_trust_path(self.platform)
+                or self.policy_trust.media_type != "application/json"
+                or not encoded_trust
+                or len(encoded_trust) > 128_000
+                or _required_sha256(self.policy_trust.sha256, "managed policy trust digest")
+                != hashlib.sha256(encoded_trust).hexdigest()
+            ):
+                raise SecurityConfigurationError("managed policy trust artifact is invalid")
+            try:
+                trust = PolicyTrustStore.from_json(self.policy_trust.content)
+            except (TypeError, ValueError) as error:
+                raise SecurityConfigurationError(
+                    "managed policy trust bundle is invalid"
+                ) from error
+            if trust.to_json() != self.policy_trust.content:
+                raise SecurityConfigurationError("managed policy trust bundle is not canonical")
 
     @classmethod
     def from_bundle(
@@ -201,6 +251,7 @@ class ManagedDeploymentPackage:
         bundle: ManagedConfigurationBundle,
         *,
         required_executables: tuple[ManagedExecutableRequirement, ...],
+        policy_trust_store: PolicyTrustStore | None = None,
     ) -> ManagedDeploymentPackage:
         """Bind a compiled bundle to exact endpoint-installed prerequisites."""
         if not isinstance(bundle, ManagedConfigurationBundle):
@@ -214,6 +265,30 @@ class ManagedDeploymentPackage:
             bundle_hash=bundle.bundle_hash,
             artifacts=bundle.artifacts,
             required_executables=required_executables,
+            policy_trust=(
+                _policy_trust_artifact(policy_trust_store, bundle.platform)
+                if policy_trust_store is not None
+                else None
+            ),
+        )
+
+    def with_policy_trust(self, store: PolicyTrustStore) -> ManagedDeploymentPackage:
+        """Return schema-v2 bytes binding this package to reviewed public trust.
+
+        The original immutable package is unchanged. Callers must distribute
+        the resulting package digest and trust digest through authenticated,
+        independent desired-state fields before installation.
+        """
+        return ManagedDeploymentPackage(
+            host=self.host,
+            host_version=self.host_version,
+            platform=self.platform,
+            policy_id=self.policy_id,
+            policy_version=self.policy_version,
+            bundle_hash=self.bundle_hash,
+            artifacts=self.artifacts,
+            required_executables=self.required_executables,
+            policy_trust=_policy_trust_artifact(store, self.platform),
         )
 
     @classmethod
@@ -241,7 +316,7 @@ class ManagedDeploymentPackage:
     @classmethod
     def _from_wire(cls, value: object) -> ManagedDeploymentPackage:
         """Build a typed package from one exact schema-1 mapping."""
-        fields = {
+        fields_v1 = {
             "schemaVersion",
             "host",
             "hostVersion",
@@ -252,7 +327,14 @@ class ManagedDeploymentPackage:
             "artifacts",
             "requiredExecutables",
         }
-        if not isinstance(value, dict) or set(value) != fields or value.get("schemaVersion") != 1:
+        fields_v2 = fields_v1 | {"policyTrust"}
+        if not isinstance(value, dict) or (
+            value.get("schemaVersion") == 1
+            and set(value) != fields_v1
+            or value.get("schemaVersion") == 2
+            and set(value) != fields_v2
+            or value.get("schemaVersion") not in {1, 2}
+        ):
             raise SecurityConfigurationError("managed deployment package schema is invalid")
         try:
             host = AgentHost(value["host"])
@@ -299,6 +381,22 @@ class ManagedDeploymentPackage:
                     _required_sha256(item.get("sha256"), "managed executable digest"),
                 )
             )
+        policy_trust: ManagedArtifact | None = None
+        if value.get("schemaVersion") == 2:
+            raw_trust = value.get("policyTrust")
+            if not isinstance(raw_trust, dict) or set(raw_trust) != {
+                "path",
+                "mediaType",
+                "content",
+                "sha256",
+            }:
+                raise SecurityConfigurationError("managed policy trust schema is invalid")
+            policy_trust = ManagedArtifact(
+                _required_text(raw_trust.get("path"), "managed policy trust path", 512),
+                _required_text(raw_trust.get("mediaType"), "managed policy trust media type", 64),
+                _required_text(raw_trust.get("content"), "managed policy trust content", 128_000),
+                _required_sha256(raw_trust.get("sha256"), "managed policy trust digest"),
+            )
         return cls(
             host=host,
             host_version=_required_text(value.get("hostVersion"), "host version", 64),
@@ -308,12 +406,13 @@ class ManagedDeploymentPackage:
             bundle_hash=_required_sha256(value.get("bundleHash"), "bundle hash"),
             artifacts=tuple(artifacts),
             required_executables=tuple(executables),
+            policy_trust=policy_trust,
         )
 
     def to_wire(self) -> dict[str, object]:
         """Return the exact credential-free schema-1 package object."""
-        return {
-            "schemaVersion": 1,
+        value: dict[str, object] = {
+            "schemaVersion": 2 if self.policy_trust is not None else 1,
             "host": self.host.value,
             "hostVersion": self.host_version,
             "platform": self.platform.value,
@@ -331,6 +430,14 @@ class ManagedDeploymentPackage:
             ],
             "requiredExecutables": [item.to_wire() for item in self.required_executables],
         }
+        if self.policy_trust is not None:
+            value["policyTrust"] = {
+                "path": self.policy_trust.path,
+                "mediaType": self.policy_trust.media_type,
+                "content": self.policy_trust.content,
+                "sha256": self.policy_trust.sha256,
+            }
+        return value
 
     def to_json(self) -> bytes:
         """Return deterministic canonical UTF-8 bytes used for digest pinning."""
@@ -352,6 +459,7 @@ class ManagedDeploymentPackage:
         host: AgentHost,
         platform: ManagedPlatform,
         bundle_hash: str,
+        policy_trust_bundle_sha256: str | None = None,
     ) -> None:
         """Reject cross-host, cross-platform or stale desired-state packages."""
         if not isinstance(host, AgentHost) or not isinstance(platform, ManagedPlatform):
@@ -361,6 +469,103 @@ class ManagedDeploymentPackage:
             raise SecurityConfigurationError("managed deployment package targets another host")
         if self.bundle_hash != expected_bundle:
             raise SecurityConfigurationError("managed deployment package is not desired state")
+        actual_trust = self.policy_trust.sha256 if self.policy_trust is not None else None
+        if policy_trust_bundle_sha256 is not None:
+            expected_trust = _required_sha256(
+                policy_trust_bundle_sha256, "expected policy trust digest"
+            )
+        else:
+            expected_trust = None
+        if actual_trust != expected_trust:
+            raise SecurityConfigurationError("managed policy trust is not desired state")
+
+    @property
+    def policy_trust_bundle_sha256(self) -> str | None:
+        """Return the managed trust digest, or ``None`` for a legacy v1 package."""
+        return self.policy_trust.sha256 if self.policy_trust is not None else None
 
 
-__all__ = ["ManagedDeploymentPackage", "ManagedExecutableRequirement"]
+def _measure_artifact(artifact: ManagedArtifact, *, owner_uid: int) -> None:
+    """Prove one exact administrator-owned regular file without following links."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(artifact.path, flags)
+        with os.fdopen(descriptor, "rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != owner_uid
+                or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+                or metadata.st_size > _MAX_ARTIFACT_BYTES
+            ):
+                raise SecurityConfigurationError("managed deployment artifact is not protected")
+            encoded = stream.read(_MAX_ARTIFACT_BYTES + 1)
+    except OSError as error:
+        raise SecurityConfigurationError(
+            "managed deployment artifact cannot be measured"
+        ) from error
+    if (
+        encoded != artifact.content.encode("utf-8")
+        or hashlib.sha256(encoded).hexdigest() != artifact.sha256
+    ):
+        raise SecurityConfigurationError("managed deployment artifact content has drifted")
+
+
+def measure_managed_deployment_package(
+    package: ManagedDeploymentPackage,
+    *,
+    source: ManagedConfigurationSource,
+    now: float,
+    ttl_seconds: int = 300,
+) -> ManagedConfigurationEvidence:
+    """Measure native configuration and policy trust for one heartbeat.
+
+    A schema-v2 package and its separately pinned trust digest are mandatory.
+    Every file is reopened without following symlinks on each call. The result
+    contains only identities and digests; it does not expose public-key bytes.
+    """
+    if not isinstance(package, ManagedDeploymentPackage) or package.policy_trust is None:
+        raise SecurityConfigurationError("managed trust convergence requires a schema-v2 package")
+    expected_platform = {
+        "Darwin": ManagedPlatform.MACOS,
+        "Linux": ManagedPlatform.LINUX,
+        "Windows": ManagedPlatform.WINDOWS,
+    }.get(host_platform.system())
+    if expected_platform is None or package.platform is not expected_platform:
+        raise SecurityConfigurationError("managed deployment package targets another platform")
+    if package.platform is ManagedPlatform.WINDOWS:
+        raise SecurityConfigurationError("Windows managed trust measurement requires an adapter")
+    if (
+        isinstance(now, bool)
+        or not isinstance(now, (int, float))
+        or now < 0
+        or isinstance(ttl_seconds, bool)
+        or not isinstance(ttl_seconds, int)
+        or not 30 <= ttl_seconds <= 600
+    ):
+        raise SecurityConfigurationError("managed trust measurement parameters are invalid")
+    for artifact in (*package.artifacts, package.policy_trust):
+        # Endpoint evidence is authoritative only for administrator-controlled
+        # files. Keeping UID 0 inside this trust boundary prevents callers from
+        # weakening the ownership invariant while still producing valid-looking
+        # heartbeat evidence.
+        _measure_artifact(artifact, owner_uid=0)
+    return ManagedConfigurationEvidence(
+        host=package.host,
+        host_version=package.host_version,
+        platform=package.platform,
+        bundle_hash=package.bundle_hash,
+        policy_id=package.policy_id,
+        policy_version=package.policy_version,
+        source=source,
+        verified_at=now,
+        expires_at=now + ttl_seconds,
+        policy_trust_bundle_sha256=package.policy_trust.sha256,
+    )
+
+
+__all__ = [
+    "ManagedDeploymentPackage",
+    "ManagedExecutableRequirement",
+    "measure_managed_deployment_package",
+]

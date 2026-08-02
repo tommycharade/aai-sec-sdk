@@ -120,6 +120,11 @@ the control plane uses it:
 5. Re-sign or replace active policies through governed activation.
 6. Remove the old key only after no active bundle references it.
 
+For centrally managed fleets, steps 2 and 3 use the schema-v2 package,
+short-lived heartbeat measurement and server-derived cutover posture described
+in [managed policy-signing trust convergence](policy-trust-convergence-design.md).
+Package delivery alone is never convergence evidence.
+
 Emergency response may disable the KMS key and activate server-owned stops.
 Disabling a key prevents new signatures; already signed bundles remain
 cryptographically valid until the old public trust anchor is removed. Incident

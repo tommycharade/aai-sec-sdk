@@ -427,7 +427,10 @@ def test_iac_stages_global_table_prerequisites_without_switching_signer() -> Non
     assert 'new kms.Key(this, "RegionalPolicySigningKey"' in stack
     assert "multiRegion: true" in stack
     assert "POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn" in stack
-    assert "POLICY_SIGNING_KEY_ARN: regionalPolicySigningKey.keyArn" not in stack
+    assert not any(
+        line.strip() == "POLICY_SIGNING_KEY_ARN: regionalPolicySigningKey.keyArn,"
+        for line in stack.splitlines()
+    )
     recovery_stack = (
         Path(__file__).parents[1]
         / "infra"

@@ -29,6 +29,7 @@ if str(_SOURCE_ROOT) not in sys.path:
 
 from agentic_security import (  # noqa: E402
     AgentHost,
+    ManagedArtifact,
     ManagedDeploymentPackage,
     ManagedPlatform,
     SecurityConfigurationError,
@@ -63,11 +64,17 @@ class EndpointInstallResult:
     package_sha256: str
     artifact_count: int
     executable_count: int
+    policy_trust_bundle_sha256: str | None
 
 
 def _identity(path: str) -> Path:
     """Map one package path to the live endpoint path."""
     return Path(path)
+
+
+def _install_artifacts(package: ManagedDeploymentPackage) -> tuple[ManagedArtifact, ...]:
+    """Return the complete atomic file set, including v2 signing trust."""
+    return package.artifacts + ((package.policy_trust,) if package.policy_trust is not None else ())
 
 
 def _read_regular(path: Path, maximum: int, label: str) -> tuple[bytes, os.stat_result]:
@@ -195,12 +202,25 @@ def _verify_executable(path: Path, digest: str, *, owner_uid: int) -> None:
         raise ManagedEndpointInstallError("managed executable identity or mode does not match")
 
 
+def _verify_installed_artifact(path: Path, artifact: ManagedArtifact, *, owner_uid: int) -> None:
+    """Require exact protected bytes after staged replacement."""
+    encoded, metadata = _read_regular(path, 1_000_000, "managed artifact")
+    if (
+        metadata.st_uid != owner_uid
+        or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        or encoded != artifact.content.encode("utf-8")
+        or hashlib.sha256(encoded).hexdigest() != artifact.sha256
+    ):
+        raise ManagedEndpointInstallError("installed managed artifact does not match")
+
+
 def preflight_package(
     package: ManagedDeploymentPackage,
     *,
     expected_host: AgentHost,
     expected_platform: ManagedPlatform,
     expected_bundle_hash: str,
+    expected_policy_trust_sha256: str | None = None,
     path_mapper: PathMapper = _identity,
     owner_uid: int = 0,
 ) -> EndpointInstallResult:
@@ -210,6 +230,7 @@ def preflight_package(
             host=expected_host,
             platform=expected_platform,
             bundle_hash=expected_bundle_hash,
+            policy_trust_bundle_sha256=expected_policy_trust_sha256,
         )
     except SecurityConfigurationError as error:
         raise ManagedEndpointInstallError(
@@ -229,7 +250,7 @@ def preflight_package(
             create=False,
         )
         _verify_executable(executable, requirement.sha256, owner_uid=owner_uid)
-    for artifact in package.artifacts:
+    for artifact in _install_artifacts(package):
         target = path_mapper(artifact.path)
         _directory_chain(
             target.parent,
@@ -248,6 +269,7 @@ def preflight_package(
         package_sha256=package.package_sha256,
         artifact_count=len(package.artifacts),
         executable_count=len(package.required_executables),
+        policy_trust_bundle_sha256=package.policy_trust_bundle_sha256,
     )
 
 
@@ -293,6 +315,7 @@ def install_package(
     expected_host: AgentHost,
     expected_platform: ManagedPlatform,
     expected_bundle_hash: str,
+    expected_policy_trust_sha256: str | None = None,
     path_mapper: PathMapper = _identity,
     owner_uid: int = 0,
     effective_uid: int | None = None,
@@ -310,6 +333,7 @@ def install_package(
             host=expected_host,
             platform=expected_platform,
             bundle_hash=expected_bundle_hash,
+            policy_trust_bundle_sha256=expected_policy_trust_sha256,
         )
     except SecurityConfigurationError as error:
         raise ManagedEndpointInstallError(
@@ -329,7 +353,7 @@ def install_package(
             create=False,
         )
         _verify_executable(executable, requirement.sha256, owner_uid=owner_uid)
-    for artifact in package.artifacts:
+    for artifact in _install_artifacts(package):
         target = path_mapper(artifact.path)
         _directory_chain(
             target.parent,
@@ -342,7 +366,7 @@ def install_package(
     staged: list[tuple[Path, Path]] = []
     completed: list[tuple[Path, Path | None]] = []
     try:
-        for artifact in package.artifacts:
+        for artifact in _install_artifacts(package):
             target = path_mapper(artifact.path)
             _directory_chain(
                 target.parent,
@@ -362,6 +386,10 @@ def install_package(
             completed.append((target, backup))
             replace(temporary, target)
             _sync_directory(target.parent)
+        # Verify the complete authority set while backups are still available.
+        # Any unexpected post-replacement bytes trigger the same full rollback.
+        for artifact in _install_artifacts(package):
+            _verify_installed_artifact(path_mapper(artifact.path), artifact, owner_uid=owner_uid)
     except Exception as error:
         rollback_error: Exception | None = None
         for target, backup in reversed(completed):
@@ -391,6 +419,7 @@ def install_package(
         expected_host=expected_host,
         expected_platform=expected_platform,
         expected_bundle_hash=expected_bundle_hash,
+        expected_policy_trust_sha256=expected_policy_trust_sha256,
         path_mapper=path_mapper,
         owner_uid=owner_uid,
     )
@@ -404,6 +433,7 @@ def install_package(
         package_sha256=result.package_sha256,
         artifact_count=result.artifact_count,
         executable_count=result.executable_count,
+        policy_trust_bundle_sha256=result.policy_trust_bundle_sha256,
     )
 
 
@@ -413,6 +443,10 @@ def main() -> int:
     parser.add_argument("--package", type=Path, required=True)
     parser.add_argument("--expected-package-sha256", required=True)
     parser.add_argument("--expected-bundle-hash", required=True)
+    parser.add_argument(
+        "--expected-policy-trust-sha256",
+        help="Required out-of-band trust digest for a schema-v2 package",
+    )
     parser.add_argument(
         "--host",
         choices=(AgentHost.CLAUDE_CODE.value, AgentHost.CODEX_CLI.value),
@@ -437,6 +471,7 @@ def main() -> int:
             expected_host=host,
             expected_platform=platform,
             expected_bundle_hash=arguments.expected_bundle_hash,
+            expected_policy_trust_sha256=arguments.expected_policy_trust_sha256,
         )
     else:
         result = preflight_package(
@@ -444,6 +479,7 @@ def main() -> int:
             expected_host=host,
             expected_platform=platform,
             expected_bundle_hash=arguments.expected_bundle_hash,
+            expected_policy_trust_sha256=arguments.expected_policy_trust_sha256,
         )
     print(
         f"Managed endpoint {result.status}: host={result.host} platform={result.platform} "

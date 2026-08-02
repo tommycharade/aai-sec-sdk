@@ -29,7 +29,7 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.
 | P0-08 | Durable evidence | Complete | S3 Object Lock; increase-only 365–3,650-day tenant retention; exact-version legal hold; revision-bound mass retention; fixed-cutoff asynchronous assurance/export with independent browser verification; scheduled gaps and durable alerts; live assurance acceptance across 532 records/54 pages; live mass-retention acceptance across 536 pre-cutover versions at 730 days; persisted fail-closed cross-region authority; live S3 Batch Replication and independent recovery verification of all 603 versions with exact identity/order, SHA-256 bytes, metadata, COMPLIANCE retention parity and replica provenance | Repeat the documented exercise in the first customer environment and retain its customer-owned evidence; regional API failover/RTO/RPO remain P0-11 |
 | P0-09 | Production credential broker | Partial | Typed broker contracts and AWS scoped STS reference | Real AWS/Azure/GCP production role inventory and revocation evidence |
 | P0-10 | Production isolation | Partial | Typed attestation contract and Docker probe | Supported production sandbox adapter and independent hostile-code assessment |
-| P0-11 | HA/DR | Partial | Durable AWS stores; complete immutable audit replication; active-passive regional design; persisted secret-free 1,000-agent/30-minute-RTO/60-second-RPO authority; four live protected Global Table replicas with exact-content create/delete RPO canaries; retained staged P-256 multi-Region signing primary and replica; three-key overlap export; adversarial contracts, runbook and 2026-08-02 live acceptance | Prove endpoint trust-bundle convergence before signer cutover, then complete Cognito MRR/Entra, passive API/workers/UI, bidirectional audit writes, routing, 1,000-agent load, backup/key recovery and rehearsed failover/failback |
+| P0-11 | HA/DR | Partial | Durable AWS stores; complete immutable audit replication; active-passive regional design; persisted secret-free 1,000-agent/30-minute-RTO/60-second-RPO authority; four live protected Global Table replicas with exact-content create/delete RPO canaries; retained staged P-256 multi-Region signing primary and replica; schema-v2 package trust binding, atomic privileged installation and protected-file heartbeat measurement; deployed central three-key trust posture with fail-closed fleet cutover readiness; adversarial contracts, runbook and 2026-08-02 live acceptance | Install the overlap on real managed endpoints and prove 100% trust convergence before signer cutover, then complete Cognito MRR/Entra, passive API/workers/UI, bidirectional audit writes, routing, 1,000-agent load, backup/key recovery and rehearsed failover/failback |
 | P0-12 | Assurance package | Partial | Apache-2.0 project, SBOM/release provenance and security policy | Independent penetration test, vulnerability SLA and customer legal/compliance pack |
 
 P0-08 is complete for the deployed evidence boundary. The remaining partial P0
@@ -73,6 +73,18 @@ rollout-, attestation- and emergency-stop-gated, and remain possible while
 managed configuration is missing so an endpoint can repair itself. Operator
 reads expose metadata only. This closes control-plane distribution, not MDM
 installation or live host-load acceptance.
+
+Schema-v2 packages now bind the canonical policy-signing trust store as a
+separate administrator-owned artifact. Publication and retrieval require its
+out-of-band digest, the privileged installer stages and verifies the complete
+native-configuration-plus-trust transaction before deleting backups, and each
+heartbeat reopens the files without following symlinks and requires root
+ownership, restrictive modes and exact bytes. The deployed control plane
+derives a tenant-wide cutover posture only when one trust digest is current in
+every package, rollout and fresh endpoint report. The
+[2026-08-02 live acceptance](policy-trust-convergence-acceptance-2026-08-02.md)
+proved the safe empty-fleet state and unchanged active signer. Physical endpoint
+installation and convergence are deliberately not claimed.
 
 ## P1 ledger
 
