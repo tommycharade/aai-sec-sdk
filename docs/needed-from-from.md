@@ -38,6 +38,26 @@ binding and Microsoft OIDC metadata and stores the secret-free configuration in
 encrypted Parameter Store. See the
 [persistent Entra deployment guard](entra-deployment-guard-design.md).
 
+### Recovery-region identity foundation
+
+The passive regional cell is implemented but must not be deployed with a
+synthetic or primary-region identity. The `p1` AWS account currently has no
+Cognito user pool in `eu-west-1`, and the primary stack still reports Microsoft
+Entra ID as `not-configured`. To cross this gate, provide:
+
+- approval to configure Cognito managed login multi-Region resiliency for the
+  pilot identity pool, with `eu-west-1` as the recovery Region;
+- the resulting real `eu-west-1` user-pool ID and app-client ID after AWS has
+  created and verified them;
+- the Microsoft Entra pilot inputs listed above, including the administrator
+  who can register both primary and recovery redirect URIs; and
+- retained acceptance references for recovery-region login, strong
+  authentication and joiner/mover/leaver behavior.
+
+Do not create placeholder identity resources or reuse the `eu-west-2` pool to
+unblock deployment. The stack rejects wrong-Region identity and remains
+non-serving until a separate reviewed activation change.
+
 ### Managed Claude Code and Codex hosts
 
 - Confirmation that `/Users/tommooney/dev/kratos` remains the first local

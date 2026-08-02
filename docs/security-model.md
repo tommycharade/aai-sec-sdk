@@ -203,6 +203,14 @@ outage bypass from cached policy because revocation, emergency-stop, approval
 and session state may have changed. See the
 [regional recovery design](regional-control-plane-recovery-design.md).
 
+The passive compute cell applies that principle below DNS: its API default
+origin is disabled, Lambdas have zero reserved concurrency, schedules and queue
+mappings are disabled, and roles cannot mutate Global Tables, write immutable
+audit evidence, send work or sign policy. A discovered API ID or direct Lambda
+invoke permission therefore cannot create a second active authority. Enabling
+any of those controls is an independently reviewed recovery operation; see the
+[passive regional cell design](passive-regional-cell-design.md).
+
 Regional signer migration additionally binds the old/new/replica public trust
 set into a schema-v2 managed endpoint package while keeping its expected digest
 as separate server-owned desired state. Root installation is all-or-rollback;
