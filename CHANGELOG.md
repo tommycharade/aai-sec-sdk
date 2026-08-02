@@ -1,5 +1,11 @@
 # Changelog
 
+- Added the fail-closed passive regional-cell foundation: recovery API, worker,
+  queue, alert and private UI-origin resources synthesize with the public API
+  origin disabled, zero Lambda concurrency, disabled schedules/event mappings,
+  read-only data roles and no active signing key. A template verifier and
+  dedicated CI job reject routing resources or write/sign/send authority.
+
 - Added fail-closed managed policy-signing trust convergence. Backward-compatible
   schema-v2 endpoint packages bind canonical old/new/replica public trust while
   requiring its SHA-256 through separate desired state; privileged installation

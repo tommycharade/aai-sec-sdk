@@ -8,6 +8,7 @@
     "deploy": "python3 ../../scripts/deploy_aws_control_plane.py deploy",
     "deploy:replica": "npm run build && cdk --app 'npx ts-node --prefer-ts-exts bin/audit-replica.ts' deploy AaiSecAuditReplica --require-approval never",
     "synth:recovery": "npm run build && cdk --app 'npx ts-node --prefer-ts-exts bin/regional-recovery.ts' synth AaiSecRegionalRecovery",
+    "synth:passive": "npm run build && cdk --app 'npx ts-node --prefer-ts-exts bin/passive-regional-cell.ts' synth AaiSecPassiveRegionalCell",
     "destroy": "npm run build && cdk destroy --force"
   },
   "devDependencies": {

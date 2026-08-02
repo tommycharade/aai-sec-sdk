@@ -68,3 +68,38 @@ jobs:
           # image ID is still immutable and is the correct local verification input.
           image_ref="$(docker image inspect aai-sec-isolation-probe:ci --format '{{.Id}}')"
           python scripts/test_docker_sandbox.py --image "$image_ref"
+
+  passive-cell-iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262b # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@1e60f620b9541d1c243d9a31fd5b8395c9c2be0a # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: infra/aws-control-plane/package-lock.json
+      - name: Install pinned AWS infrastructure dependencies
+        working-directory: infra/aws-control-plane
+        run: npm ci
+      - name: Synthesize non-serving passive cell
+        working-directory: infra/aws-control-plane
+        env:
+          RECOVERY_AWS_ACCOUNT_ID: "111111111111"
+          RECOVERY_REGION: eu-west-1
+          PRIMARY_REGION: eu-west-2
+          RECOVERY_CONTROL_TABLE: AaiControl
+          RECOVERY_PRESENCE_TABLE: AaiPresence
+          RECOVERY_IDEMPOTENCY_TABLE: AaiIdempotency
+          RECOVERY_SCIM_TABLE: AaiScim
+          RECOVERY_AUDIT_BUCKET: aai-audit-replica-111111
+          RECOVERY_POLICY_SIGNING_KEY_ARN: arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef
+          RECOVERY_USER_POOL_ID: eu-west-1_AbCdEf123
+          RECOVERY_USER_POOL_CLIENT_ID: abcdefghij1234567890
+        run: npm run synth:passive -- --quiet
+      - name: Verify synthesized cell has no executable authority
+        run: >-
+          python scripts/verify_passive_regional_cell.py
+          infra/aws-control-plane/cdk.out/AaiSecPassiveRegionalCell.template.json

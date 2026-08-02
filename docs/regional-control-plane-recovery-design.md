@@ -115,6 +115,14 @@ and Cognito issuer configuration atomically from a reviewed deployment
 manifest. Agents use the stable managed endpoint; they are not asked to edit
 every project during an incident.
 
+The first passive-cell implementation intentionally has no executable
+authority: Lambda reserved concurrency is zero, schedules and queue mappings
+are disabled, the `execute-api` origin is disabled, the UI bucket is private,
+and runtime roles have no table-write, audit-write, queue-send or signing
+permission. See the [passive regional cell design](passive-regional-cell-design.md).
+Activation requires a separately reviewed CloudFormation change; DNS alone is
+not treated as the active/passive lock.
+
 ## Delivery phases and acceptance gates
 
 | Phase | Deliverable | Activation permitted? |
