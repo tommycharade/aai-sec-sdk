@@ -108,6 +108,8 @@ def _template() -> dict[str, Any]:
                     "Variables": {
                         "PASSIVE_CELL_MODE": "standby",
                         "RECOVERY_JOB_RECONCILIATION_ENABLED": "false",
+                        "REGIONAL_CELL_ROLE": "recovery",
+                        "REGIONAL_JOB_RECONCILIATION_ENABLED": "false",
                         "POLICY_SIGNING_KEY_ARN": "",
                     }
                 },
@@ -236,6 +238,7 @@ def test_passive_stack_source_has_no_activation_or_routing_construct() -> None:
     assert stack.count("enabled: active") == 3
     assert 'POLICY_SIGNING_KEY_ARN: active ? props.policySigningReplicaKeyArn : ""' in stack
     assert 'RECOVERY_JOB_RECONCILIATION_ENABLED: active ? "true" : "false"' in stack
+    assert 'REGIONAL_JOB_RECONCILIATION_ENABLED: active ? "true" : "false"' in stack
     assert ".grantReadData(target)" in stack
     assert 'actions: ["s3:GetObject", "s3:GetObjectVersion"]' in stack
     assert "if (active && evidenceReports)" in stack

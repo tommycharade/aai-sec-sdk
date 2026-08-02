@@ -2,10 +2,11 @@
 
 ## Outcome and boundary
 
-`scripts/deploy_aws_active_cell.py` implements the first three mutable recovery
+`scripts/deploy_aws_active_cell.py` implements the first three mutable regional
 steps without implementing traffic movement. It can independently check an
 active-but-not-routed target, fence source execution, deploy the exact verified
-target assembly, or reconcile the live target runtime and Region-local jobs. It
+recovery assembly, restore an exact template-bound primary target, or reconcile
+the live target runtime and Region-local jobs in either direction. It
 cannot update DNS, CloudFront, Route 53, Global Accelerator, custom domains or
 API routing. Routing is isolated in `scripts/execute_aws_regional_routing.py`,
 which requires schema-v3 or schema-v4 authority and cannot activate target
@@ -27,8 +28,8 @@ the [regional activation design](regional-activation-and-exercise-design.md).
 | `check` | None | Derives persisted identity/signing authority, verifies the journal, and verifies the active-but-not-routed template |
 | `initialize-journal` | Creates only generation-zero primary `STABLE` authority | Requires schema-v2 two-person authority and `--confirm-journal-initialization` |
 | `fence-source` | Claims `FENCING_SOURCE`, disables source rules/mappings and all source-stack Lambda concurrency, then records `SOURCE_FENCED` | Requires `--confirm-source-fence` and independently reads every resulting state |
-| `activate-target` | Claims `ACTIVATING_TARGET`, deploys the exact verified CDK assembly, then records `TARGET_ACTIVE_NOT_ROUTED` | Requires `--confirm-target-activation` and a newly verified complete source fence |
-| `reconcile-target` | Claims `RECONCILING_TARGET_JOBS`, verifies exact live target authority and rebuilds Region-local work from DynamoDB, then records `TARGET_JOBS_RECONCILED_NOT_ROUTED` | Requires `--confirm-target-reconciliation`, active-not-routed provider state and a bounded zero-action final check |
+| `activate-target` | Claims `ACTIVATING_TARGET`, deploys the exact recovery assembly for failover or restores the exact processed-template primary runtime for failback, then records `TARGET_ACTIVE_NOT_ROUTED` | Requires `--confirm-target-activation`, schema-v4 authority and a newly verified complete source fence |
+| `reconcile-target` | Claims `RECONCILING_TARGET_JOBS`, verifies exact live target authority and rebuilds Region-local work from DynamoDB, then records `TARGET_JOBS_RECONCILED_NOT_ROUTED` | Requires `--confirm-target-reconciliation`, direction-bound target state and a bounded zero-action final check |
 
 The routing component exposes three forward steps: `verify-ingress`
 proves invalid-token rejection, authenticated policy read and HSTS UI delivery
@@ -67,15 +68,17 @@ transition, direction, Regions, stable domains, hosted zone, fleet/RTO/RPO
 targets, approval reference, expiry and manual-activation flags. This prevents
 valid evidence being replayed with a substituted domain, zone or approval.
 
-The verifier returns the exact Entra tenant UUID and recovery signing-key ARN.
-Active synthesis accepts them only when they match the encrypted persisted
-Entra manifest, live recovery-key output and retained evidence. Account, table,
-bucket, pool and client identities are provider-derived. Ambient authority
-values are discarded before active values are added from verified sources.
+The verifier returns the exact Entra tenant UUID and target signing-key ARN.
+Failover synthesis accepts them only when they match the encrypted persisted
+Entra manifest, live recovery-key output and retained evidence. Failback binds
+the same Entra authority to the live primary regional signer and normal primary
+policy signer. Account, table, bucket, pool and client identities are
+provider-derived. Ambient authority values are discarded before active values
+are added from verified sources.
 
 ## Source fence
 
-The executor requires a stable primary CloudFormation stack, paginates its
+The executor requires the exact stable source CloudFormation stack, paginates its
 resources, and accepts at most 50 Lambda functions, 20 event-source mappings
 and 50 EventBridge rules. Duplicate, missing or malformed identities fail
 closed. The sorted exact resource set is SHA-256-bound into operator evidence.
@@ -135,6 +138,36 @@ The template SHA-256 is checked again immediately before CDK deployment.
 Deployment uses `--app cdk.out`, so source re-synthesis cannot change the
 reviewed assembly.
 
+## Primary failback target
+
+Planned failback does not deploy the recovery template under a different name.
+After recovery is fenced, the adapter re-derives the primary restoration plan
+from the exact schema-v4 processed-template digest and proves the primary was
+still fenced before the first restoration mutation. It then restores the
+complete bounded function/mapping/rule set and independently verifies:
+
+- the exact primary handler and two asynchronous workers;
+- concurrency `100`, `5`, and `5`, Python 3.13, ARM64, handler, memory,
+  timeout, code digest and configuration revision;
+- persisted Entra tenant/AAI tenant, enabled strong authentication and SCIM;
+- primary and regional signing-key identities;
+- explicit `primary` cell role and transition-reconciliation gate; and
+- two enabled queue mappings and four enabled schedules.
+
+The primary handler, trial onboarding, SCIM and discovery application Lambdas
+have explicit concurrency bounds. CDK support Lambdas remain part of the exact
+fence/restoration plan but are not accepted as application-runtime evidence.
+
+The internal reconciliation event is schema v2 and includes direction, target
+Region, transition UUID and `authoritySha256`. A failover event is accepted
+only by a recovery cell; a failback event only by primary. The dedicated
+transition role must have `lambda:InvokeFunction` only on the exact target
+handler. That role also needs only the enumerated read APIs used by preflight
+and verification. The separate DNS mutation grant must be limited to
+`route53:ChangeResourceRecordSets` on the exact hosted zone and removed from
+ordinary operator roles. The Lambda result is still untrusted and must echo the
+authority digest and reach a bounded zero-action check before routing.
+
 ## Operator sequence
 
 Keep all reviewed authority files outside source control. First run `check`:
@@ -191,11 +224,10 @@ authority files as this executor plus `--operator-token-file`. Confirmation
 flags are `--confirm-journal-ingress`, `--confirm-route53-cutover`, and
 `--confirm-stable-completion` respectively.
 
-Exit code `2` is fail-closed. Failed-cutover rollback is implemented, but the
-`planned-failback` command still refuses: restoring service after a failed
-cutover is not equivalent to intentionally moving an active recovery cell back
-to primary. Primary target-job reconciliation and its active-template contract
-remain incomplete gates, as does retained live RTO/RPO evidence. See
+Exit code `2` is fail-closed. Failover and planned failback use the same command
+sequence with source and target derived from signed direction authority.
+Failed-cutover rollback is available in either direction. Retained live
+RTO/RPO evidence remains an incomplete gate. See
 [Regional target readiness and stable ingress](regional-target-readiness-and-stable-ingress-design.md).
 
 ## Test evidence and non-guarantees
@@ -203,9 +235,11 @@ remain incomplete gates, as does retained live RTO/RPO evidence. See
 Focused tests cover unstable/duplicate discovery, bounded pagination, resource
 digest binding, ordered fencing, partial mutation failure, independent state
 reads, identity/signing substitution, exact assembly deployment, unknown IAM
-actions, mismatched bucket policies and absence of routing commands. CI
-synthesizes standby and synthetic active variants with separate verifiers.
+actions, mismatched bucket policies, direction/Region/transition/authority
+binding, exact primary restoration, symmetric failback routing, retry safety
+and routing refusal before complete target state. CI synthesizes standby,
+recovery-active and failback-capable primary variants with separate verifiers.
 
 No live AWS mutation was performed by this tranche. P0-11 remains **Partial**
 until real identity, trust, stable-origin, passive/witness/ingress deployment,
-planned failback and rehearsed exercise gates all pass.
+exclusive provider authority and rehearsed failover/failback gates all pass.

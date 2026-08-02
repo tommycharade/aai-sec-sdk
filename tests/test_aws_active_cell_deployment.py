@@ -8,9 +8,10 @@ import io
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -106,6 +107,31 @@ def _active_environment() -> dict[str, str]:
         "ENTRA_TENANT_ID": "12345678-1234-4234-8234-123456789abc",
         "ENTRA_AAI_TENANT_ID": "synthetic-enterprise",
     }
+
+
+def _failback_activation(module: Any) -> Any:
+    """Return schema-v4 recovery-to-primary transition authority."""
+    return replace(
+        _activation(module),
+        schema_version=4,
+        direction="failback",
+        source_region="eu-west-1",
+        target_region="eu-west-2",
+        expected_routing_generation=1,
+        primary_ingress_stack_name="AaiSecPrimaryRegionalIngress",
+        recovery_ingress_stack_name="AaiSecRecoveryRegionalIngress",
+        primary_canary_api_domain="api-primary.security.example.com",
+        primary_canary_ui_domain="primary.security.example.com",
+        recovery_canary_api_domain="api-recovery.security.example.com",
+        recovery_canary_ui_domain="recovery.security.example.com",
+        routing_marker_name="routing-generation.security.example.com",
+        routing_role_arn="arn:aws:iam::111111111111:role/AaiSecRegionalRouting",
+        routing_authority_evidence_ref="change/ROUTING-123",
+        primary_runtime_stack_name="AaiSecControlPlane",
+        primary_runtime_template_sha256="b" * 64,
+        recovery_runtime_stack_name="AaiSecPassiveRegionalCell",
+        recovery_runtime_template_sha256="c" * 64,
+    )
 
 
 def test_source_discovery_is_stable_paginated_bounded_and_digest_bound() -> None:
@@ -524,6 +550,8 @@ def test_target_discovery_and_live_runtime_are_exact_and_provider_verified() -> 
         "ENTRA_AAI_TENANT_ID": expected_environment["ENTRA_AAI_TENANT_ID"],
         "PASSIVE_CELL_MODE": "active",
         "RECOVERY_JOB_RECONCILIATION_ENABLED": "true",
+        "REGIONAL_CELL_ROLE": "recovery",
+        "REGIONAL_JOB_RECONCILIATION_ENABLED": "true",
         "ENTRA_PROVIDER_ENABLED": "true",
         "ENTRA_STRONG_AUTH_ENFORCED": "true",
     }
@@ -617,6 +645,249 @@ def test_target_discovery_and_live_runtime_are_exact_and_provider_verified() -> 
         )
 
 
+def test_primary_failback_target_discovery_and_runtime_are_exact() -> None:
+    module = _load()
+    manifest = _failback_activation(module)
+    inventory = [
+        ("ControlPlaneHandlerABC", "AWS::Lambda::Function", "primary-handler"),
+        ("EvidenceWorkerABC", "AWS::Lambda::Function", "primary-evidence"),
+        ("EvidenceRetentionWorkerABC", "AWS::Lambda::Function", "primary-retention"),
+        ("DiscoveryCollectorABC", "AWS::Lambda::Function", "ignored-discovery"),
+        ("EvidenceMapping", "AWS::Lambda::EventSourceMapping", "primary-map-a"),
+        ("RetentionMapping", "AWS::Lambda::EventSourceMapping", "primary-map-b"),
+        *[(f"Schedule{index}", "AWS::Events::Rule", f"primary-rule-{index}") for index in range(4)],
+    ]
+    expected = {
+        "ENTRA_TENANT_ID": "12345678-1234-1234-1234-123456789abc",
+        "ENTRA_AAI_TENANT_ID": "synthetic-enterprise",
+        "POLICY_SIGNING_KEY_ARN": (
+            "arn:aws:kms:eu-west-2:111111111111:key/12345678-1234-1234-1234-123456789abc"
+        ),
+        "REGIONAL_POLICY_SIGNING_KEY_ARN": (
+            "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
+        ),
+    }
+    common = {
+        "ENTRA_PROVIDER_ENABLED": "true",
+        "ENTRA_TENANT_ID": expected["ENTRA_TENANT_ID"],
+        "ENTRA_AAI_TENANT_ID": expected["ENTRA_AAI_TENANT_ID"],
+        "ENTRA_STRONG_AUTH_ENFORCED": "true",
+        "SCIM_ENABLED": "true",
+        "POLICY_SIGNING_KEY_ARN": expected["POLICY_SIGNING_KEY_ARN"],
+        "REGIONAL_CELL_ROLE": "primary",
+        "REGIONAL_JOB_RECONCILIATION_ENABLED": "true",
+    }
+
+    def runner(command: list[str], **_: Any) -> Any:
+        if "describe-stacks" in command:
+            return _completed(
+                {
+                    "Stacks": [
+                        {
+                            "StackStatus": "UPDATE_COMPLETE",
+                            "Outputs": [
+                                {"OutputKey": "RegionalCellRole", "OutputValue": "primary"},
+                                {
+                                    "OutputKey": "RegionalTargetStatus",
+                                    "OutputValue": "active-capable",
+                                },
+                            ],
+                        }
+                    ]
+                }
+            )
+        if "list-stack-resources" in command:
+            return _completed(
+                {
+                    "StackResourceSummaries": [
+                        {
+                            "LogicalResourceId": logical,
+                            "ResourceType": kind,
+                            "PhysicalResourceId": physical,
+                        }
+                        for logical, kind, physical in inventory
+                    ]
+                }
+            )
+        if "get-function-configuration" in command:
+            name = command[command.index("--function-name") + 1]
+            contracts = {
+                "primary-handler": ("handler.handler", 512, 15, 100),
+                "primary-evidence": ("evidence_worker.handler", 1024, 60, 5),
+                "primary-retention": ("retention_worker.handler", 1024, 60, 5),
+            }
+            handler, memory, timeout, concurrency = contracts[name]
+            variables = dict(common)
+            if name == "primary-handler":
+                variables["REGIONAL_POLICY_SIGNING_KEY_ARN"] = expected[
+                    "REGIONAL_POLICY_SIGNING_KEY_ARN"
+                ]
+            return _completed(
+                {
+                    "FunctionName": name,
+                    "State": "Active",
+                    "LastUpdateStatus": "Successful",
+                    "Runtime": "python3.13",
+                    "Handler": handler,
+                    "MemorySize": memory,
+                    "Timeout": timeout,
+                    "Architectures": ["arm64"],
+                    "PackageType": "Zip",
+                    "TracingConfig": {"Mode": "PassThrough"},
+                    "CodeSha256": "A" * 43 + "=",
+                    "RevisionId": "42345678-1234-4234-8234-123456789abc",
+                    "ReservedConcurrentExecutions": concurrency,
+                    "Environment": {"Variables": variables},
+                }
+            )
+        if "get-event-source-mapping" in command:
+            return _completed({"UUID": command[command.index("--uuid") + 1], "State": "Enabled"})
+        if "describe-rule" in command:
+            return _completed({"Name": command[command.index("--name") + 1], "State": "ENABLED"})
+        raise AssertionError(command)
+
+    resources = module.discover_primary_target_resources(
+        stack_name="AaiSecControlPlane",
+        target_region="eu-west-2",
+        profile="synthetic",
+        runner=runner,
+    )
+    evidence = module.verify_primary_target_runtime(
+        resources,
+        manifest,
+        expected,
+        profile="synthetic",
+        runner=runner,
+    )
+    assert evidence["status"] == "primary-target-runtime-live-not-routed"
+    assert evidence["functionCount"] == 3
+
+    common["REGIONAL_CELL_ROLE"] = "recovery"
+    with pytest.raises(module.ActiveCellDeploymentError, match="primary target Lambda"):
+        module.verify_primary_target_runtime(
+            resources,
+            manifest,
+            expected,
+            profile="synthetic",
+            runner=runner,
+        )
+
+
+def test_primary_target_environment_binds_persisted_entra_and_live_signer(
+    monkeypatch: Any,
+) -> None:
+    module = _load()
+    manifest = _failback_activation(module)
+    regional = _regional(module)
+    outputs = {
+        "PolicySigningKeyArn": (
+            "arn:aws:kms:eu-west-2:111111111111:key/12345678-1234-1234-1234-123456789abc"
+        ),
+        "RegionalPolicySigningKeyArn": (
+            "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
+        ),
+    }
+    entra = SimpleNamespace(
+        entra_tenant_id="12345678-1234-1234-1234-123456789abc",
+        aai_tenant_id="synthetic-enterprise",
+    )
+    monkeypatch.setattr(module.recovery, "stack_outputs", lambda *_a, **_k: outputs)
+    monkeypatch.setattr(module.control_plane, "load_persisted_manifest", lambda *_a, **_k: entra)
+    verified = {
+        "entraTenantId": entra.entra_tenant_id,
+        "targetSigningKeyArn": outputs["RegionalPolicySigningKeyArn"],
+    }
+    environment = module.primary_target_environment(
+        manifest, regional, verified, profile="synthetic"
+    )
+    assert environment["POLICY_SIGNING_KEY_ARN"] == outputs["PolicySigningKeyArn"]
+    with pytest.raises(module.ActiveCellDeploymentError, match="signing authority"):
+        module.primary_target_environment(
+            manifest,
+            regional,
+            {**verified, "targetSigningKeyArn": "arn:aws:kms:eu-west-2:111111111111:key/other"},
+            profile="synthetic",
+        )
+    monkeypatch.setattr(
+        module.recovery,
+        "stack_outputs",
+        lambda *_a, **_k: {**outputs, "PolicySigningKeyArn": "not-a-kms-key"},
+    )
+    with pytest.raises(module.ActiveCellDeploymentError, match="signing authority"):
+        module.primary_target_environment(
+            manifest,
+            regional,
+            verified,
+            profile="synthetic",
+        )
+
+
+def test_primary_activation_retries_exact_plan_only_after_recovery_fence(
+    monkeypatch: Any,
+) -> None:
+    module = _load()
+    manifest = _failback_activation(module)
+    source = module.SourceResources(("recovery-handler",), (), ())
+    plan = module.SourceReactivationPlan(
+        "AaiSecControlPlane",
+        "eu-west-2",
+        "b" * 64,
+        (module.FunctionRestoreState("primary-handler", 100),),
+        (),
+        (),
+    )
+    target = module.TargetResources(
+        "primary-handler",
+        ("primary-evidence", "primary-retention"),
+        ("map-a", "map-b"),
+        ("rule-a", "rule-b", "rule-c", "rule-d"),
+    )
+    state = SimpleNamespace(
+        phase="SOURCE_FENCED",
+        evidence=lambda: {"phase": "SOURCE_FENCED"},
+    )
+    monkeypatch.setattr(module.journal, "read_state", lambda *_: state)
+    phases: list[tuple[str, str]] = []
+
+    def advance(*_: Any, expected_phase: str, next_phase: str, **__: Any) -> dict[str, Any]:
+        phases.append((expected_phase, next_phase))
+        return {"claim": "advanced", "journal": {"phase": next_phase}}
+
+    monkeypatch.setattr(module.journal, "advance_phase", advance)
+    verified_fences: list[str] = []
+
+    def verify_fence(resources: Any, **_: Any) -> dict[str, Any]:
+        verified_fences.append(resources.sha256())
+        return cast(dict[str, Any], resources.fence_evidence())
+
+    monkeypatch.setattr(module, "verify_source_fence", verify_fence)
+    monkeypatch.setattr(
+        module,
+        "reactivate_source",
+        lambda *_a, **_k: {"status": "source-runtime-reactivated"},
+    )
+    monkeypatch.setattr(
+        module,
+        "verify_primary_target_runtime",
+        lambda *_a, **_k: {"status": "primary-target-runtime-live-not-routed"},
+    )
+    result = module.activate_primary_target_step(
+        object(),
+        manifest,
+        source,
+        plan,
+        target,
+        {},
+        profile="synthetic",
+    )
+    assert phases == [
+        ("SOURCE_FENCED", "ACTIVATING_TARGET"),
+        ("ACTIVATING_TARGET", "TARGET_ACTIVE_NOT_ROUTED"),
+    ]
+    assert verified_fences == [source.sha256(), plan.resources().sha256()]
+    assert result["trafficRouted"] is False
+
+
 def test_reconciliation_invocation_rejects_runtime_failure_and_inconsistent_counts() -> None:
     module = _load()
     manifest = _activation(module)
@@ -628,7 +899,12 @@ def test_reconciliation_invocation_rejects_runtime_failure_and_inconsistent_coun
 
         def invoke(self, **kwargs: Any) -> dict[str, Any]:
             event = json.loads(kwargs["Payload"])
-            assert event["source"] == "aai.regional-recovery-jobs"
+            assert event["source"] == "aai.regional-transition-jobs"
+            assert event["schemaVersion"] == 2
+            assert event["direction"] == manifest.direction
+            assert event["targetRegion"] == manifest.target_region
+            assert event["transitionId"] == manifest.transition_id
+            assert event["authoritySha256"] == manifest.authority_sha256()
             return {
                 "StatusCode": 200,
                 **({"FunctionError": "Unhandled"} if self.failed else {}),
@@ -639,6 +915,7 @@ def test_reconciliation_invocation_rejects_runtime_failure_and_inconsistent_coun
     result = {
         "mode": "apply",
         "activationEvidenceRefSha256": hashlib.sha256(evidence_ref.encode()).hexdigest(),
+        "transitionAuthoritySha256": manifest.authority_sha256(),
         "processedTenants": 1,
         "plannedActions": 2,
         "dispatchedJobs": 2,

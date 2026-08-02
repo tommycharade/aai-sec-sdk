@@ -227,7 +227,7 @@ replacement.
 Stable ingress, public authenticated smoke, journal-governed transactional
 Route 53 movement, failed-target fencing, exact source reactivation, inverse
 routing and rollback sealing are implemented but have not been run against
-live customer domains. Planned failback remains deliberately unavailable until
-primary-side reconciliation is implemented. The live witness is not deployed
-or initialized. Those gates and a retained exercise remain required before
-P0-11 is complete.
+live customer domains. The primary target adapter and symmetric planned
+failback are implemented and synthetically tested. The live witness is not
+deployed or initialized. Those gates and a retained failover/failback exercise
+remain required before P0-11 is complete.

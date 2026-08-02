@@ -53,6 +53,13 @@ _REVISION_ID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+_KMS_KEY_ARN = re.compile(
+    r"^arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:key/"
+    r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|mrk-[0-9a-f]{32})$"
+)
+_KMS_MRK_ARN = re.compile(
+    r"^arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:key/mrk-[0-9a-f]{32}$"
+)
 
 
 @dataclass(frozen=True)
@@ -392,6 +399,115 @@ def discover_target_resources(
     )
 
 
+def discover_primary_target_resources(
+    *,
+    stack_name: str,
+    target_region: str,
+    profile: str,
+    runner: Runner = subprocess.run,
+) -> TargetResources:
+    """Discover the exact primary application runtime used for failback."""
+    response = _aws(
+        ["cloudformation", "describe-stacks", "--stack-name", stack_name],
+        profile=profile,
+        region=target_region,
+        runner=runner,
+    )
+    stacks = response.get("Stacks")
+    if (
+        not isinstance(stacks, list)
+        or len(stacks) != 1
+        or not isinstance(stacks[0], dict)
+        or stacks[0].get("StackStatus") not in _STACK_STABLE
+    ):
+        raise ActiveCellDeploymentError("primary target stack is not stable")
+    raw_outputs = stacks[0].get("Outputs")
+    if not isinstance(raw_outputs, list) or len(raw_outputs) > 100:
+        raise ActiveCellDeploymentError("primary target outputs are malformed")
+    outputs = {
+        item.get("OutputKey"): item.get("OutputValue")
+        for item in raw_outputs
+        if isinstance(item, dict)
+    }
+    if (
+        outputs.get("RegionalCellRole") != "primary"
+        or outputs.get("RegionalTargetStatus") != "active-capable"
+    ):
+        raise ActiveCellDeploymentError("primary stack is not failback-capable")
+
+    functions: dict[str, str] = {}
+    mappings: list[str] = []
+    rules: list[str] = []
+    token: str | None = None
+    for _page in range(1, 11):
+        command = ["cloudformation", "list-stack-resources", "--stack-name", stack_name]
+        if token is not None:
+            command.extend(["--next-token", token])
+        inventory = _aws(command, profile=profile, region=target_region, runner=runner)
+        summaries = inventory.get("StackResourceSummaries")
+        if not isinstance(summaries, list) or len(summaries) > 100:
+            raise ActiveCellDeploymentError("primary target resources are malformed")
+        for item in summaries:
+            if not isinstance(item, dict):
+                raise ActiveCellDeploymentError("primary target resource is malformed")
+            kind = item.get("ResourceType")
+            logical = item.get("LogicalResourceId")
+            physical = item.get("PhysicalResourceId")
+            if kind not in {
+                "AWS::Lambda::Function",
+                "AWS::Lambda::EventSourceMapping",
+                "AWS::Events::Rule",
+            }:
+                continue
+            if (
+                not isinstance(logical, str)
+                or not logical
+                or not isinstance(physical, str)
+                or not 1 <= len(physical) <= 512
+            ):
+                raise ActiveCellDeploymentError("primary target identity is malformed")
+            if kind == "AWS::Lambda::Function":
+                if logical.startswith("ControlPlaneHandler"):
+                    role = "handler"
+                elif logical.startswith("EvidenceWorker"):
+                    role = "evidence-worker"
+                elif logical.startswith("EvidenceRetentionWorker"):
+                    role = "retention-worker"
+                else:
+                    continue
+                if role in functions:
+                    raise ActiveCellDeploymentError("primary target Lambda role is duplicated")
+                functions[role] = physical
+            elif kind == "AWS::Lambda::EventSourceMapping":
+                mappings.append(physical)
+            else:
+                rules.append(physical)
+        next_token = inventory.get("NextToken")
+        if next_token is None:
+            break
+        if not isinstance(next_token, str) or not next_token or next_token == token:
+            raise ActiveCellDeploymentError("primary target pagination is malformed")
+        token = next_token
+    else:
+        raise ActiveCellDeploymentError("primary target discovery exceeded 10 pages")
+    if (
+        set(functions) != {"handler", "evidence-worker", "retention-worker"}
+        or len(mappings) != 2
+        or len(set(mappings)) != 2
+        or len(rules) != 4
+        or len(set(rules)) != 4
+    ):
+        raise ActiveCellDeploymentError("primary target runtime is incomplete or ambiguous")
+    ordered_mappings = sorted(mappings)
+    ordered_rules = sorted(rules)
+    return TargetResources(
+        functions["handler"],
+        (functions["evidence-worker"], functions["retention-worker"]),
+        (ordered_mappings[0], ordered_mappings[1]),
+        (ordered_rules[0], ordered_rules[1], ordered_rules[2], ordered_rules[3]),
+    )
+
+
 def discover_source_reactivation_plan(
     resources: SourceResources,
     *,
@@ -690,6 +806,8 @@ def verify_target_runtime(
         **{
             "PASSIVE_CELL_MODE": "active",
             "RECOVERY_JOB_RECONCILIATION_ENABLED": "true",
+            "REGIONAL_CELL_ROLE": "recovery",
+            "REGIONAL_JOB_RECONCILIATION_ENABLED": "true",
             "ENTRA_PROVIDER_ENABLED": "true",
             "ENTRA_STRONG_AUTH_ENFORCED": "true",
         },
@@ -766,6 +884,147 @@ def verify_target_runtime(
     }
 
 
+def primary_target_environment(
+    manifest: activation.ActivationManifest,
+    regional: recovery.RegionalRecoveryManifest,
+    verified: dict[str, Any],
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+) -> dict[str, str]:
+    """Derive primary failback authority from persisted identity and live outputs."""
+    if manifest.direction != "failback" or manifest.target_region != regional.primary_region:
+        raise ActiveCellDeploymentError("primary target environment requires failback authority")
+    outputs = recovery.stack_outputs(regional, profile=profile, runner=runner)
+    entra = control_plane.load_persisted_manifest(
+        regional.stack_name,
+        profile=profile,
+        region=regional.primary_region,
+        runner=runner,
+    )
+    if entra is None:
+        raise ActiveCellDeploymentError("persisted Microsoft Entra authority is unavailable")
+    signing_key = outputs.get("PolicySigningKeyArn")
+    regional_key = outputs.get("RegionalPolicySigningKeyArn")
+    if (
+        verified.get("entraTenantId") != entra.entra_tenant_id
+        or verified.get("targetSigningKeyArn") != regional_key
+        or not isinstance(signing_key, str)
+        or not isinstance(regional_key, str)
+        or not _KMS_KEY_ARN.fullmatch(signing_key)
+        or not _KMS_MRK_ARN.fullmatch(regional_key)
+    ):
+        raise ActiveCellDeploymentError("primary target identity or signing authority differs")
+    return {
+        "ENTRA_AAI_TENANT_ID": entra.aai_tenant_id,
+        "ENTRA_TENANT_ID": entra.entra_tenant_id,
+        "POLICY_SIGNING_KEY_ARN": signing_key,
+        "REGIONAL_POLICY_SIGNING_KEY_ARN": regional_key,
+    }
+
+
+def verify_primary_target_runtime(
+    resources: TargetResources,
+    manifest: activation.ActivationManifest,
+    expected_environment: dict[str, str],
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+) -> dict[str, Any]:
+    """Prove the restored primary application runtime is safe before failback."""
+    if manifest.direction != "failback" or manifest.target_region != manifest.primary_region:
+        raise ActiveCellDeploymentError("primary runtime verifier requires failback authority")
+    common_environment = {
+        "ENTRA_PROVIDER_ENABLED": "true",
+        "ENTRA_TENANT_ID": expected_environment["ENTRA_TENANT_ID"],
+        "ENTRA_AAI_TENANT_ID": expected_environment["ENTRA_AAI_TENANT_ID"],
+        "ENTRA_STRONG_AUTH_ENFORCED": "true",
+        "SCIM_ENABLED": "true",
+        "POLICY_SIGNING_KEY_ARN": expected_environment["POLICY_SIGNING_KEY_ARN"],
+        "REGIONAL_CELL_ROLE": "primary",
+        "REGIONAL_JOB_RECONCILIATION_ENABLED": "true",
+    }
+    expected_functions = {
+        resources.handler: (100, "handler.handler", 512, 15, True),
+        resources.workers[0]: (5, "evidence_worker.handler", 1024, 60, False),
+        resources.workers[1]: (5, "retention_worker.handler", 1024, 60, False),
+    }
+    function_evidence: dict[str, dict[str, str]] = {}
+    for function, (
+        concurrency,
+        handler,
+        memory,
+        timeout,
+        needs_regional_key,
+    ) in expected_functions.items():
+        response = _aws(
+            ["lambda", "get-function-configuration", "--function-name", function],
+            profile=profile,
+            region=manifest.target_region,
+            runner=runner,
+        )
+        variables = response.get("Environment", {}).get("Variables")
+        code_sha256 = response.get("CodeSha256")
+        revision_id = response.get("RevisionId")
+        required = dict(common_environment)
+        if needs_regional_key:
+            required["REGIONAL_POLICY_SIGNING_KEY_ARN"] = expected_environment[
+                "REGIONAL_POLICY_SIGNING_KEY_ARN"
+            ]
+        if (
+            response.get("FunctionName") != function
+            or response.get("State") != "Active"
+            or response.get("LastUpdateStatus") != "Successful"
+            or response.get("Runtime") != "python3.13"
+            or response.get("Handler") != handler
+            or response.get("MemorySize") != memory
+            or response.get("Timeout") != timeout
+            or response.get("Architectures") != ["arm64"]
+            or response.get("PackageType") != "Zip"
+            or response.get("TracingConfig") != {"Mode": "PassThrough"}
+            or response.get("ReservedConcurrentExecutions") != concurrency
+            or not isinstance(code_sha256, str)
+            or not _LAMBDA_CODE_SHA256.fullmatch(code_sha256)
+            or not isinstance(revision_id, str)
+            or not _REVISION_ID.fullmatch(revision_id)
+            or not isinstance(variables, dict)
+            or any(variables.get(key) != value for key, value in required.items())
+        ):
+            raise ActiveCellDeploymentError(
+                f"primary target Lambda authority is not live: {function}"
+            )
+        function_evidence[function] = {
+            "codeSha256": code_sha256,
+            "revisionId": revision_id,
+        }
+    for mapping in resources.event_source_mappings:
+        response = _aws(
+            ["lambda", "get-event-source-mapping", "--uuid", mapping],
+            profile=profile,
+            region=manifest.target_region,
+            runner=runner,
+        )
+        if response.get("UUID") != mapping or response.get("State") != "Enabled":
+            raise ActiveCellDeploymentError("primary target event mapping is not enabled")
+    for rule in resources.event_rules:
+        response = _aws(
+            ["events", "describe-rule", "--name", rule],
+            profile=profile,
+            region=manifest.target_region,
+            runner=runner,
+        )
+        if response.get("Name") != rule or response.get("State") != "ENABLED":
+            raise ActiveCellDeploymentError("primary target schedule is not enabled")
+    return {
+        "eventRuleCount": len(resources.event_rules),
+        "eventSourceMappingCount": len(resources.event_source_mappings),
+        "functionCount": len(expected_functions),
+        "functions": function_evidence,
+        "resourceSetSha256": resources.sha256(),
+        "status": "primary-target-runtime-live-not-routed",
+    }
+
+
 def _reconciliation_evidence_ref(manifest: activation.ActivationManifest) -> str:
     """Return a secret-free correlation value bound to exact transition authority."""
     return f"transition/{manifest.transition_id}/{manifest.authority_sha256()}"
@@ -776,11 +1035,13 @@ def _reconciliation_result(
     *,
     mode: str,
     evidence_ref: str,
+    authority_sha256: str,
 ) -> dict[str, Any]:
     """Validate one bounded target reconciliation result from untrusted runtime output."""
     if not isinstance(response, dict) or set(response) != {
         "mode",
         "activationEvidenceRefSha256",
+        "transitionAuthoritySha256",
         "processedTenants",
         "plannedActions",
         "dispatchedJobs",
@@ -808,6 +1069,7 @@ def _reconciliation_result(
     if (
         response.get("mode") != mode
         or response.get("activationEvidenceRefSha256") != expected_ref_sha256
+        or response.get("transitionAuthoritySha256") != authority_sha256
         or response.get("queueSource") != "authoritative-dynamodb-job-records"
         or (mode == "check" and (counts["dispatchedJobs"] or counts["failedStaleJobs"]))
         or (
@@ -832,10 +1094,14 @@ def invoke_target_reconciliation(
     evidence_ref = _reconciliation_evidence_ref(manifest)
     payload = json.dumps(
         {
-            "source": "aai.regional-recovery-jobs",
-            "schemaVersion": 1,
+            "source": "aai.regional-transition-jobs",
+            "schemaVersion": 2,
             "mode": mode,
             "activationEvidenceRef": evidence_ref,
+            "direction": manifest.direction,
+            "targetRegion": manifest.target_region,
+            "transitionId": manifest.transition_id,
+            "authoritySha256": manifest.authority_sha256(),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -874,7 +1140,12 @@ def invoke_target_reconciliation(
         activation.RegionalActivationVerificationError,
     ) as error:
         raise ActiveCellDeploymentError("target reconciliation payload is malformed") from error
-    return _reconciliation_result(result, mode=mode, evidence_ref=evidence_ref)
+    return _reconciliation_result(
+        result,
+        mode=mode,
+        evidence_ref=evidence_ref,
+        authority_sha256=manifest.authority_sha256(),
+    )
 
 
 def reconcile_target_step(
@@ -890,10 +1161,14 @@ def reconcile_target_step(
     clock: Clock = time.time,
     sleeper: Sleeper = time.sleep,
     attempts: int = 60,
+    runtime_verifier: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Claim and reconcile target jobs, leaving traffic explicitly unrouted."""
     if isinstance(attempts, bool) or not 1 <= attempts <= 120:
         raise ActiveCellDeploymentError("target reconciliation attempts must be 1 through 120")
+    selected_runtime_verifier = (
+        verify_target_runtime if runtime_verifier is None else runtime_verifier
+    )
     claimed = journal.advance_phase(
         witness,
         manifest,
@@ -907,7 +1182,7 @@ def reconcile_target_step(
         region=manifest.source_region,
         runner=runner,
     )
-    runtime_before = verify_target_runtime(
+    runtime_before = selected_runtime_verifier(
         target_resources,
         manifest,
         expected_environment,
@@ -931,7 +1206,7 @@ def reconcile_target_step(
             sleeper(10.0)
     if final is None or final["plannedActions"] != 0:
         raise ActiveCellDeploymentError("target jobs did not reconcile within the bounded window")
-    runtime_after = verify_target_runtime(
+    runtime_after = selected_runtime_verifier(
         target_resources,
         manifest,
         expected_environment,
@@ -1189,6 +1464,96 @@ def activate_target_step(
     }
 
 
+def activate_primary_target_step(
+    witness: Any,
+    manifest: activation.ActivationManifest,
+    source_resources: SourceResources,
+    target_plan: SourceReactivationPlan,
+    target_resources: TargetResources,
+    expected_environment: dict[str, str],
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+    clock: Clock = time.time,
+) -> dict[str, Any]:
+    """Restore and verify primary compute while recovery remains fenced."""
+    manifest.require_reactivation_authority()
+    if (
+        manifest.direction != "failback"
+        or target_plan.region != manifest.primary_region
+        or target_plan.stack_name != manifest.primary_runtime_stack_name
+        or target_plan.template_sha256 != manifest.primary_runtime_template_sha256
+    ):
+        raise ActiveCellDeploymentError("primary target plan differs from failback authority")
+    state = journal.read_state(witness, manifest)
+    completed_retry = state.phase == "TARGET_ACTIVE_NOT_ROUTED"
+    fresh_activation = state.phase == "SOURCE_FENCED"
+    if completed_retry:
+        claimed = {"claim": "resume-completed", "journal": state.evidence()}
+    else:
+        claimed = journal.advance_phase(
+            witness,
+            manifest,
+            expected_phase="SOURCE_FENCED",
+            next_phase="ACTIVATING_TARGET",
+            now=int(clock()),
+        )
+    source_fence = verify_source_fence(
+        source_resources,
+        profile=profile,
+        region=manifest.source_region,
+        runner=runner,
+    )
+    if completed_retry:
+        target_fence = target_plan.resources().fence_evidence()
+        restored = verify_source_reactivation(target_plan, profile=profile, runner=runner)
+    else:
+        if fresh_activation:
+            target_fence = verify_source_fence(
+                target_plan.resources(),
+                profile=profile,
+                region=manifest.target_region,
+                runner=runner,
+            )
+        else:
+            # The claim proves recovery was fenced before restoration began.
+            # A retry may see a partially restored primary and safely reapplies
+            # only the exact template-bound plan.
+            target_fence = target_plan.resources().fence_evidence()
+        restored = reactivate_source(target_plan, profile=profile, runner=runner)
+    runtime = verify_primary_target_runtime(
+        target_resources,
+        manifest,
+        expected_environment,
+        profile=profile,
+        runner=runner,
+    )
+    evidence = {
+        "primaryFenceBeforeRestore": target_fence,
+        "primaryRestoration": restored,
+        "primaryRuntime": runtime,
+        "recoveryFence": source_fence,
+    }
+    digest = hashlib.sha256(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    completed = journal.advance_phase(
+        witness,
+        manifest,
+        expected_phase="ACTIVATING_TARGET",
+        next_phase="TARGET_ACTIVE_NOT_ROUTED",
+        now=int(clock()),
+        step_evidence_sha256=digest,
+    )
+    return {
+        "journalClaim": claimed,
+        "journal": completed["journal"],
+        "primaryActivation": evidence,
+        "stepEvidenceSha256": digest,
+        "trafficRouted": False,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     """Build the bounded transition-step surface with no routing capability."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1242,15 +1607,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             s3_factory=lambda region: session.client("s3", region_name=region),
             expected_cell_status=(
                 "active-not-routed"
-                if arguments.command == "reconcile-target"
+                if manifest.direction == "failback" or arguments.command == "reconcile-target"
                 else "staged-not-serving"
             ),
         )
         manifest.require_journal_authority()
-        if arguments.command != "check" and manifest.direction != "failover":
-            raise ActiveCellDeploymentError(
-                "failback mutation is unavailable until the primary activation adapter exists"
-            )
         verified = checked.get("verified")
         if (
             not isinstance(verified, dict)
@@ -1354,20 +1715,35 @@ def main(argv: Sequence[str] | None = None) -> int:
             )["journal"]
             result["stepEvidenceSha256"] = step_sha256
         elif arguments.command == "reconcile-target":
-            environment = active_environment(
-                manifest,
-                regional,
-                passive_cell,
-                checked["verified"],
-                profile=arguments.profile,
-            )
             if not arguments.confirm_target_reconciliation:
                 raise ActiveCellDeploymentError("--confirm-target-reconciliation is required")
-            target_resources = discover_target_resources(
-                stack_name=passive_cell.stack_name,
-                target_region=manifest.target_region,
-                profile=arguments.profile,
-            )
+            if manifest.direction == "failover":
+                environment = active_environment(
+                    manifest,
+                    regional,
+                    passive_cell,
+                    checked["verified"],
+                    profile=arguments.profile,
+                )
+                target_resources = discover_target_resources(
+                    stack_name=passive_cell.stack_name,
+                    target_region=manifest.target_region,
+                    profile=arguments.profile,
+                )
+                runtime_verifier = verify_target_runtime
+            else:
+                environment = primary_target_environment(
+                    manifest,
+                    regional,
+                    checked["verified"],
+                    profile=arguments.profile,
+                )
+                target_resources = discover_primary_target_resources(
+                    stack_name=regional.stack_name,
+                    target_region=manifest.target_region,
+                    profile=arguments.profile,
+                )
+                runtime_verifier = verify_primary_target_runtime
             result.update(
                 reconcile_target_step(
                     witness,
@@ -1377,21 +1753,75 @@ def main(argv: Sequence[str] | None = None) -> int:
                     target_resources,
                     environment,
                     profile=arguments.profile,
+                    runtime_verifier=runtime_verifier,
                 )
             )
             result["activationExecuted"] = True
             result["status"] = "target-jobs-reconciled-not-routed"
         else:
-            environment = active_environment(
-                manifest,
-                regional,
-                passive_cell,
-                checked["verified"],
-                profile=arguments.profile,
-            )
-            template = prepare_active_template(passive_cell, environment)
-            result["template"] = template
-            if arguments.command == "activate-target":
+            if manifest.direction == "failback":
+                environment = primary_target_environment(
+                    manifest,
+                    regional,
+                    checked["verified"],
+                    profile=arguments.profile,
+                )
+                target_source_resources = discover_source_resources(
+                    regional,
+                    stack_name=regional.stack_name,
+                    source_region=manifest.target_region,
+                    profile=arguments.profile,
+                )
+                target_plan = discover_source_reactivation_plan(
+                    target_source_resources,
+                    stack_name=regional.stack_name,
+                    region=manifest.target_region,
+                    profile=arguments.profile,
+                )
+                if target_plan.template_sha256 != manifest.primary_runtime_template_sha256:
+                    raise ActiveCellDeploymentError(
+                        "processed primary template differs from failback authority"
+                    )
+                target_resources = discover_primary_target_resources(
+                    stack_name=regional.stack_name,
+                    target_region=manifest.target_region,
+                    profile=arguments.profile,
+                )
+                result["primaryTargetPlanSha256"] = target_plan.sha256()
+                if arguments.command == "activate-target":
+                    if not arguments.confirm_target_activation:
+                        raise ActiveCellDeploymentError("--confirm-target-activation is required")
+                    result.update(
+                        activate_primary_target_step(
+                            witness,
+                            manifest,
+                            resources,
+                            target_plan,
+                            target_resources,
+                            environment,
+                            profile=arguments.profile,
+                        )
+                    )
+                    result["activationExecuted"] = True
+                    result["status"] = "primary-target-active-not-routed"
+                else:
+                    result["primaryTargetFence"] = verify_source_fence(
+                        target_source_resources,
+                        profile=arguments.profile,
+                        region=manifest.target_region,
+                    )
+                    result["status"] = "verified-ready-for-primary-failback-steps"
+            else:
+                environment = active_environment(
+                    manifest,
+                    regional,
+                    passive_cell,
+                    checked["verified"],
+                    profile=arguments.profile,
+                )
+                template = prepare_active_template(passive_cell, environment)
+                result["template"] = template
+            if manifest.direction == "failover" and arguments.command == "activate-target":
                 if not arguments.confirm_target_activation:
                     raise ActiveCellDeploymentError("--confirm-target-activation is required")
                 target_result = activate_target_step(
@@ -1406,7 +1836,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 result.update(target_result)
                 result["activationExecuted"] = True
                 result["status"] = "target-active-not-routed"
-            else:
+            elif manifest.direction == "failover":
                 result["status"] = "verified-ready-for-separate-transition-steps"
         print(json.dumps(result, sort_keys=True))
     except (

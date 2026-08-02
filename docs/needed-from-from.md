@@ -109,12 +109,13 @@ stable API/UI names plus that Region's API/UI canary names. Copy the checked-in
 example manifest outside the repository; do not commit real domain,
 certificate or approval authority.
 
-Engineering can continue without owner input on the primary target adapter and
-planned failback. Exact source reactivation and failed-cutover rollback are now
-implemented and synthetically tested. Live routing cannot continue until the
-listed domains, certificates, Entra token path, two approvers, retained
-schema-v4 template digests and exclusive Route 53 authority are supplied and
-approved.
+The primary target adapter, exact source reactivation, failed-cutover rollback
+and symmetric planned failback are implemented and synthetically tested.
+Engineering can continue without owner input on exercise automation and
+evidence packaging. Live routing cannot continue until the listed domains,
+certificates, Entra token path, two approvers, retained schema-v4 template
+digests, exact-handler invocation authority and exclusive Route 53 authority
+are supplied and approved.
 
 ### Managed Claude Code and Codex hosts
 

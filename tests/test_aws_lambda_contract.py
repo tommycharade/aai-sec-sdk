@@ -572,6 +572,7 @@ def _load_handler(monkeypatch: Any) -> Any:
         "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef",
     )
     monkeypatch.setenv("RECOVERY_REGION", "eu-west-1")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
     monkeypatch.setenv("SECURITY_ALERTS_TOPIC_ARN", "arn:aws:sns:eu-west-2:111111111111:test")
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/handler.py"
     monkeypatch.syspath_prepend(str(path.parent))
@@ -1395,22 +1396,32 @@ def test_regional_recovery_rebuilds_queues_only_from_revision_bound_jobs(
         "application_job_id": "retention-a",
     }
     event = {
-        "source": "aai.regional-recovery-jobs",
-        "schemaVersion": 1,
+        "source": "aai.regional-transition-jobs",
+        "schemaVersion": 2,
         "mode": "check",
         "activationEvidenceRef": "change/INC-1234",
+        "direction": "failover",
+        "targetRegion": "eu-west-1",
+        "transitionId": "12345678-1234-4234-8234-123456789abc",
+        "authoritySha256": "a" * 64,
     }
+    monkeypatch.setenv("REGIONAL_CELL_ROLE", "recovery")
     checked = module.handler(event, None)
     assert checked["plannedActions"] == 2
     assert checked["dispatchedJobs"] == 0
     assert checked["queueSource"] == "authoritative-dynamodb-job-records"
     assert module._fake_sqs.messages == []
 
+    with pytest.raises(PermissionError, match="does not match this cell"):
+        module.handler({**event, "direction": "failback"}, None)
+    with pytest.raises(PermissionError, match="does not match this cell"):
+        module.handler({**event, "authoritySha256": "not-a-digest"}, None)
+    assert module._fake_sqs.messages == []
+
     event["mode"] = "apply"
     with pytest.raises(PermissionError, match="not activated"):
         module.handler(event, None)
-    monkeypatch.setenv("PASSIVE_CELL_MODE", "active")
-    monkeypatch.setenv("RECOVERY_JOB_RECONCILIATION_ENABLED", "true")
+    monkeypatch.setenv("REGIONAL_JOB_RECONCILIATION_ENABLED", "true")
     applied = module.handler(event, None)
     assert applied["plannedActions"] == 2
     assert applied["dispatchedJobs"] == 2
@@ -1456,15 +1467,19 @@ def test_regional_recovery_fails_closed_on_ambiguous_job_authority(monkeypatch: 
             "revision": 1,
             "updated_at": int(time.time()),
         }
-    monkeypatch.setenv("PASSIVE_CELL_MODE", "active")
-    monkeypatch.setenv("RECOVERY_JOB_RECONCILIATION_ENABLED", "true")
+    monkeypatch.setenv("REGIONAL_CELL_ROLE", "recovery")
+    monkeypatch.setenv("REGIONAL_JOB_RECONCILIATION_ENABLED", "true")
     with pytest.raises(RuntimeError, match="authority contains conflicts"):
         module.handler(
             {
-                "source": "aai.regional-recovery-jobs",
-                "schemaVersion": 1,
+                "source": "aai.regional-transition-jobs",
+                "schemaVersion": 2,
                 "mode": "apply",
                 "activationEvidenceRef": "change/INC-5678",
+                "direction": "failover",
+                "targetRegion": "eu-west-1",
+                "transitionId": "12345678-1234-4234-8234-123456789abc",
+                "authoritySha256": "b" * 64,
             },
             None,
         )

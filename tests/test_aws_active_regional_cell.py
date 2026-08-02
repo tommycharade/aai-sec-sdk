@@ -31,6 +31,8 @@ def _variables() -> dict[str, Any]:
     return {
         "PASSIVE_CELL_MODE": "active",
         "RECOVERY_JOB_RECONCILIATION_ENABLED": "true",
+        "REGIONAL_CELL_ROLE": "recovery",
+        "REGIONAL_JOB_RECONCILIATION_ENABLED": "true",
         "ACTIVATION_EVIDENCE_SHA256": _DIGEST,
         "POLICY_SIGNING_KEY_ARN": _KEY,
         "REGIONAL_POLICY_SIGNING_KEY_ARN": _KEY,
