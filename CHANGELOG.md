@@ -1,5 +1,13 @@
 # Changelog
 
+- Added the P0-11 phase-5 evidence-continuity foundation. Primary and recovery
+  S3 rules now synthesize bidirectional replica-modification sync while
+  excluding delete markers; an independent verifier rejects missing Object
+  Lock, substituted destinations or broad/destructive IAM. A standby-safe
+  reconciler plans Region-local FIFO work only from exact DynamoDB job and
+  policy revisions, fails on ambiguous authority and requires two activation
+  gates before dispatch. This is not yet live AWS phase-5 acceptance.
+
 - Added a persisted provider-state deployment guard for the passive regional
   cell. It derives replicated resources from AWS, compares primary/recovery
   Cognito security posture and tenant-specific Entra federation, refuses

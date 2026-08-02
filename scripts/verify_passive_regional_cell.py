@@ -162,6 +162,7 @@ def verify(template: dict[str, Any]) -> dict[str, int | str]:
         if (
             properties.get("ReservedConcurrentExecutions") != 0
             or variables.get("PASSIVE_CELL_MODE") != "standby"
+            or variables.get("RECOVERY_JOB_RECONCILIATION_ENABLED") != "false"
             or variables.get("POLICY_SIGNING_KEY_ARN") != ""
         ):
             raise PassiveCellVerificationError("Lambda executable authority is not disabled")

@@ -102,6 +102,11 @@ ensures direct writes during failover return to the former primary without
 shortening Object Lock retention. Delete markers remain excluded because they
 are not retained evidence.
 
+The phase-5 implementation and its fail-closed job planner are specified in
+[Evidence continuity and recovery-job reconciliation](evidence-continuity-and-job-reconciliation-design.md).
+Source and verifier completion is not live acceptance: the current AWS replica
+remains one-way until the guarded deployment and two-direction canary pass.
+
 ### API, UI and routing
 
 The passive cell will contain Region-local Lambda, API Gateway, SQS/SNS,
