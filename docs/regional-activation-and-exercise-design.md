@@ -85,6 +85,47 @@ and bounded fault controls without placing credentials or customer data in the
 evidence schema. Until that adapter runs during a rehearsed activation and its
 output is retained, load/dependency/consistency acceptance remains incomplete.
 
+## Immutable evidence retention
+
+`scripts/retain_aws_regional_activation_evidence.py` closes the packaging gap
+without self-certifying any exercise. It accepts one already complete JSON
+bundle, requires schema-v4 transition authority, validates every bundle claim,
+derives the primary immutable audit bucket from persisted Regional and evidence
+continuity manifests, and requires the draft manifest key to be exactly:
+
+```text
+regional-activation/<transition UUID>/<bundle SHA-256>.json
+```
+
+The write requires `--confirm-retain-evidence`. It uses an S3 conditional
+create, COMPLIANCE retention for 365–3,650 days and digest/transition metadata,
+then reads the exact returned version back and verifies bytes, metadata,
+retention mode and retention time. A retry reuses only one exact verified
+version; delete markers, multiple versions, truncated history or changed bytes
+fail closed. The command prints a finalized manifest containing AWS's returned
+version ID and the exact bundle digest. It never edits the input manifest.
+
+Use a syntactically valid placeholder version and SHA-256 in the draft
+`evidenceBundle`; the key must already contain the real bundle digest. Keep both
+files outside source control:
+
+```bash
+python3 scripts/retain_aws_regional_activation_evidence.py \
+  --manifest /secure/path/activation-draft.json \
+  --evidence /secure/path/activation-evidence.json \
+  --regional-recovery-config /secure/path/regional-recovery.json \
+  --evidence-continuity-config /secure/path/evidence-continuity.json \
+  --profile p1 \
+  --retention-days 365 \
+  --confirm-retain-evidence
+```
+
+Store the printed `finalManifest` as the reviewed activation manifest. The
+later read-only preflight independently retrieves that exact version and
+repeats all content and provider checks. Retention proves what was supplied; it
+does not prove that a boolean claim came from a real provider probe. Independent
+probe evidence and the live exercise remain mandatory.
+
 ## Ordered transition
 
 The verifier emits this order and no alternate ordering:
@@ -116,6 +157,9 @@ before source fencing, target smoke and exact job reconciliation.
 | Dependency outage creates bypass | Five named fault probes require denied execution | Exercise rejected |
 | Approval/idempotency replays effects | Side-effect count is bounded to one with no widening | Exercise rejected |
 | Malformed measurements exploit Python coercion | Explicit non-boolean numeric bounds | Evidence rejected |
+| Evidence is written to an operator-selected bucket | Primary bucket is provider-derived from persisted recovery authority | Write rejected |
+| A lost S3 response causes duplicate locked versions | Digest key, conditional create and exact single-version retry recovery | Ambiguous history rejected |
+| Retained bytes differ from the reviewed bundle | Exact-version read-back plus SHA-256 metadata and COMPLIANCE checks | Final manifest not emitted |
 
 ## Operator usage
 
