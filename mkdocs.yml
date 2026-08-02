@@ -62,6 +62,7 @@ nav:
   - Regional recovery storage acceptance (2026-08-02): regional-recovery-storage-acceptance-2026-08-02.md
   - Passive regional control-plane cell: passive-regional-cell-design.md
   - Regional activation and recovery exercise: regional-activation-and-exercise-design.md
+  - AWS Regional recovery exercise provider: aws-regional-exercise-provider-design.md
   - Guarded regional transition executor: regional-transition-executor-design.md
   - Regional transition witness and journal: regional-transition-journal-design.md
   - Regional target readiness and stable ingress: regional-target-readiness-and-stable-ingress-design.md

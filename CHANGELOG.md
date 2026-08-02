@@ -1,5 +1,12 @@
 # Changelog
 
+- Added the first live AWS Regional recovery exercise adapter. It binds an
+  exact Secrets Manager synthetic fleet to schema-v4 transition authority and
+  the target canary, measures authenticated heartbeat, effective-policy and
+  deterministic decision-write latency, disables redirects, renews tokens only
+  in memory, stops after prerequisite failures and deliberately refuses to
+  self-certify still-unimplemented dependency/consistency controls.
+
 - Added a schema-v4 regional activation evidence retention guard. It validates
   a complete independently produced bundle, derives the primary audit bucket
   from persisted AWS authority, writes one digest-addressed COMPLIANCE-locked
