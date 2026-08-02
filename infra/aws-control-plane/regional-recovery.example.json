@@ -7,5 +7,5 @@
   "rtoMinutes": 30,
   "rpoSeconds": 60,
   "recoveryMode": "fail-closed-active-passive",
-  "approvalEvidenceRef": "DR-REVIEW-CHANGE-ME"
+  "approvalEvidenceRef": "CODEX-APPROVAL-2026-08-02-P0-11"
 }

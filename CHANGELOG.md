@@ -1,5 +1,14 @@
 # Changelog
 
+- Deployed and accepted P0-11 phase-5 evidence continuity in `eu-west-2` and
+  `eu-west-1`. A persisted provider-state guard derived the exact buckets,
+  independently verified and SHA-256-bound both CDK templates, deployed their
+  exact assemblies, and re-read both live rules. Two retained canaries proved
+  exact bidirectional bytes, version identity, COMPLIANCE retention and replica
+  provenance, then proved retention/tag replica modifications returned to each
+  origin. Live read-only job reconciliation inspected one tenant and dispatched
+  nothing; passive execution remains disabled.
+
 - Added the P0-11 phase-5 evidence-continuity foundation. Primary and recovery
   S3 rules now synthesize bidirectional replica-modification sync while
   excluding delete markers; an independent verifier rejects missing Object
