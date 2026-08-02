@@ -1018,6 +1018,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../regional-transition-executor-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guarded regional transition executor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../evidence-continuity-and-job-reconciliation-design/" class="md-nav__link">
         
   
@@ -2973,7 +3000,10 @@ be invented by engineering:</p>
 <p>The activation manifest must be created only for the scheduled exercise and
 expires within one hour. Do not commit it or its provider evidence. The
 <a href="../regional-activation-and-exercise-design/">regional activation and exercise design</a>
-documents the exact fields, checks and non-mutating preflight command.</p>
+documents the exact fields, checks and non-mutating preflight command.
+The <a href="../regional-transition-executor-design/">guarded transition executor</a> is
+implemented, but its mutating commands must not be used until every item above
+is real, retained and approved. It cannot move traffic.</p>
 <h3 id="managed-claude-code-and-codex-hosts">Managed Claude Code and Codex hosts</h3>
 <ul>
 <li>Confirmation that <code>/Users/tommooney/dev/kratos</code> remains the first local
