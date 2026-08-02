@@ -16,7 +16,7 @@
         <link rel="prev" href="../regional-recovery-storage-acceptance-2026-08-02/">
       
       
-        <link rel="next" href="../evidence-continuity-and-job-reconciliation-design/">
+        <link rel="next" href="../regional-activation-and-exercise-design/">
       
       
         
@@ -1115,6 +1115,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../regional-activation-and-exercise-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional activation and recovery exercise
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2940,6 +2967,10 @@ permissions, raise bounded Lambda concurrency, enable event sources and
 schedules, deploy the UI artifact, attach the custom domains and finally move
 traffic. It must not rely on a browser-authored status or automatic health
 check. Failback uses the same gates in reverse.</p>
+<p>The implemented read-only activation authority and provider-state preflight
+are documented in the
+<a href="../regional-activation-and-exercise-design/">regional activation and exercise design</a>.
+They add no path that can mutate this standby posture.</p>
 <h2 id="guarantees-and-non-guarantees">Guarantees and non-guarantees</h2>
 <p>The passive stack guarantees that its deployed default cannot serve API/UI
 traffic or execute Lambda code and that its roles cannot sign policy or mutate

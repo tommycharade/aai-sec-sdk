@@ -991,6 +991,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../regional-activation-and-exercise-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional activation and recovery exercise
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../evidence-continuity-and-job-reconciliation-design/" class="md-nav__link">
         
   
@@ -1895,6 +1922,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#regional-routing-and-activation-exercise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regional routing and activation exercise
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#managed-claude-code-and-codex-hosts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2747,6 +2785,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#regional-routing-and-activation-exercise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regional routing and activation exercise
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#managed-claude-code-and-codex-hosts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2905,6 +2954,26 @@ bucket, account or key ARN needs to be supplied manually.</p>
 <p>Do not create placeholder identity resources or reuse the <code>eu-west-2</code> pool to
 unblock deployment. The stack rejects wrong-Region identity and remains
 non-serving until a separate reviewed activation change.</p>
+<h3 id="regional-routing-and-activation-exercise">Regional routing and activation exercise</h3>
+<p>The read-only activation preflight and bounded exercise contract are
+implemented. Live activation still requires owner/platform inputs that cannot
+be invented by engineering:</p>
+<ul>
+<li>the Route 53 hosted-zone ID and approved stable API/UI domain names;</li>
+<li>ACM certificates and authority to close both raw execute-api origins;</li>
+<li>two independent named approvers for each failover and failback rehearsal;</li>
+<li>an approved change window in which source fencing, synthetic dependency
+  failures and stable-route movement may be exercised;</li>
+<li>confirmation that 1,000 synthetic agents is the approved first-customer
+  target, or a reviewed replacement regional-recovery manifest;</li>
+<li>backup/key-recovery and break-glass exercise participants; and</li>
+<li>approval to retain the exact activation bundle in the primary COMPLIANCE
+  Object Lock bucket.</li>
+</ul>
+<p>The activation manifest must be created only for the scheduled exercise and
+expires within one hour. Do not commit it or its provider evidence. The
+<a href="../regional-activation-and-exercise-design/">regional activation and exercise design</a>
+documents the exact fields, checks and non-mutating preflight command.</p>
 <h3 id="managed-claude-code-and-codex-hosts">Managed Claude Code and Codex hosts</h3>
 <ul>
 <li>Confirmation that <code>/Users/tommooney/dev/kratos</code> remains the first local

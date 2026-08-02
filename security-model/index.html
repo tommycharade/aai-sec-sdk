@@ -1214,6 +1214,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../regional-activation-and-exercise-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional activation and recovery exercise
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../evidence-continuity-and-job-reconciliation-design/" class="md-nav__link">
         
   
@@ -3165,8 +3192,19 @@ requires the same tenant-specific Microsoft Entra issuer, strips ambient CDK
 authority and independently verifies synthesized CloudFormation. Deployment
 therefore cannot substitute a synthetic identity, unrelated pool, attacker
 table or alternate stack. The verified template SHA-256 is checked again and
-the exact CDK assembly is deployed without re-synthesis. Population continuity is not inferred from matching
-pool configuration; it requires separately retained live identity evidence.</p>
+the exact CDK assembly is deployed without re-synthesis. Population continuity
+is not inferred from matching pool configuration; it requires separately
+retained live identity evidence.</p>
+<p>Regional activation authority is a short-lived, exact-version contract rather
+than an operator toggle. The read-only preflight binds one canonical transition
+and direction to persisted recovery authority, the primary immutable audit
+bucket and one COMPLIANCE-locked S3 version. It repeats passive-stack, recovery
+identity, bidirectional replication, direct-origin fencing and stable-DNS
+checks before emitting an ordered plan. Load acceptance is computed over a
+unique fleet, while dependency and consistency probes reject bypass, duplicate
+effects and authority widening. The preflight has no activation operation; a
+later executor must repeat and condition every state change. See the
+<a href="../regional-activation-and-exercise-design/">regional activation and exercise design</a>.</p>
 <p>Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while
 excluding delete markers, and synthesized CloudFormation is rejected unless
