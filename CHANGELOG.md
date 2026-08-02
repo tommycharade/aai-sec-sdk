@@ -1,5 +1,12 @@
 # Changelog
 
+- Added independently verified, non-routing Regional ingress for the stable
+  API/UI and Region-specific canaries. The private-bucket UI proxy has bounded
+  read-only authority and exact CSP origins; active and standby recovery CORS
+  contracts fail closed. A provider-bound deployment guard validates exact ACM
+  SANs, strips ambient authority, persists reviewed configuration and deploys
+  only the verified assembly. DNS and live routing remain deliberately absent.
+
 - Added a journal-governed target-readiness step after recovery activation.
   It re-verifies the source fence and exact live target runtime, invokes the
   revision-bound Region-local job reconciler, waits for a bounded zero-action

@@ -24,6 +24,7 @@ import * as sqs from "aws-cdk-lib/aws-sqs";
 export interface PassiveRegionalCellProps extends cdk.StackProps {
   readonly cellMode: "standby" | "active";
   readonly activationEvidenceSha256?: string;
+  readonly stableUiOrigin?: string;
   readonly primaryRegion: string;
   readonly controlTableName: string;
   readonly presenceTableName: string;
@@ -97,8 +98,12 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       ) {
         throw new Error("active cell requires tenant-bound Entra strong authentication");
       }
+      if (!/^https:\/\/[a-z0-9](?:[a-z0-9.-]{1,251}[a-z0-9])$/.test(props.stableUiOrigin ?? "")) {
+        throw new Error("active cell requires one exact stable UI HTTPS origin");
+      }
     } else if (
       props.activationEvidenceSha256
+      || props.stableUiOrigin
       || props.entraTenantId
       || props.entraAaiTenantId
       || props.entraStrongAuthEnforced
@@ -397,7 +402,7 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       corsPreflight: {
         allowHeaders: ["authorization", "content-type"],
         allowMethods: [apigwv2.CorsHttpMethod.ANY],
-        allowOrigins: ["https://not-serving.invalid"],
+        allowOrigins: [active ? props.stableUiOrigin! : "https://not-serving.invalid"],
       },
     });
     const issuer = `https://cognito-idp.${recoveryRegion}.amazonaws.com/${props.recoveryUserPoolId}`;

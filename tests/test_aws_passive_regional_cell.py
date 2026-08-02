@@ -24,7 +24,10 @@ def _template() -> dict[str, Any]:
     resources: dict[str, Any] = {
         "Api": {
             "Type": "AWS::ApiGatewayV2::Api",
-            "Properties": {"DisableExecuteApiEndpoint": True},
+            "Properties": {
+                "DisableExecuteApiEndpoint": True,
+                "CorsConfiguration": {"AllowOrigins": ["https://not-serving.invalid"]},
+            },
         },
         "RuleA": {"Type": "AWS::Events::Rule", "Properties": {"State": "DISABLED"}},
         "RuleB": {"Type": "AWS::Events::Rule", "Properties": {"State": "DISABLED"}},

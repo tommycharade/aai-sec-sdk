@@ -3,10 +3,12 @@
 ## Outcome
 
 The guarded transition now has an implemented pre-routing target-readiness
-step. Stable ingress remains a reviewed design until customer-owned domains,
-certificates and change authority exist. These boundaries are separate on
-purpose: live compute and reconstructed jobs do not imply that traffic may
-move, and the presence of DNS records does not imply that the target is safe.
+step and an independently verified Regional ingress stack. The stack can
+create stable and canary custom-domain attachments in either Region, but it
+cannot create or change DNS. Live deployment remains pending customer-owned
+domains and certificates. These boundaries are separate on purpose: live
+compute, reconstructed jobs and custom domains do not imply that traffic may
+move.
 
 ## Implemented target-readiness step
 
@@ -59,13 +61,69 @@ The two stable names are implemented consistently:
 
 - `stableApiDomain` maps to the Region's existing authenticated control-plane
   API stage;
-- `stableUiDomain` maps to a small Regional REST API that reads only the exact
-  private UI bucket through an API Gateway-to-S3 service integration;
-- both Regional APIs disable their default `execute-api` endpoint;
+- `stableUiDomain` maps to a small Regional HTTP API and bounded Lambda that
+  reads only the exact private UI bucket;
+- the UI proxy disables its default `execute-api` endpoint and deployment is
+  rejected unless the mapped control API has also disabled its raw endpoint;
 - TLS 1.2 is mandatory and certificates, API mappings, S3 role scope and
   hosted-zone identity are independently verified; and
 - separate Region-specific canary names reach each regional API/UI endpoint
   before stable traffic moves.
+
+## Implemented non-routing ingress
+
+`RegionalIngressStack` creates exactly four TLS 1.2 Regional custom domains:
+stable API, stable UI, Region-specific canary API and Region-specific canary
+UI. The API names map to the provider-derived existing control API. The UI
+names map to a new HTTP API whose default `execute-api` endpoint is disabled.
+It serves GET and HEAD only through one 256 MiB, ten-second, concurrency-20
+Lambda with `s3:GetObject` on one exact private bucket and no list/write,
+control-plane or routing authority.
+
+The UI handler bounds assets to 5 MB, rejects encoded and unencoded traversal,
+uses SPA fallback only for missing objects, gives the entry document
+`no-store`, and applies HSTS, frame denial, MIME protection and an exact CSP.
+The CSP permits browser connections only to the stable API and reviewed
+Cognito origin. The active recovery API now accepts browser CORS only from the
+exact stable UI origin; the standby template retains the deliberately invalid
+origin. Both states are independently verified.
+
+`verify_regional_ingress_stack.py` uses a resource allow-list and exact
+cardinality. It rejects Route 53, CloudFront, Global Accelerator and every
+unexpected resource; certificate/domain/origin substitutions; altered API
+mappings; raw API fallback; changed Lambda limits; additional IAM statements;
+and any status other than `custom-domains-unrouted`.
+
+`deploy_aws_regional_ingress.py` is the only supported deployment path. Its
+schema-v1 manifest explicitly sets `activationPermitted` to false. The guard:
+
+1. derives the AWS account from STS;
+2. derives the existing API ID and private UI bucket from a stable source
+   CloudFormation stack and requires the live HTTP API's raw execute-api
+   endpoint to be disabled;
+3. reads ACM and requires one issued, fully validated, same-account,
+   same-Region certificate with exactly the four manifest names;
+4. discards ambient ingress environment variables;
+5. synthesizes and independently verifies the template;
+6. persists the secret-free authority in encrypted Parameter Store; and
+7. deploys only the byte-identical, SHA-256-verified CDK assembly.
+
+Prepare a private copy of
+`infra/aws-control-plane/regional-ingress.example.json`, then run:
+
+```bash
+python3 scripts/deploy_aws_regional_ingress.py check \
+  --config /private/path/recovery-ingress.json --profile p1
+python3 scripts/deploy_aws_regional_ingress.py prepare \
+  --config /private/path/recovery-ingress.json --profile p1 \
+  --confirm-persist-authority
+python3 scripts/deploy_aws_regional_ingress.py deploy \
+  --config /private/path/recovery-ingress.json --profile p1 \
+  --confirm-unrouted-deployment
+```
+
+Repeat with the primary role/stack and its provider identities. These commands
+do not create Route 53 records and do not make either Region active.
 
 The UI proxy is deliberately serverless. It trades some CDN performance for a
 single routing primitive that can move the UI and API together. A later CDN may
@@ -127,14 +185,17 @@ same state machine run with source and target reversed.
 
 ## Current blockers and non-guarantees
 
-Implementation of stable ingress and routing still requires:
+Live deployment and routing still require:
 
 - approved stable and regional-canary names in one Route 53 hosted zone;
-- primary and recovery ACM certificate ARNs covering those names;
+- primary and recovery ACM certificate ARNs, each covering exactly its stable
+  API/UI names and that Region's API/UI canary names;
 - deployment of the recovery Cognito/Entra configuration and regional cell;
+- migration of the primary control API away from its currently open raw
+  execute-api endpoint before primary ingress can pass the deployment guard;
 - customer approval for the dedicated routing role and organization-level DNS
   write restriction; and
 - a scheduled two-person recovery exercise.
 
-No Route 53, certificate, custom-domain, UI proxy or live AWS transition was
-created by the target-readiness tranche. P0-11 remains **Partial**.
+No Route 53 record, certificate, custom domain, UI proxy or live AWS transition
+was created by this implementation tranche. P0-11 remains **Partial**.

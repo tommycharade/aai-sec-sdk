@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "stackName": "AaiSecRecoveryRegionalIngress",
+  "sourceStackName": "AaiSecPassiveRegionalCell",
+  "cellRole": "recovery",
+  "region": "eu-west-1",
+  "certificateArn": "arn:aws:acm:eu-west-1:111111111111:certificate/12345678-1234-4234-8234-123456789abc",
+  "cognitoOrigin": "https://aai-recovery.auth.eu-west-1.amazoncognito.com",
+  "stableApiDomain": "api.security.example.com",
+  "stableUiDomain": "security.example.com",
+  "canaryApiDomain": "api-recovery.security.example.com",
+  "canaryUiDomain": "recovery.security.example.com",
+  "approvalEvidenceRef": "CHANGE-REGIONAL-INGRESS-REPLACE-ME",
+  "activationPermitted": false
+}

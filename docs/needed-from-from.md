@@ -99,7 +99,12 @@ The [transition journal design](regional-transition-journal-design.md) explains
 why the witness must not be converted to a Global Table and how the two Entra
 approver identities and expected routing generation are supplied.
 The [target-readiness and stable-ingress design](regional-target-readiness-and-stable-ingress-design.md)
-defines the serverless custom-domain topology and remaining routing inputs.
+defines the implemented serverless custom-domain topology, guarded deployment
+commands and remaining routing inputs. Each Regional certificate must be
+issued and fully validated in that Region and contain exactly four SANs: the
+stable API/UI names plus that Region's API/UI canary names. Copy the checked-in
+example manifest outside the repository; do not commit real domain,
+certificate or approval authority.
 
 ### Managed Claude Code and Codex hosts
 
