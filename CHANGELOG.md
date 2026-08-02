@@ -1,5 +1,11 @@
 # Changelog
 
+- Added the read-only schema-v1 Regional dependency-fault authority planner. It
+  binds one named dependency, exact target cell/template, routing generation,
+  two Entra approvers, 30–300-second duration and short expiry to schema-v4
+  transition authority, then emits the mandatory Step Functions compensation
+  and independent watchdog order without exposing a mutation path.
+
 - Added the first live AWS Regional recovery exercise adapter. It binds an
   exact Secrets Manager synthetic fleet to schema-v4 transition authority and
   the target canary, measures authenticated heartbeat, effective-policy and

@@ -85,6 +85,9 @@ implements real target-canary heartbeat, signed-policy read and content-free
 decision-write measurement for a transition-bound fleet of pre-enrolled
 synthetic agents. Dependency and consistency fault controls remain deliberately
 unimplemented because they require a separate target-cell-only mutation role.
+The [Regional dependency fault controller](regional-fault-controller-design.md)
+now validates the short-lived two-person fault authority and compensation plan,
+but does not yet execute it.
 Until both adapter layers run during a rehearsed activation and their output is
 retained, load/dependency/consistency acceptance remains incomplete.
 

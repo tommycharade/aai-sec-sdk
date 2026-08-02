@@ -282,6 +282,12 @@ The generic harness computes aggregate acceptance. Dependency and consistency
 methods fail until a separately authorized target-cell-only fault controller is
 implemented; load success cannot self-certify them. See the
 [AWS Regional exercise provider](aws-regional-exercise-provider-design.md).
+Fault authority is separately bound to one dependency, exact target runtime
+template, direction/cell role, routing generation, two approvers and a maximum
+five-minute fault. The read-only planner requires a durable compensation
+workflow and independent cleanup watchdog before any IAM mutation can be
+introduced. See the
+[Regional dependency fault controller](regional-fault-controller-design.md).
 
 Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while

@@ -36,6 +36,13 @@ def _adapter() -> Any:
     )
 
 
+def _fault_planner() -> Any:
+    return _load(
+        "aai_aws_regional_fault_planner",
+        "scripts/plan_aws_regional_fault_exercise.py",
+    )
+
+
 def _manifest(module: Any) -> Any:
     value = {
         "schemaVersion": 4,
@@ -120,6 +127,32 @@ def _fleet_payload(manifest: Any) -> str:
         },
         sort_keys=True,
     )
+
+
+def _fault_authority(manifest: Any, **updates: Any) -> dict[str, Any]:
+    value = {
+        "schemaVersion": 1,
+        "faultId": "42345678-1234-4234-8234-123456789abc",
+        "transitionId": manifest.transition_id,
+        "transitionAuthoritySha256": manifest.authority_sha256(),
+        "direction": manifest.direction,
+        "targetRegion": manifest.target_region,
+        "targetCellRole": "recovery",
+        "targetRuntimeStackName": manifest.recovery_runtime_stack_name,
+        "targetRuntimeTemplateSha256": manifest.recovery_runtime_template_sha256,
+        "coordinationRegion": manifest.coordination_region,
+        "expectedRoutingGeneration": manifest.expected_routing_generation,
+        "dependency": "dynamodb",
+        "maximumFaultSeconds": 120,
+        "approvalSha256": manifest.approval_sha256(),
+        "approverPrincipalIds": [item.principal_id for item in manifest.approvals],
+        "activationEvidenceRef": _fault_planner().activation_evidence_ref(manifest.evidence),
+        "expiresAt": 1100,
+        "faultPermitted": True,
+        "automaticFaultInjection": False,
+    }
+    value.update(updates)
+    return value
 
 
 def test_fleet_secret_is_exactly_bound_to_transition_and_target_canary() -> None:
@@ -256,3 +289,90 @@ def test_secret_loader_requires_exact_arn_and_never_returns_unbound_secret() -> 
     wrong_region = secret_arn.replace("eu-west-1", "eu-west-2")
     with pytest.raises(module.AwsRegionalExerciseError, match="ARN"):
         module.load_fleet_secret(Client(), wrong_region, manifest)
+
+
+def test_fault_authority_binds_exact_transition_and_compensation_order() -> None:
+    activation = _activation()
+    planner = _fault_planner()
+    manifest = _manifest(activation)
+    authority = planner.RegionalFaultAuthority.parse(
+        json.dumps(_fault_authority(manifest)), manifest, now=1000
+    )
+    plan = planner.fault_plan(authority)
+    assert [item["order"] for item in plan] == list(range(1, 10))
+    assert plan[1]["action"] == "create-independent-cleanup-watchdog"
+    assert plan[5]["action"] == "remove-exact-target-role-deny"
+    assert plan[-1]["action"] == "seal-content-free-fault-evidence"
+    assert len(authority.sha256()) == 64
+
+
+def test_failback_fault_authority_targets_only_primary_runtime() -> None:
+    activation = _activation()
+    planner = _fault_planner()
+    failover = _manifest(activation)
+    manifest = replace(
+        failover,
+        direction="failback",
+        source_region=failover.recovery_region,
+        target_region=failover.primary_region,
+    )
+    value = _fault_authority(
+        manifest,
+        targetCellRole="primary",
+        targetRuntimeStackName=manifest.primary_runtime_stack_name,
+        targetRuntimeTemplateSha256=manifest.primary_runtime_template_sha256,
+    )
+    authority = planner.RegionalFaultAuthority.parse(json.dumps(value), manifest, now=1000)
+    assert authority.target_cell_role == "primary"
+    assert authority.target_runtime_stack_name == "AaiSecControlPlane"
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({"automaticFaultInjection": True}, "differs"),
+        ({"targetCellRole": "primary"}, "differs"),
+        ({"targetRuntimeTemplateSha256": "d" * 64}, "differs"),
+        ({"dependency": "route53"}, "values"),
+        ({"maximumFaultSeconds": 301}, "values"),
+        ({"expiresAt": 1201}, "values"),
+        ({"approvalSha256": "0" * 64}, "differs"),
+    ],
+)
+def test_fault_authority_rejects_widening_replay_and_unsafe_duration(
+    updates: dict[str, Any], message: str
+) -> None:
+    activation = _activation()
+    planner = _fault_planner()
+    manifest = _manifest(activation)
+    with pytest.raises(planner.RegionalFaultAuthorityError, match=message):
+        planner.RegionalFaultAuthority.parse(
+            json.dumps(_fault_authority(manifest, **updates)), manifest, now=1000
+        )
+
+
+def test_fault_authority_rejects_substituted_activation_evidence() -> None:
+    activation = _activation()
+    planner = _fault_planner()
+    manifest = _manifest(activation)
+    with pytest.raises(planner.RegionalFaultAuthorityError, match="differs"):
+        planner.RegionalFaultAuthority.parse(
+            json.dumps(
+                _fault_authority(
+                    manifest,
+                    activationEvidenceRef="sha256:" + ("0" * 64),
+                )
+            ),
+            manifest,
+            now=1000,
+        )
+
+
+def test_fault_planner_rejects_duplicate_json_authority() -> None:
+    activation = _activation()
+    planner = _fault_planner()
+    manifest = _manifest(activation)
+    payload = json.dumps(_fault_authority(manifest))
+    payload = payload.replace('"schemaVersion": 1', '"schemaVersion": 1, "schemaVersion": 1')
+    with pytest.raises(planner.RegionalFaultAuthorityError, match="duplicate"):
+        planner.RegionalFaultAuthority.parse(payload, manifest, now=1000)
