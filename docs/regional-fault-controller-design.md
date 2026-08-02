@@ -63,6 +63,14 @@ controller derives these from exact provider-discovered target resources and a
 code-owned map. Every deny policy is named from the fault UUID, affects only the
 target handler role and is rejected if any other Regional fault policy exists.
 
+Both primary and recovery cell stacks now export
+`RegionalFaultTargetExecutionRoleArn` from the actual control-handler Lambda
+role. The active and passive cell verifiers require that output to resolve via
+`Fn::GetAtt` to one IAM role used by exactly one handler with the expected cell
+role. A missing, substituted, worker or literal role identity fails synthesis
+verification. This is deployment-owned discovery input; it is not fault
+execution authority by itself.
+
 The final provider implementation must define a real safe probe for each
 dependency:
 
@@ -108,8 +116,9 @@ confirmation or execute flag because this tranche is read-only.
 
 ## Current non-guarantees
 
-The authority parser and plan are implemented and synthetically tested. The
-Step Functions controller, watchdog, code-owned IAM boundaries and real
-dependency probes are not yet implemented. No live fault has been injected.
+The authority parser, plan and exact target-handler role discovery are
+implemented and synthetically tested. The Step Functions controller, watchdog,
+code-owned IAM boundaries and real dependency probes are not yet implemented.
+No live fault has been injected.
 The generic AWS exercise adapter therefore continues to reject dependency and
 consistency evidence, and P0-11 remains **Partial**.

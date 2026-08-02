@@ -511,5 +511,10 @@ export class PassiveRegionalCellStack extends cdk.Stack {
     new cdk.CfnOutput(this, "PassiveControlPlaneApiId", { value: api.apiId });
     new cdk.CfnOutput(this, "PassiveUiOriginBucketName", { value: uiOrigin.bucketName });
     new cdk.CfnOutput(this, "PassiveSecurityAlertsTopicArn", { value: alerts.topicArn });
+    // This exact role is deployment authority for the future fault controller;
+    // it is never selected by an operator, UI request or model output.
+    new cdk.CfnOutput(this, "RegionalFaultTargetExecutionRoleArn", {
+      value: handler.role!.roleArn,
+    });
   }
 }

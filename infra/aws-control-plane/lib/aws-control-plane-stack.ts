@@ -1199,6 +1199,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, "RegionalCellRole", { value: "primary" });
     new cdk.CfnOutput(this, "RegionalTargetStatus", { value: "active-capable" });
+    // The fault controller receives this deployment-owned exact role identity;
+    // operators and policy payloads never supply role names or IAM documents.
+    new cdk.CfnOutput(this, "RegionalFaultTargetExecutionRoleArn", {
+      value: handler.role!.roleArn,
+    });
     new cdk.CfnOutput(this, "DiscoveryProviderSecretNamePrefix", {
       value: providerSecretPrefix,
     });

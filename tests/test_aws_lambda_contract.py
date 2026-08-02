@@ -4822,6 +4822,8 @@ def test_policy_signing_key_is_asymmetric_retained_and_least_privileged() -> Non
     assert "REGIONAL_POLICY_SIGNING_KEY_ARN: regionalPolicySigningKey.keyArn" in stack
     assert 'RECOVERY_REGION: process.env.AUDIT_REPLICA_REGION ?? "eu-west-1"' in stack
     assert 'new cdk.CfnOutput(this, "PolicySigningKeyArn"' in stack
+    assert 'new cdk.CfnOutput(this, "RegionalFaultTargetExecutionRoleArn"' in stack
+    assert "value: handler.role!.roleArn" in stack
 
 
 def test_operator_policy_trust_metadata_is_public_provenance_not_private_authority(

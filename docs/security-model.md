@@ -288,6 +288,10 @@ five-minute fault. The read-only planner requires a durable compensation
 workflow and independent cleanup watchdog before any IAM mutation can be
 introduced. See the
 [Regional dependency fault controller](regional-fault-controller-design.md).
+Each Regional cell exports only its real control-handler execution role as
+deployment-owned controller input. Independent template verification rejects a
+literal ARN, a missing role, a worker role or a role not bound to the expected
+cell handler. The operator and model never select this identity.
 
 Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while
