@@ -24,7 +24,7 @@ class RegionalActivationVerificationError(ValueError):
     """Raised when authority or evidence cannot prove a safe transition."""
 
 
-_MANIFEST_FIELDS = {
+_MANIFEST_FIELDS_V1 = {
     "schemaVersion",
     "transitionId",
     "direction",
@@ -44,6 +44,13 @@ _MANIFEST_FIELDS = {
     "activationPermitted",
     "automaticActivation",
 }
+_MANIFEST_FIELDS_V2 = _MANIFEST_FIELDS_V1 | {
+    "coordinationRegion",
+    "journalTableName",
+    "expectedRoutingGeneration",
+    "approvals",
+}
+_APPROVAL_FIELDS = {"principalId", "evidenceRef", "approvedAt", "strongAuthAt"}
 _BUNDLE_FIELDS = {
     "schemaVersion",
     "transitionId",
@@ -82,6 +89,7 @@ _ENTRA_ISSUER = re.compile(
     re.IGNORECASE,
 )
 _KMS_ARN = re.compile(r"^arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:key/mrk-[0-9a-f]{32}$")
+_TABLE = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -132,6 +140,25 @@ def _number(value: object, label: str, *, minimum: float, maximum: float) -> flo
 
 
 @dataclass(frozen=True)
+class TransitionApproval:
+    """One independently authenticated human approval bound to a transition."""
+
+    principal_id: str
+    evidence_ref: str
+    approved_at: int
+    strong_auth_at: int
+
+    def canonical(self) -> dict[str, Any]:
+        """Return the exact secret-free representation included in authority."""
+        return {
+            "approvedAt": self.approved_at,
+            "evidenceRef": self.evidence_ref,
+            "principalId": self.principal_id,
+            "strongAuthAt": self.strong_auth_at,
+        }
+
+
+@dataclass(frozen=True)
 class EvidenceReference:
     """Exact immutable S3 version containing one activation evidence bundle."""
 
@@ -176,6 +203,34 @@ class ActivationManifest:
     evidence: EvidenceReference
     approval_evidence_ref: str
     expires_at: int
+    schema_version: int = 1
+    coordination_region: str | None = None
+    journal_table_name: str | None = None
+    expected_routing_generation: int | None = None
+    approvals: tuple[TransitionApproval, ...] = ()
+
+    def require_journal_authority(self) -> None:
+        """Reject legacy authority before any journal-governed mutation."""
+        if (
+            self.schema_version != 2
+            or self.coordination_region is None
+            or self.journal_table_name is None
+            or self.expected_routing_generation is None
+            or len(self.approvals) != 2
+        ):
+            raise RegionalActivationVerificationError(
+                "schema-v2 journal and two-person authority are required"
+            )
+
+    def approval_sha256(self) -> str:
+        """Return the digest of the exact sorted two-person approval set."""
+        self.require_journal_authority()
+        payload = json.dumps(
+            [approval.canonical() for approval in self.approvals],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(payload).hexdigest()
 
     def authority_sha256(self) -> str:
         """Bind all transition authority except the circular evidence reference."""
@@ -190,7 +245,7 @@ class ActivationManifest:
             "route53HostedZoneId": self.hosted_zone_id,
             "rpoSeconds": self.rpo_seconds,
             "rtoMinutes": self.rto_minutes,
-            "schemaVersion": 1,
+            "schemaVersion": self.schema_version,
             "sourceRegion": self.source_region,
             "stableApiDomain": self.stable_api_domain,
             "stableUiDomain": self.stable_ui_domain,
@@ -198,6 +253,15 @@ class ActivationManifest:
             "targetRegion": self.target_region,
             "transitionId": self.transition_id,
         }
+        if self.schema_version == 2:
+            authority.update(
+                {
+                    "approvals": [approval.canonical() for approval in self.approvals],
+                    "coordinationRegion": self.coordination_region,
+                    "expectedRoutingGeneration": self.expected_routing_generation,
+                    "journalTableName": self.journal_table_name,
+                }
+            )
         payload = json.dumps(authority, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(payload).hexdigest()
 
@@ -210,9 +274,13 @@ class ActivationManifest:
             value = json.loads(payload, object_pairs_hook=_strict_object)
         except json.JSONDecodeError as error:
             raise RegionalActivationVerificationError("activation manifest is not JSON") from error
-        item = _object(value, _MANIFEST_FIELDS, "activation manifest")
+        if not isinstance(value, dict):
+            raise RegionalActivationVerificationError("activation manifest must be an object")
+        schema_version = value.get("schemaVersion")
+        fields = _MANIFEST_FIELDS_V2 if schema_version == 2 else _MANIFEST_FIELDS_V1
+        item = _object(value, fields, "activation manifest")
         if (
-            item["schemaVersion"] != 1
+            schema_version not in {1, 2}
             or item["activationPermitted"] is not True
             or item["automaticActivation"] is not False
         ):
@@ -257,6 +325,63 @@ class ActivationManifest:
         current = int(time.time()) if now is None else now
         if not current < expires <= current + 3600:
             raise RegionalActivationVerificationError("activation authority is expired or too long")
+        coordination_region: str | None = None
+        journal_table_name: str | None = None
+        expected_generation: int | None = None
+        approvals: tuple[TransitionApproval, ...] = ()
+        if schema_version == 2:
+            coordination_region = item["coordinationRegion"]
+            if (
+                not isinstance(coordination_region, str)
+                or not _REGION.fullmatch(coordination_region)
+                or coordination_region in {primary, recovery}
+            ):
+                raise RegionalActivationVerificationError(
+                    "coordinationRegion must be a distinct witness Region"
+                )
+            journal_table_name = item["journalTableName"]
+            if not isinstance(journal_table_name, str) or not _TABLE.fullmatch(journal_table_name):
+                raise RegionalActivationVerificationError("journalTableName is invalid")
+            expected_generation = _integer(
+                item["expectedRoutingGeneration"],
+                "expectedRoutingGeneration",
+                minimum=0,
+                maximum=1_000_000_000,
+            )
+            raw_approvals = item["approvals"]
+            if not isinstance(raw_approvals, list) or len(raw_approvals) != 2:
+                raise RegionalActivationVerificationError(
+                    "exactly two independent approvals are required"
+                )
+            parsed: list[TransitionApproval] = []
+            for raw_approval in raw_approvals:
+                approval = _object(raw_approval, _APPROVAL_FIELDS, "transition approval")
+                principal = _uuid(approval["principalId"], "approval principalId")
+                reference = approval["evidenceRef"]
+                if not isinstance(reference, str) or not _EVIDENCE.fullmatch(reference):
+                    raise RegionalActivationVerificationError("approval evidenceRef is invalid")
+                approved_at = _integer(
+                    approval["approvedAt"], "approvedAt", minimum=1, maximum=current
+                )
+                strong_auth_at = _integer(
+                    approval["strongAuthAt"],
+                    "strongAuthAt",
+                    minimum=1,
+                    maximum=approved_at,
+                )
+                if approved_at < current - 3600 or approved_at - strong_auth_at > 300:
+                    raise RegionalActivationVerificationError(
+                        "approval or strong authentication is stale"
+                    )
+                parsed.append(TransitionApproval(principal, reference, approved_at, strong_auth_at))
+            if (
+                len({approval.principal_id for approval in parsed}) != 2
+                or len({approval.evidence_ref for approval in parsed}) != 2
+            ):
+                raise RegionalActivationVerificationError(
+                    "transition approvals are not independent"
+                )
+            approvals = tuple(sorted(parsed, key=lambda approval: approval.principal_id))
         return cls(
             transition_id,
             direction,
@@ -273,6 +398,11 @@ class ActivationManifest:
             EvidenceReference.parse(item["evidenceBundle"]),
             evidence_ref,
             expires,
+            schema_version,
+            coordination_region,
+            journal_table_name,
+            expected_generation,
+            approvals,
         )
 
 
@@ -534,15 +664,18 @@ def verify_bundle(
     ):
         raise RegionalActivationVerificationError("backup or key recovery evidence failed")
 
+    operation_fields = {
+        "independentApproverCount",
+        "breakGlassRehearsed",
+        "sourceFencePrepared",
+        "failbackPlanPassed",
+    }
+    if manifest.schema_version == 2:
+        operation_fields |= {"approverPrincipalIds", "approvalSha256"}
     operations = _section(
         bundle,
         "operations",
-        {
-            "independentApproverCount",
-            "breakGlassRehearsed",
-            "sourceFencePrepared",
-            "failbackPlanPassed",
-        },
+        operation_fields,
     )
     approver_count = _integer(
         operations["independentApproverCount"],
@@ -552,6 +685,16 @@ def verify_bundle(
     )
     if (
         approver_count < 2
+        or (manifest.schema_version == 2 and approver_count != len(manifest.approvals))
+        or (
+            manifest.schema_version == 2
+            and operations.get("approverPrincipalIds")
+            != [approval.principal_id for approval in manifest.approvals]
+        )
+        or (
+            manifest.schema_version == 2
+            and operations.get("approvalSha256") != manifest.approval_sha256()
+        )
         or operations["breakGlassRehearsed"] is not True
         or operations["sourceFencePrepared"] is not True
         or operations["failbackPlanPassed"] is not True
@@ -566,6 +709,8 @@ def verify_bundle(
         "plannedJobActions": planned_actions,
         "entraTenantId": identity["tenantIssuer"].split("/")[3],
         "targetSigningKeyArn": signer["targetKeyArn"],
+        "authoritySha256": manifest.authority_sha256(),
+        "approverPrincipalIds": [approval.principal_id for approval in manifest.approvals],
     }
 
 

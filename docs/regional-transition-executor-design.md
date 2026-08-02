@@ -21,14 +21,18 @@ the [regional activation design](regional-activation-and-exercise-design.md).
 
 | Command | Mutation | Additional proof |
 | --- | --- | --- |
-| `check` | None | Derives persisted identity/signing authority and verifies the active-but-not-routed template |
-| `fence-source` | Disables source rules/mappings, then sets all source-stack Lambda concurrency to zero | Requires `--confirm-source-fence` and independently reads every resulting state |
-| `activate-target` | Deploys the exact verified CDK assembly | Requires `--confirm-target-activation` and a newly verified complete source fence |
+| `check` | None | Derives persisted identity/signing authority, verifies the journal, and verifies the active-but-not-routed template |
+| `initialize-journal` | Creates only generation-zero primary `STABLE` authority | Requires schema-v2 two-person authority and `--confirm-journal-initialization` |
+| `fence-source` | Claims `FENCING_SOURCE`, disables source rules/mappings and all source-stack Lambda concurrency, then records `SOURCE_FENCED` | Requires `--confirm-source-fence` and independently reads every resulting state |
+| `activate-target` | Claims `ACTIVATING_TARGET`, deploys the exact verified CDK assembly, then records `TARGET_ACTIVE_NOT_ROUTED` | Requires `--confirm-target-activation` and a newly verified complete source fence |
 
 The commands cannot be combined. A later command repeats preflight rather than
 trusting prior terminal output. Source ingress is disabled before Lambda
 concurrency, the complete bounded mutation set is attempted, and any partial
 failure is reported as failure. Target activation never routes traffic.
+Mutating commands require the [single-writer transition journal](regional-transition-journal-design.md),
+schema-v2 authority, an exact expected routing generation and two independently
+strong-authenticated Entra principals.
 
 ## Authority binding
 
@@ -118,9 +122,9 @@ python3 scripts/deploy_aws_active_cell.py activate-target \
 ```
 
 Exit code `2` is fail-closed. Never treat terminal output as permission to move
-traffic. Routing, target smoke, job reconciliation, a durable compare-and-swap
-transition journal, failback and retained live RTO/RPO evidence remain separate
-incomplete gates.
+traffic. Routing CAS, target smoke, job reconciliation, transition sealing,
+primary reactivation, failback and retained live RTO/RPO evidence remain
+separate incomplete gates.
 
 ## Test evidence and non-guarantees
 
@@ -131,5 +135,5 @@ actions, mismatched bucket policies and absence of routing commands. CI
 synthesizes standby and synthetic active variants with separate verifiers.
 
 No live AWS mutation was performed by this tranche. P0-11 remains **Partial**
-until real identity, trust, stable-origin, passive deployment, journal/CAS,
-routing and rehearsed exercise gates all pass.
+until real identity, trust, stable-origin, passive/witness deployment,
+routing CAS and rehearsed exercise gates all pass.

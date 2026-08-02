@@ -198,6 +198,8 @@ def test_complete_bundle_produces_manual_ordered_transition() -> None:
         "targetSigningKeyArn": (
             "arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
         ),
+        "authoritySha256": manifest.authority_sha256(),
+        "approverPrincipalIds": [],
     }
     plan = module.transition_plan(manifest, verified)
     assert [step["order"] for step in plan] == list(range(1, 10))
@@ -207,6 +209,71 @@ def test_complete_bundle_produces_manual_ordered_transition() -> None:
         "region": "eu-west-2",
     }
     assert plan[6]["action"] == "compare-and-swap-stable-routing"
+
+
+def test_schema_v2_bundle_binds_witness_generation_and_two_approvers() -> None:
+    module = _load()
+    bundle = _bundle()
+    v2_fields = {
+        "schemaVersion": 2,
+        "coordinationRegion": "eu-central-1",
+        "journalTableName": "AaiSecRegionalTransitionJournal",
+        "expectedRoutingGeneration": 0,
+        "approvals": [
+            {
+                "principalId": "22345678-1234-4234-8234-123456789abc",
+                "evidenceRef": "entra/approval-operator-a",
+                "approvedAt": 990,
+                "strongAuthAt": 970,
+            },
+            {
+                "principalId": "32345678-1234-4234-8234-123456789abc",
+                "evidenceRef": "entra/approval-operator-b",
+                "approvedAt": 995,
+                "strongAuthAt": 980,
+            },
+        ],
+    }
+    provisional_payload = _payload(bundle)
+    manifest_value = _manifest(provisional_payload, **v2_fields)
+    provisional = module.ActivationManifest.parse(json.dumps(manifest_value), now=1000)
+    bundle["operations"].update(
+        {
+            "approverPrincipalIds": [approval.principal_id for approval in provisional.approvals],
+            "approvalSha256": provisional.approval_sha256(),
+        }
+    )
+    bundle["authoritySha256"] = provisional.authority_sha256()
+    payload = _payload(bundle)
+    manifest_value["evidenceBundle"]["sha256"] = hashlib.sha256(payload).hexdigest()
+    manifest = module.ActivationManifest.parse(json.dumps(manifest_value), now=1000)
+    verified = module.verify_bundle(manifest, payload, now=1000)
+    assert verified["authoritySha256"] == manifest.authority_sha256()
+    assert verified["approverPrincipalIds"] == [
+        "22345678-1234-4234-8234-123456789abc",
+        "32345678-1234-4234-8234-123456789abc",
+    ]
+    substituted = copy.deepcopy(manifest_value)
+    substituted["approvals"][0]["principalId"] = "42345678-1234-4234-8234-123456789abc"
+    with pytest.raises(module.RegionalActivationVerificationError, match="identity differs"):
+        module.verify_bundle(
+            module.ActivationManifest.parse(json.dumps(substituted), now=1000),
+            payload,
+            now=1000,
+        )
+    replaced_bundle = copy.deepcopy(bundle)
+    replaced_bundle["operations"]["approverPrincipalIds"][0] = (
+        "42345678-1234-4234-8234-123456789abc"
+    )
+    replaced_payload = _payload(replaced_bundle)
+    replaced_manifest = copy.deepcopy(manifest_value)
+    replaced_manifest["evidenceBundle"]["sha256"] = hashlib.sha256(replaced_payload).hexdigest()
+    with pytest.raises(module.RegionalActivationVerificationError, match="operational"):
+        module.verify_bundle(
+            module.ActivationManifest.parse(json.dumps(replaced_manifest), now=1000),
+            replaced_payload,
+            now=1000,
+        )
 
 
 @pytest.mark.parametrize(

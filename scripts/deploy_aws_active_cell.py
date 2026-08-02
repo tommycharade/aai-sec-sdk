@@ -14,6 +14,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ from scripts import deploy_aws_control_plane as control_plane  # noqa: E402
 from scripts import deploy_aws_evidence_continuity as continuity  # noqa: E402
 from scripts import deploy_aws_passive_cell as passive  # noqa: E402
 from scripts import manage_aws_regional_recovery as recovery  # noqa: E402
+from scripts import manage_aws_transition_journal as journal  # noqa: E402
 from scripts import plan_aws_regional_activation as preflight  # noqa: E402
 from scripts import verify_active_regional_cell as active_verifier  # noqa: E402
 from scripts import verify_aws_regional_activation as activation  # noqa: E402
@@ -37,6 +39,7 @@ class ActiveCellDeploymentError(RuntimeError):
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
+Clock = Callable[[], float]
 _RESOURCE_LIMITS = {
     "AWS::Lambda::Function": 50,
     "AWS::Lambda::EventSourceMapping": 20,
@@ -88,14 +91,18 @@ def _aws(
 def discover_source_resources(
     regional: recovery.RegionalRecoveryManifest,
     *,
+    stack_name: str | None = None,
+    source_region: str | None = None,
     profile: str,
     runner: Runner = subprocess.run,
 ) -> SourceResources:
     """Discover a stable source stack and its complete bounded fence surface."""
+    selected_stack = regional.stack_name if stack_name is None else stack_name
+    selected_region = regional.primary_region if source_region is None else source_region
     stack = _aws(
-        ["cloudformation", "describe-stacks", "--stack-name", regional.stack_name],
+        ["cloudformation", "describe-stacks", "--stack-name", selected_stack],
         profile=profile,
-        region=regional.primary_region,
+        region=selected_region,
         runner=runner,
     ).get("Stacks")
     if (
@@ -114,14 +121,14 @@ def discover_source_resources(
             "cloudformation",
             "list-stack-resources",
             "--stack-name",
-            regional.stack_name,
+            selected_stack,
         ]
         if token is not None:
             command.extend(["--next-token", token])
         response = _aws(
             command,
             profile=profile,
-            region=regional.primary_region,
+            region=selected_region,
             runner=runner,
         )
         pages += 1
@@ -379,10 +386,59 @@ def deploy_active_template(
         raise ActiveCellDeploymentError("active-cell CloudFormation deployment failed")
 
 
+def activate_target_step(
+    witness: Any,
+    manifest: activation.ActivationManifest,
+    resources: SourceResources,
+    passive_cell: passive.PassiveCellManifest,
+    environment: dict[str, str],
+    template_sha256: str,
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+    clock: Clock = time.time,
+) -> dict[str, Any]:
+    """Claim, verify, deploy and only then finalize target runtime authority."""
+    claimed = journal.advance_phase(
+        witness,
+        manifest,
+        expected_phase="SOURCE_FENCED",
+        next_phase="ACTIVATING_TARGET",
+        now=int(clock()),
+    )
+    source_fence = verify_source_fence(
+        resources,
+        profile=profile,
+        region=manifest.source_region,
+        runner=runner,
+    )
+    deploy_active_template(
+        passive_cell.stack_name,
+        environment,
+        template_sha256,
+        runner=runner,
+    )
+    completed = journal.advance_phase(
+        witness,
+        manifest,
+        expected_phase="ACTIVATING_TARGET",
+        next_phase="TARGET_ACTIVE_NOT_ROUTED",
+        now=int(clock()),
+    )
+    return {
+        "journalClaim": claimed,
+        "journal": completed["journal"],
+        "sourceFence": source_fence,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     """Build a three-step command surface with no routing capability."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("check", "fence-source", "activate-target"))
+    parser.add_argument(
+        "command",
+        choices=("check", "initialize-journal", "fence-source", "activate-target"),
+    )
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--regional-recovery-config", type=Path, required=True)
     parser.add_argument("--evidence-continuity-config", type=Path, required=True)
@@ -390,6 +446,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", default="p1")
     parser.add_argument("--confirm-source-fence", action="store_true")
     parser.add_argument("--confirm-target-activation", action="store_true")
+    parser.add_argument("--confirm-journal-initialization", action="store_true")
     return parser
 
 
@@ -420,22 +477,72 @@ def main(argv: Sequence[str] | None = None) -> int:
             profile=arguments.profile,
             s3_factory=lambda region: session.client("s3", region_name=region),
         )
-        resources = discover_source_resources(regional, profile=arguments.profile)
+        manifest.require_journal_authority()
+        if arguments.command != "check" and manifest.direction != "failover":
+            raise ActiveCellDeploymentError(
+                "failback mutation is unavailable until the primary activation adapter exists"
+            )
+        verified = checked.get("verified")
+        if (
+            not isinstance(verified, dict)
+            or verified.get("authoritySha256") != manifest.authority_sha256()
+            or verified.get("approverPrincipalIds")
+            != [approval.principal_id for approval in manifest.approvals]
+        ):
+            raise ActiveCellDeploymentError(
+                "provider preflight did not bind journal and two-person authority"
+            )
+        witness = session.client("dynamodb", region_name=manifest.coordination_region)
+        journal_posture = journal.verify_table_posture(witness, manifest)
+        if arguments.command == "initialize-journal":
+            if not arguments.confirm_journal_initialization:
+                raise ActiveCellDeploymentError("--confirm-journal-initialization is required")
+            initialized = journal.initialize_state(witness, manifest, now=int(time.time()))
+            journal_state = journal.read_state(witness, manifest)
+        else:
+            initialized = None
+            journal_state = journal.read_state(witness, manifest)
+        source_stack_name = (
+            regional.stack_name
+            if manifest.source_region == regional.primary_region
+            else passive_cell.stack_name
+        )
+        resources = discover_source_resources(
+            regional,
+            stack_name=source_stack_name,
+            source_region=manifest.source_region,
+            profile=arguments.profile,
+        )
         result: dict[str, Any] = {
             "activationExecuted": False,
             "command": arguments.command,
             "preflightStatus": checked["status"],
+            "journalPosture": journal_posture,
+            "journal": journal_state.evidence(),
             "sourceResourceSetSha256": resources.sha256(),
             "trafficRouted": False,
         }
-        if arguments.command == "fence-source":
+        if initialized is not None:
+            result["journalInitialization"] = initialized
+            result["status"] = "journal-initialized-primary-stable"
+        elif arguments.command == "fence-source":
             if not arguments.confirm_source_fence:
                 raise ActiveCellDeploymentError("--confirm-source-fence is required")
+            result["journalClaim"] = journal.claim_source_fence(
+                witness, manifest, now=int(time.time())
+            )
             result["sourceFence"] = fence_source(
                 resources,
                 profile=arguments.profile,
-                region=regional.primary_region,
+                region=manifest.source_region,
             )
+            result["journal"] = journal.advance_phase(
+                witness,
+                manifest,
+                expected_phase="FENCING_SOURCE",
+                next_phase="SOURCE_FENCED",
+                now=int(time.time()),
+            )["journal"]
         else:
             environment = active_environment(
                 manifest,
@@ -449,16 +556,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             if arguments.command == "activate-target":
                 if not arguments.confirm_target_activation:
                     raise ActiveCellDeploymentError("--confirm-target-activation is required")
-                result["sourceFence"] = verify_source_fence(
+                target_result = activate_target_step(
+                    witness,
+                    manifest,
                     resources,
-                    profile=arguments.profile,
-                    region=regional.primary_region,
-                )
-                deploy_active_template(
-                    passive_cell.stack_name,
+                    passive_cell,
                     environment,
                     template["templateSha256"],
+                    profile=arguments.profile,
                 )
+                result.update(target_result)
                 result["activationExecuted"] = True
                 result["status"] = "target-active-not-routed"
             else:
@@ -473,6 +580,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         passive.PassiveCellDeploymentError,
         control_plane.DeploymentConfigurationError,
         preflight.RegionalActivationPreflightError,
+        journal.TransitionJournalError,
         ActiveCellDeploymentError,
     ) as error:
         print(f"Active-cell transition guard failed: {error}", file=sys.stderr)

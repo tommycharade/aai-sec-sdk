@@ -71,6 +71,9 @@ implemented. Live activation still requires owner/platform inputs that cannot
 be invented by engineering:
 
 - the Route 53 hosted-zone ID and approved stable API/UI domain names;
+- approval to deploy the single-writer transition witness in a third Region
+  (`eu-central-1` is the proposed first-customer Region), plus the retained
+  change reference for its deployment;
 - ACM certificates and authority to close both raw execute-api origins;
 - two independent named approvers for each failover and failback rehearsal;
 - an approved change window in which source fencing, synthetic dependency
@@ -88,6 +91,9 @@ documents the exact fields, checks and non-mutating preflight command.
 The [guarded transition executor](regional-transition-executor-design.md) is
 implemented, but its mutating commands must not be used until every item above
 is real, retained and approved. It cannot move traffic.
+The [transition journal design](regional-transition-journal-design.md) explains
+why the witness must not be converted to a Global Table and how the two Entra
+approver identities and expected routing generation are supplied.
 
 ### Managed Claude Code and Codex hosts
 
