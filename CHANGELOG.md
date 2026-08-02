@@ -1,5 +1,13 @@
 # Changelog
 
+- Added a guarded active-but-not-routed regional transition component. It
+  repeats live preflight before each command, binds retained authority to the
+  exact Entra tenant and recovery signer, fences the provider-derived source
+  execution set before target deployment, verifies an exact IAM and bucket
+  policy envelope, and deploys only the SHA-256-verified CDK assembly. Source
+  fencing and target activation require separate confirmations; no routing
+  operation exists and no live AWS mutation was performed.
+
 - Added a fail-closed regional activation and failback authority contract. A
   read-only AWS preflight binds one short-lived manual transition to persisted
   recovery/passive/continuity authority and an exact COMPLIANCE-locked S3

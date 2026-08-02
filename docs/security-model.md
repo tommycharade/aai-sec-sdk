@@ -231,9 +231,12 @@ bucket and one COMPLIANCE-locked S3 version. It repeats passive-stack, recovery
 identity, bidirectional replication, direct-origin fencing and stable-DNS
 checks before emitting an ordered plan. Load acceptance is computed over a
 unique fleet, while dependency and consistency probes reject bypass, duplicate
-effects and authority widening. The preflight has no activation operation; a
-later executor must repeat and condition every state change. See the
-[regional activation and exercise design](regional-activation-and-exercise-design.md).
+effects and authority widening. The preflight has no activation operation. The
+guarded executor repeats it before each command, can fence source execution or
+deploy an independently verified active-but-not-routed target as separate
+confirmed steps, and has no traffic-routing operation. See the
+[regional activation design](regional-activation-and-exercise-design.md) and
+[guarded transition executor](regional-transition-executor-design.md).
 
 Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while

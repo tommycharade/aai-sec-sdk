@@ -410,6 +410,11 @@ def _deployment_environment(
         "RECOVERY_POLICY_SIGNING_KEY_ARN",
         "RECOVERY_USER_POOL_ID",
         "RECOVERY_USER_POOL_CLIENT_ID",
+        "RECOVERY_CELL_MODE",
+        "RECOVERY_ACTIVATION_EVIDENCE_SHA256",
+        "ENTRA_TENANT_ID",
+        "ENTRA_AAI_TENANT_ID",
+        "ENTRA_STRONG_AUTH_ENFORCED",
         "AWS_PROFILE",
         "AWS_REGION",
         "AWS_DEFAULT_REGION",
@@ -433,6 +438,7 @@ def _deployment_environment(
             "RECOVERY_POLICY_SIGNING_KEY_ARN": trust_outputs["RegionalPolicySigningReplicaKeyArn"],
             "RECOVERY_USER_POOL_ID": manifest.user_pool_id,
             "RECOVERY_USER_POOL_CLIENT_ID": manifest.user_pool_client_id,
+            "RECOVERY_CELL_MODE": "standby",
         }
     )
     if (
