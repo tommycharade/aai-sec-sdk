@@ -273,6 +273,16 @@ Lambda invocation authority must remain limited to that exact role and handler,
 while Route 53 mutation is limited to the exact stable hosted zone. See
 [Regional target readiness and stable ingress](regional-target-readiness-and-stable-ingress-design.md).
 
+Regional load evidence uses pre-enrolled synthetic sessions loaded from an
+exact transition-bound Secrets Manager object in the target Region and routing
+account. The adapter calls only the target canary's normal agent heartbeat,
+effective-policy and content-free decision routes, disables redirects, bounds
+responses/timeouts, stops after prerequisite failure and never emits tokens.
+The generic harness computes aggregate acceptance. Dependency and consistency
+methods fail until a separately authorized target-cell-only fault controller is
+implemented; load success cannot self-certify them. See the
+[AWS Regional exercise provider](aws-regional-exercise-provider-design.md).
+
 Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while
 excluding delete markers, and synthesized CloudFormation is rejected unless

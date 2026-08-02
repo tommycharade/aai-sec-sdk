@@ -79,11 +79,14 @@ aggregate pass assertion. The harness:
 - exercises approval, audit, identity, idempotency and policy consistency; and
 - refuses replay, more than one side effect or any authority widening.
 
-The generic harness is not itself a live AWS adapter. Its typed adapter
-boundary exists so the eventual AWS driver can use synthetic tenant identities
-and bounded fault controls without placing credentials or customer data in the
-evidence schema. Until that adapter runs during a rehearsed activation and its
-output is retained, load/dependency/consistency acceptance remains incomplete.
+The generic harness is not itself a live AWS adapter. The
+[AWS Regional exercise provider](aws-regional-exercise-provider-design.md) now
+implements real target-canary heartbeat, signed-policy read and content-free
+decision-write measurement for a transition-bound fleet of pre-enrolled
+synthetic agents. Dependency and consistency fault controls remain deliberately
+unimplemented because they require a separate target-cell-only mutation role.
+Until both adapter layers run during a rehearsed activation and their output is
+retained, load/dependency/consistency acceptance remains incomplete.
 
 ## Immutable evidence retention
 

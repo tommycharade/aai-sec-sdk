@@ -112,8 +112,9 @@ certificate or approval authority.
 The primary target adapter, exact source reactivation, failed-cutover rollback
 and symmetric planned failback are implemented and synthetically tested.
 Engineering can continue without owner input on exercise automation and
-provider-probe adapters. Exact evidence packaging and immutable retention are
-implemented and synthetically tested. Live routing cannot continue until the listed domains,
+target-cell fault controls. Exact evidence packaging, immutable retention and
+the real target load adapter are implemented and synthetically tested. Live
+routing cannot continue until the listed domains,
 certificates, Entra token path, two approvers, retained schema-v4 template
 digests, exact-handler invocation authority and exclusive Route 53 authority
 are supplied and approved.
