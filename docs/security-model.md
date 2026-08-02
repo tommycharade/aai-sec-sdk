@@ -255,9 +255,12 @@ on the source. The implemented non-routing ingress creates same-name Regional
 API Gateway custom domains, exact stable/canary mappings and a read-only
 private-bucket UI proxy. Its deployment guard derives provider identities,
 validates exact ACM names and deploys only an independently verified assembly;
-it contains no DNS resource or command. A later transactional Route 53 API/UI
-change batch moves traffic. Because Route 53 has no conditional generation
-token, the witness plus exclusive IAM/SCP DNS authority remains necessary. See
+it contains no DNS resource. A separate routing executor performs one
+transactional Route 53 API/UI/marker batch only after fresh source-fence,
+target-runtime, zero-action reconciliation, canary-authentication and exact DNS
+state proofs. Because Route 53 has no conditional generation token, the witness
+plus exclusive IAM/SCP DNS authority remains necessary. DNS-only rollback is
+refused until the source runtime can be independently reactivated. See
 [Regional target readiness and stable ingress](regional-target-readiness-and-stable-ingress-design.md).
 
 Bidirectional evidence continuity is independently constrained in each S3

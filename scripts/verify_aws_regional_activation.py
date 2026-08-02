@@ -50,6 +50,18 @@ _MANIFEST_FIELDS_V2 = _MANIFEST_FIELDS_V1 | {
     "expectedRoutingGeneration",
     "approvals",
 }
+_ROUTING_AUTHORITY_FIELDS = {
+    "primaryIngressStackName",
+    "recoveryIngressStackName",
+    "primaryCanaryApiDomain",
+    "primaryCanaryUiDomain",
+    "recoveryCanaryApiDomain",
+    "recoveryCanaryUiDomain",
+    "routingMarkerName",
+    "routingRoleArn",
+    "routingAuthorityEvidenceRef",
+}
+_MANIFEST_FIELDS_V3 = _MANIFEST_FIELDS_V2 | _ROUTING_AUTHORITY_FIELDS
 _APPROVAL_FIELDS = {"principalId", "evidenceRef", "approvedAt", "strongAuthAt"}
 _BUNDLE_FIELDS = {
     "schemaVersion",
@@ -90,6 +102,10 @@ _ENTRA_ISSUER = re.compile(
 )
 _KMS_ARN = re.compile(r"^arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:key/mrk-[0-9a-f]{32}$")
 _TABLE = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
+_ROLE_ARN = re.compile(
+    r"^arn:(?:aws|aws-us-gov|aws-cn):iam::\d{12}:"
+    r"role/(?:[A-Za-z0-9+=,.@_-]+/)*[A-Za-z0-9+=,.@_-]+$"
+)
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -208,18 +224,51 @@ class ActivationManifest:
     journal_table_name: str | None = None
     expected_routing_generation: int | None = None
     approvals: tuple[TransitionApproval, ...] = ()
+    primary_ingress_stack_name: str | None = None
+    recovery_ingress_stack_name: str | None = None
+    primary_canary_api_domain: str | None = None
+    primary_canary_ui_domain: str | None = None
+    recovery_canary_api_domain: str | None = None
+    recovery_canary_ui_domain: str | None = None
+    routing_marker_name: str | None = None
+    routing_role_arn: str | None = None
+    routing_authority_evidence_ref: str | None = None
 
     def require_journal_authority(self) -> None:
         """Reject legacy authority before any journal-governed mutation."""
         if (
-            self.schema_version != 2
+            self.schema_version not in {2, 3}
             or self.coordination_region is None
             or self.journal_table_name is None
             or self.expected_routing_generation is None
             or len(self.approvals) != 2
         ):
             raise RegionalActivationVerificationError(
-                "schema-v2 journal and two-person authority are required"
+                "schema-v2-or-v3 journal and two-person authority are required"
+            )
+
+    def require_routing_authority(self) -> None:
+        """Require exact schema-v3 DNS, ingress, role, and canary authority."""
+        self.require_journal_authority()
+        if (
+            self.schema_version != 3
+            or self.primary_ingress_stack_name != "AaiSecPrimaryRegionalIngress"
+            or self.recovery_ingress_stack_name != "AaiSecRecoveryRegionalIngress"
+            or any(
+                value is None
+                for value in (
+                    self.primary_canary_api_domain,
+                    self.primary_canary_ui_domain,
+                    self.recovery_canary_api_domain,
+                    self.recovery_canary_ui_domain,
+                    self.routing_marker_name,
+                    self.routing_role_arn,
+                    self.routing_authority_evidence_ref,
+                )
+            )
+        ):
+            raise RegionalActivationVerificationError(
+                "schema-v3 exact routing authority is required"
             )
 
     def approval_sha256(self) -> str:
@@ -253,13 +302,27 @@ class ActivationManifest:
             "targetRegion": self.target_region,
             "transitionId": self.transition_id,
         }
-        if self.schema_version == 2:
+        if self.schema_version in {2, 3}:
             authority.update(
                 {
                     "approvals": [approval.canonical() for approval in self.approvals],
                     "coordinationRegion": self.coordination_region,
                     "expectedRoutingGeneration": self.expected_routing_generation,
                     "journalTableName": self.journal_table_name,
+                }
+            )
+        if self.schema_version == 3:
+            authority.update(
+                {
+                    "primaryIngressStackName": self.primary_ingress_stack_name,
+                    "recoveryIngressStackName": self.recovery_ingress_stack_name,
+                    "primaryCanaryApiDomain": self.primary_canary_api_domain,
+                    "primaryCanaryUiDomain": self.primary_canary_ui_domain,
+                    "recoveryCanaryApiDomain": self.recovery_canary_api_domain,
+                    "recoveryCanaryUiDomain": self.recovery_canary_ui_domain,
+                    "routingMarkerName": self.routing_marker_name,
+                    "routingRoleArn": self.routing_role_arn,
+                    "routingAuthorityEvidenceRef": self.routing_authority_evidence_ref,
                 }
             )
         payload = json.dumps(authority, sort_keys=True, separators=(",", ":")).encode()
@@ -277,10 +340,16 @@ class ActivationManifest:
         if not isinstance(value, dict):
             raise RegionalActivationVerificationError("activation manifest must be an object")
         schema_version = value.get("schemaVersion")
-        fields = _MANIFEST_FIELDS_V2 if schema_version == 2 else _MANIFEST_FIELDS_V1
+        fields = (
+            _MANIFEST_FIELDS_V3
+            if schema_version == 3
+            else _MANIFEST_FIELDS_V2
+            if schema_version == 2
+            else _MANIFEST_FIELDS_V1
+        )
         item = _object(value, fields, "activation manifest")
         if (
-            schema_version not in {1, 2}
+            schema_version not in {1, 2, 3}
             or item["activationPermitted"] is not True
             or item["automaticActivation"] is not False
         ):
@@ -329,7 +398,7 @@ class ActivationManifest:
         journal_table_name: str | None = None
         expected_generation: int | None = None
         approvals: tuple[TransitionApproval, ...] = ()
-        if schema_version == 2:
+        if schema_version in {2, 3}:
             coordination_region = item["coordinationRegion"]
             if (
                 not isinstance(coordination_region, str)
@@ -382,6 +451,60 @@ class ActivationManifest:
                     "transition approvals are not independent"
                 )
             approvals = tuple(sorted(parsed, key=lambda approval: approval.principal_id))
+        primary_ingress: str | None = None
+        recovery_ingress: str | None = None
+        primary_canary_api: str | None = None
+        primary_canary_ui: str | None = None
+        recovery_canary_api: str | None = None
+        recovery_canary_ui: str | None = None
+        routing_marker: str | None = None
+        routing_role: str | None = None
+        routing_evidence: str | None = None
+        if schema_version == 3:
+            primary_ingress = item["primaryIngressStackName"]
+            recovery_ingress = item["recoveryIngressStackName"]
+            if (
+                primary_ingress != "AaiSecPrimaryRegionalIngress"
+                or recovery_ingress != "AaiSecRecoveryRegionalIngress"
+            ):
+                raise RegionalActivationVerificationError(
+                    "routing ingress stack identities are invalid"
+                )
+            raw_canaries = [
+                item["primaryCanaryApiDomain"],
+                item["primaryCanaryUiDomain"],
+                item["recoveryCanaryApiDomain"],
+                item["recoveryCanaryUiDomain"],
+            ]
+            if (
+                any(
+                    not isinstance(value, str) or not _DOMAIN.fullmatch(value)
+                    for value in raw_canaries
+                )
+                or len(set(raw_canaries + [api_domain, ui_domain])) != 6
+            ):
+                raise RegionalActivationVerificationError(
+                    "routing canary domains must be exact and distinct"
+                )
+            (
+                primary_canary_api,
+                primary_canary_ui,
+                recovery_canary_api,
+                recovery_canary_ui,
+            ) = (str(value) for value in raw_canaries)
+            routing_marker = item["routingMarkerName"]
+            if (
+                not isinstance(routing_marker, str)
+                or not _DOMAIN.fullmatch(routing_marker)
+                or routing_marker in {api_domain, ui_domain, *raw_canaries}
+            ):
+                raise RegionalActivationVerificationError("routing marker name is invalid")
+            routing_role = item["routingRoleArn"]
+            if not isinstance(routing_role, str) or not _ROLE_ARN.fullmatch(routing_role):
+                raise RegionalActivationVerificationError("routing role ARN is invalid")
+            routing_evidence = item["routingAuthorityEvidenceRef"]
+            if not isinstance(routing_evidence, str) or not _EVIDENCE.fullmatch(routing_evidence):
+                raise RegionalActivationVerificationError("routingAuthorityEvidenceRef is invalid")
         return cls(
             transition_id,
             direction,
@@ -403,6 +526,15 @@ class ActivationManifest:
             journal_table_name,
             expected_generation,
             approvals,
+            primary_ingress,
+            recovery_ingress,
+            primary_canary_api,
+            primary_canary_ui,
+            recovery_canary_api,
+            recovery_canary_ui,
+            routing_marker,
+            routing_role,
+            routing_evidence,
         )
 
 

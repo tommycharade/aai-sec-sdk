@@ -51,6 +51,10 @@ _PHASES = {
     "TARGET_ACTIVE_NOT_ROUTED",
     "RECONCILING_TARGET_JOBS",
     "TARGET_JOBS_RECONCILED_NOT_ROUTED",
+    "VERIFYING_TARGET_INGRESS",
+    "TARGET_INGRESS_VERIFIED_NOT_ROUTED",
+    "ROUTING_TARGET",
+    "VERIFYING_STABLE_ROUTE",
 }
 _REGION = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -509,6 +513,10 @@ def advance_phase(
         ("ACTIVATING_TARGET", "TARGET_ACTIVE_NOT_ROUTED"),
         ("TARGET_ACTIVE_NOT_ROUTED", "RECONCILING_TARGET_JOBS"),
         ("RECONCILING_TARGET_JOBS", "TARGET_JOBS_RECONCILED_NOT_ROUTED"),
+        ("TARGET_JOBS_RECONCILED_NOT_ROUTED", "VERIFYING_TARGET_INGRESS"),
+        ("VERIFYING_TARGET_INGRESS", "TARGET_INGRESS_VERIFIED_NOT_ROUTED"),
+        ("TARGET_INGRESS_VERIFIED_NOT_ROUTED", "ROUTING_TARGET"),
+        ("ROUTING_TARGET", "VERIFYING_STABLE_ROUTE"),
     }
     if (expected_phase, next_phase) not in allowed:
         raise TransitionJournalError("journal phase transition is unsupported")
@@ -576,3 +584,101 @@ def advance_phase(
     if step_evidence_sha256 is not None:
         result["stepEvidenceSha256"] = step_evidence_sha256
     return result
+
+
+def complete_transition(
+    client: Any,
+    manifest: activation.ActivationManifest,
+    *,
+    now: int,
+    step_evidence_sha256: str,
+) -> dict[str, Any]:
+    """CAS a verified stable route into the next stable routing generation."""
+    manifest.require_routing_authority()
+    expected_generation = manifest.expected_routing_generation
+    if expected_generation is None:  # Defensive narrowing after validated authority.
+        raise TransitionJournalError("routing generation authority is unavailable")
+    if not _SHA256.fullmatch(step_evidence_sha256):
+        raise TransitionJournalError("step evidence SHA-256 is malformed")
+    state = read_state(client, manifest)
+    next_generation = expected_generation + 1
+    if state.phase == "STABLE":
+        if (
+            state.generation != next_generation
+            or state.active_region != manifest.target_region
+            or state.last_completed_transition_id != manifest.transition_id
+        ):
+            raise TransitionJournalError("stable journal does not prove this transition")
+        _verify_completed_step_evidence(
+            client,
+            manifest,
+            phase="STABLE",
+            revision=state.revision,
+            expected_sha256=step_evidence_sha256,
+        )
+        return {"claim": "already-completed", "journal": state.evidence()}
+    if state.phase != "VERIFYING_STABLE_ROUTE" or not _same_authority(state, manifest, now=now):
+        raise TransitionJournalError("stable-route completion is stale or out of order")
+    values = _value_map(manifest, now)
+    values.update(
+        {
+            ":completed": {"S": manifest.transition_id},
+            ":expected": {"S": "VERIFYING_STABLE_ROUTE"},
+            ":nextGeneration": {"N": str(next_generation)},
+            ":revision": {"N": str(state.revision)},
+            ":stable": {"S": "STABLE"},
+        }
+    )
+    update = {
+        "TableName": manifest.journal_table_name,
+        "Key": _AUTHORITY_KEY,
+        "UpdateExpression": (
+            "SET #phase=:stable, generation=:nextGeneration, activeRegion=:target, "
+            "revision=revision+:one, updatedAt=:now, lastCompletedTransitionId=:completed "
+            "REMOVE activeTransitionId, direction, sourceRegion, targetRegion, "
+            "authoritySha256, evidenceSha256, approvalSha256, expiresAt"
+        ),
+        "ConditionExpression": (
+            "#phase=:expected AND revision=:revision AND generation=:generation AND "
+            "activeRegion=:source AND activeTransitionId=:transition AND "
+            "authoritySha256=:authority AND evidenceSha256=:evidence AND "
+            "approvalSha256=:approval AND expiresAt=:expires"
+        ),
+        "ExpressionAttributeNames": {"#phase": "phase"},
+        "ExpressionAttributeValues": values,
+    }
+    event = _event_item(
+        manifest,
+        phase="STABLE",
+        revision=state.revision + 1,
+        now=now,
+        step_evidence_sha256=step_evidence_sha256,
+    )
+    _transact(
+        client,
+        [
+            {"Update": update},
+            {
+                "Put": {
+                    "TableName": manifest.journal_table_name,
+                    "Item": event,
+                    "ConditionExpression": (
+                        "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+                    ),
+                }
+            },
+        ],
+    )
+    completed = read_state(client, manifest)
+    if (
+        completed.phase != "STABLE"
+        or completed.generation != next_generation
+        or completed.active_region != manifest.target_region
+        or completed.last_completed_transition_id != manifest.transition_id
+    ):
+        raise TransitionJournalError("stable transition did not converge")
+    return {
+        "claim": "completed",
+        "journal": completed.evidence(),
+        "stepEvidenceSha256": step_evidence_sha256,
+    }

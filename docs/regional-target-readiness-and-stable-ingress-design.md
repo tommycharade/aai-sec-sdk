@@ -137,11 +137,11 @@ AWS references:
 - [API Gateway S3 proxy integration](https://docs.aws.amazon.com/apigateway/latest/developerguide/integrating-api-with-aws-services-s3.html)
 - [Route 53 transactional change batches](https://docs.aws.amazon.com/Route53/latest/APIReference/API_ChangeResourceRecordSets.html)
 
-## Routing compare-and-swap
+## Implemented routing compare-and-swap
 
 Route 53 change batches are transactional—all records in a valid batch change
 or none do—but Route 53 does not expose a conditional generation token. The
-single-writer witness therefore remains the CAS authority. The planned route
+single-writer witness therefore remains the CAS authority. The implemented route
 step is:
 
 ```text
@@ -153,15 +153,19 @@ TARGET_JOBS_RECONCILED_NOT_ROUTED
   -> STABLE (generation + 1, activeRegion = target)
 ```
 
-Before `ROUTING_TARGET`, the executor will repeat source fencing, target live
-posture, zero-action job reconciliation, canary authentication, policy read,
-signed decision write and immutable audit verification. It will strongly read
+Before `ROUTING_TARGET`, the executor repeats source fencing, target live
+posture, zero-action job reconciliation, canary authentication and policy read.
+It strongly reads
 the witness generation and exact current Route 53 API, UI and generation-marker
 records. One Route 53 change batch will delete the byte-equivalent source
 aliases and marker and create the exact target aliases and next marker. It will
 wait for the returned change ID to become `INSYNC`, then independently read
 Route 53 and probe both stable names before committing the new journal
-generation.
+generation. It validates the public hosted zone, reads a bounded paginated
+record inventory, rejects parallel AAAA/CNAME/routing records, and accepts only
+the exact source state or exact next-generation target state. A retry after
+provider acceptance but before journal advancement recognizes only that exact
+target state.
 
 An out-of-band DNS administrator could still race the provider between the
 exact read and Route 53 mutation. Production acceptance therefore also
@@ -174,9 +178,10 @@ detect divergence but cannot truthfully claim provider-level CAS.
 
 If Route 53 rejects the change batch, no DNS record changes and the journal
 remains `ROUTING_TARGET`. If Route 53 accepts the batch but stable probes fail,
-the executor must not mark the target stable. A separately recorded rollback
-phase applies the exact inverse transactional batch, waits for `INSYNC`, proves
-source routing and leaves the failed transition sealed for investigation.
+the executor does not mark the target stable. It also refuses DNS-only
+rollback: the source was intentionally fenced, so routing users back before
+independent source reactivation would create an outage. Symmetric reactivation,
+canary proof and inverse routing are the next required implementation tranche.
 
 Failback is not implemented by swapping labels in the failover code. The
 primary runtime needs the same active-template verifier, target job
@@ -198,4 +203,5 @@ Live deployment and routing still require:
 - a scheduled two-person recovery exercise.
 
 No Route 53 record, certificate, custom domain, UI proxy or live AWS transition
-was created by this implementation tranche. P0-11 remains **Partial**.
+was created by this implementation tranche. The executor is implemented and
+synthetically tested; P0-11 remains **Partial**.

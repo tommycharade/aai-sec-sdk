@@ -7,7 +7,8 @@ steps without implementing traffic movement. It can independently check an
 active-but-not-routed target, fence source execution, deploy the exact verified
 target assembly, or reconcile the live target runtime and Region-local jobs. It
 cannot update DNS, CloudFront, Route 53, Global Accelerator, custom domains or
-API routing.
+API routing. Routing is isolated in `scripts/execute_aws_regional_routing.py`,
+which requires schema-v3 authority and cannot activate compute.
 
 A successful target deployment means **active-not-routed**, not “failover
 complete.” The recovery cell has no SCIM endpoint. Existing recovery identities
@@ -27,6 +28,13 @@ the [regional activation design](regional-activation-and-exercise-design.md).
 | `fence-source` | Claims `FENCING_SOURCE`, disables source rules/mappings and all source-stack Lambda concurrency, then records `SOURCE_FENCED` | Requires `--confirm-source-fence` and independently reads every resulting state |
 | `activate-target` | Claims `ACTIVATING_TARGET`, deploys the exact verified CDK assembly, then records `TARGET_ACTIVE_NOT_ROUTED` | Requires `--confirm-target-activation` and a newly verified complete source fence |
 | `reconcile-target` | Claims `RECONCILING_TARGET_JOBS`, verifies exact live target authority and rebuilds Region-local work from DynamoDB, then records `TARGET_JOBS_RECONCILED_NOT_ROUTED` | Requires `--confirm-target-reconciliation`, active-not-routed provider state and a bounded zero-action final check |
+
+The routing component exposes exactly three forward steps: `verify-ingress`
+proves invalid-token rejection, authenticated policy read and HSTS UI delivery
+on target canaries; `route-target` repeats source-fence, target-runtime and
+zero-action reconciliation proofs before one transactional Route 53 batch;
+and `verify-stable` repeats stable API/UI probes before committing the next
+journal generation. Each has a distinct confirmation flag.
 
 The commands cannot be combined. A later command repeats preflight rather than
 trusting prior terminal output. Source ingress is disabled before Lambda
@@ -135,8 +143,15 @@ python3 scripts/deploy_aws_active_cell.py reconcile-target \
   --confirm-target-reconciliation
 ```
 
-Exit code `2` is fail-closed. Never treat terminal output as permission to move
-traffic. Public-ingress smoke, routing CAS, transition sealing, primary
+Create an owner-only file containing a short-lived operator JWT (`chmod 600`),
+then execute one routing step at a time with
+`scripts/execute_aws_regional_routing.py`. The commands require the same four
+authority files as this executor plus `--operator-token-file`. Confirmation
+flags are `--confirm-journal-ingress`, `--confirm-route53-cutover`, and
+`--confirm-stable-completion` respectively.
+
+Exit code `2` is fail-closed. The rollback command always refuses until source
+runtime reactivation is independently implemented and proved. Primary
 reactivation, failback and retained live RTO/RPO evidence remain separate
 incomplete gates. See [Regional target readiness and stable ingress](regional-target-readiness-and-stable-ingress-design.md).
 
@@ -149,5 +164,5 @@ actions, mismatched bucket policies and absence of routing commands. CI
 synthesizes standby and synthetic active variants with separate verifiers.
 
 No live AWS mutation was performed by this tranche. P0-11 remains **Partial**
-until real identity, trust, stable-origin, passive/witness deployment,
-routing CAS and rehearsed exercise gates all pass.
+until real identity, trust, stable-origin, passive/witness/ingress deployment,
+safe rollback/failback and rehearsed exercise gates all pass.

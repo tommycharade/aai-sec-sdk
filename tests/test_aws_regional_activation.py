@@ -276,6 +276,58 @@ def test_schema_v2_bundle_binds_witness_generation_and_two_approvers() -> None:
         )
 
 
+def test_schema_v3_binds_exact_ingress_canaries_marker_and_routing_role() -> None:
+    module = _load()
+    payload = _payload()
+    v3 = {
+        "schemaVersion": 3,
+        "coordinationRegion": "eu-central-1",
+        "journalTableName": "AaiSecRegionalTransitionJournal",
+        "expectedRoutingGeneration": 0,
+        "approvals": [
+            {
+                "principalId": "22345678-1234-4234-8234-123456789abc",
+                "evidenceRef": "entra/approval-operator-a",
+                "approvedAt": 990,
+                "strongAuthAt": 970,
+            },
+            {
+                "principalId": "32345678-1234-4234-8234-123456789abc",
+                "evidenceRef": "entra/approval-operator-b",
+                "approvedAt": 995,
+                "strongAuthAt": 980,
+            },
+        ],
+        "primaryIngressStackName": "AaiSecPrimaryRegionalIngress",
+        "recoveryIngressStackName": "AaiSecRecoveryRegionalIngress",
+        "primaryCanaryApiDomain": "api-primary.security.example.com",
+        "primaryCanaryUiDomain": "primary.security.example.com",
+        "recoveryCanaryApiDomain": "api-recovery.security.example.com",
+        "recoveryCanaryUiDomain": "recovery.security.example.com",
+        "routingMarkerName": "routing-generation.security.example.com",
+        "routingRoleArn": "arn:aws:iam::111111111111:role/AaiSecRegionalRouting",
+        "routingAuthorityEvidenceRef": "change/ROUTING-AUTHORITY-123",
+    }
+    manifest = module.ActivationManifest.parse(json.dumps(_manifest(payload, **v3)), now=1000)
+    manifest.require_routing_authority()
+    original = manifest.authority_sha256()
+    substituted = copy.deepcopy(v3)
+    substituted["recoveryCanaryApiDomain"] = "api-other.security.example.com"
+    changed = module.ActivationManifest.parse(
+        json.dumps(_manifest(payload, **substituted)), now=1000
+    )
+    assert changed.authority_sha256() != original
+    for field, value, message in [
+        ("routingRoleArn", "arn:aws:iam::222222222222:user/attacker", "role ARN"),
+        ("primaryIngressStackName", "AttackerStack", "stack identities"),
+        ("routingMarkerName", "security.example.com", "marker"),
+    ]:
+        invalid = copy.deepcopy(v3)
+        invalid[field] = value
+        with pytest.raises(module.RegionalActivationVerificationError, match=message):
+            module.ActivationManifest.parse(json.dumps(_manifest(payload, **invalid)), now=1000)
+
+
 @pytest.mark.parametrize(
     ("section", "field", "value", "message"),
     [

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 3,
+  "transitionId": "00000000-0000-4000-8000-000000000001",
+  "direction": "failover",
+  "primaryRegion": "eu-west-2",
+  "recoveryRegion": "eu-west-1",
+  "sourceRegion": "eu-west-2",
+  "targetRegion": "eu-west-1",
+  "stableApiDomain": "api.security.example.com",
+  "stableUiDomain": "security.example.com",
+  "route53HostedZoneId": "ZREPLACEWITHREALZONE",
+  "targetFleetSize": 1000,
+  "rtoMinutes": 30,
+  "rpoSeconds": 60,
+  "evidenceBundle": {
+    "bucketArn": "arn:aws:s3:::replace-with-retained-evidence-bucket",
+    "key": "regional-activation/replace-with-transition-id.json",
+    "versionId": "replace-with-object-version",
+    "sha256": "replace-with-64-lowercase-hex-characters"
+  },
+  "approvalEvidenceRef": "replace-with-approved-change-reference",
+  "expiresAt": 0,
+  "activationPermitted": true,
+  "automaticActivation": false,
+  "coordinationRegion": "eu-central-1",
+  "journalTableName": "AaiSecRegionalTransitionJournal",
+  "expectedRoutingGeneration": 0,
+  "approvals": [
+    {
+      "principalId": "00000000-0000-4000-8000-000000000002",
+      "evidenceRef": "replace-with-operator-a-evidence",
+      "approvedAt": 0,
+      "strongAuthAt": 0
+    },
+    {
+      "principalId": "00000000-0000-4000-8000-000000000003",
+      "evidenceRef": "replace-with-operator-b-evidence",
+      "approvedAt": 0,
+      "strongAuthAt": 0
+    }
+  ],
+  "primaryIngressStackName": "AaiSecPrimaryRegionalIngress",
+  "recoveryIngressStackName": "AaiSecRecoveryRegionalIngress",
+  "primaryCanaryApiDomain": "api-primary.security.example.com",
+  "primaryCanaryUiDomain": "primary.security.example.com",
+  "recoveryCanaryApiDomain": "api-recovery.security.example.com",
+  "recoveryCanaryUiDomain": "recovery.security.example.com",
+  "routingMarkerName": "routing-generation.security.example.com",
+  "routingRoleArn": "arn:aws:iam::111111111111:role/AaiSecRegionalRouting",
+  "routingAuthorityEvidenceRef": "replace-with-exclusive-dns-authority-evidence"
+}

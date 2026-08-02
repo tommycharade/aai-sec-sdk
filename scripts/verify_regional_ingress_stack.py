@@ -88,6 +88,7 @@ def verify(
                 {
                     "CertificateArn": certificate_arn,
                     "EndpointType": "REGIONAL",
+                    "IpAddressType": "ipv4",
                     "SecurityPolicy": "TLS_1_2",
                 }
             ]
