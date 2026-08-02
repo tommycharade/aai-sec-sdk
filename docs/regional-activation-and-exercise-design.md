@@ -8,10 +8,12 @@ The supported preflight is `scripts/plan_aws_regional_activation.py`; it is
 read-only and has no activation command. It emits a nine-step plan only after
 reviewed authority, retained evidence and current AWS provider state agree.
 
-The preflight is intentionally separate from a future transition executor. An
-executor must repeat every provider check immediately before each conditional
-change. A plan is evidence that activation was ready at one instant, not a
-capability, lease or permission to skip a later check.
+The preflight is intentionally separate from the
+[guarded transition executor](regional-transition-executor-design.md). That
+executor repeats every provider check before one separately confirmed source
+fence or target activation step and cannot route traffic. A plan is evidence
+that activation was ready at one instant, not a capability, lease or permission
+to skip a later check.
 
 ## Authority and evidence
 
@@ -134,8 +136,10 @@ custom domains or Route 53 records.
 
 ## Current non-guarantees
 
-This tranche does not deploy identity, activate the passive cell, implement
-the conditional transition executor or prove live RTO/RPO. The current AWS
+This tranche does not deploy identity or prove live RTO/RPO. A guarded executor
+now covers source fencing and active-but-not-routed target deployment, but not
+a durable transition journal/CAS, routing, smoke/reconciliation or failback.
+The current AWS
 environment still requires Microsoft Entra/SCIM, recovery Cognito, real managed
 endpoint trust convergence, stable domains, direct-origin closure and the live
 recovery exercise. P0-11 therefore remains **Partial**.

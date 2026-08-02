@@ -177,6 +177,11 @@ def test_deployment_environment_ignores_ambient_authority(monkeypatch: Any) -> N
     regional = _regional(module)
     monkeypatch.setenv("RECOVERY_CONTROL_TABLE", "attacker-table")
     monkeypatch.setenv("RECOVERY_POLICY_SIGNING_KEY_ARN", "arn:attacker")
+    monkeypatch.setenv("RECOVERY_CELL_MODE", "active")
+    monkeypatch.setenv("RECOVERY_ACTIVATION_EVIDENCE_SHA256", "a" * 64)
+    monkeypatch.setenv("ENTRA_TENANT_ID", "12345678-1234-4234-8234-123456789abc")
+    monkeypatch.setenv("ENTRA_AAI_TENANT_ID", "attacker")
+    monkeypatch.setenv("ENTRA_STRONG_AUTH_ENFORCED", "true")
     outputs = {
         "ControlTableName": "control",
         "PresenceTableName": "presence",
@@ -197,6 +202,9 @@ def test_deployment_environment_ignores_ambient_authority(monkeypatch: Any) -> N
         == trust["RegionalPolicySigningReplicaKeyArn"]
     )
     assert "CDK_DEFAULT_ACCOUNT" not in environment
+    assert environment["RECOVERY_CELL_MODE"] == "standby"
+    assert "RECOVERY_ACTIVATION_EVIDENCE_SHA256" not in environment
+    assert "ENTRA_TENANT_ID" not in environment
 
 
 def test_persisted_authority_must_match_exactly() -> None:

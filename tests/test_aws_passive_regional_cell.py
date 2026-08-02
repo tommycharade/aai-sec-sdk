@@ -226,15 +226,15 @@ def test_passive_stack_source_has_no_activation_or_routing_construct() -> None:
     root = Path(__file__).parents[1]
     stack = (root / "infra/aws-control-plane/lib/passive-regional-cell-stack.ts").read_text()
     assert "disableExecuteApiEndpoint: true" in stack
-    assert stack.count("reservedConcurrentExecutions: 0") == 3
+    assert "reservedConcurrentExecutions: active ? 100 : 0" in stack
+    assert stack.count("reservedConcurrentExecutions: active ? 5 : 0") == 2
     # Two queue mappings plus one schedule-loop declaration synthesize to six
     # separately verified disabled resources.
-    assert stack.count("enabled: false") == 3
-    assert 'POLICY_SIGNING_KEY_ARN: ""' in stack
-    assert 'RECOVERY_JOB_RECONCILIATION_ENABLED: "false"' in stack
+    assert stack.count("enabled: active") == 3
+    assert 'POLICY_SIGNING_KEY_ARN: active ? props.policySigningReplicaKeyArn : ""' in stack
+    assert 'RECOVERY_JOB_RECONCILIATION_ENABLED: active ? "true" : "false"' in stack
     assert ".grantReadData(target)" in stack
     assert 'actions: ["s3:GetObject", "s3:GetObjectVersion"]' in stack
-    assert ".grantReadWriteData(" not in stack
-    assert ".grantSign(" not in stack
+    assert "if (active && evidenceReports)" in stack
     assert "cloudfront" not in stack.lower()
     assert "route53" not in stack.lower()

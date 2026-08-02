@@ -47,6 +47,7 @@ _MANIFEST_FIELDS = {
 _BUNDLE_FIELDS = {
     "schemaVersion",
     "transitionId",
+    "authoritySha256",
     "generatedAt",
     "expiresAt",
     "sourceRegion",
@@ -176,6 +177,30 @@ class ActivationManifest:
     approval_evidence_ref: str
     expires_at: int
 
+    def authority_sha256(self) -> str:
+        """Bind all transition authority except the circular evidence reference."""
+        authority = {
+            "activationPermitted": True,
+            "approvalEvidenceRef": self.approval_evidence_ref,
+            "automaticActivation": False,
+            "direction": self.direction,
+            "expiresAt": self.expires_at,
+            "primaryRegion": self.primary_region,
+            "recoveryRegion": self.recovery_region,
+            "route53HostedZoneId": self.hosted_zone_id,
+            "rpoSeconds": self.rpo_seconds,
+            "rtoMinutes": self.rto_minutes,
+            "schemaVersion": 1,
+            "sourceRegion": self.source_region,
+            "stableApiDomain": self.stable_api_domain,
+            "stableUiDomain": self.stable_ui_domain,
+            "targetFleetSize": self.target_fleet_size,
+            "targetRegion": self.target_region,
+            "transitionId": self.transition_id,
+        }
+        payload = json.dumps(authority, sort_keys=True, separators=(",", ":")).encode()
+        return hashlib.sha256(payload).hexdigest()
+
     @classmethod
     def parse(cls, payload: str, *, now: int | None = None) -> ActivationManifest:
         """Parse exact, time-bounded, explicitly manual activation authority."""
@@ -270,7 +295,11 @@ def verify_bundle(
     except json.JSONDecodeError as error:
         raise RegionalActivationVerificationError("activation evidence is not JSON") from error
     bundle = _object(value, _BUNDLE_FIELDS, "activation evidence")
-    if bundle["schemaVersion"] != 1 or bundle["transitionId"] != manifest.transition_id:
+    if (
+        bundle["schemaVersion"] != 1
+        or bundle["transitionId"] != manifest.transition_id
+        or bundle["authoritySha256"] != manifest.authority_sha256()
+    ):
         raise RegionalActivationVerificationError("activation evidence identity differs")
     current = int(time.time()) if now is None else now
     generated = _integer(bundle["generatedAt"], "generatedAt", minimum=1, maximum=current)
@@ -535,6 +564,8 @@ def verify_bundle(
         "evidenceSha256": digest,
         "targetFleetSize": manifest.target_fleet_size,
         "plannedJobActions": planned_actions,
+        "entraTenantId": identity["tenantIssuer"].split("/")[3],
+        "targetSigningKeyArn": signer["targetKeyArn"],
     }
 
 

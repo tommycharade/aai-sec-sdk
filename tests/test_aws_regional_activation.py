@@ -26,10 +26,36 @@ def _load() -> Any:
 _TRANSITION = "12345678-1234-4234-8234-123456789abc"
 
 
+def _authority_digest() -> str:
+    authority = {
+        "activationPermitted": True,
+        "approvalEvidenceRef": "change/DR-123456",
+        "automaticActivation": False,
+        "direction": "failover",
+        "expiresAt": 1200,
+        "primaryRegion": "eu-west-2",
+        "recoveryRegion": "eu-west-1",
+        "route53HostedZoneId": "Z1234567890ABC",
+        "rpoSeconds": 60,
+        "rtoMinutes": 30,
+        "schemaVersion": 1,
+        "sourceRegion": "eu-west-2",
+        "stableApiDomain": "api.security.example.com",
+        "stableUiDomain": "security.example.com",
+        "targetFleetSize": 1000,
+        "targetRegion": "eu-west-1",
+        "transitionId": _TRANSITION,
+    }
+    return hashlib.sha256(
+        json.dumps(authority, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 def _bundle() -> dict[str, Any]:
     return {
         "schemaVersion": 1,
         "transitionId": _TRANSITION,
+        "authoritySha256": _authority_digest(),
         "generatedAt": 900,
         "expiresAt": 1100,
         "sourceRegion": "eu-west-2",
@@ -168,6 +194,10 @@ def test_complete_bundle_produces_manual_ordered_transition() -> None:
         "evidenceSha256": hashlib.sha256(payload).hexdigest(),
         "targetFleetSize": 1000,
         "plannedJobActions": 3,
+        "entraTenantId": "12345678-1234-1234-1234-123456789abc",
+        "targetSigningKeyArn": (
+            "arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
+        ),
     }
     plan = module.transition_plan(manifest, verified)
     assert [step["order"] for step in plan] == list(range(1, 10))
@@ -244,6 +274,24 @@ def test_evidence_is_exact_version_and_content_bound() -> None:
     bad["evidenceBundle"]["key"] = "../unretained.json"
     with pytest.raises(module.RegionalActivationVerificationError, match="key is invalid"):
         module.ActivationManifest.parse(json.dumps(bad), now=1000)
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"approvalEvidenceRef": "change/SUBSTITUTED-999"},
+        {"route53HostedZoneId": "ZATTACKER123456"},
+        {"stableApiDomain": "api.attacker.example.com"},
+    ],
+)
+def test_retained_bundle_binds_local_manifest_authority(
+    updates: dict[str, Any],
+) -> None:
+    module = _load()
+    payload = _payload()
+    manifest = module.ActivationManifest.parse(json.dumps(_manifest(payload, **updates)), now=1000)
+    with pytest.raises(module.RegionalActivationVerificationError, match="identity differs"):
+        module.verify_bundle(manifest, payload, now=1000)
 
 
 def test_failback_reverses_exact_source_and_target_regions() -> None:

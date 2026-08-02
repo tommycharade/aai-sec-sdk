@@ -12,12 +12,18 @@ function required(name: string): string {
 }
 
 const app = new cdk.App();
+const cellMode = process.env.RECOVERY_CELL_MODE ?? "standby";
+if (cellMode !== "standby" && cellMode !== "active") {
+  throw new Error("RECOVERY_CELL_MODE must be standby or active");
+}
 new PassiveRegionalCellStack(app, "AaiSecPassiveRegionalCell", {
   env: {
     account: required("RECOVERY_AWS_ACCOUNT_ID"),
     region: process.env.RECOVERY_REGION ?? "eu-west-1",
   },
   description: "Non-serving AAI Security regional recovery compute and delivery cell",
+  cellMode,
+  activationEvidenceSha256: process.env.RECOVERY_ACTIVATION_EVIDENCE_SHA256,
   primaryRegion: process.env.PRIMARY_REGION ?? "eu-west-2",
   controlTableName: required("RECOVERY_CONTROL_TABLE"),
   presenceTableName: required("RECOVERY_PRESENCE_TABLE"),
@@ -27,4 +33,7 @@ new PassiveRegionalCellStack(app, "AaiSecPassiveRegionalCell", {
   policySigningReplicaKeyArn: required("RECOVERY_POLICY_SIGNING_KEY_ARN"),
   recoveryUserPoolId: required("RECOVERY_USER_POOL_ID"),
   recoveryUserPoolClientId: required("RECOVERY_USER_POOL_CLIENT_ID"),
+  entraTenantId: process.env.ENTRA_TENANT_ID,
+  entraAaiTenantId: process.env.ENTRA_AAI_TENANT_ID,
+  entraStrongAuthEnforced: process.env.ENTRA_STRONG_AUTH_ENFORCED === "true",
 });

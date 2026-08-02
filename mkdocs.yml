@@ -62,6 +62,7 @@ nav:
   - Regional recovery storage acceptance (2026-08-02): regional-recovery-storage-acceptance-2026-08-02.md
   - Passive regional control-plane cell: passive-regional-cell-design.md
   - Regional activation and recovery exercise: regional-activation-and-exercise-design.md
+  - Guarded regional transition executor: regional-transition-executor-design.md
   - Evidence continuity and recovery-job reconciliation: evidence-continuity-and-job-reconciliation-design.md
   - Evidence continuity acceptance (2026-08-02): evidence-continuity-acceptance-2026-08-02.md
   - Managed policy-signing trust convergence: policy-trust-convergence-design.md

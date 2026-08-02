@@ -1,4 +1,6 @@
 import * as path from "node:path";
+import * as fs from "node:fs";
+import { createHash } from "node:crypto";
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
@@ -12,6 +14,7 @@ import * as eventTargets from "aws-cdk-lib/aws-events-targets";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as lambdaEventSources from "aws-cdk-lib/aws-lambda-event-sources";
+import * as kms from "aws-cdk-lib/aws-kms";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as subscriptions from "aws-cdk-lib/aws-sns-subscriptions";
@@ -19,6 +22,8 @@ import * as sqs from "aws-cdk-lib/aws-sqs";
 
 /** Deployment-owned, secret-free identities required by the passive cell. */
 export interface PassiveRegionalCellProps extends cdk.StackProps {
+  readonly cellMode: "standby" | "active";
+  readonly activationEvidenceSha256?: string;
   readonly primaryRegion: string;
   readonly controlTableName: string;
   readonly presenceTableName: string;
@@ -28,6 +33,9 @@ export interface PassiveRegionalCellProps extends cdk.StackProps {
   readonly policySigningReplicaKeyArn: string;
   readonly recoveryUserPoolId: string;
   readonly recoveryUserPoolClientId: string;
+  readonly entraTenantId?: string;
+  readonly entraAaiTenantId?: string;
+  readonly entraStrongAuthEnforced?: boolean;
 }
 
 /** Return one bounded AWS resource name or reject ambiguous deployment input. */
@@ -57,6 +65,10 @@ export class PassiveRegionalCellStack extends cdk.Stack {
     super(scope, id, props);
 
     const recoveryRegion = props.env?.region;
+    const active = props.cellMode === "active";
+    if (!active && props.cellMode !== "standby") {
+      throw new Error("cellMode must be standby or active");
+    }
     if (!recoveryRegion || !/^[a-z]{2}(?:-gov)?-[a-z]+-\d$/.test(recoveryRegion)) {
       throw new Error("passive cell requires one explicit recovery AWS Region");
     }
@@ -71,6 +83,27 @@ export class PassiveRegionalCellStack extends cdk.Stack {
     }
     if (!/^[a-z0-9]{10,128}$/.test(props.recoveryUserPoolClientId)) {
       throw new Error("recovery user-pool client ID is invalid");
+    }
+    if (active) {
+      if (!/^[0-9a-f]{64}$/.test(props.activationEvidenceSha256 ?? "")) {
+        throw new Error("active cell requires one exact activation evidence SHA-256");
+      }
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          props.entraTenantId ?? "",
+        )
+        || !/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(props.entraAaiTenantId ?? "")
+        || props.entraStrongAuthEnforced !== true
+      ) {
+        throw new Error("active cell requires tenant-bound Entra strong authentication");
+      }
+    } else if (
+      props.activationEvidenceSha256
+      || props.entraTenantId
+      || props.entraAaiTenantId
+      || props.entraStrongAuthEnforced
+    ) {
+      throw new Error("standby cell must not receive active identity or evidence authority");
     }
     const deploymentAccount = props.env?.account;
     if (!deploymentAccount || !/^\d{12}$/.test(deploymentAccount)) {
@@ -107,6 +140,11 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       this,
       "AuditReplica",
       bucketName(props.auditReplicaBucketName),
+    );
+    const policySigningReplica = kms.Key.fromKeyArn(
+      this,
+      "PolicySigningReplica",
+      props.policySigningReplicaKeyArn,
     );
 
     const alertsDlq = new sqs.Queue(this, "SecurityAlertsDlq", {
@@ -181,6 +219,23 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       }),
     };
 
+    const evidenceReports = active
+      ? new s3.Bucket(this, "ActiveEvidenceReports", {
+          blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+          encryption: s3.BucketEncryption.S3_MANAGED,
+          enforceSSL: true,
+          versioned: true,
+          removalPolicy: cdk.RemovalPolicy.RETAIN,
+        })
+      : undefined;
+    const runtimeManifestBundle = fs.readFileSync(
+      path.join(__dirname, "../lambda/runtime-manifests.json"),
+      "utf8",
+    );
+    const runtimeApprovalBundle = fs.readFileSync(
+      path.join(__dirname, "../lambda/runtime-manifests.provenance.json"),
+      "utf8",
+    );
     const environment = {
       CONTROL_TABLE: control.tableName,
       PRESENCE_TABLE: presence.tableName,
@@ -190,18 +245,28 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       EVIDENCE_QUEUE_URL: evidenceQueue.queueUrl,
       EVIDENCE_RETENTION_QUEUE_URL: retentionQueue.queueUrl,
       SECURITY_ALERTS_TOPIC_ARN: alerts.topicArn,
-      PASSIVE_CELL_MODE: "standby",
-      RECOVERY_JOB_RECONCILIATION_ENABLED: "false",
+      EVIDENCE_REPORT_BUCKET: evidenceReports?.bucketName ?? "",
+      PASSIVE_CELL_MODE: active ? "active" : "standby",
+      RECOVERY_JOB_RECONCILIATION_ENABLED: active ? "true" : "false",
       PRIMARY_REGION: props.primaryRegion,
       RECOVERY_REGION: recoveryRegion,
       // An ARN in this field would claim live signing authority. The replica
       // identity is staged separately and the role receives no KMS grant.
-      POLICY_SIGNING_KEY_ARN: "",
+      POLICY_SIGNING_KEY_ARN: active ? props.policySigningReplicaKeyArn : "",
       REGIONAL_POLICY_SIGNING_KEY_ARN: props.policySigningReplicaKeyArn,
-      ENTRA_PROVIDER_ENABLED: "false",
-      ENTRA_STRONG_AUTH_ENFORCED: "false",
+      ACTIVATION_EVIDENCE_SHA256: props.activationEvidenceSha256 ?? "",
+      ENTRA_PROVIDER_ENABLED: active ? "true" : "false",
+      ENTRA_TENANT_ID: active ? (props.entraTenantId ?? "") : "",
+      ENTRA_AAI_TENANT_ID: active ? (props.entraAaiTenantId ?? "") : "",
+      ENTRA_STRONG_AUTH_ENFORCED: active ? "true" : "false",
       SCIM_ENABLED: "false",
       SPLUNK_STUB_ENABLED: "true",
+      RUNTIME_ATTESTATION_MANIFESTS_SHA256: createHash("sha256")
+        .update(runtimeManifestBundle)
+        .digest("hex"),
+      RUNTIME_ATTESTATION_APPROVALS_SHA256: createHash("sha256")
+        .update(runtimeApprovalBundle)
+        .digest("hex"),
     };
     const code = lambda.Code.fromAsset(path.join(__dirname, "../lambda"));
     const handler = new lambda.Function(this, "PassiveControlPlaneHandler", {
@@ -211,7 +276,7 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       code,
       timeout: cdk.Duration.seconds(15),
       memorySize: 512,
-      reservedConcurrentExecutions: 0,
+      reservedConcurrentExecutions: active ? 100 : 0,
       environment,
       tracing: lambda.Tracing.PASS_THROUGH,
     });
@@ -222,7 +287,8 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       code,
       timeout: cdk.Duration.seconds(60),
       memorySize: 1024,
-      reservedConcurrentExecutions: 0,
+      recursiveLoop: active ? lambda.RecursiveLoop.ALLOW : lambda.RecursiveLoop.TERMINATE,
+      reservedConcurrentExecutions: active ? 5 : 0,
       environment,
       tracing: lambda.Tracing.PASS_THROUGH,
     });
@@ -233,7 +299,8 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       code,
       timeout: cdk.Duration.seconds(60),
       memorySize: 1024,
-      reservedConcurrentExecutions: 0,
+      recursiveLoop: active ? lambda.RecursiveLoop.ALLOW : lambda.RecursiveLoop.TERMINATE,
+      reservedConcurrentExecutions: active ? 5 : 0,
       environment,
       tracing: lambda.Tracing.PASS_THROUGH,
     });
@@ -258,17 +325,68 @@ export class PassiveRegionalCellStack extends cdk.Stack {
         }),
       );
     }
+    if (active && evidenceReports) {
+      control.grantReadWriteData(handler);
+      presence.grantReadWriteData(handler);
+      idempotency.grantReadWriteData(handler);
+      scim.grantReadWriteData(handler);
+      control.grant(handler, "dynamodb:TransactWriteItems");
+      auditReplica.grantRead(handler);
+      auditReplica.grantPut(handler);
+      handler.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: [
+            "s3:GetObjectLegalHold",
+            "s3:GetObjectRetention",
+            "s3:PutObjectLegalHold",
+            "s3:PutObjectRetention",
+          ],
+          resources: [auditReplica.arnForObjects("tenant=*")],
+        }),
+      );
+      evidenceReports.grantRead(handler);
+      evidenceQueue.grantSendMessages(handler);
+      retentionQueue.grantSendMessages(handler);
+      alerts.grantPublish(handler);
+      policySigningReplica.grant(handler, "kms:Sign", "kms:GetPublicKey");
+
+      control.grantReadWriteData(evidenceWorker);
+      auditReplica.grantRead(evidenceWorker);
+      auditReplica.grantPut(evidenceWorker);
+      evidenceWorker.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["s3:GetObjectLegalHold", "s3:GetObjectRetention"],
+          resources: [auditReplica.arnForObjects("tenant=*")],
+        }),
+      );
+      evidenceReports.grantReadWrite(evidenceWorker);
+      evidenceQueue.grantSendMessages(evidenceWorker);
+      alerts.grantPublish(evidenceWorker);
+
+      control.grantReadWriteData(retentionWorker);
+      control.grant(retentionWorker, "dynamodb:TransactWriteItems");
+      auditReplica.grantRead(retentionWorker);
+      auditReplica.grantPut(retentionWorker);
+      retentionWorker.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["s3:GetObjectRetention", "s3:PutObjectRetention"],
+          resources: [auditReplica.arnForObjects("tenant=*")],
+        }),
+      );
+      retentionQueue.grantSendMessages(retentionWorker);
+      alerts.grantPublish(retentionWorker);
+    }
     evidenceWorker.addEventSource(
       new lambdaEventSources.SqsEventSource(evidenceQueue, {
         batchSize: 1,
-        enabled: false,
+        enabled: active,
         reportBatchItemFailures: false,
       }),
     );
     retentionWorker.addEventSource(
       new lambdaEventSources.SqsEventSource(retentionQueue, {
         batchSize: 1,
-        enabled: false,
+        enabled: active,
         reportBatchItemFailures: false,
       }),
     );
@@ -338,7 +456,7 @@ export class PassiveRegionalCellStack extends cdk.Stack {
     for (const [identifier, schedule, deadLetterQueue, event] of schedules) {
       const rule = new events.Rule(this, identifier, {
         schedule,
-        enabled: false,
+        enabled: active,
         description: `Passive recovery ${identifier}; activation is separately governed`,
       });
       rule.addTarget(
@@ -377,10 +495,12 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       alarm.addAlarmAction(alarmTopicAction);
     }
 
-    cdk.Tags.of(this).add("aai-sec:cell-role", "passive");
-    cdk.Tags.of(this).add("aai-sec:active-authority", "false");
+    cdk.Tags.of(this).add("aai-sec:cell-role", active ? "recovery-active" : "passive");
+    cdk.Tags.of(this).add("aai-sec:active-authority", active ? "true" : "false");
     cdk.Tags.of(this).add("aai-sec:primary-region", props.primaryRegion);
-    new cdk.CfnOutput(this, "PassiveCellStatus", { value: "staged-not-serving" });
+    new cdk.CfnOutput(this, "PassiveCellStatus", {
+      value: active ? "active-not-routed" : "staged-not-serving",
+    });
     new cdk.CfnOutput(this, "PassiveControlPlaneApiId", { value: api.apiId });
     new cdk.CfnOutput(this, "PassiveUiOriginBucketName", { value: uiOrigin.bucketName });
     new cdk.CfnOutput(this, "PassiveSecurityAlertsTopicArn", { value: alerts.topicArn });

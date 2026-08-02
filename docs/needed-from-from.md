@@ -85,6 +85,9 @@ The activation manifest must be created only for the scheduled exercise and
 expires within one hour. Do not commit it or its provider evidence. The
 [regional activation and exercise design](regional-activation-and-exercise-design.md)
 documents the exact fields, checks and non-mutating preflight command.
+The [guarded transition executor](regional-transition-executor-design.md) is
+implemented, but its mutating commands must not be used until every item above
+is real, retained and approved. It cannot move traffic.
 
 ### Managed Claude Code and Codex hosts
 

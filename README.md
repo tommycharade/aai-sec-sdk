@@ -16,6 +16,8 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Regional recovery storage runbook](docs/regional-recovery-storage-runbook.md)
 - [Regional recovery storage acceptance — 2026-08-02](docs/regional-recovery-storage-acceptance-2026-08-02.md)
 - [Passive regional control-plane cell](docs/passive-regional-cell-design.md)
+- [Regional activation and recovery exercise](docs/regional-activation-and-exercise-design.md)
+- [Guarded regional transition executor](docs/regional-transition-executor-design.md)
 - [Managed policy-signing trust convergence](docs/policy-trust-convergence-design.md)
 - [Managed policy-trust convergence acceptance — 2026-08-02](docs/policy-trust-convergence-acceptance-2026-08-02.md)
 - [Operational runbooks](docs/runbooks.md)
