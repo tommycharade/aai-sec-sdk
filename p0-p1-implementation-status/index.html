@@ -964,6 +964,60 @@
   
   
     <li class="md-nav__item">
+      <a href="../policy-trust-convergence-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed policy-signing trust convergence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-trust-convergence-acceptance-2026-08-02/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed policy-trust convergence acceptance (2026-08-02)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../asynchronous-retention-design/" class="md-nav__link">
         
   
@@ -2814,8 +2868,8 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.</p>
 <td>P0-11</td>
 <td>HA/DR</td>
 <td>Partial</td>
-<td>Durable AWS stores; complete immutable audit replication; active-passive regional design; persisted secret-free 1,000-agent/30-minute-RTO/60-second-RPO authority; four live protected Global Table replicas with exact-content create/delete RPO canaries; retained staged P-256 multi-Region signing primary and replica; three-key overlap export; adversarial contracts, runbook and 2026-08-02 live acceptance</td>
-<td>Prove endpoint trust-bundle convergence before signer cutover, then complete Cognito MRR/Entra, passive API/workers/UI, bidirectional audit writes, routing, 1,000-agent load, backup/key recovery and rehearsed failover/failback</td>
+<td>Durable AWS stores; complete immutable audit replication; active-passive regional design; persisted secret-free 1,000-agent/30-minute-RTO/60-second-RPO authority; four live protected Global Table replicas with exact-content create/delete RPO canaries; retained staged P-256 multi-Region signing primary and replica; schema-v2 package trust binding, atomic privileged installation and protected-file heartbeat measurement; deployed central three-key trust posture with fail-closed fleet cutover readiness; adversarial contracts, runbook and 2026-08-02 live acceptance</td>
+<td>Install the overlap on real managed endpoints and prove 100% trust convergence before signer cutover, then complete Cognito MRR/Entra, passive API/workers/UI, bidirectional audit writes, routing, 1,000-agent load, backup/key recovery and rehearsed failover/failback</td>
 </tr>
 <tr>
 <td>P0-12</td>
@@ -2861,6 +2915,17 @@ rollout-, attestation- and emergency-stop-gated, and remain possible while
 managed configuration is missing so an endpoint can repair itself. Operator
 reads expose metadata only. This closes control-plane distribution, not MDM
 installation or live host-load acceptance.</p>
+<p>Schema-v2 packages now bind the canonical policy-signing trust store as a
+separate administrator-owned artifact. Publication and retrieval require its
+out-of-band digest, the privileged installer stages and verifies the complete
+native-configuration-plus-trust transaction before deleting backups, and each
+heartbeat reopens the files without following symlinks and requires root
+ownership, restrictive modes and exact bytes. The deployed control plane
+derives a tenant-wide cutover posture only when one trust digest is current in
+every package, rollout and fresh endpoint report. The
+<a href="../policy-trust-convergence-acceptance-2026-08-02/">2026-08-02 live acceptance</a>
+proved the safe empty-fleet state and unchanged active signer. Physical endpoint
+installation and convergence are deliberately not claimed.</p>
 <h2 id="p1-ledger">P1 ledger</h2>
 <table>
 <thead>

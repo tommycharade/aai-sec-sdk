@@ -964,6 +964,60 @@
   
   
     <li class="md-nav__item">
+      <a href="../policy-trust-convergence-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed policy-signing trust convergence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-trust-convergence-acceptance-2026-08-02/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed policy-trust convergence acceptance (2026-08-02)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../asynchronous-retention-design/" class="md-nav__link">
         
   
@@ -2780,6 +2834,10 @@ the control plane uses it:</p>
 <li>Re-sign or replace active policies through governed activation.</li>
 <li>Remove the old key only after no active bundle references it.</li>
 </ol>
+<p>For centrally managed fleets, steps 2 and 3 use the schema-v2 package,
+short-lived heartbeat measurement and server-derived cutover posture described
+in <a href="../policy-trust-convergence-design/">managed policy-signing trust convergence</a>.
+Package delivery alone is never convergence evidence.</p>
 <p>Emergency response may disable the KMS key and activate server-owned stops.
 Disabling a key prevents new signatures; already signed bundles remain
 cryptographically valid until the old public trust anchor is removed. Incident

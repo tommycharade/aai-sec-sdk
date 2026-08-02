@@ -1187,6 +1187,60 @@
   
   
     <li class="md-nav__item">
+      <a href="../policy-trust-convergence-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed policy-signing trust convergence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-trust-convergence-acceptance-2026-08-02/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed policy-trust convergence acceptance (2026-08-02)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../asynchronous-retention-design/" class="md-nav__link">
         
   
@@ -3014,6 +3068,12 @@ traffic before a controlled activation. Disconnected agents do not infer an
 outage bypass from cached policy because revocation, emergency-stop, approval
 and session state may have changed. See the
 <a href="../regional-control-plane-recovery-design/">regional recovery design</a>.</p>
+<p>Regional signer migration additionally binds the old/new/replica public trust
+set into a schema-v2 managed endpoint package while keeping its expected digest
+as separate server-owned desired state. Root installation is all-or-rollback;
+heartbeats remeasure native configuration and trust; and cutover readiness is
+derived only from every active endpoint. Readiness never changes KMS or signing
+authority. See <a href="../policy-trust-convergence-design/">policy trust convergence</a>.</p>
 <p>Mass-retention extension is a separate irreversible boundary. The API
 atomically binds a longer future-write policy to an idempotent job, waits longer
 than any evidence-writing Lambda can run and then extends every pre-cutover S3
