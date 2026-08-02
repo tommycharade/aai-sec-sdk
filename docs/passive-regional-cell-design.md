@@ -170,6 +170,11 @@ schedules, deploy the UI artifact, attach the custom domains and finally move
 traffic. It must not rely on a browser-authored status or automatic health
 check. Failback uses the same gates in reverse.
 
+The implemented read-only activation authority and provider-state preflight
+are documented in the
+[regional activation and exercise design](regional-activation-and-exercise-design.md).
+They add no path that can mutate this standby posture.
+
 ## Guarantees and non-guarantees
 
 The passive stack guarantees that its deployed default cannot serve API/UI

@@ -1,5 +1,14 @@
 # Changelog
 
+- Added a fail-closed regional activation and failback authority contract. A
+  read-only AWS preflight binds one short-lived manual transition to persisted
+  recovery/passive/continuity authority and an exact COMPLIANCE-locked S3
+  version, then repeats identity, passive-stack, origin-fencing, stable-DNS and
+  bidirectional audit checks before emitting an ordered plan. A bounded typed
+  exercise harness independently computes fleet p99/error results and rejects
+  dependency bypass, replay, duplicate side effects or authority widening. It
+  does not activate AWS resources or claim live P0-11 acceptance.
+
 - Deployed and accepted P0-11 phase-5 evidence continuity in `eu-west-2` and
   `eu-west-1`. A persisted provider-state guard derived the exact buckets,
   independently verified and SHA-256-bound both CDK templates, deployed their
