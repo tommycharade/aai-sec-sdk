@@ -16,7 +16,7 @@
         <link rel="prev" href="../passive-regional-cell-design/">
       
       
-        <link rel="next" href="../policy-trust-convergence-design/">
+        <link rel="next" href="../evidence-continuity-acceptance-2026-08-02/">
       
       
         
@@ -1120,6 +1120,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evidence-continuity-acceptance-2026-08-02/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evidence continuity acceptance (2026-08-02)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2813,6 +2840,16 @@ authority.</p>
 </ol>
 <p>The synthetic retained objects are evidence and are not deleted. A successful
 template check is not a live recovery acceptance result.</p>
+<p>The supported operator entry point is
+<code>scripts/deploy_aws_evidence_continuity.py</code>. It requires both strict manifests
+and uses four explicit commands: <code>check</code> synthesizes and verifies without AWS
+mutation; <code>prepare --confirm-authority</code> persists the reviewed non-activation
+authority; <code>deploy --confirm-replication-deployment</code> updates the exact verified
+assemblies and re-reads provider state; and <code>canary --confirm-retained-canary</code>
+writes and verifies the two retained synthetic versions. The checked-in
+manifests are
+<code>infra/aws-control-plane/evidence-continuity.example.json</code> and
+<code>infra/aws-control-plane/regional-recovery.example.json</code>.</p>
 <h2 id="threats-and-controls">Threats and controls</h2>
 <table>
 <thead>
@@ -2861,10 +2898,13 @@ template check is not a live recovery acceptance result.</p>
 </tbody>
 </table>
 <h2 id="current-status">Current status</h2>
-<p>The infrastructure definitions, independent verifier, adversarial tests and
-standby reconciliation planner are implemented. They have not been deployed to
-the AWS recovery account as phase-5 acceptance. The current live environment
-therefore remains a one-way audit replica and P0-11 remains partial.</p>
+<p>The infrastructure, provider-state deployment guard, independent verifier,
+adversarial tests and standby reconciliation planner are implemented. Both
+directions were deployed from exact verified assemblies and passed the retained
+two-direction canary on 2026-08-02. The acceptance evidence is recorded in
+<a href="../evidence-continuity-acceptance-2026-08-02/">Evidence continuity acceptance</a>.
+P0-11 remains partial because identity, passive-cell activation, routing, load
+and full failover/failback acceptance are separate phases.</p>
 
 
 

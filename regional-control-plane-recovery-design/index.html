@@ -1192,6 +1192,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../evidence-continuity-acceptance-2026-08-02/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evidence continuity acceptance (2026-08-02)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../policy-trust-convergence-design/" class="md-nav__link">
         
   
@@ -2928,8 +2955,9 @@ shortening Object Lock retention. Delete markers remain excluded because they
 are not retained evidence.</p>
 <p>The phase-5 implementation and its fail-closed job planner are specified in
 <a href="../evidence-continuity-and-job-reconciliation-design/">Evidence continuity and recovery-job reconciliation</a>.
-Source and verifier completion is not live acceptance: the current AWS replica
-remains one-way until the guarded deployment and two-direction canary pass.</p>
+The guarded deployment and retained two-direction canary passed on 2026-08-02;
+see the <a href="../evidence-continuity-acceptance-2026-08-02/">phase-5 acceptance</a>.
+This does not activate or accept the passive control plane.</p>
 <h3 id="api-ui-and-routing">API, UI and routing</h3>
 <p>The passive cell will contain Region-local Lambda, API Gateway, SQS/SNS,
 EventBridge schedules, CloudWatch alarms and a UI origin. A production customer
