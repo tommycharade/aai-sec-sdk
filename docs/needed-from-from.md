@@ -64,6 +64,28 @@ Do not create placeholder identity resources or reuse the `eu-west-2` pool to
 unblock deployment. The stack rejects wrong-Region identity and remains
 non-serving until a separate reviewed activation change.
 
+### Regional routing and activation exercise
+
+The read-only activation preflight and bounded exercise contract are
+implemented. Live activation still requires owner/platform inputs that cannot
+be invented by engineering:
+
+- the Route 53 hosted-zone ID and approved stable API/UI domain names;
+- ACM certificates and authority to close both raw execute-api origins;
+- two independent named approvers for each failover and failback rehearsal;
+- an approved change window in which source fencing, synthetic dependency
+  failures and stable-route movement may be exercised;
+- confirmation that 1,000 synthetic agents is the approved first-customer
+  target, or a reviewed replacement regional-recovery manifest;
+- backup/key-recovery and break-glass exercise participants; and
+- approval to retain the exact activation bundle in the primary COMPLIANCE
+  Object Lock bucket.
+
+The activation manifest must be created only for the scheduled exercise and
+expires within one hour. Do not commit it or its provider evidence. The
+[regional activation and exercise design](regional-activation-and-exercise-design.md)
+documents the exact fields, checks and non-mutating preflight command.
+
 ### Managed Claude Code and Codex hosts
 
 - Confirmation that `/Users/tommooney/dev/kratos` remains the first local
