@@ -54,6 +54,12 @@ Entra ID as `not-configured`. To cross this gate, provide:
 - retained acceptance references for recovery-region login, strong
   authentication and joiner/mover/leaver behavior.
 
+When those values exist, copy `infra/aws-control-plane/passive-cell.example.json`
+outside the repository, replace its synthetic identities/evidence references,
+and use the three-stage deployment guard documented in the
+[passive regional cell design](passive-regional-cell-design.md). No table,
+bucket, account or key ARN needs to be supplied manually.
+
 Do not create placeholder identity resources or reuse the `eu-west-2` pool to
 unblock deployment. The stack rejects wrong-Region identity and remains
 non-serving until a separate reviewed activation change.

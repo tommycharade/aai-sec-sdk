@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "passiveStackName": "AaiSecPassiveRegionalCell",
+  "primaryRegion": "eu-west-2",
+  "recoveryRegion": "eu-west-1",
+  "recoveryUserPoolId": "eu-west-1_AbCdEf123",
+  "recoveryUserPoolClientId": "abcdefghij1234567890",
+  "approvalEvidenceRef": "DR-PASSIVE-CELL-CHANGE-ME",
+  "identityAcceptanceEvidenceRef": "ENTRA-RECOVERY-ACCEPTANCE-CHANGE-ME",
+  "activationPermitted": false
+}

@@ -1,5 +1,11 @@
 # Changelog
 
+- Added a persisted provider-state deployment guard for the passive regional
+  cell. It derives replicated resources from AWS, compares primary/recovery
+  Cognito security posture and tenant-specific Entra federation, refuses
+  ambient authority, verifies synthesized CloudFormation and can deploy only
+  the reviewed non-serving stack after explicit confirmation.
+
 - Added the fail-closed passive regional-cell foundation: recovery API, worker,
   queue, alert and private UI-origin resources synthesize with the public API
   origin disabled, zero Lambda concurrency, disabled schedules/event mappings,

@@ -101,6 +101,55 @@ Synthetic acceptance proves the infrastructure contract only. A live deploy
 requires real recovery identity and provider-state checks; passing this command
 does not authorize deployment or activation.
 
+## Provider-state deployment guard
+
+Operators must use `scripts/deploy_aws_passive_cell.py`; direct `cdk deploy` is
+not the approved path. The guard uses two secret-free reviewed manifests:
+
+- `regional-recovery.json`, previously persisted after the storage/trust
+  exercises; and
+- `passive-cell.json`, based on
+  `infra/aws-control-plane/passive-cell.example.json`.
+
+The guard derives table, audit-bucket, signing-replica and AWS-account
+identities from CloudFormation, KMS and STS. It does not accept those identities
+from ambient shell variables. It requires protected primary/recovery Cognito
+pools with matching security posture, the same tenant-specific Microsoft Entra
+OIDC issuer, an Entra-enabled recovery app client, configured primary SCIM and
+an identity-acceptance evidence reference. This comparison is necessary because
+Cognito's provider API does not expose a standalone replica-relationship proof.
+Population and lifecycle continuity therefore still require the retained live
+acceptance referenced in the manifest.
+
+Run the three stages in order:
+
+```bash
+python3 scripts/deploy_aws_passive_cell.py check \
+  --config /absolute/path/to/passive-cell.json \
+  --regional-recovery-config /absolute/path/to/regional-recovery.json \
+  --profile p1
+
+python3 scripts/deploy_aws_passive_cell.py prepare \
+  --config /absolute/path/to/passive-cell.json \
+  --regional-recovery-config /absolute/path/to/regional-recovery.json \
+  --profile p1 \
+  --confirm-identity-foundation
+
+python3 scripts/deploy_aws_passive_cell.py deploy \
+  --config /absolute/path/to/passive-cell.json \
+  --regional-recovery-config /absolute/path/to/regional-recovery.json \
+  --profile p1 \
+  --confirm-non-serving-deployment
+```
+
+`check` is read-only except for local CDK synthesis. `prepare` persists the
+exact secret-free authority as an encrypted SSM parameter only after all checks
+pass. `deploy` requires a byte-equivalent persisted manifest, repeats every
+provider and template check, and deploys only `AaiSecPassiveRegionalCell`.
+The deploy stage rechecks the verified template SHA-256 and consumes the exact
+`cdk.out` assembly; it never re-synthesizes unreviewed code. None of the commands
+can activate it.
+
 ## Activation contract
 
 Activation is prohibited until retained evidence proves:

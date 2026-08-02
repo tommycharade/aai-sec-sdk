@@ -211,6 +211,18 @@ invoke permission therefore cannot create a second active authority. Enabling
 any of those controls is an independently reviewed recovery operation; see the
 [passive regional cell design](passive-regional-cell-design.md).
 
+Passive-cell deployment authority is persistent and provider-derived. A strict
+secret-free manifest can only name the reviewed non-serving stack and must keep
+`activationPermitted` false. The deployment guard reloads the previously
+persisted regional-recovery authority, derives table/audit/key/account
+identities from AWS, compares primary and recovery Cognito security posture,
+requires the same tenant-specific Microsoft Entra issuer, strips ambient CDK
+authority and independently verifies synthesized CloudFormation. Deployment
+therefore cannot substitute a synthetic identity, unrelated pool, attacker
+table or alternate stack. The verified template SHA-256 is checked again and
+the exact CDK assembly is deployed without re-synthesis. Population continuity is not inferred from matching
+pool configuration; it requires separately retained live identity evidence.
+
 Regional signer migration additionally binds the old/new/replica public trust
 set into a schema-v2 managed endpoint package while keeping its expected digest
 as separate server-owned desired state. Root installation is all-or-rollback;
