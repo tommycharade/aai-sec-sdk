@@ -964,6 +964,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../passive-regional-cell-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Passive regional control-plane cell
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../policy-trust-convergence-design/" class="md-nav__link">
         
   
@@ -1796,6 +1823,17 @@
     <span class="md-ellipsis">
       
         Microsoft Entra ID pilot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery-region-identity-foundation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery-region identity foundation
       
     </span>
   </a>
@@ -2644,6 +2682,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#recovery-region-identity-foundation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery-region identity foundation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#managed-claude-code-and-codex-hosts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2779,6 +2828,24 @@ Once supplied, the deployment guard validates the secret references, tenant
 binding and Microsoft OIDC metadata and stores the secret-free configuration in
 encrypted Parameter Store. See the
 <a href="../entra-deployment-guard-design/">persistent Entra deployment guard</a>.</p>
+<h3 id="recovery-region-identity-foundation">Recovery-region identity foundation</h3>
+<p>The passive regional cell is implemented but must not be deployed with a
+synthetic or primary-region identity. The <code>p1</code> AWS account currently has no
+Cognito user pool in <code>eu-west-1</code>, and the primary stack still reports Microsoft
+Entra ID as <code>not-configured</code>. To cross this gate, provide:</p>
+<ul>
+<li>approval to configure Cognito managed login multi-Region resiliency for the
+  pilot identity pool, with <code>eu-west-1</code> as the recovery Region;</li>
+<li>the resulting real <code>eu-west-1</code> user-pool ID and app-client ID after AWS has
+  created and verified them;</li>
+<li>the Microsoft Entra pilot inputs listed above, including the administrator
+  who can register both primary and recovery redirect URIs; and</li>
+<li>retained acceptance references for recovery-region login, strong
+  authentication and joiner/mover/leaver behavior.</li>
+</ul>
+<p>Do not create placeholder identity resources or reuse the <code>eu-west-2</code> pool to
+unblock deployment. The stack rejects wrong-Region identity and remains
+non-serving until a separate reviewed activation change.</p>
 <h3 id="managed-claude-code-and-codex-hosts">Managed Claude Code and Codex hosts</h3>
 <ul>
 <li>Confirmation that <code>/Users/tommooney/dev/kratos</code> remains the first local

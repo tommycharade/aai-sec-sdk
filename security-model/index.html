@@ -1187,6 +1187,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../passive-regional-cell-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Passive regional control-plane cell
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../policy-trust-convergence-design/" class="md-nav__link">
         
   
@@ -3068,6 +3095,13 @@ traffic before a controlled activation. Disconnected agents do not infer an
 outage bypass from cached policy because revocation, emergency-stop, approval
 and session state may have changed. See the
 <a href="../regional-control-plane-recovery-design/">regional recovery design</a>.</p>
+<p>The passive compute cell applies that principle below DNS: its API default
+origin is disabled, Lambdas have zero reserved concurrency, schedules and queue
+mappings are disabled, and roles cannot mutate Global Tables, write immutable
+audit evidence, send work or sign policy. A discovered API ID or direct Lambda
+invoke permission therefore cannot create a second active authority. Enabling
+any of those controls is an independently reviewed recovery operation; see the
+<a href="../passive-regional-cell-design/">passive regional cell design</a>.</p>
 <p>Regional signer migration additionally binds the old/new/replica public trust
 set into a schema-v2 managed endpoint package while keeping its expected digest
 as separate server-owned desired state. Root installation is all-or-rollback;
