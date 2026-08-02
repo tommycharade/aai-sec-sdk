@@ -5,8 +5,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,16 @@ import pytest
 def _load() -> Any:
     path = Path(__file__).parents[1] / "scripts" / "verify_aws_regional_activation.py"
     spec = importlib.util.spec_from_file_location("aai_regional_activation", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_retainer() -> Any:
+    path = Path(__file__).parents[1] / "scripts" / "retain_aws_regional_activation_evidence.py"
+    spec = importlib.util.spec_from_file_location("aai_retain_regional_evidence", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -403,6 +415,169 @@ def test_schema_v4_binds_both_runtime_templates_for_reactivation() -> None:
     invalid["recoveryRuntimeStackName"] = "AaiSecOtherCell"
     with pytest.raises(module.RegionalActivationVerificationError, match="stack identities"):
         module.ActivationManifest.parse(json.dumps(_manifest(payload, **invalid)), now=1000)
+
+
+def test_schema_v4_evidence_is_retained_and_read_back_before_manifest_finalization() -> None:
+    module = _load()
+    retainer = _load_retainer()
+    authority = {
+        "schemaVersion": 4,
+        "coordinationRegion": "eu-central-1",
+        "journalTableName": "AaiSecRegionalTransitionJournal",
+        "expectedRoutingGeneration": 0,
+        "approvals": [
+            {
+                "principalId": "22345678-1234-4234-8234-123456789abc",
+                "evidenceRef": "entra/approval-operator-a",
+                "approvedAt": 990,
+                "strongAuthAt": 970,
+            },
+            {
+                "principalId": "32345678-1234-4234-8234-123456789abc",
+                "evidenceRef": "entra/approval-operator-b",
+                "approvedAt": 995,
+                "strongAuthAt": 980,
+            },
+        ],
+        "primaryIngressStackName": "AaiSecPrimaryRegionalIngress",
+        "recoveryIngressStackName": "AaiSecRecoveryRegionalIngress",
+        "primaryCanaryApiDomain": "api-primary.security.example.com",
+        "primaryCanaryUiDomain": "primary.security.example.com",
+        "recoveryCanaryApiDomain": "api-recovery.security.example.com",
+        "recoveryCanaryUiDomain": "recovery.security.example.com",
+        "routingMarkerName": "routing-generation.security.example.com",
+        "routingRoleArn": "arn:aws:iam::111111111111:role/AaiSecRegionalRouting",
+        "routingAuthorityEvidenceRef": "change/ROUTING-AUTHORITY-123",
+        "primaryRuntimeStackName": "AaiSecControlPlane",
+        "primaryRuntimeTemplateSha256": "b" * 64,
+        "recoveryRuntimeStackName": "AaiSecPassiveRegionalCell",
+        "recoveryRuntimeTemplateSha256": "c" * 64,
+    }
+    provisional = module.ActivationManifest.parse(
+        json.dumps(_manifest(_payload(), **authority)), now=1000
+    )
+    bundle = _bundle()
+    bundle["operations"].update(
+        {
+            "approverPrincipalIds": [item.principal_id for item in provisional.approvals],
+            "approvalSha256": provisional.approval_sha256(),
+        }
+    )
+    bundle["authoritySha256"] = provisional.authority_sha256()
+    payload = _payload(bundle)
+    digest = hashlib.sha256(payload).hexdigest()
+    document = _manifest(payload, **authority)
+    document["evidenceBundle"]["key"] = f"regional-activation/{_TRANSITION}/{digest}.json"
+    manifest = module.ActivationManifest.parse(json.dumps(document), now=1000)
+
+    class S3:
+        put: dict[str, Any]
+        version_exists = False
+        put_count = 0
+        ambiguous = False
+        tampered = False
+
+        def list_object_versions(self, **_: Any) -> dict[str, Any]:
+            if not self.version_exists:
+                return {"Versions": []}
+            versions = [{"Key": self.put["Key"], "VersionId": "version-456"}]
+            if self.ambiguous:
+                versions.append({"Key": self.put["Key"], "VersionId": "version-789"})
+            return {"Versions": versions}
+
+        def put_object(self, **kwargs: Any) -> dict[str, str]:
+            self.put = kwargs
+            self.version_exists = True
+            self.put_count += 1
+            return {"VersionId": "version-456"}
+
+        def get_object(self, **kwargs: Any) -> dict[str, Any]:
+            assert kwargs["VersionId"] == "version-456"
+            return {
+                "Body": io.BytesIO(payload + b"tampered" if self.tampered else payload),
+                "Metadata": self.put["Metadata"],
+                "ObjectLockMode": "COMPLIANCE",
+                "ObjectLockRetainUntilDate": self.put["ObjectLockRetainUntilDate"],
+                "VersionId": "version-456",
+            }
+
+    s3 = S3()
+    result = retainer.retain_evidence(
+        manifest,
+        document,
+        payload,
+        expected_bucket_arn="arn:aws:s3:::retained-activation-evidence",
+        s3_client=s3,
+        now=datetime.fromtimestamp(1000, tz=UTC),
+    )
+    assert result["status"] == "activation-evidence-retained-and-read-back"
+    assert result["finalManifest"]["evidenceBundle"] == {
+        "bucketArn": "arn:aws:s3:::retained-activation-evidence",
+        "key": f"regional-activation/{_TRANSITION}/{digest}.json",
+        "versionId": "version-456",
+        "sha256": digest,
+    }
+    assert s3.put["IfNoneMatch"] == "*"
+    retried = retainer.retain_evidence(
+        manifest,
+        document,
+        payload,
+        expected_bucket_arn="arn:aws:s3:::retained-activation-evidence",
+        s3_client=s3,
+        now=datetime.fromtimestamp(1000, tz=UTC),
+    )
+    assert retried["evidenceReference"]["versionId"] == "version-456"
+    assert s3.put_count == 1
+    s3.ambiguous = True
+    with pytest.raises(retainer.RegionalEvidenceRetentionError, match="ambiguous"):
+        retainer.retain_evidence(
+            manifest,
+            document,
+            payload,
+            expected_bucket_arn="arn:aws:s3:::retained-activation-evidence",
+            s3_client=s3,
+            now=datetime.fromtimestamp(1000, tz=UTC),
+        )
+    s3.ambiguous = False
+    s3.tampered = True
+    with pytest.raises(retainer.RegionalEvidenceRetentionError, match="bytes"):
+        retainer.retain_evidence(
+            manifest,
+            document,
+            payload,
+            expected_bucket_arn="arn:aws:s3:::retained-activation-evidence",
+            s3_client=s3,
+            now=datetime.fromtimestamp(1000, tz=UTC),
+        )
+    with pytest.raises(retainer.RegionalEvidenceRetentionError, match="provider authority"):
+        retainer.retain_evidence(
+            manifest,
+            document,
+            payload,
+            expected_bucket_arn="arn:aws:s3:::different-bucket",
+            s3_client=object(),
+            now=datetime.fromtimestamp(1000, tz=UTC),
+        )
+
+
+def test_evidence_retention_cli_requires_explicit_immutable_write_confirmation(
+    capsys: Any,
+) -> None:
+    retainer = _load_retainer()
+    result = retainer.main(
+        [
+            "--manifest",
+            "/synthetic/missing-manifest.json",
+            "--evidence",
+            "/synthetic/missing-evidence.json",
+            "--regional-recovery-config",
+            "/synthetic/missing-regional.json",
+            "--evidence-continuity-config",
+            "/synthetic/missing-continuity.json",
+        ]
+    )
+    assert result == 2
+    assert "--confirm-retain-evidence is required" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

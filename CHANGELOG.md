@@ -1,5 +1,12 @@
 # Changelog
 
+- Added a schema-v4 regional activation evidence retention guard. It validates
+  a complete independently produced bundle, derives the primary audit bucket
+  from persisted AWS authority, writes one digest-addressed COMPLIANCE-locked
+  S3 version only after explicit confirmation, reads back exact bytes and
+  retention state, recovers a lost response only from one unambiguous existing
+  version, and emits the finalized version-bound activation manifest.
+
 - Added symmetric schema-v4 planned failback. The primary target adapter
   restores the exact processed-template runtime only after recovery is fenced,
   independently verifies the primary handler/workers, binds internal job
