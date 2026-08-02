@@ -55,6 +55,38 @@ watchdog must be armed before the deny is applied and must invoke cleanup even
 if the workflow, caller or network disappears. Normal cleanup can remove the
 watchdog only after independently proving the deny no longer exists.
 
+## Implemented controller primitives
+
+`scripts/regional_fault_controller_lambda.py` and
+`scripts/regional_fault_cleanup_lambda.py` implement the provider mutation
+boundary that the state machine will invoke. They are Lambda handlers, not HTTP
+or model-facing entry points. Every normal operation reparses the complete
+schema-v4 transition and schema-v1 fault authority. The cleanup handler accepts
+only a fault UUID, authority digest and target cell role because cleanup must
+remain possible after approval expiry.
+
+The implemented sequence enforces these invariants:
+
+- a conditional third-Region journal write permits one active fault per target;
+- a retry with the same authority digest is idempotent, while a different fault
+  is rejected;
+- the Scheduler watchdog is created before the lock becomes
+  `WATCHDOG_ARMED`;
+- `apply-deny` performs a strongly consistent lock read and refuses IAM
+  mutation unless that exact digest is armed;
+- policy and role names are derived from the reviewed UUID and deployment-owned
+  cell outputs;
+- primary and recovery have separate immutable resource maps, so failback
+  cannot reuse a recovery bucket, table, key or queue alias;
+- normal and watchdog cleanup tolerate an already-absent exact policy but never
+  broaden the deletion target; and
+- successful or watchdog cleanup transactionally retains content-free evidence
+  and releases the active lock.
+
+Authority must cover the requested fault duration plus a 30-second normal
+cleanup margin. The independently scheduled cleanup runs 60 seconds after the
+maximum fault duration and deliberately does not require live approval.
+
 ## Code-owned dependency boundaries
 
 Operators and UI payloads may select only the dependency name. They may never
@@ -86,6 +118,11 @@ A mocked error flag is not dependency evidence. The controller must observe a
 real provider denial produced by its exact target boundary and independently
 observe recovery after removal.
 
+The IAM boundary implementation currently enables `audit`, `dynamodb`, `kms`
+and `queue`. `cognito` fails closed before IAM mutation: API Gateway validates
+target Cognito tokens outside the Lambda execution role, so attaching a handler
+deny would be false evidence rather than an identity failure exercise.
+
 ## Threats and controls
 
 | Threat | Control | Failure posture |
@@ -116,9 +153,11 @@ confirmation or execute flag because this tranche is read-only.
 
 ## Current non-guarantees
 
-The authority parser, plan and exact target-handler role discovery are
-implemented and synthetically tested. The Step Functions controller, watchdog,
-code-owned IAM boundaries and real dependency probes are not yet implemented.
-No live fault has been injected.
+The authority parser, exact target-handler discovery, code-owned IAM boundaries,
+single-writer lock, Scheduler creation and expiry-safe cleanup handlers are
+implemented and synthetically tested. They are not deployed. The Step Functions
+orchestration, live target/source preconditions and real dependency/recovery
+probes are not yet implemented. Cognito remains unsupported rather than
+simulated. No live fault has been injected.
 The generic AWS exercise adapter therefore continues to reject dependency and
 consistency evidence, and P0-11 remains **Partial**.

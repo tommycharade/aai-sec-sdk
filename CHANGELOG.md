@@ -1,5 +1,12 @@
 # Changelog
 
+- Added the Regional fault-controller Lambda primitives: an exact
+  single-writer journal lock, independent Scheduler watchdog, code-owned
+  audit/DynamoDB/KMS/queue deny boundaries, watchdog-before-mutation proof,
+  expiry-safe exact cleanup and transactional content-free completion evidence.
+  Cognito remains fail-closed until a real target identity boundary exists;
+  Step Functions orchestration and live probes are not yet claimed.
+
 - Exposed the exact primary and recovery control-handler execution roles as
   deployment-owned Regional fault-controller inputs. Independent active and
   passive cell verification rejects missing, literal, substituted or

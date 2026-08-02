@@ -292,6 +292,13 @@ Each Regional cell exports only its real control-handler execution role as
 deployment-owned controller input. Independent template verification rejects a
 literal ARN, a missing role, a worker role or a role not bound to the expected
 cell handler. The operator and model never select this identity.
+The controller requires a durable per-target lock and independently armed
+Scheduler cleanup before it can attach a UUID-named inline deny. Dependency
+actions and resources are code/deployment-owned; unknown dependencies and
+Cognito's out-of-role authentication path fail before IAM mutation. Cleanup is
+authorized by the exact retained lock digest rather than a still-live approval,
+so expiry cannot strand the deny. Completion transactionally releases the lock
+and retains content-free evidence.
 
 Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while

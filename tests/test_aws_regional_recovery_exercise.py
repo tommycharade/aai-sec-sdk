@@ -147,7 +147,7 @@ def _fault_authority(manifest: Any, **updates: Any) -> dict[str, Any]:
         "approvalSha256": manifest.approval_sha256(),
         "approverPrincipalIds": [item.principal_id for item in manifest.approvals],
         "activationEvidenceRef": _fault_planner().activation_evidence_ref(manifest.evidence),
-        "expiresAt": 1100,
+        "expiresAt": 1150,
         "faultPermitted": True,
         "automaticFaultInjection": False,
     }
@@ -336,6 +336,7 @@ def test_failback_fault_authority_targets_only_primary_runtime() -> None:
         ({"dependency": "route53"}, "values"),
         ({"maximumFaultSeconds": 301}, "values"),
         ({"expiresAt": 1201}, "values"),
+        ({"expiresAt": 1149}, "cleanup window"),
         ({"approvalSha256": "0" * 64}, "differs"),
     ],
 )

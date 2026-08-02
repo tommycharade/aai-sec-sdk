@@ -114,8 +114,10 @@ and symmetric planned failback are implemented and synthetically tested.
 Engineering can continue without owner input on exercise automation and
 target-cell fault controls. Exact evidence packaging, immutable retention and
 the real target load adapter are implemented and synthetically tested. The
-fault authority and compensation plan are implemented read-only; the durable
-controller and real provider probes remain engineering work. Live
+fault authority, exact target identities, single-writer lock, independent
+watchdog creation, code-owned IAM boundaries and expiry-safe cleanup handlers
+are implemented and synthetically tested. Step Functions orchestration and
+real provider probes remain engineering work. Live
 routing cannot continue until the listed domains,
 certificates, Entra token path, two approvers, retained schema-v4 template
 digests, exact-handler invocation authority and exclusive Route 53 authority
