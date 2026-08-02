@@ -157,6 +157,9 @@ def test_schema_v2_measurement_reports_exact_trust_digest(monkeypatch: Any) -> N
     package = _package(platform=ManagedPlatform.MACOS, with_trust=True)
     measured: list[str] = []
     monkeypatch.setattr(
+        "agentic_security.managed_deployment.host_platform.system", lambda: "Darwin"
+    )
+    monkeypatch.setattr(
         managed_deployment,
         "_measure_artifact",
         lambda artifact, *, owner_uid: measured.append(f"{owner_uid}:{artifact.path}"),
