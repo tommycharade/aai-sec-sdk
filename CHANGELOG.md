@@ -1,5 +1,14 @@
 # Changelog
 
+- Added the third-Region single-writer transition witness and journal. A
+  retained, customer-key-encrypted, PITR-enabled DynamoDB table provides strong
+  transactional CAS without Global Table last-writer-wins ambiguity. Schema-v2
+  authority binds the witness, expected routing generation and two distinct
+  recently strong-authenticated Entra approvers. Source fencing and target
+  activation claim durable in-progress phases before mutation, support exact
+  retries and reject replay, substitution, concurrency and out-of-order steps.
+  Deployment and initialization remain separately confirmed and cannot route.
+
 - Added a guarded active-but-not-routed regional transition component. It
   repeats live preflight before each command, binds retained authority to the
   exact Entra tenant and recovery signer, fences the provider-derived source

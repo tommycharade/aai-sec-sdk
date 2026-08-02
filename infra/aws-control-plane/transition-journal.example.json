@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "stackName": "AaiSecRegionalTransitionJournal",
+  "tableName": "AaiSecRegionalTransitionJournal",
+  "coordinationRegion": "eu-central-1",
+  "primaryRegion": "eu-west-2",
+  "recoveryRegion": "eu-west-1",
+  "approvalEvidenceRef": "replace-with-real-change-approval",
+  "activationPermitted": false
+}

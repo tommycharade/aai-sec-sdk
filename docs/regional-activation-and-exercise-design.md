@@ -17,8 +17,11 @@ to skip a later check.
 
 ## Authority and evidence
 
-One schema-v1 activation manifest authorizes exactly one transition UUID and
-direction. It fixes the primary, recovery, source and target Regions; stable
+Schema v1 remains valid for read-only verification. Every mutating command
+requires schema v2, which additionally binds a third-Region single-writer
+journal, expected routing generation and two distinct recently
+strong-authenticated Entra approvers. One manifest authorizes exactly one
+transition UUID and direction. It fixes the primary, recovery, source and target Regions; stable
 API/UI domains; hosted zone; target fleet; RTO/RPO; approval reference; and one
 exact S3 evidence object version. The authority:
 
@@ -137,8 +140,9 @@ custom domains or Route 53 records.
 ## Current non-guarantees
 
 This tranche does not deploy identity or prove live RTO/RPO. A guarded executor
-now covers source fencing and active-but-not-routed target deployment, but not
-a durable transition journal/CAS, routing, smoke/reconciliation or failback.
+now covers journal-governed source fencing and active-but-not-routed target
+deployment, but not routing CAS, smoke/reconciliation, evidence sealing,
+primary reactivation or failback.
 The current AWS
 environment still requires Microsoft Entra/SCIM, recovery Cognito, real managed
 endpoint trust convergence, stable domains, direct-origin closure and the live

@@ -238,6 +238,14 @@ confirmed steps, and has no traffic-routing operation. See the
 [regional activation design](regional-activation-and-exercise-design.md) and
 [guarded transition executor](regional-transition-executor-design.md).
 
+Transition ownership is not stored in the replicated control Global Table.
+One protected DynamoDB witness in a third Region provides strongly consistent
+reads and transactional compare-and-swap over generation, phase, revision,
+transition UUID, retained evidence and two-person approval digests. In-progress
+phases are committed before source or target mutation, so exact retries resume
+while competing, stale, expired or substituted authority fails closed. See the
+[regional transition journal](regional-transition-journal-design.md).
+
 Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while
 excluding delete markers, and synthesized CloudFormation is rejected unless

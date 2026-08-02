@@ -8,6 +8,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -256,13 +257,53 @@ def test_target_deploy_uses_only_exact_verified_assembly(monkeypatch: Any) -> No
         )
 
 
+def test_target_deployment_failure_leaves_journal_in_progress(monkeypatch: Any) -> None:
+    module = _load()
+    phases: list[tuple[str, str]] = []
+
+    def advance(*_args: Any, expected_phase: str, next_phase: str, **_kwargs: Any) -> Any:
+        phases.append((expected_phase, next_phase))
+        return {"claim": "advanced", "journal": {"phase": next_phase}}
+
+    monkeypatch.setattr(module.journal, "advance_phase", advance)
+    monkeypatch.setattr(
+        module,
+        "verify_source_fence",
+        lambda *_args, **_kwargs: {"status": "source-fence-verified"},
+    )
+    monkeypatch.setattr(
+        module,
+        "deploy_active_template",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            module.ActiveCellDeploymentError("synthetic deployment failure")
+        ),
+    )
+    with pytest.raises(module.ActiveCellDeploymentError, match="synthetic deployment"):
+        module.activate_target_step(
+            object(),
+            SimpleNamespace(source_region="eu-west-2"),
+            module.SourceResources(("fn",), (), ()),
+            SimpleNamespace(stack_name="AaiSecPassiveRegionalCell"),
+            {},
+            "a" * 64,
+            profile="synthetic",
+            clock=lambda: 1000.0,
+        )
+    assert phases == [("SOURCE_FENCED", "ACTIVATING_TARGET")]
+
+
 def test_command_surface_exposes_no_routing_or_combined_failover() -> None:
     source = (Path(__file__).parents[1] / "scripts" / "deploy_aws_active_cell.py").read_text(
         encoding="utf-8"
     )
-    assert 'choices=("check", "fence-source", "activate-target")' in source
+    assert '"initialize-journal", "fence-source", "activate-target"' in source
     assert "route53" not in source.lower()
     assert "provider_preflight(" in source
     assert source.index("provider_preflight(") < source.index(
         "fence_source(", source.index("def main")
     )
+    target_step = source[source.index("def activate_target_step") : source.index("def _parser")]
+    target_claim = target_step.index('next_phase="ACTIVATING_TARGET"')
+    deployment = target_step.index("deploy_active_template(", target_claim)
+    target_completion = target_step.index('next_phase="TARGET_ACTIVE_NOT_ROUTED"')
+    assert target_claim < deployment < target_completion

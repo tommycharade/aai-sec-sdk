@@ -153,6 +153,36 @@ jobs:
           --aai-tenant-id
           tenant-demo
 
+  transition-journal-iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262b # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: infra/aws-control-plane/package-lock.json
+      - name: Install pinned AWS infrastructure dependencies
+        working-directory: infra/aws-control-plane
+        run: npm ci
+      - name: Synthesize independent single-writer transition witness
+        working-directory: infra/aws-control-plane
+        env:
+          CDK_DEFAULT_ACCOUNT: "111111111111"
+          TRANSITION_COORDINATION_REGION: eu-central-1
+          PRIMARY_REGION: eu-west-2
+          RECOVERY_REGION: eu-west-1
+          TRANSITION_JOURNAL_TABLE_NAME: AaiSecRegionalTransitionJournal
+        run: npm run synth:journal -- --quiet
+      - name: Verify witness is retained, unreplicated and has no runtime authority
+        run: >-
+          python scripts/verify_transition_journal_stack.py
+          infra/aws-control-plane/cdk.out/AaiSecRegionalTransitionJournal.template.json
+          --table-name AaiSecRegionalTransitionJournal
+
   evidence-continuity-iac:
     runs-on: ubuntu-latest
     steps:
