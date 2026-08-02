@@ -33,7 +33,7 @@ dev = [
   "mkdocs-material==9.7.7",
   "mkdocstrings[python]==0.30.1",
   "build==1.5.0",
-  "twine==6.2.0",
+  "twine==7.0.0",
   "pip-audit==2.10.1",
   "mutmut==3.6.0",
   "opentelemetry-api==1.42.1",
