@@ -55,6 +55,14 @@ _PHASES = {
     "TARGET_INGRESS_VERIFIED_NOT_ROUTED",
     "ROUTING_TARGET",
     "VERIFYING_STABLE_ROUTE",
+    "FENCING_FAILED_TARGET",
+    "FAILED_TARGET_FENCED",
+    "REACTIVATING_SOURCE",
+    "SOURCE_REACTIVATED_NOT_ROUTED",
+    "VERIFYING_SOURCE_INGRESS",
+    "SOURCE_INGRESS_VERIFIED_NOT_ROUTED",
+    "ROUTING_SOURCE_ROLLBACK",
+    "VERIFYING_SOURCE_ROLLBACK",
 }
 _REGION = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -517,6 +525,14 @@ def advance_phase(
         ("VERIFYING_TARGET_INGRESS", "TARGET_INGRESS_VERIFIED_NOT_ROUTED"),
         ("TARGET_INGRESS_VERIFIED_NOT_ROUTED", "ROUTING_TARGET"),
         ("ROUTING_TARGET", "VERIFYING_STABLE_ROUTE"),
+        ("VERIFYING_STABLE_ROUTE", "FENCING_FAILED_TARGET"),
+        ("FENCING_FAILED_TARGET", "FAILED_TARGET_FENCED"),
+        ("FAILED_TARGET_FENCED", "REACTIVATING_SOURCE"),
+        ("REACTIVATING_SOURCE", "SOURCE_REACTIVATED_NOT_ROUTED"),
+        ("SOURCE_REACTIVATED_NOT_ROUTED", "VERIFYING_SOURCE_INGRESS"),
+        ("VERIFYING_SOURCE_INGRESS", "SOURCE_INGRESS_VERIFIED_NOT_ROUTED"),
+        ("SOURCE_INGRESS_VERIFIED_NOT_ROUTED", "ROUTING_SOURCE_ROLLBACK"),
+        ("ROUTING_SOURCE_ROLLBACK", "VERIFYING_SOURCE_ROLLBACK"),
     }
     if (expected_phase, next_phase) not in allowed:
         raise TransitionJournalError("journal phase transition is unsupported")
@@ -679,6 +695,104 @@ def complete_transition(
         raise TransitionJournalError("stable transition did not converge")
     return {
         "claim": "completed",
+        "journal": completed.evidence(),
+        "stepEvidenceSha256": step_evidence_sha256,
+    }
+
+
+def complete_rollback(
+    client: Any,
+    manifest: activation.ActivationManifest,
+    *,
+    now: int,
+    step_evidence_sha256: str,
+) -> dict[str, Any]:
+    """Seal a proved source rollback at generation plus two and stable source."""
+    manifest.require_reactivation_authority()
+    expected_generation = manifest.expected_routing_generation
+    if expected_generation is None:
+        raise TransitionJournalError("routing generation authority is unavailable")
+    if not _SHA256.fullmatch(step_evidence_sha256):
+        raise TransitionJournalError("step evidence SHA-256 is malformed")
+    state = read_state(client, manifest)
+    rollback_generation = expected_generation + 2
+    if state.phase == "STABLE":
+        if (
+            state.generation != rollback_generation
+            or state.active_region != manifest.source_region
+            or state.last_completed_transition_id != manifest.transition_id
+        ):
+            raise TransitionJournalError("stable journal does not prove this rollback")
+        _verify_completed_step_evidence(
+            client,
+            manifest,
+            phase="ROLLED_BACK",
+            revision=state.revision,
+            expected_sha256=step_evidence_sha256,
+        )
+        return {"claim": "already-completed", "journal": state.evidence()}
+    if state.phase != "VERIFYING_SOURCE_ROLLBACK" or not _same_authority(state, manifest, now=now):
+        raise TransitionJournalError("source-rollback completion is stale or out of order")
+    values = _value_map(manifest, now)
+    values.update(
+        {
+            ":completed": {"S": manifest.transition_id},
+            ":expected": {"S": "VERIFYING_SOURCE_ROLLBACK"},
+            ":nextGeneration": {"N": str(rollback_generation)},
+            ":revision": {"N": str(state.revision)},
+            ":stable": {"S": "STABLE"},
+        }
+    )
+    update = {
+        "TableName": manifest.journal_table_name,
+        "Key": _AUTHORITY_KEY,
+        "UpdateExpression": (
+            "SET #phase=:stable, generation=:nextGeneration, activeRegion=:source, "
+            "revision=revision+:one, updatedAt=:now, lastCompletedTransitionId=:completed "
+            "REMOVE activeTransitionId, direction, sourceRegion, targetRegion, "
+            "authoritySha256, evidenceSha256, approvalSha256, expiresAt"
+        ),
+        "ConditionExpression": (
+            "#phase=:expected AND revision=:revision AND generation=:generation AND "
+            "activeRegion=:source AND activeTransitionId=:transition AND "
+            "authoritySha256=:authority AND evidenceSha256=:evidence AND "
+            "approvalSha256=:approval AND expiresAt=:expires"
+        ),
+        "ExpressionAttributeNames": {"#phase": "phase"},
+        "ExpressionAttributeValues": values,
+    }
+    event = _event_item(
+        manifest,
+        phase="ROLLED_BACK",
+        revision=state.revision + 1,
+        now=now,
+        step_evidence_sha256=step_evidence_sha256,
+    )
+    _transact(
+        client,
+        [
+            {"Update": update},
+            {
+                "Put": {
+                    "TableName": manifest.journal_table_name,
+                    "Item": event,
+                    "ConditionExpression": (
+                        "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+                    ),
+                }
+            },
+        ],
+    )
+    completed = read_state(client, manifest)
+    if (
+        completed.phase != "STABLE"
+        or completed.generation != rollback_generation
+        or completed.active_region != manifest.source_region
+        or completed.last_completed_transition_id != manifest.transition_id
+    ):
+        raise TransitionJournalError("source rollback did not converge")
+    return {
+        "claim": "rolled-back",
         "journal": completed.evidence(),
         "stepEvidenceSha256": step_evidence_sha256,
     }

@@ -62,6 +62,13 @@ _ROUTING_AUTHORITY_FIELDS = {
     "routingAuthorityEvidenceRef",
 }
 _MANIFEST_FIELDS_V3 = _MANIFEST_FIELDS_V2 | _ROUTING_AUTHORITY_FIELDS
+_REACTIVATION_AUTHORITY_FIELDS = {
+    "primaryRuntimeStackName",
+    "primaryRuntimeTemplateSha256",
+    "recoveryRuntimeStackName",
+    "recoveryRuntimeTemplateSha256",
+}
+_MANIFEST_FIELDS_V4 = _MANIFEST_FIELDS_V3 | _REACTIVATION_AUTHORITY_FIELDS
 _APPROVAL_FIELDS = {"principalId", "evidenceRef", "approvedAt", "strongAuthAt"}
 _BUNDLE_FIELDS = {
     "schemaVersion",
@@ -102,6 +109,7 @@ _ENTRA_ISSUER = re.compile(
 )
 _KMS_ARN = re.compile(r"^arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:key/mrk-[0-9a-f]{32}$")
 _TABLE = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
+_STACK = re.compile(r"^[A-Za-z][A-Za-z0-9-]{0,127}$")
 _ROLE_ARN = re.compile(
     r"^arn:(?:aws|aws-us-gov|aws-cn):iam::\d{12}:"
     r"role/(?:[A-Za-z0-9+=,.@_-]+/)*[A-Za-z0-9+=,.@_-]+$"
@@ -233,11 +241,15 @@ class ActivationManifest:
     routing_marker_name: str | None = None
     routing_role_arn: str | None = None
     routing_authority_evidence_ref: str | None = None
+    primary_runtime_stack_name: str | None = None
+    primary_runtime_template_sha256: str | None = None
+    recovery_runtime_stack_name: str | None = None
+    recovery_runtime_template_sha256: str | None = None
 
     def require_journal_authority(self) -> None:
         """Reject legacy authority before any journal-governed mutation."""
         if (
-            self.schema_version not in {2, 3}
+            self.schema_version not in {2, 3, 4}
             or self.coordination_region is None
             or self.journal_table_name is None
             or self.expected_routing_generation is None
@@ -248,10 +260,10 @@ class ActivationManifest:
             )
 
     def require_routing_authority(self) -> None:
-        """Require exact schema-v3 DNS, ingress, role, and canary authority."""
+        """Require exact schema-v3-or-v4 DNS, ingress, role, and canary authority."""
         self.require_journal_authority()
         if (
-            self.schema_version != 3
+            self.schema_version not in {3, 4}
             or self.primary_ingress_stack_name != "AaiSecPrimaryRegionalIngress"
             or self.recovery_ingress_stack_name != "AaiSecRecoveryRegionalIngress"
             or any(
@@ -268,7 +280,21 @@ class ActivationManifest:
             )
         ):
             raise RegionalActivationVerificationError(
-                "schema-v3 exact routing authority is required"
+                "schema-v3-or-v4 exact routing authority is required"
+            )
+
+    def require_reactivation_authority(self) -> None:
+        """Require schema-v4 exact runtime templates for reversible fencing."""
+        self.require_routing_authority()
+        if (
+            self.schema_version != 4
+            or self.primary_runtime_stack_name is None
+            or self.primary_runtime_template_sha256 is None
+            or self.recovery_runtime_stack_name != "AaiSecPassiveRegionalCell"
+            or self.recovery_runtime_template_sha256 is None
+        ):
+            raise RegionalActivationVerificationError(
+                "schema-v4 exact runtime reactivation authority is required"
             )
 
     def approval_sha256(self) -> str:
@@ -302,7 +328,7 @@ class ActivationManifest:
             "targetRegion": self.target_region,
             "transitionId": self.transition_id,
         }
-        if self.schema_version in {2, 3}:
+        if self.schema_version in {2, 3, 4}:
             authority.update(
                 {
                     "approvals": [approval.canonical() for approval in self.approvals],
@@ -311,7 +337,7 @@ class ActivationManifest:
                     "journalTableName": self.journal_table_name,
                 }
             )
-        if self.schema_version == 3:
+        if self.schema_version in {3, 4}:
             authority.update(
                 {
                     "primaryIngressStackName": self.primary_ingress_stack_name,
@@ -323,6 +349,15 @@ class ActivationManifest:
                     "routingMarkerName": self.routing_marker_name,
                     "routingRoleArn": self.routing_role_arn,
                     "routingAuthorityEvidenceRef": self.routing_authority_evidence_ref,
+                }
+            )
+        if self.schema_version == 4:
+            authority.update(
+                {
+                    "primaryRuntimeStackName": self.primary_runtime_stack_name,
+                    "primaryRuntimeTemplateSha256": self.primary_runtime_template_sha256,
+                    "recoveryRuntimeStackName": self.recovery_runtime_stack_name,
+                    "recoveryRuntimeTemplateSha256": self.recovery_runtime_template_sha256,
                 }
             )
         payload = json.dumps(authority, sort_keys=True, separators=(",", ":")).encode()
@@ -341,7 +376,9 @@ class ActivationManifest:
             raise RegionalActivationVerificationError("activation manifest must be an object")
         schema_version = value.get("schemaVersion")
         fields = (
-            _MANIFEST_FIELDS_V3
+            _MANIFEST_FIELDS_V4
+            if schema_version == 4
+            else _MANIFEST_FIELDS_V3
             if schema_version == 3
             else _MANIFEST_FIELDS_V2
             if schema_version == 2
@@ -349,7 +386,7 @@ class ActivationManifest:
         )
         item = _object(value, fields, "activation manifest")
         if (
-            schema_version not in {1, 2, 3}
+            schema_version not in {1, 2, 3, 4}
             or item["activationPermitted"] is not True
             or item["automaticActivation"] is not False
         ):
@@ -398,7 +435,7 @@ class ActivationManifest:
         journal_table_name: str | None = None
         expected_generation: int | None = None
         approvals: tuple[TransitionApproval, ...] = ()
-        if schema_version in {2, 3}:
+        if schema_version in {2, 3, 4}:
             coordination_region = item["coordinationRegion"]
             if (
                 not isinstance(coordination_region, str)
@@ -460,7 +497,7 @@ class ActivationManifest:
         routing_marker: str | None = None
         routing_role: str | None = None
         routing_evidence: str | None = None
-        if schema_version == 3:
+        if schema_version in {3, 4}:
             primary_ingress = item["primaryIngressStackName"]
             recovery_ingress = item["recoveryIngressStackName"]
             if (
@@ -505,6 +542,31 @@ class ActivationManifest:
             routing_evidence = item["routingAuthorityEvidenceRef"]
             if not isinstance(routing_evidence, str) or not _EVIDENCE.fullmatch(routing_evidence):
                 raise RegionalActivationVerificationError("routingAuthorityEvidenceRef is invalid")
+        primary_runtime_stack: str | None = None
+        primary_runtime_template: str | None = None
+        recovery_runtime_stack: str | None = None
+        recovery_runtime_template: str | None = None
+        if schema_version == 4:
+            primary_runtime_stack = item["primaryRuntimeStackName"]
+            recovery_runtime_stack = item["recoveryRuntimeStackName"]
+            if (
+                not isinstance(primary_runtime_stack, str)
+                or not _STACK.fullmatch(primary_runtime_stack)
+                or recovery_runtime_stack != "AaiSecPassiveRegionalCell"
+                or primary_runtime_stack == recovery_runtime_stack
+            ):
+                raise RegionalActivationVerificationError(
+                    "runtime reactivation stack identities are invalid"
+                )
+            primary_runtime_template = item["primaryRuntimeTemplateSha256"]
+            recovery_runtime_template = item["recoveryRuntimeTemplateSha256"]
+            if any(
+                not isinstance(digest, str) or not _SHA256.fullmatch(digest)
+                for digest in (primary_runtime_template, recovery_runtime_template)
+            ):
+                raise RegionalActivationVerificationError(
+                    "runtime reactivation template digests are invalid"
+                )
         return cls(
             transition_id,
             direction,
@@ -535,6 +597,10 @@ class ActivationManifest:
             routing_marker,
             routing_role,
             routing_evidence,
+            primary_runtime_stack,
+            primary_runtime_template,
+            recovery_runtime_stack,
+            recovery_runtime_template,
         )
 
 

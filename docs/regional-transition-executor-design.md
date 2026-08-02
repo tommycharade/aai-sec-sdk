@@ -8,7 +8,8 @@ active-but-not-routed target, fence source execution, deploy the exact verified
 target assembly, or reconcile the live target runtime and Region-local jobs. It
 cannot update DNS, CloudFront, Route 53, Global Accelerator, custom domains or
 API routing. Routing is isolated in `scripts/execute_aws_regional_routing.py`,
-which requires schema-v3 authority and cannot activate compute.
+which requires schema-v3 or schema-v4 authority and cannot activate target
+compute. Schema v4 is mandatory for source restoration and rollback.
 
 A successful target deployment means **active-not-routed**, not “failover
 complete.” The recovery cell has no SCIM endpoint. Existing recovery identities
@@ -29,12 +30,27 @@ the [regional activation design](regional-activation-and-exercise-design.md).
 | `activate-target` | Claims `ACTIVATING_TARGET`, deploys the exact verified CDK assembly, then records `TARGET_ACTIVE_NOT_ROUTED` | Requires `--confirm-target-activation` and a newly verified complete source fence |
 | `reconcile-target` | Claims `RECONCILING_TARGET_JOBS`, verifies exact live target authority and rebuilds Region-local work from DynamoDB, then records `TARGET_JOBS_RECONCILED_NOT_ROUTED` | Requires `--confirm-target-reconciliation`, active-not-routed provider state and a bounded zero-action final check |
 
-The routing component exposes exactly three forward steps: `verify-ingress`
+The routing component exposes three forward steps: `verify-ingress`
 proves invalid-token rejection, authenticated policy read and HSTS UI delivery
 on target canaries; `route-target` repeats source-fence, target-runtime and
 zero-action reconciliation proofs before one transactional Route 53 batch;
 and `verify-stable` repeats stable API/UI probes before committing the next
 journal generation. Each has a distinct confirmation flag.
+
+If stable verification fails after Route 53 accepted the forward batch, five
+separately confirmed rollback steps are available under schema-v4 authority:
+
+| Command | Mutation or proof | Required confirmation |
+| --- | --- | --- |
+| `fence-failed-target` | Fences every target rule, mapping and Lambda and independently verifies it | `--confirm-failed-target-fence` |
+| `reactivate-source` | Restores the exact approved source-template runtime while the target remains fenced | `--confirm-source-reactivation` |
+| `verify-source-ingress` | Proves invalid-token denial, authenticated policy read and HSTS on source canaries | `--confirm-source-ingress` |
+| `route-source-rollback` | Atomically replaces target aliases/marker with source aliases and generation + 2 | `--confirm-rollback-route53` |
+| `verify-source-rollback` | Probes stable API/UI and seals `ROLLED_BACK` in the witness | `--confirm-rollback-completion` |
+
+Generation advances by two because generation + 1 identifies the failed
+target route and generation + 2 identifies the restored source. This avoids an
+ABA state where DNS appears to return to its original generation.
 
 The commands cannot be combined. A later command repeats preflight rather than
 trusting prior terminal output. Source ingress is disabled before Lambda
@@ -75,6 +91,31 @@ The source is fenced only when every rule is `DISABLED`, every mapping is
 `Disabled`, and every function reports exactly zero reserved concurrency. This
 hard fence may make the primary UI/API unavailable and belongs only in an
 approved recovery window.
+
+## Source reactivation boundary
+
+Schema v4 adds the primary and recovery runtime stack names and exact SHA-256
+digests of their processed CloudFormation templates. Before the original
+source is fenced, the executor downloads the provider-processed template,
+maps its bounded logical resources to exact physical resources, and records a
+typed restoration plan. Lambda reserved concurrency may be absent or a literal
+bounded integer; event-source mappings default enabled; EventBridge rules
+default enabled. Dynamic or ambiguous values fail closed.
+
+Rollback re-derives the plan and requires the processed-template digest to
+match retained authority. It first proves the failed target is completely
+fenced, proves the exact current source physical-resource set is also still
+fenced, restores all source Lambda concurrency, mappings and rules, and then
+independently re-reads every resource. Partial mutation is failure, never
+success. If a process stops after the reactivation claim, an exact retry first
+re-proves the target fence and then reapplies the bounded approved source plan;
+it does not require partially restored source resources to be fenced again.
+The source canary must pass before stable DNS can move.
+
+This follows AWS's [processed-template contract](https://docs.aws.amazon.com/AWSCloudFormation/latest/APIReference/API_GetTemplate.html),
+uses [delete-function-concurrency](https://docs.aws.amazon.com/lambda/latest/api/API_DeleteFunctionConcurrency.html)
+to restore functions that had no reservation, and restores exact
+[EventBridge rule state](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-events-rule.html).
 
 ## Active template verification
 
@@ -150,10 +191,12 @@ authority files as this executor plus `--operator-token-file`. Confirmation
 flags are `--confirm-journal-ingress`, `--confirm-route53-cutover`, and
 `--confirm-stable-completion` respectively.
 
-Exit code `2` is fail-closed. The rollback command always refuses until source
-runtime reactivation is independently implemented and proved. Primary
-reactivation, failback and retained live RTO/RPO evidence remain separate
-incomplete gates. See [Regional target readiness and stable ingress](regional-target-readiness-and-stable-ingress-design.md).
+Exit code `2` is fail-closed. Failed-cutover rollback is implemented, but the
+`planned-failback` command still refuses: restoring service after a failed
+cutover is not equivalent to intentionally moving an active recovery cell back
+to primary. Primary target-job reconciliation and its active-template contract
+remain incomplete gates, as does retained live RTO/RPO evidence. See
+[Regional target readiness and stable ingress](regional-target-readiness-and-stable-ingress-design.md).
 
 ## Test evidence and non-guarantees
 
@@ -165,4 +208,4 @@ synthesizes standby and synthetic active variants with separate verifiers.
 
 No live AWS mutation was performed by this tranche. P0-11 remains **Partial**
 until real identity, trust, stable-origin, passive/witness/ingress deployment,
-safe rollback/failback and rehearsed exercise gates all pass.
+planned failback and rehearsed exercise gates all pass.

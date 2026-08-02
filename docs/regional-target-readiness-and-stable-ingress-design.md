@@ -178,10 +178,19 @@ detect divergence but cannot truthfully claim provider-level CAS.
 
 If Route 53 rejects the change batch, no DNS record changes and the journal
 remains `ROUTING_TARGET`. If Route 53 accepts the batch but stable probes fail,
-the executor does not mark the target stable. It also refuses DNS-only
+the executor does not mark the target stable. It also never performs DNS-only
 rollback: the source was intentionally fenced, so routing users back before
-independent source reactivation would create an outage. Symmetric reactivation,
-canary proof and inverse routing are the next required implementation tranche.
+independent source reactivation would create an outage.
+
+Schema-v4 rollback instead performs five ordered, independently confirmed
+steps. It fences and verifies the failed target, restores the original source
+from an exact processed-template-bound plan, proves source canary
+authentication, transactionally moves API/UI/marker back at generation + 2,
+then proves stable service before recording `ROLLED_BACK`. The target remains
+fenced throughout source restoration. Mixed DNS, changed templates, partial
+restoration, stale journal authority and changed retry evidence all fail
+closed. A retry after Route 53 convergence recognizes the exact source records
+and does not submit a duplicate mutation.
 
 Failback is not implemented by swapping labels in the failover code. The
 primary runtime needs the same active-template verifier, target job
@@ -199,9 +208,12 @@ Live deployment and routing still require:
 - migration of the primary control API away from its currently open raw
   execute-api endpoint before primary ingress can pass the deployment guard;
 - customer approval for the dedicated routing role and organization-level DNS
-  write restriction; and
+  write restriction;
+- schema-v4 retained digests for both exact provider-processed runtime
+  templates; and
 - a scheduled two-person recovery exercise.
 
 No Route 53 record, certificate, custom domain, UI proxy or live AWS transition
-was created by this implementation tranche. The executor is implemented and
-synthetically tested; P0-11 remains **Partial**.
+was created by this implementation tranche. Forward routing and failed-cutover
+rollback are implemented and synthetically tested; planned failback and the
+live exercise remain incomplete, so P0-11 remains **Partial**.

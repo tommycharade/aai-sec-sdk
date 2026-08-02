@@ -43,7 +43,7 @@ strips ambient CDK authority, derives the AWS account through STS, verifies the
 template, binds its SHA-256 and deploys only the exact `cdk.out` assembly. It
 cannot initialize the journal.
 
-## Schema-v2 and schema-v3 transition authority
+## Schema-v2 through schema-v4 transition authority
 
 Mutating transition commands reject legacy schema-v1 manifests. Schema v2 adds:
 
@@ -71,6 +71,12 @@ generation marker, dedicated routing-role ARN and retained routing-authority
 evidence reference. Schema v2 remains valid for non-routing runtime steps but
 is rejected before ingress journaling or Route 53 access.
 
+Failed-cutover rollback requires schema v4. It additionally binds each runtime
+stack name and the SHA-256 of its exact provider-processed CloudFormation
+template. These values authorize restoration of a known runtime state; they do
+not authorize arbitrary concurrency, mapping or schedule changes. Schema v3
+continues to support forward routing but cannot reactivate a fenced source.
+
 ## State model
 
 The strongly consistent singleton record is `pk=AUTHORITY, sk=CURRENT`.
@@ -90,6 +96,22 @@ STABLE
   -> ROUTING_TARGET
   -> VERIFYING_STABLE_ROUTE
   -> STABLE (generation + 1, activeRegion = target)
+```
+
+If stable smoke fails after the forward Route 53 batch, the same transition
+continues instead of opening competing authority:
+
+```text
+VERIFYING_STABLE_ROUTE
+  -> FENCING_FAILED_TARGET
+  -> FAILED_TARGET_FENCED
+  -> REACTIVATING_SOURCE
+  -> SOURCE_REACTIVATED_NOT_ROUTED
+  -> VERIFYING_SOURCE_INGRESS
+  -> SOURCE_INGRESS_VERIFIED_NOT_ROUTED
+  -> ROUTING_SOURCE_ROLLBACK
+  -> VERIFYING_SOURCE_ROLLBACK
+  -> STABLE (generation + 2, activeRegion = source, event = ROLLED_BACK)
 ```
 
 Every phase change is one DynamoDB transaction containing:
@@ -121,6 +143,13 @@ single DynamoDB transaction that increments generation, changes active Region,
 removes active-transition fields and appends the final immutable evidence
 event. An exact retry verifies the existing event digest; a changed stable
 probe or substituted authority is denied.
+
+Rollback completion uses the same transactional boundary. It increments to
+the original generation plus two, restores `activeRegion` to the source,
+removes active-transition fields, and appends an immutable `ROLLED_BACK` event.
+`lastCompletedTransitionId` still records the transition UUID; the event phase
+distinguishes rollback from successful cutover. Completed command retries must
+reproduce the exact evidence digest and issue no duplicate Route 53 mutation.
 
 ## Initialization
 
@@ -179,6 +208,9 @@ python3 scripts/deploy_aws_active_cell.py initialize-journal \
 | One operator self-approves | Exactly two distinct Entra UUIDs and evidence refs | Approval digest in every journal event |
 | Approval substitution | Sorted approvals included in `authoritySha256` | Retained bundle identity check fails |
 | Process dies after partial AWS mutation | In-progress phase is committed first | Same exact authority can resume; competitors denied |
+| Failed target remains active while source is restored | Target must reach the independently verified fence phase first | Source-reactivation phase is unreachable out of order |
+| Rollback recreates the original DNS generation (ABA) | Inverse batch writes generation + 2 | Exact marker and journal generation converge together |
+| Restored source differs from reviewed runtime | Schema-v4 processed-template digest and exact typed restore plan | Every function, mapping and rule is independently re-read |
 | Event replay or overwrite | Revision/phase event key plus `attribute_not_exists` | Transaction fails atomically |
 | Witness becomes replicated | Independent template and live table posture verifiers | Deployment/execution denied |
 | Table/key is removed | Deletion protection, PITR and retain policies | Template/live posture denied if weakened |
@@ -193,8 +225,9 @@ replacement.
 ## Current non-guarantees
 
 Stable ingress, public authenticated smoke, journal-governed transactional
-Route 53 movement and transition sealing are implemented but have not been run
-against live customer domains. Primary reactivation, safe rollback and
-failback remain deliberately unavailable. The live witness is not deployed or
-initialized. Those gates and a retained exercise remain required before P0-11
-is complete.
+Route 53 movement, failed-target fencing, exact source reactivation, inverse
+routing and rollback sealing are implemented but have not been run against
+live customer domains. Planned failback remains deliberately unavailable until
+primary-side reconciliation is implemented. The live witness is not deployed
+or initialized. Those gates and a retained exercise remain required before
+P0-11 is complete.

@@ -79,6 +79,91 @@ class SourceResources:
         """Return the digest of the exact source resource set."""
         return hashlib.sha256(self.canonical_json().encode()).hexdigest()
 
+    def fence_evidence(self) -> dict[str, Any]:
+        """Return deterministic evidence for an independently proved fence."""
+        return {
+            "eventRuleCount": len(self.event_rules),
+            "eventSourceMappingCount": len(self.event_source_mappings),
+            "functionCount": len(self.functions),
+            "resourceSetSha256": self.sha256(),
+            "status": "source-fence-verified",
+        }
+
+
+@dataclass(frozen=True)
+class FunctionRestoreState:
+    """Reviewed reserved-concurrency state for one fenced Lambda."""
+
+    function_name: str
+    reserved_concurrency: int | None
+
+
+@dataclass(frozen=True)
+class MappingRestoreState:
+    """Reviewed enabled state for one Lambda event-source mapping."""
+
+    mapping_id: str
+    enabled: bool
+
+
+@dataclass(frozen=True)
+class RuleRestoreState:
+    """Reviewed enabled state for one EventBridge rule."""
+
+    rule_name: str
+    enabled: bool
+
+
+@dataclass(frozen=True)
+class SourceReactivationPlan:
+    """Exact processed-template plan needed to reverse one source fence."""
+
+    stack_name: str
+    region: str
+    template_sha256: str
+    functions: tuple[FunctionRestoreState, ...]
+    event_source_mappings: tuple[MappingRestoreState, ...]
+    event_rules: tuple[RuleRestoreState, ...]
+
+    def canonical_json(self) -> str:
+        """Return deterministic authority suitable for journal evidence."""
+        return json.dumps(
+            {
+                "eventRules": [
+                    {"enabled": item.enabled, "ruleName": item.rule_name}
+                    for item in self.event_rules
+                ],
+                "eventSourceMappings": [
+                    {"enabled": item.enabled, "mappingId": item.mapping_id}
+                    for item in self.event_source_mappings
+                ],
+                "functions": [
+                    {
+                        "functionName": item.function_name,
+                        "reservedConcurrency": item.reserved_concurrency,
+                    }
+                    for item in self.functions
+                ],
+                "region": self.region,
+                "stackName": self.stack_name,
+                "templateSha256": self.template_sha256,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def sha256(self) -> str:
+        """Bind the complete reversible execution-state plan."""
+        return hashlib.sha256(self.canonical_json().encode()).hexdigest()
+
+    def resources(self) -> SourceResources:
+        """Return the exact physical resource set that must remain fenced."""
+        return SourceResources(
+            tuple(item.function_name for item in self.functions),
+            tuple(item.mapping_id for item in self.event_source_mappings),
+            tuple(item.rule_name for item in self.event_rules),
+        )
+
 
 @dataclass(frozen=True)
 class TargetResources:
@@ -307,6 +392,246 @@ def discover_target_resources(
     )
 
 
+def discover_source_reactivation_plan(
+    resources: SourceResources,
+    *,
+    stack_name: str,
+    region: str,
+    profile: str,
+    runner: Runner = subprocess.run,
+) -> SourceReactivationPlan:
+    """Derive a reversible fence plan from the exact processed stack template."""
+    response = _aws(
+        [
+            "cloudformation",
+            "get-template",
+            "--stack-name",
+            stack_name,
+            "--template-stage",
+            "Processed",
+        ],
+        profile=profile,
+        region=region,
+        runner=runner,
+    )
+    template = response.get("TemplateBody")
+    stages = response.get("StagesAvailable")
+    if not isinstance(template, dict) or not isinstance(stages, list) or "Processed" not in stages:
+        raise ActiveCellDeploymentError("processed source template is unavailable")
+    try:
+        template_payload = json.dumps(template, sort_keys=True, separators=(",", ":")).encode()
+    except (TypeError, ValueError) as error:
+        raise ActiveCellDeploymentError("processed source template is malformed") from error
+    if len(template_payload) > 1_048_576:
+        raise ActiveCellDeploymentError("processed source template exceeds 1 MiB")
+    template_resources = template.get("Resources")
+    if not isinstance(template_resources, dict) or not 1 <= len(template_resources) <= 500:
+        raise ActiveCellDeploymentError("processed source resources are malformed")
+
+    physical_to_logical: dict[tuple[str, str], str] = {}
+    token: str | None = None
+    pages = 0
+    while True:
+        command = ["cloudformation", "list-stack-resources", "--stack-name", stack_name]
+        if token is not None:
+            command.extend(["--next-token", token])
+        inventory = _aws(command, profile=profile, region=region, runner=runner)
+        pages += 1
+        if pages > 10:
+            raise ActiveCellDeploymentError("source plan discovery exceeded 10 pages")
+        summaries = inventory.get("StackResourceSummaries")
+        if not isinstance(summaries, list) or len(summaries) > 100:
+            raise ActiveCellDeploymentError("source plan resource inventory is malformed")
+        for item in summaries:
+            if not isinstance(item, dict):
+                raise ActiveCellDeploymentError("source plan resource is malformed")
+            kind = item.get("ResourceType")
+            physical_id = item.get("PhysicalResourceId")
+            logical_id = item.get("LogicalResourceId")
+            if kind not in _RESOURCE_LIMITS:
+                continue
+            key = (str(kind), str(physical_id))
+            if (
+                not isinstance(physical_id, str)
+                or not isinstance(logical_id, str)
+                or key in physical_to_logical
+            ):
+                raise ActiveCellDeploymentError("source plan identity is malformed or duplicated")
+            physical_to_logical[key] = logical_id
+        next_token = inventory.get("NextToken")
+        if next_token is None:
+            break
+        if not isinstance(next_token, str) or not next_token or next_token == token:
+            raise ActiveCellDeploymentError("source plan pagination is malformed")
+        token = next_token
+
+    def properties(kind: str, physical_id: str) -> dict[str, Any]:
+        logical_id = physical_to_logical.get((kind, physical_id))
+        value = template_resources.get(logical_id) if logical_id is not None else None
+        raw_properties = value.get("Properties", {}) if isinstance(value, dict) else None
+        if (
+            not isinstance(value, dict)
+            or value.get("Type") != kind
+            or not isinstance(raw_properties, dict)
+        ):
+            raise ActiveCellDeploymentError("source resource is not bound to processed template")
+        return raw_properties
+
+    functions: list[FunctionRestoreState] = []
+    for function_name in resources.functions:
+        desired = properties("AWS::Lambda::Function", function_name).get(
+            "ReservedConcurrentExecutions"
+        )
+        if desired is not None and (
+            isinstance(desired, bool) or not isinstance(desired, int) or not 1 <= desired <= 1_000
+        ):
+            raise ActiveCellDeploymentError("source Lambda concurrency is not a safe literal")
+        functions.append(FunctionRestoreState(function_name, desired))
+    mappings: list[MappingRestoreState] = []
+    for mapping_id in resources.event_source_mappings:
+        desired = properties("AWS::Lambda::EventSourceMapping", mapping_id).get("Enabled", True)
+        if not isinstance(desired, bool):
+            raise ActiveCellDeploymentError("source mapping enabled state is not a literal")
+        mappings.append(MappingRestoreState(mapping_id, desired))
+    rules: list[RuleRestoreState] = []
+    for rule_name in resources.event_rules:
+        desired = properties("AWS::Events::Rule", rule_name).get("State", "ENABLED")
+        if desired not in {"ENABLED", "DISABLED"}:
+            raise ActiveCellDeploymentError("source rule state is not safely reversible")
+        rules.append(RuleRestoreState(rule_name, desired == "ENABLED"))
+    return SourceReactivationPlan(
+        stack_name,
+        region,
+        hashlib.sha256(template_payload).hexdigest(),
+        tuple(functions),
+        tuple(mappings),
+        tuple(rules),
+    )
+
+
+def verify_source_reactivation(
+    plan: SourceReactivationPlan,
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+) -> dict[str, Any]:
+    """Prove every source execution path matches its reviewed active state."""
+    for function in plan.functions:
+        response = _aws(
+            [
+                "lambda",
+                "get-function-concurrency",
+                "--function-name",
+                function.function_name,
+            ],
+            profile=profile,
+            region=plan.region,
+            runner=runner,
+        )
+        if response.get("ReservedConcurrentExecutions") != function.reserved_concurrency or (
+            function.reserved_concurrency is None and response
+        ):
+            raise ActiveCellDeploymentError(
+                f"source Lambda concurrency was not restored: {function.function_name}"
+            )
+    for mapping in plan.event_source_mappings:
+        response = _aws(
+            ["lambda", "get-event-source-mapping", "--uuid", mapping.mapping_id],
+            profile=profile,
+            region=plan.region,
+            runner=runner,
+        )
+        expected = "Enabled" if mapping.enabled else "Disabled"
+        if response.get("UUID") != mapping.mapping_id or response.get("State") != expected:
+            raise ActiveCellDeploymentError(
+                f"source event-source mapping was not restored: {mapping.mapping_id}"
+            )
+    for rule in plan.event_rules:
+        response = _aws(
+            ["events", "describe-rule", "--name", rule.rule_name],
+            profile=profile,
+            region=plan.region,
+            runner=runner,
+        )
+        expected = "ENABLED" if rule.enabled else "DISABLED"
+        if response.get("Name") != rule.rule_name or response.get("State") != expected:
+            raise ActiveCellDeploymentError(
+                f"source EventBridge rule was not restored: {rule.rule_name}"
+            )
+    return {
+        "planSha256": plan.sha256(),
+        "resourceCount": (
+            len(plan.functions) + len(plan.event_source_mappings) + len(plan.event_rules)
+        ),
+        "status": "source-runtime-reactivated",
+        "templateSha256": plan.template_sha256,
+    }
+
+
+def reactivate_source(
+    plan: SourceReactivationPlan,
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+) -> dict[str, Any]:
+    """Reverse one source fence in bounded order and independently verify it."""
+    failures: list[str] = []
+    # Restore direct invocation capacity before asynchronous consumers. Stable
+    # DNS still points elsewhere, while canary ingress becomes testable.
+    for function in plan.functions:
+        command = ["lambda"]
+        if function.reserved_concurrency is None:
+            command.extend(
+                ["delete-function-concurrency", "--function-name", function.function_name]
+            )
+        else:
+            command.extend(
+                [
+                    "put-function-concurrency",
+                    "--function-name",
+                    function.function_name,
+                    "--reserved-concurrent-executions",
+                    str(function.reserved_concurrency),
+                ]
+            )
+        try:
+            _aws(command, profile=profile, region=plan.region, runner=runner)
+        except ActiveCellDeploymentError:
+            failures.append(f"function:{function.function_name}")
+    for mapping in plan.event_source_mappings:
+        try:
+            _aws(
+                [
+                    "lambda",
+                    "update-event-source-mapping",
+                    "--uuid",
+                    mapping.mapping_id,
+                    "--enabled" if mapping.enabled else "--no-enabled",
+                ],
+                profile=profile,
+                region=plan.region,
+                runner=runner,
+            )
+        except ActiveCellDeploymentError:
+            failures.append(f"mapping:{mapping.mapping_id}")
+    for rule in plan.event_rules:
+        operation = "enable-rule" if rule.enabled else "disable-rule"
+        try:
+            _aws(
+                ["events", operation, "--name", rule.rule_name],
+                profile=profile,
+                region=plan.region,
+                runner=runner,
+            )
+        except ActiveCellDeploymentError:
+            failures.append(f"rule:{rule.rule_name}")
+    if failures:
+        raise ActiveCellDeploymentError(
+            f"source reactivation incomplete for {len(failures)} resources: {','.join(failures)}"
+        )
+    return verify_source_reactivation(plan, profile=profile, runner=runner)
+
+
 def verify_source_fence(
     resources: SourceResources,
     *,
@@ -344,13 +669,7 @@ def verify_source_fence(
         ).get("ReservedConcurrentExecutions")
         if concurrency != 0:
             raise ActiveCellDeploymentError(f"source Lambda is not concurrency-fenced: {function}")
-    return {
-        "eventRuleCount": len(resources.event_rules),
-        "eventSourceMappingCount": len(resources.event_source_mappings),
-        "functionCount": len(resources.functions),
-        "resourceSetSha256": resources.sha256(),
-        "status": "source-fence-verified",
-    }
+    return resources.fence_evidence()
 
 
 def verify_target_runtime(
@@ -978,21 +1297,62 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif arguments.command == "fence-source":
             if not arguments.confirm_source_fence:
                 raise ActiveCellDeploymentError("--confirm-source-fence is required")
+            manifest.require_reactivation_authority()
+            expected_stack = (
+                manifest.primary_runtime_stack_name
+                if manifest.source_region == manifest.primary_region
+                else manifest.recovery_runtime_stack_name
+            )
+            expected_template = (
+                manifest.primary_runtime_template_sha256
+                if manifest.source_region == manifest.primary_region
+                else manifest.recovery_runtime_template_sha256
+            )
+            if source_stack_name != expected_stack or expected_template is None:
+                raise ActiveCellDeploymentError(
+                    "source runtime stack differs from reactivation authority"
+                )
+            reactivation_plan = discover_source_reactivation_plan(
+                resources,
+                stack_name=source_stack_name,
+                region=manifest.source_region,
+                profile=arguments.profile,
+            )
+            if reactivation_plan.template_sha256 != expected_template:
+                raise ActiveCellDeploymentError(
+                    "processed source template differs from approved reactivation authority"
+                )
+            if journal_state.phase == "STABLE":
+                verify_source_reactivation(
+                    reactivation_plan,
+                    profile=arguments.profile,
+                )
             result["journalClaim"] = journal.claim_source_fence(
                 witness, manifest, now=int(time.time())
             )
-            result["sourceFence"] = fence_source(
+            source_fence = fence_source(
                 resources,
                 profile=arguments.profile,
                 region=manifest.source_region,
             )
+            result["sourceFence"] = source_fence
+            result["sourceReactivationPlanSha256"] = reactivation_plan.sha256()
+            step_evidence = {
+                "reactivationPlan": json.loads(reactivation_plan.canonical_json()),
+                "sourceFence": source_fence,
+            }
+            step_sha256 = hashlib.sha256(
+                json.dumps(step_evidence, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
             result["journal"] = journal.advance_phase(
                 witness,
                 manifest,
                 expected_phase="FENCING_SOURCE",
                 next_phase="SOURCE_FENCED",
                 now=int(time.time()),
+                step_evidence_sha256=step_sha256,
             )["journal"]
+            result["stepEvidenceSha256"] = step_sha256
         elif arguments.command == "reconcile-target":
             environment = active_environment(
                 manifest,

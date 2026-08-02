@@ -109,7 +109,7 @@ def require_routing_role(
     profile: str,
     runner: Runner = subprocess.run,
 ) -> dict[str, str]:
-    """Require an STS session for the exact schema-v3 dedicated routing role."""
+    """Require an STS session for the exact schema-v3-or-v4 routing role."""
     manifest.require_routing_authority()
     role_arn = manifest.routing_role_arn
     if role_arn is None:
@@ -933,10 +933,388 @@ def verify_stable_step(
     }
 
 
-def refuse_unsafe_rollback() -> None:
-    """Fail closed until source runtime reactivation has independent evidence."""
+def fence_failed_target_step(
+    witness: Any,
+    manifest: activation.ActivationManifest,
+    target_resources: active.SourceResources,
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+    clock: Clock = time.time,
+) -> dict[str, Any]:
+    """Fence every failed-target execution path before source reactivation."""
+    manifest.require_reactivation_authority()
+    require_routing_role(manifest, profile=profile, runner=runner)
+    state = journal.read_state(witness, manifest)
+    if state.phase == "FAILED_TARGET_FENCED":
+        claimed = {"claim": "resume-completed", "journal": state.evidence()}
+        target_fence = active.verify_source_fence(
+            target_resources,
+            profile=profile,
+            region=manifest.target_region,
+            runner=runner,
+        )
+    else:
+        claimed = journal.advance_phase(
+            witness,
+            manifest,
+            expected_phase="VERIFYING_STABLE_ROUTE",
+            next_phase="FENCING_FAILED_TARGET",
+            now=int(clock()),
+        )
+        target_fence = active.fence_source(
+            target_resources,
+            profile=profile,
+            region=manifest.target_region,
+            runner=runner,
+        )
+    digest = hashlib.sha256(
+        json.dumps(target_fence, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    completed = journal.advance_phase(
+        witness,
+        manifest,
+        expected_phase="FENCING_FAILED_TARGET",
+        next_phase="FAILED_TARGET_FENCED",
+        now=int(clock()),
+        step_evidence_sha256=digest,
+    )
+    return {
+        "journalClaim": claimed,
+        "journal": completed["journal"],
+        "stepEvidenceSha256": digest,
+        "targetFence": target_fence,
+        "trafficRouted": True,
+    }
+
+
+def reactivate_source_step(
+    witness: Any,
+    manifest: activation.ActivationManifest,
+    target_resources: active.SourceResources,
+    source_plan: active.SourceReactivationPlan,
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+    clock: Clock = time.time,
+) -> dict[str, Any]:
+    """Re-prove target fencing and restore the exact approved source runtime."""
+    manifest.require_reactivation_authority()
+    require_routing_role(manifest, profile=profile, runner=runner)
+    expected_stack = (
+        manifest.primary_runtime_stack_name
+        if manifest.source_region == manifest.primary_region
+        else manifest.recovery_runtime_stack_name
+    )
+    expected_template = (
+        manifest.primary_runtime_template_sha256
+        if manifest.source_region == manifest.primary_region
+        else manifest.recovery_runtime_template_sha256
+    )
+    if (
+        source_plan.region != manifest.source_region
+        or source_plan.stack_name != expected_stack
+        or source_plan.template_sha256 != expected_template
+    ):
+        raise RegionalRoutingError("source reactivation plan differs from approved authority")
+    state = journal.read_state(witness, manifest)
+    completed_retry = state.phase == "SOURCE_REACTIVATED_NOT_ROUTED"
+    fresh_reactivation = state.phase == "FAILED_TARGET_FENCED"
+    if completed_retry:
+        claimed = {"claim": "resume-completed", "journal": state.evidence()}
+    else:
+        claimed = journal.advance_phase(
+            witness,
+            manifest,
+            expected_phase="FAILED_TARGET_FENCED",
+            next_phase="REACTIVATING_SOURCE",
+            now=int(clock()),
+        )
+    target_fence = active.verify_source_fence(
+        target_resources,
+        profile=profile,
+        region=manifest.target_region,
+        runner=runner,
+    )
+    if completed_retry:
+        source_fence = source_plan.resources().fence_evidence()
+        source_runtime = active.verify_source_reactivation(
+            source_plan, profile=profile, runner=runner
+        )
+    else:
+        if fresh_reactivation:
+            source_fence = active.verify_source_fence(
+                source_plan.resources(),
+                profile=profile,
+                region=manifest.source_region,
+                runner=runner,
+            )
+        else:
+            # A crash after the REACTIVATING_SOURCE claim may leave a mixture
+            # of fenced and restored values. The target is re-proved fenced
+            # above; replay the bounded approved plan instead of deadlocking.
+            source_fence = source_plan.resources().fence_evidence()
+        source_runtime = active.reactivate_source(source_plan, profile=profile, runner=runner)
+    evidence = {
+        "sourceFenceBeforeRestore": source_fence,
+        "sourceRuntime": source_runtime,
+        "targetFence": target_fence,
+    }
+    digest = hashlib.sha256(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    completed = journal.advance_phase(
+        witness,
+        manifest,
+        expected_phase="REACTIVATING_SOURCE",
+        next_phase="SOURCE_REACTIVATED_NOT_ROUTED",
+        now=int(clock()),
+        step_evidence_sha256=digest,
+    )
+    return {
+        "journalClaim": claimed,
+        "journal": completed["journal"],
+        "reactivation": evidence,
+        "stepEvidenceSha256": digest,
+        "trafficRouted": True,
+    }
+
+
+def verify_source_ingress_step(
+    witness: Any,
+    manifest: activation.ActivationManifest,
+    source: IngressCell,
+    token: str,
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+    probe: HttpProbe = _http_probe,
+    clock: Clock = time.time,
+) -> dict[str, Any]:
+    """Prove reactivated source canaries before rollback routing."""
+    manifest.require_reactivation_authority()
+    require_routing_role(manifest, profile=profile, runner=runner)
+    state = journal.read_state(witness, manifest)
+    if state.phase == "SOURCE_INGRESS_VERIFIED_NOT_ROUTED":
+        # A crash may occur after the completion CAS but before returning output.
+        # Re-probe below and bind the retry to the immutable completion event.
+        claimed = {"claim": "resume-completed", "journal": state.evidence()}
+    else:
+        claimed = journal.advance_phase(
+            witness,
+            manifest,
+            expected_phase="SOURCE_REACTIVATED_NOT_ROUTED",
+            next_phase="VERIFYING_SOURCE_INGRESS",
+            now=int(clock()),
+        )
+    smoke = smoke_ingress(source.canary_api_domain, source.canary_ui_domain, token, probe=probe)
+    evidence = {"ingressEvidenceSha256": source.evidence_sha256, "smoke": smoke}
+    digest = hashlib.sha256(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    completed = journal.advance_phase(
+        witness,
+        manifest,
+        expected_phase="VERIFYING_SOURCE_INGRESS",
+        next_phase="SOURCE_INGRESS_VERIFIED_NOT_ROUTED",
+        now=int(clock()),
+        step_evidence_sha256=digest,
+    )
+    return {
+        "journalClaim": claimed,
+        "journal": completed["journal"],
+        "sourceSmoke": smoke,
+        "stepEvidenceSha256": digest,
+        "trafficRouted": True,
+    }
+
+
+def route_source_rollback_step(
+    witness: Any,
+    manifest: activation.ActivationManifest,
+    source: IngressCell,
+    target: IngressCell,
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+    clock: Clock = time.time,
+    sleeper: Sleeper = time.sleep,
+    attempts: int = 60,
+) -> dict[str, Any]:
+    """Move stable aliases from failed target to reactivated source atomically."""
+    manifest.require_reactivation_authority()
+    if isinstance(attempts, bool) or not 1 <= attempts <= 120:
+        raise RegionalRoutingError("Route 53 wait attempts must be 1 through 120")
+    role = require_routing_role(manifest, profile=profile, runner=runner)
+    state = journal.read_state(witness, manifest)
+    if state.phase == "VERIFYING_SOURCE_ROLLBACK":
+        # Route 53 may have converged and the journal may have advanced before
+        # the operator received output. Exact DNS/evidence checks below make
+        # this recovery path idempotent without issuing another mutation.
+        claimed = {"claim": "resume-completed", "journal": state.evidence()}
+    else:
+        claimed = journal.advance_phase(
+            witness,
+            manifest,
+            expected_phase="SOURCE_INGRESS_VERIFIED_NOT_ROUTED",
+            next_phase="ROUTING_SOURCE_ROLLBACK",
+            now=int(clock()),
+        )
+    generation = manifest.expected_routing_generation
+    if generation is None:
+        raise RegionalRoutingError("routing generation authority is unavailable")
+    target_state = expected_route_state(
+        manifest,
+        target,
+        generation=generation + 1,
+        transition_id=manifest.transition_id,
+        marker_required=True,
+    )
+    source_state = expected_route_state(
+        manifest,
+        source,
+        generation=generation + 2,
+        transition_id=manifest.transition_id,
+        marker_required=True,
+    )
+    observed = read_route_state(manifest, profile=profile, runner=runner)
+    change_id: str | None = None
+    if observed == target_state:
+        changes = [
+            {"Action": "DELETE", "ResourceRecordSet": record} for record in target_state.values()
+        ] + [{"Action": "CREATE", "ResourceRecordSet": record} for record in source_state.values()]
+        response = _aws(
+            [
+                "route53",
+                "change-resource-record-sets",
+                "--hosted-zone-id",
+                manifest.hosted_zone_id,
+                "--change-batch",
+                json.dumps(
+                    {
+                        "Changes": changes,
+                        "Comment": f"AAI Security rollback {manifest.transition_id}",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ],
+            profile=profile,
+            region=manifest.primary_region,
+            runner=runner,
+        )
+        info = response.get("ChangeInfo")
+        change_id = info.get("Id") if isinstance(info, dict) else None
+        if (
+            not isinstance(info, dict)
+            or not isinstance(change_id, str)
+            or not _CHANGE_ID.fullmatch(change_id)
+            or info.get("Status") not in {"PENDING", "INSYNC"}
+        ):
+            raise RegionalRoutingError("Route 53 rollback change identity is malformed")
+        for attempt in range(attempts):
+            change = _aws(
+                ["route53", "get-change", "--id", change_id],
+                profile=profile,
+                region=manifest.primary_region,
+                runner=runner,
+            ).get("ChangeInfo")
+            if (
+                isinstance(change, dict)
+                and change.get("Id") == change_id
+                and change.get("Status") == "INSYNC"
+            ):
+                break
+            if attempt + 1 == attempts:
+                raise RegionalRoutingError("Route 53 rollback did not become INSYNC")
+            sleeper(5.0)
+    elif observed != source_state:
+        raise RegionalRoutingError("stable records differ from failed target and rollback source")
+    final_records = read_route_state(manifest, profile=profile, runner=runner)
+    if final_records != source_state:
+        raise RegionalRoutingError("stable records did not converge on rollback source")
+    evidence = {
+        "changeId": change_id or "recovered-from-source-records",
+        "records": canonical_records(final_records),
+        "routingRole": role,
+    }
+    digest = hashlib.sha256(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    completed = journal.advance_phase(
+        witness,
+        manifest,
+        expected_phase="ROUTING_SOURCE_ROLLBACK",
+        next_phase="VERIFYING_SOURCE_ROLLBACK",
+        now=int(clock()),
+        step_evidence_sha256=digest,
+    )
+    return {
+        "changeId": change_id,
+        "journalClaim": claimed,
+        "journal": completed["journal"],
+        "records": canonical_records(final_records),
+        "stepEvidenceSha256": digest,
+        "trafficRouted": True,
+    }
+
+
+def verify_source_rollback_step(
+    witness: Any,
+    manifest: activation.ActivationManifest,
+    source: IngressCell,
+    token: str,
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+    probe: HttpProbe = _http_probe,
+    clock: Clock = time.time,
+) -> dict[str, Any]:
+    """Verify stable source service and seal a rolled-back generation."""
+    manifest.require_reactivation_authority()
+    require_routing_role(manifest, profile=profile, runner=runner)
+    generation = manifest.expected_routing_generation
+    if generation is None:
+        raise RegionalRoutingError("routing generation authority is unavailable")
+    expected = expected_route_state(
+        manifest,
+        source,
+        generation=generation + 2,
+        transition_id=manifest.transition_id,
+        marker_required=True,
+    )
+    observed = read_route_state(manifest, profile=profile, runner=runner)
+    if observed != expected:
+        raise RegionalRoutingError("stable rollback aliases or marker changed before smoke")
+    smoke = smoke_ingress(manifest.stable_api_domain, manifest.stable_ui_domain, token, probe=probe)
+    evidence = {
+        "ingressEvidenceSha256": source.evidence_sha256,
+        "outcome": "ROLLED_BACK",
+        "records": canonical_records(observed),
+        "smoke": smoke,
+    }
+    digest = hashlib.sha256(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    completed = journal.complete_rollback(
+        witness,
+        manifest,
+        now=int(clock()),
+        step_evidence_sha256=digest,
+    )
+    return {
+        "journal": completed["journal"],
+        "outcome": "ROLLED_BACK",
+        "stableSmoke": smoke,
+        "stepEvidenceSha256": digest,
+        "trafficRouted": True,
+    }
+
+
+def refuse_unsafe_failback() -> None:
+    """Fail closed until the primary target adapter supports planned failback."""
     raise RegionalRoutingError(
-        "route rollback is prohibited until the fenced source is independently reactivated"
+        "planned failback is prohibited until primary target reconciliation is implemented"
     )
 
 
@@ -961,7 +1339,17 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("verify-ingress", "route-target", "verify-stable", "rollback"),
+        choices=(
+            "verify-ingress",
+            "route-target",
+            "verify-stable",
+            "fence-failed-target",
+            "reactivate-source",
+            "verify-source-ingress",
+            "route-source-rollback",
+            "verify-source-rollback",
+            "planned-failback",
+        ),
     )
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--regional-recovery-config", type=Path, required=True)
@@ -972,6 +1360,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--confirm-journal-ingress", action="store_true")
     parser.add_argument("--confirm-route53-cutover", action="store_true")
     parser.add_argument("--confirm-stable-completion", action="store_true")
+    parser.add_argument("--confirm-failed-target-fence", action="store_true")
+    parser.add_argument("--confirm-source-reactivation", action="store_true")
+    parser.add_argument("--confirm-source-ingress", action="store_true")
+    parser.add_argument("--confirm-rollback-route53", action="store_true")
+    parser.add_argument("--confirm-rollback-completion", action="store_true")
     return parser
 
 
@@ -979,8 +1372,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Repeat provider preflight and execute exactly one confirmed route step."""
     arguments = _parser().parse_args(argv)
     try:
-        if arguments.command == "rollback":
-            refuse_unsafe_rollback()
+        if arguments.command == "planned-failback":
+            refuse_unsafe_failback()
         manifest = activation.ActivationManifest.parse(
             arguments.manifest.read_text(encoding="utf-8")
         )
@@ -1082,7 +1475,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             result["status"] = "target-routed-awaiting-stable-verification"
-        else:
+        elif arguments.command == "verify-stable":
             if not arguments.confirm_stable_completion:
                 raise RegionalRoutingError("--confirm-stable-completion is required")
             result.update(
@@ -1095,6 +1488,94 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             result["status"] = "target-stable-generation-completed"
+        elif arguments.command == "fence-failed-target":
+            if not arguments.confirm_failed_target_fence:
+                raise RegionalRoutingError("--confirm-failed-target-fence is required")
+            rollback_target_resources = active.discover_source_resources(
+                regional,
+                stack_name=passive_cell.stack_name,
+                source_region=manifest.target_region,
+                profile=arguments.profile,
+            )
+            result.update(
+                fence_failed_target_step(
+                    witness,
+                    manifest,
+                    rollback_target_resources,
+                    profile=arguments.profile,
+                )
+            )
+            result["status"] = "failed-target-fenced-before-source-reactivation"
+        elif arguments.command == "reactivate-source":
+            if not arguments.confirm_source_reactivation:
+                raise RegionalRoutingError("--confirm-source-reactivation is required")
+            rollback_target_resources = active.discover_source_resources(
+                regional,
+                stack_name=passive_cell.stack_name,
+                source_region=manifest.target_region,
+                profile=arguments.profile,
+            )
+            source_resources = active.discover_source_resources(
+                regional,
+                stack_name=regional.stack_name,
+                source_region=manifest.source_region,
+                profile=arguments.profile,
+            )
+            source_plan = active.discover_source_reactivation_plan(
+                source_resources,
+                stack_name=regional.stack_name,
+                region=manifest.source_region,
+                profile=arguments.profile,
+            )
+            result.update(
+                reactivate_source_step(
+                    witness,
+                    manifest,
+                    rollback_target_resources,
+                    source_plan,
+                    profile=arguments.profile,
+                )
+            )
+            result["status"] = "source-reactivated-target-fenced-not-routed"
+        elif arguments.command == "verify-source-ingress":
+            if not arguments.confirm_source_ingress:
+                raise RegionalRoutingError("--confirm-source-ingress is required")
+            result.update(
+                verify_source_ingress_step(
+                    witness,
+                    manifest,
+                    primary,
+                    token,
+                    profile=arguments.profile,
+                )
+            )
+            result["status"] = "source-ingress-verified-before-rollback"
+        elif arguments.command == "route-source-rollback":
+            if not arguments.confirm_rollback_route53:
+                raise RegionalRoutingError("--confirm-rollback-route53 is required")
+            result.update(
+                route_source_rollback_step(
+                    witness,
+                    manifest,
+                    primary,
+                    recovery_cell,
+                    profile=arguments.profile,
+                )
+            )
+            result["status"] = "source-routed-awaiting-rollback-verification"
+        else:
+            if not arguments.confirm_rollback_completion:
+                raise RegionalRoutingError("--confirm-rollback-completion is required")
+            result.update(
+                verify_source_rollback_step(
+                    witness,
+                    manifest,
+                    primary,
+                    token,
+                    profile=arguments.profile,
+                )
+            )
+            result["status"] = "source-stable-transition-rolled-back"
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     except (

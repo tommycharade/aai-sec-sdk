@@ -175,6 +175,149 @@ def test_source_discovery_rejects_unstable_or_duplicate_authority() -> None:
         module.discover_source_resources(_regional(module), profile="synthetic", runner=duplicate)
 
 
+def test_source_reactivation_plan_is_template_bound_and_exactly_restored() -> None:
+    module = _load()
+    resources = module.SourceResources(
+        ("fn-default", "fn-reserved"),
+        ("map-enabled", "map-disabled"),
+        ("rule-enabled", "rule-disabled"),
+    )
+    template = {
+        "Resources": {
+            "DefaultFunction": {"Type": "AWS::Lambda::Function", "Properties": {}},
+            "ReservedFunction": {
+                "Type": "AWS::Lambda::Function",
+                "Properties": {"ReservedConcurrentExecutions": 7},
+            },
+            "EnabledMapping": {
+                "Type": "AWS::Lambda::EventSourceMapping",
+                "Properties": {},
+            },
+            "DisabledMapping": {
+                "Type": "AWS::Lambda::EventSourceMapping",
+                "Properties": {"Enabled": False},
+            },
+            "EnabledRule": {"Type": "AWS::Events::Rule", "Properties": {}},
+            "DisabledRule": {
+                "Type": "AWS::Events::Rule",
+                "Properties": {"State": "DISABLED"},
+            },
+        }
+    }
+    identities = [
+        ("DefaultFunction", "AWS::Lambda::Function", "fn-default"),
+        ("ReservedFunction", "AWS::Lambda::Function", "fn-reserved"),
+        ("EnabledMapping", "AWS::Lambda::EventSourceMapping", "map-enabled"),
+        ("DisabledMapping", "AWS::Lambda::EventSourceMapping", "map-disabled"),
+        ("EnabledRule", "AWS::Events::Rule", "rule-enabled"),
+        ("DisabledRule", "AWS::Events::Rule", "rule-disabled"),
+    ]
+    mutations: list[list[str]] = []
+
+    def runner(command: list[str], **_: Any) -> Any:
+        if "get-template" in command:
+            return _completed(
+                {"TemplateBody": template, "StagesAvailable": ["Original", "Processed"]}
+            )
+        if "list-stack-resources" in command:
+            return _completed(
+                {
+                    "StackResourceSummaries": [
+                        {
+                            "LogicalResourceId": logical,
+                            "ResourceType": kind,
+                            "PhysicalResourceId": physical,
+                        }
+                        for logical, kind, physical in identities
+                    ]
+                }
+            )
+        if any(
+            operation in command
+            for operation in (
+                "delete-function-concurrency",
+                "put-function-concurrency",
+                "update-event-source-mapping",
+                "enable-rule",
+                "disable-rule",
+            )
+        ):
+            mutations.append(command)
+            return _completed()
+        if "get-function-concurrency" in command:
+            name = command[command.index("--function-name") + 1]
+            return _completed({} if name == "fn-default" else {"ReservedConcurrentExecutions": 7})
+        if "get-event-source-mapping" in command:
+            mapping = command[command.index("--uuid") + 1]
+            return _completed(
+                {"UUID": mapping, "State": "Enabled" if mapping == "map-enabled" else "Disabled"}
+            )
+        if "describe-rule" in command:
+            rule = command[command.index("--name") + 1]
+            return _completed(
+                {"Name": rule, "State": "ENABLED" if rule == "rule-enabled" else "DISABLED"}
+            )
+        raise AssertionError(command)
+
+    plan = module.discover_source_reactivation_plan(
+        resources,
+        stack_name="AaiSecControlPlane",
+        region="eu-west-2",
+        profile="synthetic",
+        runner=runner,
+    )
+    result = module.reactivate_source(plan, profile="synthetic", runner=runner)
+    assert result["status"] == "source-runtime-reactivated"
+    assert len(plan.sha256()) == 64
+    assert "delete-function-concurrency" in mutations[0]
+    assert "put-function-concurrency" in mutations[1]
+    assert "--enabled" in mutations[2]
+    assert "--no-enabled" in mutations[3]
+    assert "enable-rule" in mutations[4]
+    assert "disable-rule" in mutations[5]
+
+
+def test_source_reactivation_rejects_dynamic_or_substituted_template_state() -> None:
+    module = _load()
+    resources = module.SourceResources(("fn",), (), ())
+
+    def runner(command: list[str], **_: Any) -> Any:
+        if "get-template" in command:
+            return _completed(
+                {
+                    "TemplateBody": {
+                        "Resources": {
+                            "Function": {
+                                "Type": "AWS::Lambda::Function",
+                                "Properties": {"ReservedConcurrentExecutions": {"Ref": "Limit"}},
+                            }
+                        }
+                    },
+                    "StagesAvailable": ["Processed"],
+                }
+            )
+        return _completed(
+            {
+                "StackResourceSummaries": [
+                    {
+                        "LogicalResourceId": "Function",
+                        "ResourceType": "AWS::Lambda::Function",
+                        "PhysicalResourceId": "fn",
+                    }
+                ]
+            }
+        )
+
+    with pytest.raises(module.ActiveCellDeploymentError, match="safe literal"):
+        module.discover_source_reactivation_plan(
+            resources,
+            stack_name="AaiSecControlPlane",
+            region="eu-west-2",
+            profile="synthetic",
+            runner=runner,
+        )
+
+
 def test_fence_orders_ingress_before_concurrency_and_independently_verifies() -> None:
     module = _load()
     resources = module.SourceResources(("fn-a",), ("map-a",), ("rule-a",))
