@@ -1127,10 +1127,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#schema-v2-and-schema-v3-transition-authority" class="md-nav__link">
+  <a href="#schema-v2-through-schema-v4-transition-authority" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Schema-v2 and schema-v3 transition authority
+        Schema-v2 through schema-v4 transition authority
       
     </span>
   </a>
@@ -2815,10 +2815,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#schema-v2-and-schema-v3-transition-authority" class="md-nav__link">
+  <a href="#schema-v2-through-schema-v4-transition-authority" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Schema-v2 and schema-v3 transition authority
+        Schema-v2 through schema-v4 transition authority
       
     </span>
   </a>
@@ -2935,7 +2935,7 @@ table/stack names, and is persisted as an encrypted SSM parameter. The guard
 strips ambient CDK authority, derives the AWS account through STS, verifies the
 template, binds its SHA-256 and deploys only the exact <code>cdk.out</code> assembly. It
 cannot initialize the journal.</p>
-<h2 id="schema-v2-and-schema-v3-transition-authority">Schema-v2 and schema-v3 transition authority</h2>
+<h2 id="schema-v2-through-schema-v4-transition-authority">Schema-v2 through schema-v4 transition authority</h2>
 <p>Mutating transition commands reject legacy schema-v1 manifests. Schema v2 adds:</p>
 <table>
 <thead>
@@ -2977,6 +2977,11 @@ recovery ingress stack names, four Region-specific canary names, stable-route
 generation marker, dedicated routing-role ARN and retained routing-authority
 evidence reference. Schema v2 remains valid for non-routing runtime steps but
 is rejected before ingress journaling or Route 53 access.</p>
+<p>Failed-cutover rollback requires schema v4. It additionally binds each runtime
+stack name and the SHA-256 of its exact provider-processed CloudFormation
+template. These values authorize restoration of a known runtime state; they do
+not authorize arbitrary concurrency, mapping or schedule changes. Schema v3
+continues to support forward routing but cannot reactivate a fenced source.</p>
 <h2 id="state-model">State model</h2>
 <p>The strongly consistent singleton record is <code>pk=AUTHORITY, sk=CURRENT</code>.
 Generation changes only in the future routing CAS step; revision changes on
@@ -2993,6 +2998,19 @@ every journal phase.</p>
   -&gt; ROUTING_TARGET
   -&gt; VERIFYING_STABLE_ROUTE
   -&gt; STABLE (generation + 1, activeRegion = target)
+</code></pre>
+<p>If stable smoke fails after the forward Route 53 batch, the same transition
+continues instead of opening competing authority:</p>
+<pre><code class="language-text">VERIFYING_STABLE_ROUTE
+  -&gt; FENCING_FAILED_TARGET
+  -&gt; FAILED_TARGET_FENCED
+  -&gt; REACTIVATING_SOURCE
+  -&gt; SOURCE_REACTIVATED_NOT_ROUTED
+  -&gt; VERIFYING_SOURCE_INGRESS
+  -&gt; SOURCE_INGRESS_VERIFIED_NOT_ROUTED
+  -&gt; ROUTING_SOURCE_ROLLBACK
+  -&gt; VERIFYING_SOURCE_ROLLBACK
+  -&gt; STABLE (generation + 2, activeRegion = source, event = ROLLED_BACK)
 </code></pre>
 <p>Every phase change is one DynamoDB transaction containing:</p>
 <ol>
@@ -3020,6 +3038,12 @@ single DynamoDB transaction that increments generation, changes active Region,
 removes active-transition fields and appends the final immutable evidence
 event. An exact retry verifies the existing event digest; a changed stable
 probe or substituted authority is denied.</p>
+<p>Rollback completion uses the same transactional boundary. It increments to
+the original generation plus two, restores <code>activeRegion</code> to the source,
+removes active-transition fields, and appends an immutable <code>ROLLED_BACK</code> event.
+<code>lastCompletedTransitionId</code> still records the transition UUID; the event phase
+distinguishes rollback from successful cutover. Completed command retries must
+reproduce the exact evidence digest and issue no duplicate Route 53 mutation.</p>
 <h2 id="initialization">Initialization</h2>
 <p>The stack starts with no authority record. After deployment, the guarded
 executor exposes a separate <code>initialize-journal</code> command requiring
@@ -3095,6 +3119,21 @@ bundle. Initialization is a different confirmed command:</p>
 <td>Same exact authority can resume; competitors denied</td>
 </tr>
 <tr>
+<td>Failed target remains active while source is restored</td>
+<td>Target must reach the independently verified fence phase first</td>
+<td>Source-reactivation phase is unreachable out of order</td>
+</tr>
+<tr>
+<td>Rollback recreates the original DNS generation (ABA)</td>
+<td>Inverse batch writes generation + 2</td>
+<td>Exact marker and journal generation converge together</td>
+</tr>
+<tr>
+<td>Restored source differs from reviewed runtime</td>
+<td>Schema-v4 processed-template digest and exact typed restore plan</td>
+<td>Every function, mapping and rule is independently re-read</td>
+</tr>
+<tr>
 <td>Event replay or overwrite</td>
 <td>Revision/phase event key plus <code>attribute_not_exists</code></td>
 <td>Transaction fails atomically</td>
@@ -3119,11 +3158,12 @@ resources, ambient deployment substitution and post-verification template
 replacement.</p>
 <h2 id="current-non-guarantees">Current non-guarantees</h2>
 <p>Stable ingress, public authenticated smoke, journal-governed transactional
-Route 53 movement and transition sealing are implemented but have not been run
-against live customer domains. Primary reactivation, safe rollback and
-failback remain deliberately unavailable. The live witness is not deployed or
-initialized. Those gates and a retained exercise remain required before P0-11
-is complete.</p>
+Route 53 movement, failed-target fencing, exact source reactivation, inverse
+routing and rollback sealing are implemented but have not been run against
+live customer domains. Planned failback remains deliberately unavailable until
+primary-side reconciliation is implemented. The live witness is not deployed
+or initialized. Those gates and a retained exercise remain required before
+P0-11 is complete.</p>
 
 
 

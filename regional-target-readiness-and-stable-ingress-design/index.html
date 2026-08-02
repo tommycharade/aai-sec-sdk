@@ -3034,10 +3034,18 @@ detect divergence but cannot truthfully claim provider-level CAS.</p>
 <h2 id="failed-cutover-and-failback">Failed cutover and failback</h2>
 <p>If Route 53 rejects the change batch, no DNS record changes and the journal
 remains <code>ROUTING_TARGET</code>. If Route 53 accepts the batch but stable probes fail,
-the executor does not mark the target stable. It also refuses DNS-only
+the executor does not mark the target stable. It also never performs DNS-only
 rollback: the source was intentionally fenced, so routing users back before
-independent source reactivation would create an outage. Symmetric reactivation,
-canary proof and inverse routing are the next required implementation tranche.</p>
+independent source reactivation would create an outage.</p>
+<p>Schema-v4 rollback instead performs five ordered, independently confirmed
+steps. It fences and verifies the failed target, restores the original source
+from an exact processed-template-bound plan, proves source canary
+authentication, transactionally moves API/UI/marker back at generation + 2,
+then proves stable service before recording <code>ROLLED_BACK</code>. The target remains
+fenced throughout source restoration. Mixed DNS, changed templates, partial
+restoration, stale journal authority and changed retry evidence all fail
+closed. A retry after Route 53 convergence recognizes the exact source records
+and does not submit a duplicate mutation.</p>
 <p>Failback is not implemented by swapping labels in the failover code. The
 primary runtime needs the same active-template verifier, target job
 reconciliation, regional ingress and canary contracts first. Only then may the
@@ -3052,12 +3060,15 @@ same state machine run with source and target reversed.</p>
 <li>migration of the primary control API away from its currently open raw
   execute-api endpoint before primary ingress can pass the deployment guard;</li>
 <li>customer approval for the dedicated routing role and organization-level DNS
-  write restriction; and</li>
+  write restriction;</li>
+<li>schema-v4 retained digests for both exact provider-processed runtime
+  templates; and</li>
 <li>a scheduled two-person recovery exercise.</li>
 </ul>
 <p>No Route 53 record, certificate, custom domain, UI proxy or live AWS transition
-was created by this implementation tranche. The executor is implemented and
-synthetically tested; P0-11 remains <strong>Partial</strong>.</p>
+was created by this implementation tranche. Forward routing and failed-cutover
+rollback are implemented and synthetically tested; planned failback and the
+live exercise remain incomplete, so P0-11 remains <strong>Partial</strong>.</p>
 
 
 

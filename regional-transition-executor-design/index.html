@@ -1122,6 +1122,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#source-reactivation-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source reactivation boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#active-template-verification" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2826,6 +2837,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#source-reactivation-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source reactivation boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#active-template-verification" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2886,7 +2908,8 @@ active-but-not-routed target, fence source execution, deploy the exact verified
 target assembly, or reconcile the live target runtime and Region-local jobs. It
 cannot update DNS, CloudFront, Route 53, Global Accelerator, custom domains or
 API routing. Routing is isolated in <code>scripts/execute_aws_regional_routing.py</code>,
-which requires schema-v3 authority and cannot activate compute.</p>
+which requires schema-v3 or schema-v4 authority and cannot activate target
+compute. Schema v4 is mandatory for source restoration and rollback.</p>
 <p>A successful target deployment means <strong>active-not-routed</strong>, not “failover
 complete.” The recovery cell has no SCIM endpoint. Existing recovery identities
 can use the runtime during an outage, but joiner/mover/leaver changes remain
@@ -2931,12 +2954,53 @@ the <a href="../regional-activation-and-exercise-design/">regional activation de
 </tr>
 </tbody>
 </table>
-<p>The routing component exposes exactly three forward steps: <code>verify-ingress</code>
+<p>The routing component exposes three forward steps: <code>verify-ingress</code>
 proves invalid-token rejection, authenticated policy read and HSTS UI delivery
 on target canaries; <code>route-target</code> repeats source-fence, target-runtime and
 zero-action reconciliation proofs before one transactional Route 53 batch;
 and <code>verify-stable</code> repeats stable API/UI probes before committing the next
 journal generation. Each has a distinct confirmation flag.</p>
+<p>If stable verification fails after Route 53 accepted the forward batch, five
+separately confirmed rollback steps are available under schema-v4 authority:</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Mutation or proof</th>
+<th>Required confirmation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fence-failed-target</code></td>
+<td>Fences every target rule, mapping and Lambda and independently verifies it</td>
+<td><code>--confirm-failed-target-fence</code></td>
+</tr>
+<tr>
+<td><code>reactivate-source</code></td>
+<td>Restores the exact approved source-template runtime while the target remains fenced</td>
+<td><code>--confirm-source-reactivation</code></td>
+</tr>
+<tr>
+<td><code>verify-source-ingress</code></td>
+<td>Proves invalid-token denial, authenticated policy read and HSTS on source canaries</td>
+<td><code>--confirm-source-ingress</code></td>
+</tr>
+<tr>
+<td><code>route-source-rollback</code></td>
+<td>Atomically replaces target aliases/marker with source aliases and generation + 2</td>
+<td><code>--confirm-rollback-route53</code></td>
+</tr>
+<tr>
+<td><code>verify-source-rollback</code></td>
+<td>Probes stable API/UI and seals <code>ROLLED_BACK</code> in the witness</td>
+<td><code>--confirm-rollback-completion</code></td>
+</tr>
+</tbody>
+</table>
+<p>Generation advances by two because generation + 1 identifies the failed
+target route and generation + 2 identifies the restored source. This avoids an
+ABA state where DNS appears to return to its original generation.</p>
 <p>The commands cannot be combined. A later command repeats preflight rather than
 trusting prior terminal output. Source ingress is disabled before Lambda
 concurrency, the complete bounded mutation set is attempted, and any partial
@@ -2970,6 +3034,27 @@ closed. The sorted exact resource set is SHA-256-bound into operator evidence.</
 <code>Disabled</code>, and every function reports exactly zero reserved concurrency. This
 hard fence may make the primary UI/API unavailable and belongs only in an
 approved recovery window.</p>
+<h2 id="source-reactivation-boundary">Source reactivation boundary</h2>
+<p>Schema v4 adds the primary and recovery runtime stack names and exact SHA-256
+digests of their processed CloudFormation templates. Before the original
+source is fenced, the executor downloads the provider-processed template,
+maps its bounded logical resources to exact physical resources, and records a
+typed restoration plan. Lambda reserved concurrency may be absent or a literal
+bounded integer; event-source mappings default enabled; EventBridge rules
+default enabled. Dynamic or ambiguous values fail closed.</p>
+<p>Rollback re-derives the plan and requires the processed-template digest to
+match retained authority. It first proves the failed target is completely
+fenced, proves the exact current source physical-resource set is also still
+fenced, restores all source Lambda concurrency, mappings and rules, and then
+independently re-reads every resource. Partial mutation is failure, never
+success. If a process stops after the reactivation claim, an exact retry first
+re-proves the target fence and then reapplies the bounded approved source plan;
+it does not require partially restored source resources to be fenced again.
+The source canary must pass before stable DNS can move.</p>
+<p>This follows AWS's <a href="https://docs.aws.amazon.com/AWSCloudFormation/latest/APIReference/API_GetTemplate.html">processed-template contract</a>,
+uses <a href="https://docs.aws.amazon.com/lambda/latest/api/API_DeleteFunctionConcurrency.html">delete-function-concurrency</a>
+to restore functions that had no reservation, and restores exact
+<a href="https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-events-rule.html">EventBridge rule state</a>.</p>
 <h2 id="active-template-verification">Active template verification</h2>
 <p>The independent CloudFormation verifier requires:</p>
 <ul>
@@ -3028,10 +3113,12 @@ then execute one routing step at a time with
 authority files as this executor plus <code>--operator-token-file</code>. Confirmation
 flags are <code>--confirm-journal-ingress</code>, <code>--confirm-route53-cutover</code>, and
 <code>--confirm-stable-completion</code> respectively.</p>
-<p>Exit code <code>2</code> is fail-closed. The rollback command always refuses until source
-runtime reactivation is independently implemented and proved. Primary
-reactivation, failback and retained live RTO/RPO evidence remain separate
-incomplete gates. See <a href="../regional-target-readiness-and-stable-ingress-design/">Regional target readiness and stable ingress</a>.</p>
+<p>Exit code <code>2</code> is fail-closed. Failed-cutover rollback is implemented, but the
+<code>planned-failback</code> command still refuses: restoring service after a failed
+cutover is not equivalent to intentionally moving an active recovery cell back
+to primary. Primary target-job reconciliation and its active-template contract
+remain incomplete gates, as does retained live RTO/RPO evidence. See
+<a href="../regional-target-readiness-and-stable-ingress-design/">Regional target readiness and stable ingress</a>.</p>
 <h2 id="test-evidence-and-non-guarantees">Test evidence and non-guarantees</h2>
 <p>Focused tests cover unstable/duplicate discovery, bounded pagination, resource
 digest binding, ordered fencing, partial mutation failure, independent state
@@ -3040,7 +3127,7 @@ actions, mismatched bucket policies and absence of routing commands. CI
 synthesizes standby and synthetic active variants with separate verifiers.</p>
 <p>No live AWS mutation was performed by this tranche. P0-11 remains <strong>Partial</strong>
 until real identity, trust, stable-origin, passive/witness/ingress deployment,
-safe rollback/failback and rehearsed exercise gates all pass.</p>
+planned failback and rehearsed exercise gates all pass.</p>
 
 
 
