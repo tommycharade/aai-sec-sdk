@@ -75,6 +75,10 @@ be invented by engineering:
   (`eu-central-1` is the proposed first-customer Region), plus the retained
   change reference for its deployment;
 - ACM certificates and authority to close both raw execute-api origins;
+- approved Region-specific API/UI canary names and ACM certificate ARNs for
+  both the primary and recovery Regions;
+- approval for a dedicated Route 53 transition role plus an organization SCP
+  or equivalent boundary that removes ordinary DNS-write authority;
 - two independent named approvers for each failover and failback rehearsal;
 - an approved change window in which source fencing, synthetic dependency
   failures and stable-route movement may be exercised;
@@ -94,6 +98,8 @@ is real, retained and approved. It cannot move traffic.
 The [transition journal design](regional-transition-journal-design.md) explains
 why the witness must not be converted to a Global Table and how the two Entra
 approver identities and expected routing generation are supplied.
+The [target-readiness and stable-ingress design](regional-target-readiness-and-stable-ingress-design.md)
+defines the serverless custom-domain topology and remaining routing inputs.
 
 ### Managed Claude Code and Codex hosts
 

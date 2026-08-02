@@ -243,6 +243,44 @@ def test_passive_stack_and_both_direct_origins_must_be_provider_verified() -> No
     assert result == {"sourceApiId": "source123", "targetApiId": "target123"}
 
 
+def test_post_activation_preflight_requires_active_not_routed_exactly() -> None:
+    module = _load()
+
+    def runner(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        assert "describe-stacks" in command
+        return _completed(
+            {
+                "Stacks": [
+                    {
+                        "StackStatus": "UPDATE_COMPLETE",
+                        "Outputs": [
+                            {
+                                "OutputKey": "PassiveCellStatus",
+                                "OutputValue": "active-not-routed",
+                            },
+                            {
+                                "OutputKey": "PassiveControlPlaneApiId",
+                                "OutputValue": "target123",
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+
+    assert (
+        module.verify_passive_stack(
+            _passive(module),
+            profile="synthetic",
+            expected_status="active-not-routed",
+            runner=runner,
+        )
+        == "target123"
+    )
+    with pytest.raises(module.RegionalActivationPreflightError, match="staged-not-serving"):
+        module.verify_passive_stack(_passive(module), profile="synthetic", runner=runner)
+
+
 def test_origin_fencing_fails_when_provider_exposes_either_raw_api() -> None:
     module = _load()
 

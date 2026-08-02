@@ -246,6 +246,16 @@ phases are committed before source or target mutation, so exact retries resume
 while competing, stale, expired or substituted authority fails closed. See the
 [regional transition journal](regional-transition-journal-design.md).
 
+Post-activation target readiness is also journal governed. The executor
+re-verifies source fencing and the exact live recovery Lambda, queue-mapping,
+schedule, signer, evidence and Entra authority before invoking the internal job
+reconciler. Runtime output is treated as untrusted data and completion requires
+a bounded zero-action check plus an append-only evidence digest. Traffic stays
+on the source. The planned stable ingress uses same-name Regional API Gateway
+custom domains and a transactional Route 53 API/UI change batch; because Route
+53 has no conditional generation token, the witness plus exclusive IAM/SCP DNS
+authority remains necessary. See [Regional target readiness and stable ingress](regional-target-readiness-and-stable-ingress-design.md).
+
 Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while
 excluding delete markers, and synthesized CloudFormation is rejected unless

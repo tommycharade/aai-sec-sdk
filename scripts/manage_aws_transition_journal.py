@@ -49,6 +49,8 @@ _PHASES = {
     "SOURCE_FENCED",
     "ACTIVATING_TARGET",
     "TARGET_ACTIVE_NOT_ROUTED",
+    "RECONCILING_TARGET_JOBS",
+    "TARGET_JOBS_RECONCILED_NOT_ROUTED",
 }
 _REGION = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -323,9 +325,12 @@ def _event_item(
     phase: str,
     revision: int,
     now: int,
+    step_evidence_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Build one append-only content-addressed transition event."""
-    return {
+    if step_evidence_sha256 is not None and not _SHA256.fullmatch(step_evidence_sha256):
+        raise TransitionJournalError("step evidence SHA-256 is malformed")
+    event = {
         "pk": {"S": f"TRANSITION#{manifest.transition_id}"},
         "sk": {"S": f"EVENT#{revision:010d}#{phase}"},
         "schemaVersion": {"N": "1"},
@@ -339,6 +344,63 @@ def _event_item(
         "evidenceSha256": {"S": manifest.evidence.sha256},
         "approvalSha256": {"S": approval_sha256(manifest)},
     }
+    if step_evidence_sha256 is not None:
+        event["stepEvidenceSha256"] = {"S": step_evidence_sha256}
+    return event
+
+
+def _verify_completed_step_evidence(
+    client: Any,
+    manifest: activation.ActivationManifest,
+    *,
+    phase: str,
+    revision: int,
+    expected_sha256: str,
+) -> None:
+    """Bind an idempotent retry to the exact evidence recorded at completion."""
+    try:
+        response = client.get_item(
+            TableName=manifest.journal_table_name,
+            Key={
+                "pk": {"S": f"TRANSITION#{manifest.transition_id}"},
+                "sk": {"S": f"EVENT#{revision:010d}#{phase}"},
+            },
+            ConsistentRead=True,
+        )
+    except Exception as error:
+        raise TransitionJournalError("completed transition evidence is unavailable") from error
+    event = _decode_item(response.get("Item"))
+    if (
+        set(event)
+        != {
+            "pk",
+            "sk",
+            "schemaVersion",
+            "phase",
+            "revision",
+            "occurredAt",
+            "direction",
+            "sourceRegion",
+            "targetRegion",
+            "authoritySha256",
+            "evidenceSha256",
+            "approvalSha256",
+            "stepEvidenceSha256",
+        }
+        or event.get("pk") != f"TRANSITION#{manifest.transition_id}"
+        or event.get("sk") != f"EVENT#{revision:010d}#{phase}"
+        or event.get("schemaVersion") != 1
+        or event.get("phase") != phase
+        or event.get("revision") != revision
+        or event.get("direction") != manifest.direction
+        or event.get("sourceRegion") != manifest.source_region
+        or event.get("targetRegion") != manifest.target_region
+        or event.get("authoritySha256") != manifest.authority_sha256()
+        or event.get("evidenceSha256") != manifest.evidence.sha256
+        or event.get("approvalSha256") != approval_sha256(manifest)
+        or event.get("stepEvidenceSha256") != expected_sha256
+    ):
+        raise TransitionJournalError("completed transition evidence differs from retry")
 
 
 def _transact(client: Any, items: list[dict[str, Any]]) -> None:
@@ -438,19 +500,32 @@ def advance_phase(
     expected_phase: str,
     next_phase: str,
     now: int,
+    step_evidence_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Advance one exact transition phase with revision and authority CAS."""
     allowed = {
         ("FENCING_SOURCE", "SOURCE_FENCED"),
         ("SOURCE_FENCED", "ACTIVATING_TARGET"),
         ("ACTIVATING_TARGET", "TARGET_ACTIVE_NOT_ROUTED"),
+        ("TARGET_ACTIVE_NOT_ROUTED", "RECONCILING_TARGET_JOBS"),
+        ("RECONCILING_TARGET_JOBS", "TARGET_JOBS_RECONCILED_NOT_ROUTED"),
     }
     if (expected_phase, next_phase) not in allowed:
         raise TransitionJournalError("journal phase transition is unsupported")
+    if step_evidence_sha256 is not None and not _SHA256.fullmatch(step_evidence_sha256):
+        raise TransitionJournalError("step evidence SHA-256 is malformed")
     state = read_state(client, manifest)
     if not _same_authority(state, manifest, now=now):
         raise TransitionJournalError("journal authority differs or has expired")
     if state.phase == next_phase:
+        if step_evidence_sha256 is not None:
+            _verify_completed_step_evidence(
+                client,
+                manifest,
+                phase=next_phase,
+                revision=state.revision,
+                expected_sha256=step_evidence_sha256,
+            )
         return {"claim": "already-completed", "journal": state.evidence()}
     if state.phase != expected_phase:
         raise TransitionJournalError("journal phase is stale or out of order")
@@ -474,7 +549,13 @@ def advance_phase(
         "ExpressionAttributeNames": {"#phase": "phase"},
         "ExpressionAttributeValues": values,
     }
-    event = _event_item(manifest, phase=next_phase, revision=state.revision + 1, now=now)
+    event = _event_item(
+        manifest,
+        phase=next_phase,
+        revision=state.revision + 1,
+        now=now,
+        step_evidence_sha256=step_evidence_sha256,
+    )
     _transact(
         client,
         [
@@ -491,4 +572,7 @@ def advance_phase(
     advanced = read_state(client, manifest)
     if advanced.phase != next_phase or not _same_authority(advanced, manifest, now=now):
         raise TransitionJournalError("journal phase did not converge")
-    return {"claim": "advanced", "journal": advanced.evidence()}
+    result = {"claim": "advanced", "journal": advanced.evidence()}
+    if step_evidence_sha256 is not None:
+        result["stepEvidenceSha256"] = step_evidence_sha256
+    return result
