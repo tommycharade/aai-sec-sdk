@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/audit-recovery-deployment-guard-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/regional-fault-controller-design/">
       
       
-        <link rel="prev" href="../durable-evidence-governance-design/">
+        <link rel="prev" href="../aws-regional-exercise-provider-design/">
       
       
-        <link rel="next" href="../cross-region-audit-recovery-acceptance-2026-08-01/">
+        <link rel="next" href="../regional-transition-executor-design/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Persistent audit-recovery deployment guard - Agentic AI Security SDK</title>
+        <title>Regional dependency fault controller - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#persistent-audit-recovery-deployment-guard" class="md-skip">
+        <a href="#regional-dependency-fault-controller" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Persistent audit-recovery deployment guard
+              Regional dependency fault controller
             
           </span>
         </div>
@@ -826,37 +826,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Persistent audit-recovery deployment guard
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../audit-recovery-deployment-guard-design/" class="md-nav__link">
         
   
   
@@ -872,70 +845,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decision
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#historical-repair" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Historical repair
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#independent-acceptance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Independent acceptance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#failure-and-recovery" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Failure and recovery
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1133,10 +1042,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../regional-fault-controller-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional dependency fault controller
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1152,6 +1088,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authority-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authority contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-durable-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required durable workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#code-owned-dependency-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Code-owned dependency boundaries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threats-and-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threats and controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operator-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2814,10 +2847,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#historical-repair" class="md-nav__link">
+  <a href="#authority-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Historical repair
+        Authority contract
       
     </span>
   </a>
@@ -2825,10 +2858,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#independent-acceptance" class="md-nav__link">
+  <a href="#required-durable-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Independent acceptance
+        Required durable workflow
       
     </span>
   </a>
@@ -2836,10 +2869,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#failure-and-recovery" class="md-nav__link">
+  <a href="#code-owned-dependency-boundaries" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Failure and recovery
+        Code-owned dependency boundaries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threats-and-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threats and controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operator-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current non-guarantees
       
     </span>
   </a>
@@ -2866,65 +2932,174 @@
   
 
 
-<h1 id="persistent-audit-recovery-deployment-guard">Persistent audit-recovery deployment guard</h1>
+<h1 id="regional-dependency-fault-controller">Regional dependency fault controller</h1>
 <h2 id="decision">Decision</h2>
-<p>Cross-region audit recovery is deployment authority, not ambient shell state.
-The primary control-plane deployer loads one reviewed, secret-free recovery
-manifest from encrypted Parameter Store and removes any ambient
-<code>AUDIT_REPLICA_*</code> values before synthesis. Once the stack reports a replica,
-losing that manifest blocks deployment instead of silently removing the S3
-replication rule.</p>
-<p>The manifest binds one exact destination bucket ARN, a distinct AWS Region and
-an opaque recovery-review reference. Configuration succeeds only when AWS
-proves that the destination is versioned and defaults to at least 365 days of
-COMPLIANCE Object Lock. A post-deployment check requires the exact destination,
-region and historical Batch Replication role outputs.</p>
-<h2 id="historical-repair">Historical repair</h2>
-<p>Live S3 replication protects versions written after a rule is active; it does
-not repair older versions. <code>scripts/backfill_aws_audit_replication.py</code> creates a
-bounded S3 Batch Replication job for exact versions with <code>NONE</code>, <code>FAILED</code> or
-<code>COMPLETED</code> replication status at a fixed cutoff. <code>COMPLETED</code> versions are
-intentionally reprocessed: their bytes may exist while destination retention or
-metadata is stale after a later source-side change. The script:</p>
+<p>Regional dependency failure testing requires a server-managed compensation
+workflow. A local script that attaches an IAM deny and later removes it is not
+acceptable: process termination, network loss or operator interruption could
+leave the target cell unavailable indefinitely.</p>
+<p><code>scripts/plan_aws_regional_fault_exercise.py</code> implements the first read-only
+authority boundary. It validates one exact request and emits the mandatory
+workflow order. It has no IAM, Lambda, Scheduler, Step Functions, DNS or traffic
+mutation operation.</p>
+<h2 id="authority-contract">Authority contract</h2>
+<p>Schema v1 requires exactly:</p>
 <ul>
-<li>counts source versions and refuses more than the reviewed safety bound;</li>
-<li>asks S3 to generate the version-aware manifest in the source Region;</li>
-<li>uses a dedicated least-privilege Batch Operations role;</li>
-<li>writes a provider completion report outside the immutable audit namespace;</li>
-<li>fails on timeout, terminal provider failure or any failed task.</li>
+<li>a canonical fault UUID and the existing transition UUID;</li>
+<li>the schema-v4 transition authority digest and direction;</li>
+<li>exact target Region and expected <code>primary</code> or <code>recovery</code> cell role;</li>
+<li>exact target runtime stack and retained processed-template SHA-256;</li>
+<li>third-Region coordination authority and current routing generation;</li>
+<li>one dependency from <code>audit</code>, <code>cognito</code>, <code>dynamodb</code>, <code>kms</code> or <code>queue</code>;</li>
+<li>a 30–300-second maximum fault duration;</li>
+<li>the exact two-person approval digest and ordered Entra principal UUIDs;</li>
+<li>a canonical SHA-256 reference to the exact immutable activation evidence S3
+  bucket, key, version and content digest;</li>
+<li>expiry after the current time, no later than 15 minutes or transition expiry;</li>
+<li><code>faultPermitted: true</code>; and</li>
+<li><code>automaticFaultInjection: false</code>.</li>
 </ul>
-<p>The role can initiate replication for source audit objects and write only under
-the recovery-report prefix. The existing S3 replication role remains the
-principal authorized to read immutable source versions and create replicas.
-Replication metrics enable object-level failed/not-tracked events, which enter
-the existing durable security-alert SNS/SQS channel with provider failure
-reasons. CloudWatch replication metrics are best-effort and published in the
-destination Region, so they are not treated as the sole failure signal.
-The rule uses the explicit V2 schema required by metrics: priority 1, an empty
-prefix that covers every evidence object, and disabled delete-marker replication
-because delete markers are not retained evidence records.</p>
-<h2 id="independent-acceptance">Independent acceptance</h2>
-<p><code>scripts/verify_aws_audit_recovery.py</code> does not trust the Batch Operations
-completion count. It independently enumerates both versioned buckets and
-requires exact key/version identity and canonical ordering, SHA-256 equality,
-preserved content-digest metadata, COMPLIANCE mode, destination retention no
-shorter than source retention and <code>REPLICA</code> provenance. Verification is bounded
-and emits a canonical manifest digest suitable for retained acceptance evidence.</p>
-<p>Delete markers are not evidence records and are excluded from the retained
-version proof. Production audit writers never delete records; unexpected delete
-markers should be investigated separately.</p>
-<h2 id="failure-and-recovery">Failure and recovery</h2>
-<ul>
-<li>Missing or malformed persisted authority: deployment stops before synthesis.</li>
-<li>Same-region or weakly retained destination: configuration and deployment stop.</li>
-<li>Historical job failure: live replication remains enabled; inspect the
-  completion report, correct the failure and rerun the idempotent repair.</li>
-<li>Verification mismatch: do not declare recovery ready. Preserve both provider
-  reports and verifier output, then investigate the exact object/version.</li>
-</ul>
-<p>This control proves immutable audit data recoverability. It does not by itself
-provide a second regional API, an approved RTO/RPO or automated control-plane
-failover.</p>
+<p>Failover may target only the recovery runtime; failback only primary. Changed
+templates, routing generations, approvers, dependencies, durations or Regions
+change or invalidate authority. Unknown, missing and duplicate fields fail
+closed.</p>
+<h2 id="required-durable-workflow">Required durable workflow</h2>
+<p>The planner emits this order and no alternate order:</p>
+<ol>
+<li>independently verify target active-but-not-routed and source fenced;</li>
+<li>create an independent cleanup watchdog;</li>
+<li>apply one code-owned deny boundary to the exact target execution role;</li>
+<li>verify the named dependency is unavailable from the target;</li>
+<li>prove synthetic execution is denied with no bypass;</li>
+<li>remove the exact deny boundary;</li>
+<li>prove dependency and target recovery;</li>
+<li>remove the watchdog; and</li>
+<li>seal content-free fault evidence.</li>
+</ol>
+<p>The implementation phase will use a Step Functions workflow for normal and
+exception compensation plus an EventBridge Scheduler one-time watchdog. The
+watchdog must be armed before the deny is applied and must invoke cleanup even
+if the workflow, caller or network disappears. Normal cleanup can remove the
+watchdog only after independently proving the deny no longer exists.</p>
+<h2 id="code-owned-dependency-boundaries">Code-owned dependency boundaries</h2>
+<p>Operators and UI payloads may select only the dependency name. They may never
+supply IAM actions, resources, policy JSON, role names or probe commands. The
+controller derives these from exact provider-discovered target resources and a
+code-owned map. Every deny policy is named from the fault UUID, affects only the
+target handler role and is rejected if any other Regional fault policy exists.</p>
+<p>The final provider implementation must define a real safe probe for each
+dependency:</p>
+<table>
+<thead>
+<tr>
+<th>Dependency</th>
+<th>Target-only failure boundary</th>
+<th>Recovery proof</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Audit</td>
+<td>Exact target audit write path</td>
+<td>Content-free canary is durably written and read back</td>
+</tr>
+<tr>
+<td>Cognito</td>
+<td>Exact target identity dependency, never source/customer identity</td>
+<td>Target canary authentication succeeds after restoration</td>
+</tr>
+<tr>
+<td>DynamoDB</td>
+<td>Exact target handler access to four authoritative tables</td>
+<td>Consistent canary reads and governed agent heartbeat recover</td>
+</tr>
+<tr>
+<td>KMS</td>
+<td>Exact target signing/verification key calls</td>
+<td>Target policy signing and enrolled verification recover</td>
+</tr>
+<tr>
+<td>Queue</td>
+<td>Exact target evidence/retention queue operations</td>
+<td>Revision-bound synthetic job dispatch and zero-conflict check recover</td>
+</tr>
+</tbody>
+</table>
+<p>A mocked error flag is not dependency evidence. The controller must observe a
+real provider denial produced by its exact target boundary and independently
+observe recovery after removal.</p>
+<h2 id="threats-and-controls">Threats and controls</h2>
+<table>
+<thead>
+<tr>
+<th>Threat</th>
+<th>Control</th>
+<th>Failure posture</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fault targets serving source</td>
+<td>Direction, cell role, source fence and active-not-routed proof</td>
+<td>Workflow not started</td>
+</tr>
+<tr>
+<td>Operator supplies broad IAM deny</td>
+<td>Dependency name only; actions/resources are code-owned and provider-derived</td>
+<td>Request rejected</td>
+</tr>
+<tr>
+<td>Fault survives caller crash</td>
+<td>Step Functions compensation plus separately armed Scheduler watchdog</td>
+<td>Automatic exact cleanup</td>
+</tr>
+<tr>
+<td>Two faults overlap</td>
+<td>One active Regional fault policy and workflow execution per target</td>
+<td>Later request rejected</td>
+</tr>
+<tr>
+<td>Old approval is replayed</td>
+<td>Exact approval digest/principals, transition digest and short expiry</td>
+<td>Authority rejected</td>
+</tr>
+<tr>
+<td>Runtime changed after review</td>
+<td>Exact processed-template digest and live runtime verification</td>
+<td>Workflow not started</td>
+</tr>
+<tr>
+<td>Cleanup removes another fault</td>
+<td>UUID-derived exact policy identity and authority digest</td>
+<td>Cleanup rejected</td>
+</tr>
+<tr>
+<td>Simulated flag self-certifies outage</td>
+<td>Real provider denial and independent synthetic route probe</td>
+<td>Evidence rejected</td>
+</tr>
+<tr>
+<td>Recovery is assumed after delete</td>
+<td>Live provider and target-route recovery checks</td>
+<td>Workflow remains failed/alerted</td>
+</tr>
+</tbody>
+</table>
+<h2 id="operator-usage">Operator usage</h2>
+<p>Keep both files outside source control:</p>
+<pre><code class="language-bash">python3 scripts/plan_aws_regional_fault_exercise.py \
+  --manifest /secure/path/activation-draft.json \
+  --fault-authority /secure/path/dynamodb-fault.json
+</code></pre>
+<p>Exit code <code>0</code> prints <code>faultExecuted: false</code>, a canonical authority digest and
+the compensated plan. Exit code <code>2</code> prints the first blocker. There is no
+confirmation or execute flag because this tranche is read-only.</p>
+<h2 id="current-non-guarantees">Current non-guarantees</h2>
+<p>The authority parser and plan are implemented and synthetically tested. The
+Step Functions controller, watchdog, code-owned IAM boundaries and real
+dependency probes are not yet implemented. No live fault has been injected.
+The generic AWS exercise adapter therefore continues to reject dependency and
+consistency evidence, and P0-11 remains <strong>Partial</strong>.</p>
 
 
 
