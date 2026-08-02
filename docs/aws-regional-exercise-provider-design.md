@@ -97,6 +97,8 @@ template-bound state, and verify recovery before advancing. DNS, Global Table
 data, source-cell IAM, customer identity and signing-key material remain outside
 that role. Until this exists, `exercise_dependency` and
 `exercise_consistency` fail closed.
+The read-only authority contract and mandatory compensation order are defined
+in the [Regional dependency fault controller](regional-fault-controller-design.md).
 
 ## Threats and controls
 
