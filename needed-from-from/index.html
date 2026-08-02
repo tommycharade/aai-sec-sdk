@@ -1072,6 +1072,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../regional-target-readiness-and-stable-ingress-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional target readiness and stable ingress
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../evidence-continuity-and-job-reconciliation-design/" class="md-nav__link">
         
   
@@ -3018,6 +3045,10 @@ be invented by engineering:</p>
   (<code>eu-central-1</code> is the proposed first-customer Region), plus the retained
   change reference for its deployment;</li>
 <li>ACM certificates and authority to close both raw execute-api origins;</li>
+<li>approved Region-specific API/UI canary names and ACM certificate ARNs for
+  both the primary and recovery Regions;</li>
+<li>approval for a dedicated Route 53 transition role plus an organization SCP
+  or equivalent boundary that removes ordinary DNS-write authority;</li>
 <li>two independent named approvers for each failover and failback rehearsal;</li>
 <li>an approved change window in which source fencing, synthetic dependency
   failures and stable-route movement may be exercised;</li>
@@ -3036,7 +3067,9 @@ implemented, but its mutating commands must not be used until every item above
 is real, retained and approved. It cannot move traffic.
 The <a href="../regional-transition-journal-design/">transition journal design</a> explains
 why the witness must not be converted to a Global Table and how the two Entra
-approver identities and expected routing generation are supplied.</p>
+approver identities and expected routing generation are supplied.
+The <a href="../regional-target-readiness-and-stable-ingress-design/">target-readiness and stable-ingress design</a>
+defines the serverless custom-domain topology and remaining routing inputs.</p>
 <h3 id="managed-claude-code-and-codex-hosts">Managed Claude Code and Codex hosts</h3>
 <ul>
 <li>Confirmation that <code>/Users/tommooney/dev/kratos</code> remains the first local

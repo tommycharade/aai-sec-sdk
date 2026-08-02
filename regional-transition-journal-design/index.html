@@ -16,7 +16,7 @@
         <link rel="prev" href="../regional-transition-executor-design/">
       
       
-        <link rel="next" href="../evidence-continuity-and-job-reconciliation-design/">
+        <link rel="next" href="../regional-target-readiness-and-stable-ingress-design/">
       
       
         
@@ -1196,6 +1196,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../regional-target-readiness-and-stable-ingress-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional target readiness and stable ingress
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2954,6 +2981,8 @@ every journal phase.</p>
   -&gt; SOURCE_FENCED
   -&gt; ACTIVATING_TARGET
   -&gt; TARGET_ACTIVE_NOT_ROUTED
+  -&gt; RECONCILING_TARGET_JOBS
+  -&gt; TARGET_JOBS_RECONCILED_NOT_ROUTED
 </code></pre>
 <p>Every phase change is one DynamoDB transaction containing:</p>
 <ol>
@@ -2972,6 +3001,10 @@ with byte-equivalent authority may resume that step. A different transition,
 changed approver, changed evidence, changed generation, expired authority or
 out-of-order command is denied. A completed phase is idempotent and does not
 append a duplicate event.</p>
+<p>Target reconciliation claims its in-progress phase before the first job
+dispatch. Completion appends a SHA-256 over the independently verified source
+fence, live target resource set, check/apply results and final zero-action
+check. An idempotent completed retry must present that exact digest.</p>
 <h2 id="initialization">Initialization</h2>
 <p>The stack starts with no authority record. After deployment, the guarded
 executor exposes a separate <code>initialize-journal</code> command requiring
@@ -3070,10 +3103,11 @@ records, weakened table posture, replicated infrastructure, unknown runtime
 resources, ambient deployment substitution and post-verification template
 replacement.</p>
 <h2 id="current-non-guarantees">Current non-guarantees</h2>
-<p>This tranche does not implement stable-route compare-and-swap, target smoke,
-job reconciliation completion, transition sealing, primary reactivation or
-failback execution. It has not deployed or initialized the live witness. Those
-remain required before P0-11 is complete.</p>
+<p>The target-runtime and job-reconciliation smoke is implemented, but it does not
+exercise public ingress. This tranche does not implement stable ingress,
+stable-route compare-and-swap, public authenticated smoke, transition sealing,
+primary reactivation or failback execution. It has not deployed or initialized
+the live witness. Those remain required before P0-11 is complete.</p>
 
 
 
