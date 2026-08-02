@@ -43,7 +43,7 @@ strips ambient CDK authority, derives the AWS account through STS, verifies the
 template, binds its SHA-256 and deploys only the exact `cdk.out` assembly. It
 cannot initialize the journal.
 
-## Schema-v2 transition authority
+## Schema-v2 and schema-v3 transition authority
 
 Mutating transition commands reject legacy schema-v1 manifests. Schema v2 adds:
 
@@ -65,6 +65,12 @@ must contain that digest.
 The journal stores only principal-independent SHA-256 approval evidence in its
 events. It does not store tokens, claims, secrets or approval content.
 
+Routing requires schema v3. It additionally binds the exact primary and
+recovery ingress stack names, four Region-specific canary names, stable-route
+generation marker, dedicated routing-role ARN and retained routing-authority
+evidence reference. Schema v2 remains valid for non-routing runtime steps but
+is rejected before ingress journaling or Route 53 access.
+
 ## State model
 
 The strongly consistent singleton record is `pk=AUTHORITY, sk=CURRENT`.
@@ -79,6 +85,11 @@ STABLE
   -> TARGET_ACTIVE_NOT_ROUTED
   -> RECONCILING_TARGET_JOBS
   -> TARGET_JOBS_RECONCILED_NOT_ROUTED
+  -> VERIFYING_TARGET_INGRESS
+  -> TARGET_INGRESS_VERIFIED_NOT_ROUTED
+  -> ROUTING_TARGET
+  -> VERIFYING_STABLE_ROUTE
+  -> STABLE (generation + 1, activeRegion = target)
 ```
 
 Every phase change is one DynamoDB transaction containing:
@@ -104,6 +115,12 @@ Target reconciliation claims its in-progress phase before the first job
 dispatch. Completion appends a SHA-256 over the independently verified source
 fence, live target resource set, check/apply results and final zero-action
 check. An idempotent completed retry must present that exact digest.
+
+Ingress and route phases follow the same revision CAS. Stable completion is a
+single DynamoDB transaction that increments generation, changes active Region,
+removes active-transition fields and appends the final immutable evidence
+event. An exact retry verifies the existing event digest; a changed stable
+probe or substituted authority is denied.
 
 ## Initialization
 
@@ -175,8 +192,9 @@ replacement.
 
 ## Current non-guarantees
 
-The target-runtime and job-reconciliation smoke is implemented, but it does not
-exercise public ingress. This tranche does not implement stable ingress,
-stable-route compare-and-swap, public authenticated smoke, transition sealing,
-primary reactivation or failback execution. It has not deployed or initialized
-the live witness. Those remain required before P0-11 is complete.
+Stable ingress, public authenticated smoke, journal-governed transactional
+Route 53 movement and transition sealing are implemented but have not been run
+against live customer domains. Primary reactivation, safe rollback and
+failback remain deliberately unavailable. The live witness is not deployed or
+initialized. Those gates and a retained exercise remain required before P0-11
+is complete.

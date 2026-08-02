@@ -70,6 +70,24 @@ def _manifest(module: Any, **updates: Any) -> Any:
     return module.activation.ActivationManifest.parse(json.dumps(value), now=1000)
 
 
+def _routing_manifest(module: Any, **updates: Any) -> Any:
+    """Return schema-v3 authority bound to exact ingress and routing identities."""
+    return _manifest(
+        module,
+        schemaVersion=3,
+        primaryIngressStackName="AaiSecPrimaryRegionalIngress",
+        recoveryIngressStackName="AaiSecRecoveryRegionalIngress",
+        primaryCanaryApiDomain="api-primary.security.example.com",
+        primaryCanaryUiDomain="primary.security.example.com",
+        recoveryCanaryApiDomain="api-recovery.security.example.com",
+        recoveryCanaryUiDomain="recovery.security.example.com",
+        routingMarkerName="routing-generation.security.example.com",
+        routingRoleArn="arn:aws:iam::111111111111:role/AaiSecRegionalRouting",
+        routingAuthorityEvidenceRef="change/ROUTING-AUTHORITY-123",
+        **updates,
+    )
+
+
 def _attribute(value: str | int) -> dict[str, str]:
     return {"N": str(value)} if isinstance(value, int) else {"S": value}
 
@@ -148,11 +166,36 @@ class _Client:
         update = TransactItems[0]["Update"]
         values = update["ExpressionAttributeValues"]
         current_phase = self.state["phase"]["S"]
-        expected = values.get(":stable", values.get(":expected"))["S"]
+        expected = (
+            values[":expected"]["S"]
+            if ":completed" in values
+            else values.get(":stable", values.get(":expected"))["S"]
+        )
         expected_revision = int(values[":revision"]["N"])
         if current_phase != expected or int(self.state["revision"]["N"]) != expected_revision:
             raise _ConditionalError("stale")
-        if ":stable" in values:
+        if ":completed" in values:
+            for field, token in (
+                ("activeTransitionId", ":transition"),
+                ("authoritySha256", ":authority"),
+                ("evidenceSha256", ":evidence"),
+                ("approvalSha256", ":approval"),
+                ("expiresAt", ":expires"),
+            ):
+                if self.state[field] != values[token]:
+                    raise _ConditionalError("substituted completion authority")
+            self.state = {
+                "pk": {"S": "AUTHORITY"},
+                "sk": {"S": "CURRENT"},
+                "schemaVersion": {"N": "1"},
+                "generation": copy.deepcopy(values[":nextGeneration"]),
+                "activeRegion": copy.deepcopy(values[":target"]),
+                "phase": copy.deepcopy(values[":stable"]),
+                "revision": {"N": str(expected_revision + 1)},
+                "updatedAt": copy.deepcopy(values[":now"]),
+                "lastCompletedTransitionId": copy.deepcopy(values[":completed"]),
+            }
+        elif ":stable" in values:
             if (
                 int(self.state["generation"]["N"]) != int(values[":generation"]["N"])
                 or self.state["activeRegion"]["S"] != values[":source"]["S"]
@@ -179,9 +222,10 @@ class _Client:
             ):
                 if self.state[field] != values[token]:
                     raise _ConditionalError("substituted authority")
-        self.state["phase"] = copy.deepcopy(values[":next"])
-        self.state["revision"] = {"N": str(expected_revision + 1)}
-        self.state["updatedAt"] = copy.deepcopy(values[":now"])
+        if ":completed" not in values:
+            self.state["phase"] = copy.deepcopy(values[":next"])
+            self.state["revision"] = {"N": str(expected_revision + 1)}
+            self.state["updatedAt"] = copy.deepcopy(values[":now"])
         event = copy.deepcopy(TransactItems[1]["Put"]["Item"])
         key = (event["pk"]["S"], event["sk"]["S"])
         if key in self.events:
@@ -351,6 +395,48 @@ def test_initialization_is_primary_generation_zero_and_two_person_bound() -> Non
     assert event["approvalSha256"] == {"S": module.approval_sha256(manifest)}
     with pytest.raises(module.TransitionJournalError, match="generation-zero"):
         module.initialize_state(client, _manifest(module, expectedRoutingGeneration=1), now=1002)
+
+
+def test_routing_phases_complete_one_generation_and_are_retry_safe() -> None:
+    module = _load()
+    client = _Client()
+    manifest = _routing_manifest(module)
+    module.claim_source_fence(client, manifest, now=1001)
+    phases = [
+        ("FENCING_SOURCE", "SOURCE_FENCED"),
+        ("SOURCE_FENCED", "ACTIVATING_TARGET"),
+        ("ACTIVATING_TARGET", "TARGET_ACTIVE_NOT_ROUTED"),
+        ("TARGET_ACTIVE_NOT_ROUTED", "RECONCILING_TARGET_JOBS"),
+        ("RECONCILING_TARGET_JOBS", "TARGET_JOBS_RECONCILED_NOT_ROUTED"),
+        ("TARGET_JOBS_RECONCILED_NOT_ROUTED", "VERIFYING_TARGET_INGRESS"),
+        ("VERIFYING_TARGET_INGRESS", "TARGET_INGRESS_VERIFIED_NOT_ROUTED"),
+        ("TARGET_INGRESS_VERIFIED_NOT_ROUTED", "ROUTING_TARGET"),
+        ("ROUTING_TARGET", "VERIFYING_STABLE_ROUTE"),
+    ]
+    for offset, (expected, next_phase) in enumerate(phases, start=2):
+        module.advance_phase(
+            client,
+            manifest,
+            expected_phase=expected,
+            next_phase=next_phase,
+            now=1000 + offset,
+        )
+    digest = "e" * 64
+    completed = module.complete_transition(client, manifest, now=1012, step_evidence_sha256=digest)
+    assert completed["journal"] == {
+        "activeRegion": "eu-west-1",
+        "activeTransitionId": None,
+        "generation": 1,
+        "phase": "STABLE",
+        "revision": 18,
+        "updatedAt": 1012,
+    }
+    assert (
+        module.complete_transition(client, manifest, now=1013, step_evidence_sha256=digest)["claim"]
+        == "already-completed"
+    )
+    with pytest.raises(module.TransitionJournalError, match="differs from retry"):
+        module.complete_transition(client, manifest, now=1014, step_evidence_sha256="f" * 64)
 
 
 def test_stale_generation_wrong_source_and_competing_transition_fail_before_write() -> None:

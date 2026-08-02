@@ -94,7 +94,8 @@ expires within one hour. Do not commit it or its provider evidence. The
 documents the exact fields, checks and non-mutating preflight command.
 The [guarded transition executor](regional-transition-executor-design.md) is
 implemented, but its mutating commands must not be used until every item above
-is real, retained and approved. It cannot move traffic.
+is real, retained and approved. The separate routing executor can move traffic
+only under schema-v3 authority and the dedicated role; it has not been run live.
 The [transition journal design](regional-transition-journal-design.md) explains
 why the witness must not be converted to a Global Table and how the two Entra
 approver identities and expected routing generation are supplied.
@@ -105,6 +106,11 @@ issued and fully validated in that Region and contain exactly four SANs: the
 stable API/UI names plus that Region's API/UI canary names. Copy the checked-in
 example manifest outside the repository; do not commit real domain,
 certificate or approval authority.
+
+Engineering can continue without owner input on symmetric source reactivation,
+rollback and failback. Live routing cannot continue until the listed domains,
+certificates, Entra token path, two approvers and exclusive Route 53 authority
+are supplied and approved.
 
 ### Managed Claude Code and Codex hosts
 

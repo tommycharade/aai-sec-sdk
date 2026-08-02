@@ -1,5 +1,13 @@
 # Changelog
 
+- Added schema-v3, journal-governed Regional routing. A dedicated-role executor
+  verifies exact custom domains and mappings, authenticates canary API/UI,
+  repeats source fencing, target immutability and zero-action reconciliation,
+  then moves API, UI and generation marker in one transactional Route 53 batch.
+  Stable authenticated smoke seals the next journal generation. Provider
+  retries are idempotent; mixed DNS fails closed; DNS-only rollback is refused
+  until independent source reactivation exists. No live routing was performed.
+
 - Added independently verified, non-routing Regional ingress for the stable
   API/UI and Region-specific canaries. The private-bucket UI proxy has bounded
   read-only authority and exact CSP origins; active and standby recovery CORS

@@ -114,6 +114,7 @@ export class RegionalIngressStack extends cdk.Stack {
           domainNameConfigurations: [{
             certificateArn: props.certificateArn,
             endpointType: "REGIONAL",
+            ipAddressType: "ipv4",
             securityPolicy: "TLS_1_2",
           }],
         }),
