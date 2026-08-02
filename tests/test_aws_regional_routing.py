@@ -699,6 +699,71 @@ def test_completed_rollback_route_retry_does_not_mutate_route53(
     assert advances[0]["next_phase"] == "VERIFYING_SOURCE_ROLLBACK"
 
 
-def test_planned_failback_remains_explicitly_refused() -> None:
-    with pytest.raises(routing.RegionalRoutingError, match="primary target reconciliation"):
-        routing.refuse_unsafe_failback()
+def test_planned_failback_routes_recovery_to_primary_at_next_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _manifest(
+        direction="failback",
+        sourceRegion="eu-west-1",
+        targetRegion="eu-west-2",
+        expectedRoutingGeneration=1,
+    )
+    source, target = _cell("recovery"), _cell("primary")
+    previous_transition = "42345678-1234-4234-8234-123456789abc"
+    source_state = routing.expected_route_state(
+        manifest,
+        source,
+        generation=1,
+        transition_id=previous_transition,
+        marker_required=True,
+    )
+    target_state = routing.expected_route_state(
+        manifest,
+        target,
+        generation=2,
+        transition_id=manifest.transition_id,
+        marker_required=True,
+    )
+    observed = iter((source_state, target_state))
+    state = SimpleNamespace(
+        phase="TARGET_INGRESS_VERIFIED_NOT_ROUTED",
+        generation=1,
+        last_completed_transition_id=previous_transition,
+        evidence=lambda: {"phase": "TARGET_INGRESS_VERIFIED_NOT_ROUTED"},
+    )
+    monkeypatch.setattr(journal, "read_state", lambda *_: state)
+    monkeypatch.setattr(
+        journal,
+        "advance_phase",
+        lambda *_, **__: {"claim": "advanced", "journal": {"phase": "VERIFYING_STABLE_ROUTE"}},
+    )
+    monkeypatch.setattr(routing, "read_route_state", lambda *_, **__: next(observed))
+    batches: list[dict[str, Any]] = []
+
+    def runner(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if "get-caller-identity" in command:
+            return _completed(
+                {
+                    "Account": "111111111111",
+                    "Arn": "arn:aws:sts::111111111111:assumed-role/AaiSecRegionalRouting/operator",
+                }
+            )
+        if "change-resource-record-sets" in command:
+            batches.append(json.loads(command[command.index("--change-batch") + 1]))
+            return _completed({"ChangeInfo": {"Id": "/change/FAILBACK1", "Status": "PENDING"}})
+        return _completed({"ChangeInfo": {"Id": "/change/FAILBACK1", "Status": "INSYNC"}})
+
+    result = routing.route_target_step(
+        object(),
+        manifest,
+        source,
+        target,
+        profile="p1",
+        runner=runner,
+        sleeper=lambda _: None,
+        runtime_guard=_runtime_proof,
+    )
+    assert result["trafficRouted"] is True
+    assert len(batches) == 1
+    marker = next(record for record in result["records"] if record["Type"] == "TXT")
+    assert ":g=2:" in marker["ResourceRecords"][0]["Value"]

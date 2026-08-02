@@ -368,6 +368,30 @@ def test_schema_v4_binds_both_runtime_templates_for_reactivation() -> None:
         json.dumps(_manifest(payload, **authority)), now=1000
     )
     manifest.require_reactivation_authority()
+    bundle = _bundle()
+    bundle["operations"].update(
+        {
+            "approverPrincipalIds": [approval.principal_id for approval in manifest.approvals],
+            "approvalSha256": manifest.approval_sha256(),
+        }
+    )
+    bundle["authoritySha256"] = manifest.authority_sha256()
+    bound_payload = _payload(bundle)
+    bound_manifest_value = _manifest(bound_payload, **authority)
+    bound_manifest = module.ActivationManifest.parse(json.dumps(bound_manifest_value), now=1000)
+    assert module.verify_bundle(bound_manifest, bound_payload, now=1000)[
+        "approverPrincipalIds"
+    ] == [approval.principal_id for approval in bound_manifest.approvals]
+    forged_bundle = copy.deepcopy(bundle)
+    forged_bundle["operations"]["approvalSha256"] = "0" * 64
+    forged_payload = _payload(forged_bundle)
+    forged_manifest_value = _manifest(forged_payload, **authority)
+    with pytest.raises(module.RegionalActivationVerificationError, match="operational"):
+        module.verify_bundle(
+            module.ActivationManifest.parse(json.dumps(forged_manifest_value), now=1000),
+            forged_payload,
+            now=1000,
+        )
     original = manifest.authority_sha256()
     changed_authority = copy.deepcopy(authority)
     changed_authority["primaryRuntimeTemplateSha256"] = "d" * 64

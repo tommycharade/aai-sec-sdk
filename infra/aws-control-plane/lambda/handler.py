@@ -7529,23 +7529,43 @@ def _evidence_job_page(tenant, job_id, page_number):
     return {**value, "contentSha256": supplied}
 
 
-def _regional_recovery_job_reconciliation(mode, activation_evidence_ref):
-    """Rebuild Region-local evidence delivery from authoritative job records.
+def _regional_transition_job_reconciliation(
+    mode,
+    activation_evidence_ref,
+    direction,
+    target_region,
+    transition_id,
+    authority_sha256,
+):
+    """Rebuild target-Region delivery under exact transition authority.
 
     SQS is deliberately never inspected or copied. A check can run in standby,
     while apply requires two independent activation controls and still relies
     on revision-bound FIFO messages plus DynamoDB conditional writes.
     """
     if mode not in {"check", "apply"}:
-        raise ValueError("regional recovery reconciliation mode is invalid")
+        raise ValueError("regional transition reconciliation mode is invalid")
     evidence_ref = _bounded_text(activation_evidence_ref, "activationEvidenceRef", maximum=512)
     if len(evidence_ref) < 8:
         raise ValueError("activationEvidenceRef must be at least eight characters")
-    if mode == "apply" and (
-        os.environ.get("PASSIVE_CELL_MODE") != "active"
-        or os.environ.get("RECOVERY_JOB_RECONCILIATION_ENABLED") != "true"
+    cell_role = os.environ.get("REGIONAL_CELL_ROLE")
+    expected_role = {"failover": "recovery", "failback": "primary"}.get(direction)
+    if (
+        expected_role is None
+        or cell_role != expected_role
+        or target_region != os.environ.get("AWS_REGION")
+        or not isinstance(transition_id, str)
+        or not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            transition_id,
+            re.IGNORECASE,
+        )
+        or not isinstance(authority_sha256, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", authority_sha256)
     ):
-        raise PermissionError("regional recovery job reconciliation is not activated")
+        raise PermissionError("regional transition authority does not match this cell")
+    if mode == "apply" and os.environ.get("REGIONAL_JOB_RECONCILIATION_ENABLED") != "true":
+        raise PermissionError("regional transition job reconciliation is not activated")
 
     registrations = []
     for shard in range(_EVIDENCE_ASSURANCE_SHARDS):
@@ -7650,6 +7670,7 @@ def _regional_recovery_job_reconciliation(mode, activation_evidence_ref):
     return {
         "mode": mode,
         "activationEvidenceRefSha256": hashlib.sha256(evidence_ref.encode()).hexdigest(),
+        "transitionAuthoritySha256": authority_sha256,
         "processedTenants": len(registrations),
         "plannedActions": planned,
         "dispatchedJobs": dispatched,
@@ -13579,7 +13600,7 @@ def handler(event, context):
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("evidence retention schedule event is invalid")
         return _evidence_retention_schedule_cycle()
-    if isinstance(event, dict) and event.get("source") == "aai.regional-recovery-jobs":
+    if isinstance(event, dict) and event.get("source") == "aai.regional-transition-jobs":
         if (
             set(event)
             != {
@@ -13587,12 +13608,21 @@ def handler(event, context):
                 "schemaVersion",
                 "mode",
                 "activationEvidenceRef",
+                "direction",
+                "targetRegion",
+                "transitionId",
+                "authoritySha256",
             }
-            or event.get("schemaVersion") != 1
+            or event.get("schemaVersion") != 2
         ):
-            raise ValueError("regional recovery job reconciliation event is invalid")
-        return _regional_recovery_job_reconciliation(
-            event.get("mode"), event.get("activationEvidenceRef")
+            raise ValueError("regional transition job reconciliation event is invalid")
+        return _regional_transition_job_reconciliation(
+            event.get("mode"),
+            event.get("activationEvidenceRef"),
+            event.get("direction"),
+            event.get("targetRegion"),
+            event.get("transitionId"),
+            event.get("authoritySha256"),
         )
     try:
         method, path = _method_path(event)

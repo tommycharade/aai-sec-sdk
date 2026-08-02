@@ -458,6 +458,43 @@ def test_routing_phases_complete_one_generation_and_are_retry_safe() -> None:
         module.complete_transition(client, manifest, now=1014, step_evidence_sha256="f" * 64)
 
 
+def test_failback_uses_same_cas_and_completes_on_primary_generation_two() -> None:
+    module = _load()
+    client = _Client(_stable(generation=1, active_region="eu-west-1"))
+    manifest = _routing_manifest(
+        module,
+        direction="failback",
+        sourceRegion="eu-west-1",
+        targetRegion="eu-west-2",
+        expectedRoutingGeneration=1,
+    )
+    module.claim_source_fence(client, manifest, now=1001)
+    phases = [
+        ("FENCING_SOURCE", "SOURCE_FENCED"),
+        ("SOURCE_FENCED", "ACTIVATING_TARGET"),
+        ("ACTIVATING_TARGET", "TARGET_ACTIVE_NOT_ROUTED"),
+        ("TARGET_ACTIVE_NOT_ROUTED", "RECONCILING_TARGET_JOBS"),
+        ("RECONCILING_TARGET_JOBS", "TARGET_JOBS_RECONCILED_NOT_ROUTED"),
+        ("TARGET_JOBS_RECONCILED_NOT_ROUTED", "VERIFYING_TARGET_INGRESS"),
+        ("VERIFYING_TARGET_INGRESS", "TARGET_INGRESS_VERIFIED_NOT_ROUTED"),
+        ("TARGET_INGRESS_VERIFIED_NOT_ROUTED", "ROUTING_TARGET"),
+        ("ROUTING_TARGET", "VERIFYING_STABLE_ROUTE"),
+    ]
+    for offset, (expected, next_phase) in enumerate(phases, start=2):
+        module.advance_phase(
+            client,
+            manifest,
+            expected_phase=expected,
+            next_phase=next_phase,
+            now=1000 + offset,
+        )
+    completed = module.complete_transition(
+        client, manifest, now=1012, step_evidence_sha256="e" * 64
+    )
+    assert completed["journal"]["activeRegion"] == "eu-west-2"
+    assert completed["journal"]["generation"] == 2
+
+
 def test_failed_target_rolls_back_at_a_new_generation_and_seals_outcome() -> None:
     module = _load()
     client = _Client()

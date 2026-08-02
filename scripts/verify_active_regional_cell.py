@@ -290,6 +290,8 @@ def verify(
         if (
             variables.get("PASSIVE_CELL_MODE") != "active"
             or variables.get("RECOVERY_JOB_RECONCILIATION_ENABLED") != "true"
+            or variables.get("REGIONAL_CELL_ROLE") != "recovery"
+            or variables.get("REGIONAL_JOB_RECONCILIATION_ENABLED") != "true"
             or variables.get("ACTIVATION_EVIDENCE_SHA256") != activation_evidence_sha256
             or variables.get("POLICY_SIGNING_KEY_ARN") != signing_key_arn
             or variables.get("REGIONAL_POLICY_SIGNING_KEY_ARN") != signing_key_arn

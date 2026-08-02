@@ -143,8 +143,10 @@ This tranche does not deploy identity or prove live RTO/RPO. A guarded executor
 now covers journal-governed source fencing, active-but-not-routed target
 deployment, target-runtime/job reconciliation, Regional custom-domain ingress,
 public authenticated smoke, routing CAS, evidence sealing and safe
-failed-cutover rollback to an exact template-bound source. It does not yet
-cover planned failback with primary-side target reconciliation.
+failed-cutover rollback to an exact template-bound source. A distinct primary
+target adapter now adds exact primary restoration, live runtime verification,
+direction-bound job reconciliation and symmetric planned failback. None of
+these transition paths has been exercised against live customer domains.
 The current AWS
 environment still requires Microsoft Entra/SCIM, recovery Cognito, real managed
 endpoint trust convergence, stable domains, direct-origin closure and the live

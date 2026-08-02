@@ -868,7 +868,7 @@ def verify_bundle(
         "sourceFencePrepared",
         "failbackPlanPassed",
     }
-    if manifest.schema_version == 2:
+    if manifest.schema_version >= 2:
         operation_fields |= {"approverPrincipalIds", "approvalSha256"}
     operations = _section(
         bundle,
@@ -883,14 +883,14 @@ def verify_bundle(
     )
     if (
         approver_count < 2
-        or (manifest.schema_version == 2 and approver_count != len(manifest.approvals))
+        or (manifest.schema_version >= 2 and approver_count != len(manifest.approvals))
         or (
-            manifest.schema_version == 2
+            manifest.schema_version >= 2
             and operations.get("approverPrincipalIds")
             != [approval.principal_id for approval in manifest.approvals]
         )
         or (
-            manifest.schema_version == 2
+            manifest.schema_version >= 2
             and operations.get("approvalSha256") != manifest.approval_sha256()
         )
         or operations["breakGlassRehearsed"] is not True

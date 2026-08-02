@@ -264,8 +264,13 @@ requires schema-v4 authority bound to both processed runtime templates. The
 failed target is independently fenced before exact source restoration; source
 canaries pass before one inverse Route 53 batch writes generation + 2; stable
 smoke then seals an immutable `ROLLED_BACK` event. DNS-only rollback, changed
-template state and planned failback without primary job reconciliation remain
-denied. See
+template state and failback without exact primary runtime/job reconciliation
+remain denied. Planned failback uses a distinct primary adapter: its internal
+job event binds direction, target Region, transition UUID and authority digest,
+and only an IAM-scoped dedicated transition role may invoke the exact target
+handler. The event fields are defence in depth, not caller authentication:
+Lambda invocation authority must remain limited to that exact role and handler,
+while Route 53 mutation is limited to the exact stable hosted zone. See
 [Regional target readiness and stable ingress](regional-target-readiness-and-stable-ingress-design.md).
 
 Bidirectional evidence continuity is independently constrained in each S3

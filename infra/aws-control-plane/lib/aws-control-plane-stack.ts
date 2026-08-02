@@ -560,6 +560,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
       timeout: cdk.Duration.seconds(10),
       memorySize: 256,
+      reservedConcurrentExecutions: 5,
       environment: {
         CONTROL_TABLE: table.tableName,
         TRIAL_DAYS: "14",
@@ -681,6 +682,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       SCIM_TABLE: scim.tableName,
       SPLUNK_STUB_ENABLED: "true",
       RECOVERY_JOB_RECONCILIATION_ENABLED: "false",
+      REGIONAL_CELL_ROLE: "primary",
+      REGIONAL_JOB_RECONCILIATION_ENABLED: "true",
       SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn,
       RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
       RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
@@ -693,6 +696,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
       timeout: cdk.Duration.seconds(15),
       memorySize: 512,
+      reservedConcurrentExecutions: 100,
       environment: {
         ...controlPlaneEnvironment,
         REGIONAL_POLICY_SIGNING_KEY_ARN: regionalPolicySigningKey.keyArn,
@@ -872,6 +876,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
         code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
         timeout: cdk.Duration.seconds(15),
         memorySize: 256,
+        reservedConcurrentExecutions: 20,
         environment: {
           SCIM_TABLE: scim.tableName,
           SCIM_AAI_TENANT_ID: entraAaiTenantId,
@@ -928,6 +933,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
       timeout: cdk.Duration.minutes(5),
       memorySize: 512,
+      reservedConcurrentExecutions: 5,
       environment: {
         CONTROL_TABLE: table.tableName,
         CONTROL_PLANE_API_URL: api.apiEndpoint,
@@ -1191,6 +1197,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "RegionalPolicySigningKeyArn", {
       value: regionalPolicySigningKey.keyArn,
     });
+    new cdk.CfnOutput(this, "RegionalCellRole", { value: "primary" });
+    new cdk.CfnOutput(this, "RegionalTargetStatus", { value: "active-capable" });
     new cdk.CfnOutput(this, "DiscoveryProviderSecretNamePrefix", {
       value: providerSecretPrefix,
     });

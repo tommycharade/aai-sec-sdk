@@ -2,10 +2,9 @@
 """Verify and atomically move stable API/UI aliases under journal authority.
 
 This component is deliberately narrower than the runtime transition executor.
-It can verify Regional ingress, perform one exact Route 53 change batch, and
-complete one journal generation. It cannot activate or reactivate compute.
-Rollback is therefore refused until a separate source-reactivation proof is
-implemented; routing to a fenced source would turn rollback into an outage.
+It verifies Regional ingress and live runtime evidence, performs one exact
+Route 53 change batch, and completes one journal generation. Compute activation
+and restoration remain separate journal-governed commands.
 """
 
 from __future__ import annotations
@@ -666,6 +665,7 @@ def prove_pre_route_runtime(
     *,
     profile: str,
     runner: Runner = subprocess.run,
+    runtime_verifier: Callable[..., dict[str, Any]] = active.verify_target_runtime,
 ) -> dict[str, Any]:
     """Re-prove source fencing, target immutability, and zero pending jobs."""
     source_fence = active.verify_source_fence(
@@ -674,7 +674,7 @@ def prove_pre_route_runtime(
         region=manifest.source_region,
         runner=runner,
     )
-    runtime_before = active.verify_target_runtime(
+    runtime_before = runtime_verifier(
         target_resources,
         manifest,
         expected_environment,
@@ -689,7 +689,7 @@ def prove_pre_route_runtime(
     )
     if reconciliation.get("plannedActions") != 0:
         raise RegionalRoutingError("target has pending reconciliation actions before routing")
-    runtime_after = active.verify_target_runtime(
+    runtime_after = runtime_verifier(
         target_resources,
         manifest,
         expected_environment,
@@ -1311,13 +1311,6 @@ def verify_source_rollback_step(
     }
 
 
-def refuse_unsafe_failback() -> None:
-    """Fail closed until the primary target adapter supports planned failback."""
-    raise RegionalRoutingError(
-        "planned failback is prohibited until primary target reconciliation is implemented"
-    )
-
-
 def _read_token(path: Path) -> str:
     """Read a bounded owner-only smoke token without exposing it in output."""
     try:
@@ -1348,7 +1341,6 @@ def _parser() -> argparse.ArgumentParser:
             "verify-source-ingress",
             "route-source-rollback",
             "verify-source-rollback",
-            "planned-failback",
         ),
     )
     parser.add_argument("--manifest", type=Path, required=True)
@@ -1372,16 +1364,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Repeat provider preflight and execute exactly one confirmed route step."""
     arguments = _parser().parse_args(argv)
     try:
-        if arguments.command == "planned-failback":
-            refuse_unsafe_failback()
         manifest = activation.ActivationManifest.parse(
             arguments.manifest.read_text(encoding="utf-8")
         )
         manifest.require_routing_authority()
-        if manifest.direction != "failover":
-            raise RegionalRoutingError(
-                "failback routing is unavailable until primary reactivation is implemented"
-            )
         regional = recovery.RegionalRecoveryManifest.parse(
             arguments.regional_recovery_config.read_text(encoding="utf-8")
         )
@@ -1416,6 +1402,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         journal_posture = journal.verify_table_posture(witness, manifest)
         primary = discover_ingress_cell(manifest, role="primary", profile=arguments.profile)
         recovery_cell = discover_ingress_cell(manifest, role="recovery", profile=arguments.profile)
+        source_cell = (
+            primary if manifest.source_region == manifest.primary_region else recovery_cell
+        )
+        target_cell = (
+            primary if manifest.target_region == manifest.primary_region else recovery_cell
+        )
+        source_stack_name = (
+            regional.stack_name
+            if manifest.source_region == manifest.primary_region
+            else passive_cell.stack_name
+        )
+        target_stack_name = (
+            regional.stack_name
+            if manifest.target_region == manifest.primary_region
+            else passive_cell.stack_name
+        )
         result: dict[str, Any] = {
             "command": arguments.command,
             "journalPosture": journal_posture,
@@ -1429,7 +1431,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 verify_target_ingress_step(
                     witness,
                     manifest,
-                    recovery_cell,
+                    target_cell,
                     token,
                     profile=arguments.profile,
                 )
@@ -1438,22 +1440,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif arguments.command == "route-target":
             if not arguments.confirm_route53_cutover:
                 raise RegionalRoutingError("--confirm-route53-cutover is required")
-            environment = active.active_environment(
-                manifest,
-                regional,
-                passive_cell,
-                verified,
-                profile=arguments.profile,
-            )
+            if manifest.direction == "failover":
+                environment = active.active_environment(
+                    manifest,
+                    regional,
+                    passive_cell,
+                    verified,
+                    profile=arguments.profile,
+                )
+                target_resources = active.discover_target_resources(
+                    stack_name=target_stack_name,
+                    target_region=manifest.target_region,
+                    profile=arguments.profile,
+                )
+                runtime_verifier = active.verify_target_runtime
+            else:
+                environment = active.primary_target_environment(
+                    manifest,
+                    regional,
+                    verified,
+                    profile=arguments.profile,
+                )
+                target_resources = active.discover_primary_target_resources(
+                    stack_name=target_stack_name,
+                    target_region=manifest.target_region,
+                    profile=arguments.profile,
+                )
+                runtime_verifier = active.verify_primary_target_runtime
             source_resources = active.discover_source_resources(
                 regional,
-                stack_name=regional.stack_name,
+                stack_name=source_stack_name,
                 source_region=manifest.source_region,
-                profile=arguments.profile,
-            )
-            target_resources = active.discover_target_resources(
-                stack_name=passive_cell.stack_name,
-                target_region=manifest.target_region,
                 profile=arguments.profile,
             )
             lambda_client = session.client("lambda", region_name=manifest.target_region)
@@ -1461,8 +1478,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 route_target_step(
                     witness,
                     manifest,
-                    primary,
-                    recovery_cell,
+                    source_cell,
+                    target_cell,
                     profile=arguments.profile,
                     runtime_guard=lambda: prove_pre_route_runtime(
                         lambda_client,
@@ -1471,6 +1488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         target_resources,
                         environment,
                         profile=arguments.profile,
+                        runtime_verifier=runtime_verifier,
                     ),
                 )
             )
@@ -1482,7 +1500,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 verify_stable_step(
                     witness,
                     manifest,
-                    recovery_cell,
+                    target_cell,
                     token,
                     profile=arguments.profile,
                 )
@@ -1493,7 +1511,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise RegionalRoutingError("--confirm-failed-target-fence is required")
             rollback_target_resources = active.discover_source_resources(
                 regional,
-                stack_name=passive_cell.stack_name,
+                stack_name=target_stack_name,
                 source_region=manifest.target_region,
                 profile=arguments.profile,
             )
@@ -1511,19 +1529,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise RegionalRoutingError("--confirm-source-reactivation is required")
             rollback_target_resources = active.discover_source_resources(
                 regional,
-                stack_name=passive_cell.stack_name,
+                stack_name=target_stack_name,
                 source_region=manifest.target_region,
                 profile=arguments.profile,
             )
             source_resources = active.discover_source_resources(
                 regional,
-                stack_name=regional.stack_name,
+                stack_name=source_stack_name,
                 source_region=manifest.source_region,
                 profile=arguments.profile,
             )
             source_plan = active.discover_source_reactivation_plan(
                 source_resources,
-                stack_name=regional.stack_name,
+                stack_name=source_stack_name,
                 region=manifest.source_region,
                 profile=arguments.profile,
             )
@@ -1544,7 +1562,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 verify_source_ingress_step(
                     witness,
                     manifest,
-                    primary,
+                    source_cell,
                     token,
                     profile=arguments.profile,
                 )
@@ -1557,8 +1575,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 route_source_rollback_step(
                     witness,
                     manifest,
-                    primary,
-                    recovery_cell,
+                    source_cell,
+                    target_cell,
                     profile=arguments.profile,
                 )
             )
@@ -1570,7 +1588,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 verify_source_rollback_step(
                     witness,
                     manifest,
-                    primary,
+                    source_cell,
                     token,
                     profile=arguments.profile,
                 )

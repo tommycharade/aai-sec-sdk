@@ -192,10 +192,14 @@ restoration, stale journal authority and changed retry evidence all fail
 closed. A retry after Route 53 convergence recognizes the exact source records
 and does not submit a duplicate mutation.
 
-Failback is not implemented by swapping labels in the failover code. The
-primary runtime needs the same active-template verifier, target job
-reconciliation, regional ingress and canary contracts first. Only then may the
-same state machine run with source and target reversed.
+Planned failback is implemented as a separate primary target adapter, not by
+blindly swapping labels. It requires recovery to be the journal-authorized
+active source, fences that recovery runtime first, restores primary only from
+the exact schema-v4 processed template, verifies primary application runtime
+and signing/Entra authority, reconciles Region-local jobs, and proves primary
+canary ingress before using the same generation CAS and transactional Route 53
+batch. A failed failback can use the same inverse rollback sequence to restore
+recovery at generation + 2.
 
 ## Current blockers and non-guarantees
 
@@ -215,5 +219,6 @@ Live deployment and routing still require:
 
 No Route 53 record, certificate, custom domain, UI proxy or live AWS transition
 was created by this implementation tranche. Forward routing and failed-cutover
-rollback are implemented and synthetically tested; planned failback and the
-live exercise remain incomplete, so P0-11 remains **Partial**.
+rollback in either direction plus planned failback are implemented and
+synthetically tested. The live exercise remains incomplete, so P0-11 remains
+**Partial**.

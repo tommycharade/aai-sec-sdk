@@ -1,5 +1,15 @@
 # Changelog
 
+- Added symmetric schema-v4 planned failback. The primary target adapter
+  restores the exact processed-template runtime only after recovery is fenced,
+  independently verifies the primary handler/workers, binds internal job
+  reconciliation to transition direction, Region, UUID and authority digest,
+  and requires a zero-action result before canary and stable routing. The same
+  journal and transactional Route 53 state machine now moves recovery back to
+  primary at the next generation and can roll a failed failback back to
+  recovery at generation + 2. Primary application concurrency is explicitly
+  bounded. No live AWS mutation or routing was performed.
+
 - Added schema-v4, journal-governed failed-cutover rollback. The approved
   authority now binds the exact processed primary and recovery runtime
   templates. The executor fences the failed target, restores every source
@@ -7,7 +17,6 @@
   template, proves source canary authentication, and moves API, UI and marker
   back in one transactional Route 53 batch at generation + 2. Stable source
   smoke seals an explicit `ROLLED_BACK` event. Every phase is retry-safe and
-  planned failback remains denied until primary-side job reconciliation exists.
   No live routing was performed.
 
 - Added schema-v3, journal-governed Regional routing. A dedicated-role executor

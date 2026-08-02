@@ -253,6 +253,8 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       EVIDENCE_REPORT_BUCKET: evidenceReports?.bucketName ?? "",
       PASSIVE_CELL_MODE: active ? "active" : "standby",
       RECOVERY_JOB_RECONCILIATION_ENABLED: active ? "true" : "false",
+      REGIONAL_CELL_ROLE: "recovery",
+      REGIONAL_JOB_RECONCILIATION_ENABLED: active ? "true" : "false",
       PRIMARY_REGION: props.primaryRegion,
       RECOVERY_REGION: recoveryRegion,
       // An ARN in this field would claim live signing authority. The replica
