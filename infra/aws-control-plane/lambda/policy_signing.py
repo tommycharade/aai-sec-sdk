@@ -18,7 +18,8 @@ MAX_DEPTH = 12
 MAX_COLLECTION_ITEMS = 2_000
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 KMS_KEY_ARN = re.compile(
-    r"^arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36}$"
+    r"^arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/"
+    r"(?:[0-9a-f-]{36}|mrk-[0-9a-f]{32})$"
 )
 
 

@@ -216,8 +216,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
       sortKey: { name: "sk", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       timeToLiveAttribute: "ttl",
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
     table.addGlobalSecondaryIndex({
@@ -248,7 +250,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
       sortKey: { name: "sk", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       timeToLiveAttribute: "ttl",
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -256,8 +261,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       timeToLiveAttribute: "ttl",
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -268,8 +275,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "sk", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -525,6 +534,18 @@ export class AwsControlPlaneStack extends cdk.Stack {
       description: "Signs immutable tenant-bound AAI Security policy bundles",
       keySpec: kms.KeySpec.ECC_NIST_P256,
       keyUsage: kms.KeyUsage.SIGN_VERIFY,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    // This key is staged before signer cutover so endpoint trust bundles can
+    // carry both the current single-Region key and the future multi-Region key.
+    // Deploying it does not change active policy authority. A reviewed DR
+    // exercise must prove trust convergence before POLICY_SIGNING_KEY_ARN is
+    // switched, avoiding a failover that silently invalidates active policy.
+    const regionalPolicySigningKey = new kms.Key(this, "RegionalPolicySigningKey", {
+      description: "Staged multi-Region policy signing authority for controlled recovery",
+      keySpec: kms.KeySpec.ECC_NIST_P256,
+      keyUsage: kms.KeyUsage.SIGN_VERIFY,
+      multiRegion: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
     const trialOnboarding = new lambda.Function(this, "TrialOnboarding", {
@@ -1135,6 +1156,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "UiBucketName", { value: uiBucket.bucketName });
     new cdk.CfnOutput(this, "AuditBucketName", { value: audit.bucketName });
     new cdk.CfnOutput(this, "ControlTableName", { value: table.tableName });
+    new cdk.CfnOutput(this, "PresenceTableName", { value: presence.tableName });
     new cdk.CfnOutput(this, "IdempotencyTableName", { value: idempotency.tableName });
     new cdk.CfnOutput(this, "ScimLifecycleTableName", { value: scim.tableName });
     new cdk.CfnOutput(this, "ScopedToolRoleArn", { value: scopedToolRole.roleArn });
@@ -1156,6 +1178,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });
     new cdk.CfnOutput(this, "PolicySigningKeyArn", { value: policySigningKey.keyArn });
+    new cdk.CfnOutput(this, "RegionalPolicySigningKeyArn", {
+      value: regionalPolicySigningKey.keyArn,
+    });
     new cdk.CfnOutput(this, "DiscoveryProviderSecretNamePrefix", {
       value: providerSecretPrefix,
     });

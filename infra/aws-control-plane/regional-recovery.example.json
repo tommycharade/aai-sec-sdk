@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "stackName": "AaiSecControlPlane",
+  "primaryRegion": "eu-west-2",
+  "recoveryRegion": "eu-west-1",
+  "targetFleetSize": 1000,
+  "rtoMinutes": 30,
+  "rpoSeconds": 60,
+  "recoveryMode": "fail-closed-active-passive",
+  "approvalEvidenceRef": "DR-REVIEW-CHANGE-ME"
+}

@@ -7,11 +7,13 @@ import os
 from pathlib import Path
 
 import pytest
-from scripts.export_policy_trust_bundle import export_trust_bundle
+from scripts.export_policy_trust_bundle import export_trust_bundle, export_trust_bundle_set
 
 from agentic_security import PolicyTrustStore
 
 KEY_ID = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789abc"
+MRK_PRIMARY = "arn:aws:kms:eu-west-2:123456789012:key/mrk-1234567890abcdef1234567890abcdef"
+MRK_REPLICA = "arn:aws:kms:eu-west-1:123456789012:key/mrk-1234567890abcdef1234567890abcdef"
 # Synthetic P-256 public key derived from private scalar 1. A fixed public-only
 # fixture keeps this contract deterministic and avoids involving key generation.
 PUBLIC_DER = base64.b64decode(
@@ -55,6 +57,31 @@ def test_exported_bundle_is_valid_deterministic_trust_material(tmp_path: Path) -
     assert KEY_ID in trust.to_json()
     with pytest.raises(FileExistsError):
         export_trust_bundle(kms_client=FakeKms(_public_der()), key_id=KEY_ID, output=output)
+
+
+def test_overlap_bundle_supports_old_and_both_regional_mrk_identities(tmp_path: Path) -> None:
+    output = tmp_path / "policy-trust-overlap.json"
+    fingerprints = export_trust_bundle_set(
+        kms_keys=(
+            (FakeKms(_public_der()), KEY_ID),
+            (FakeKms(_public_der()), MRK_PRIMARY),
+            (FakeKms(_public_der()), MRK_REPLICA),
+        ),
+        output=output,
+    )
+    trust = PolicyTrustStore.from_file(output, required_owner_id=os.getuid())
+    encoded = trust.to_json()
+    assert set(fingerprints) == {KEY_ID, MRK_PRIMARY, MRK_REPLICA}
+    assert all(key_id in encoded for key_id in fingerprints)
+    assert len(set(fingerprints.values())) == 1
+
+    duplicate = tmp_path / "duplicate.json"
+    with pytest.raises(ValueError, match="unique"):
+        export_trust_bundle_set(
+            kms_keys=((FakeKms(_public_der()), KEY_ID), (FakeKms(_public_der()), KEY_ID)),
+            output=duplicate,
+        )
+    assert not duplicate.exists()
 
 
 def test_export_rejects_wrong_kms_key_usage_without_writing(tmp_path: Path) -> None:
