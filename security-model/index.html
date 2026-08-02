@@ -1268,6 +1268,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../regional-transition-journal-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional transition witness and journal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../evidence-continuity-and-job-reconciliation-design/" class="md-nav__link">
         
   
@@ -3235,6 +3262,13 @@ deploy an independently verified active-but-not-routed target as separate
 confirmed steps, and has no traffic-routing operation. See the
 <a href="../regional-activation-and-exercise-design/">regional activation design</a> and
 <a href="../regional-transition-executor-design/">guarded transition executor</a>.</p>
+<p>Transition ownership is not stored in the replicated control Global Table.
+One protected DynamoDB witness in a third Region provides strongly consistent
+reads and transactional compare-and-swap over generation, phase, revision,
+transition UUID, retained evidence and two-person approval digests. In-progress
+phases are committed before source or target mutation, so exact retries resume
+while competing, stale, expired or substituted authority fails closed. See the
+<a href="../regional-transition-journal-design/">regional transition journal</a>.</p>
 <p>Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while
 excluding delete markers, and synthesized CloudFormation is rejected unless

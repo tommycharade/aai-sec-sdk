@@ -16,7 +16,7 @@
         <link rel="prev" href="../regional-activation-and-exercise-design/">
       
       
-        <link rel="next" href="../evidence-continuity-and-job-reconciliation-design/">
+        <link rel="next" href="../regional-transition-journal-design/">
       
       
         
@@ -1158,6 +1158,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../regional-transition-journal-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional transition witness and journal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2851,16 +2878,21 @@ the <a href="../regional-activation-and-exercise-design/">regional activation de
 <tr>
 <td><code>check</code></td>
 <td>None</td>
-<td>Derives persisted identity/signing authority and verifies the active-but-not-routed template</td>
+<td>Derives persisted identity/signing authority, verifies the journal, and verifies the active-but-not-routed template</td>
+</tr>
+<tr>
+<td><code>initialize-journal</code></td>
+<td>Creates only generation-zero primary <code>STABLE</code> authority</td>
+<td>Requires schema-v2 two-person authority and <code>--confirm-journal-initialization</code></td>
 </tr>
 <tr>
 <td><code>fence-source</code></td>
-<td>Disables source rules/mappings, then sets all source-stack Lambda concurrency to zero</td>
+<td>Claims <code>FENCING_SOURCE</code>, disables source rules/mappings and all source-stack Lambda concurrency, then records <code>SOURCE_FENCED</code></td>
 <td>Requires <code>--confirm-source-fence</code> and independently reads every resulting state</td>
 </tr>
 <tr>
 <td><code>activate-target</code></td>
-<td>Deploys the exact verified CDK assembly</td>
+<td>Claims <code>ACTIVATING_TARGET</code>, deploys the exact verified CDK assembly, then records <code>TARGET_ACTIVE_NOT_ROUTED</code></td>
 <td>Requires <code>--confirm-target-activation</code> and a newly verified complete source fence</td>
 </tr>
 </tbody>
@@ -2868,7 +2900,10 @@ the <a href="../regional-activation-and-exercise-design/">regional activation de
 <p>The commands cannot be combined. A later command repeats preflight rather than
 trusting prior terminal output. Source ingress is disabled before Lambda
 concurrency, the complete bounded mutation set is attempted, and any partial
-failure is reported as failure. Target activation never routes traffic.</p>
+failure is reported as failure. Target activation never routes traffic.
+Mutating commands require the <a href="../regional-transition-journal-design/">single-writer transition journal</a>,
+schema-v2 authority, an exact expected routing generation and two independently
+strong-authenticated Entra principals.</p>
 <h2 id="authority-binding">Authority binding</h2>
 <p>The retained bundle includes <code>authoritySha256</code>, a digest over the manifest’s
 transition, direction, Regions, stable domains, hosted zone, fleet/RTO/RPO
@@ -2939,9 +2974,9 @@ reviewed assembly.</p>
   --confirm-target-activation
 </code></pre>
 <p>Exit code <code>2</code> is fail-closed. Never treat terminal output as permission to move
-traffic. Routing, target smoke, job reconciliation, a durable compare-and-swap
-transition journal, failback and retained live RTO/RPO evidence remain separate
-incomplete gates.</p>
+traffic. Routing CAS, target smoke, job reconciliation, transition sealing,
+primary reactivation, failback and retained live RTO/RPO evidence remain
+separate incomplete gates.</p>
 <h2 id="test-evidence-and-non-guarantees">Test evidence and non-guarantees</h2>
 <p>Focused tests cover unstable/duplicate discovery, bounded pagination, resource
 digest binding, ordered fencing, partial mutation failure, independent state
@@ -2949,8 +2984,8 @@ reads, identity/signing substitution, exact assembly deployment, unknown IAM
 actions, mismatched bucket policies and absence of routing commands. CI
 synthesizes standby and synthetic active variants with separate verifiers.</p>
 <p>No live AWS mutation was performed by this tranche. P0-11 remains <strong>Partial</strong>
-until real identity, trust, stable-origin, passive deployment, journal/CAS,
-routing and rehearsed exercise gates all pass.</p>
+until real identity, trust, stable-origin, passive/witness deployment,
+routing CAS and rehearsed exercise gates all pass.</p>
 
 
 
