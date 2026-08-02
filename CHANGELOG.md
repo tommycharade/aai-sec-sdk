@@ -1,5 +1,11 @@
 # Changelog
 
+- Exposed the exact primary and recovery control-handler execution roles as
+  deployment-owned Regional fault-controller inputs. Independent active and
+  passive cell verification rejects missing, literal, substituted or
+  non-handler role identities; no operator or model-facing role selector was
+  introduced.
+
 - Added the read-only schema-v1 Regional dependency-fault authority planner. It
   binds one named dependency, exact target cell/template, routing generation,
   two Entra approvers, 30–300-second duration and short expiry to schema-v4

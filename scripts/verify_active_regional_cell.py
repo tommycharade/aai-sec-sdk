@@ -110,6 +110,45 @@ def _resources(template: dict[str, Any], resource_type: str) -> list[dict[str, A
     ]
 
 
+def _fault_target_role(template: dict[str, Any], outputs: dict[str, Any]) -> str:
+    """Require one output bound to the exact active recovery handler role."""
+    if "RegionalFaultTargetExecutionRoleArn" not in outputs:
+        raise ActiveCellVerificationError("fault target role output is missing")
+    output = _object(
+        outputs.get("RegionalFaultTargetExecutionRoleArn"),
+        "RegionalFaultTargetExecutionRoleArn output",
+    )
+    value = output.get("Value")
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"Fn::GetAtt"}
+        or not isinstance(value["Fn::GetAtt"], list)
+        or len(value["Fn::GetAtt"]) != 2
+        or value["Fn::GetAtt"][1] != "Arn"
+        or not isinstance(value["Fn::GetAtt"][0], str)
+    ):
+        raise ActiveCellVerificationError("fault target role output is not one exact role ARN")
+    role_id = value["Fn::GetAtt"][0]
+    resources = _object(template.get("Resources"), "template Resources")
+    role = _object(resources.get(role_id), "fault target role")
+    if role.get("Type") != "AWS::IAM::Role":
+        raise ActiveCellVerificationError("fault target output does not reference an IAM role")
+    role_reference = {"Fn::GetAtt": [role_id, "Arn"]}
+    matches = []
+    for function in _resources(template, "AWS::Lambda::Function"):
+        properties = _object(function.get("Properties"), "Lambda properties")
+        environment = _object(properties.get("Environment"), "Lambda environment")
+        variables = _object(environment.get("Variables"), "Lambda variables")
+        if (
+            properties.get("Role") == role_reference
+            and variables.get("REGIONAL_CELL_ROLE") == "recovery"
+        ):
+            matches.append(function)
+    if len(matches) != 1:
+        raise ActiveCellVerificationError("fault target role must identify one recovery handler")
+    return role_id
+
+
 def _actions(value: object) -> set[str]:
     """Normalize one IAM action field without accepting malformed values."""
     if isinstance(value, str):
@@ -328,6 +367,7 @@ def verify(
         any(term in name.lower() for term in ("url", "endpoint", "domain")) for name in outputs
     ):
         raise ActiveCellVerificationError("active template advertises traffic or wrong status")
+    fault_target_role = _fault_target_role(template, outputs)
     return {
         "status": "verified-active-not-routed",
         "lambdaConcurrency": sorted(concurrency),
@@ -339,6 +379,7 @@ def verify(
         "signingKeyArn": signing_key_arn,
         "entraTenantId": entra_tenant_id,
         "aaiTenantId": aai_tenant_id,
+        "faultTargetRoleLogicalId": fault_target_role,
     }
 
 

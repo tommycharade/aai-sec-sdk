@@ -103,6 +103,7 @@ def _template() -> dict[str, Any]:
         resources[f"Function{index}"] = {
             "Type": "AWS::Lambda::Function",
             "Properties": {
+                **({"Role": {"Fn::GetAtt": ["RuntimeRole", "Arn"]}} if index == 0 else {}),
                 "ReservedConcurrentExecutions": 0,
                 "Environment": {
                     "Variables": {
@@ -117,7 +118,12 @@ def _template() -> dict[str, Any]:
         }
     return {
         "Resources": resources,
-        "Outputs": {"PassiveCellStatus": {"Value": "staged-not-serving"}},
+        "Outputs": {
+            "PassiveCellStatus": {"Value": "staged-not-serving"},
+            "RegionalFaultTargetExecutionRoleArn": {
+                "Value": {"Fn::GetAtt": ["RuntimeRole", "Arn"]}
+            },
+        },
     }
 
 
@@ -129,6 +135,7 @@ def test_passive_template_requires_every_independent_disable_control() -> None:
         "lambdaCount": 3,
         "disabledScheduleCount": 4,
         "disabledEventSourceCount": 2,
+        "faultTargetRoleLogicalId": "RuntimeRole",
     }
 
 
@@ -216,6 +223,16 @@ def test_passive_template_requires_every_independent_disable_control() -> None:
         (
             lambda value: value["Outputs"].update({"ApiUrl": {"Value": "https://invalid"}}),
             "serving origin",
+        ),
+        (
+            lambda value: value["Outputs"].pop("RegionalFaultTargetExecutionRoleArn"),
+            "fault target role output",
+        ),
+        (
+            lambda value: value["Outputs"]["RegionalFaultTargetExecutionRoleArn"].update(
+                {"Value": {"Fn::GetAtt": ["DifferentRole", "Arn"]}}
+            ),
+            "fault target role",
         ),
     ],
 )

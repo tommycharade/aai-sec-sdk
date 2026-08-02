@@ -87,6 +87,7 @@ def _bucket_policy(bucket: str) -> dict[str, Any]:
 
 def _template() -> dict[str, Any]:
     resources: dict[str, Any] = {
+        "RuntimeRole": {"Type": "AWS::IAM::Role", "Properties": {}},
         "Api": {
             "Type": "AWS::ApiGatewayV2::Api",
             "Properties": {
@@ -158,6 +159,7 @@ def _template() -> dict[str, Any]:
         resources[f"Function{index}"] = {
             "Type": "AWS::Lambda::Function",
             "Properties": {
+                **({"Role": {"Fn::GetAtt": ["RuntimeRole", "Arn"]}} if index == 0 else {}),
                 "ReservedConcurrentExecutions": concurrency,
                 "Environment": {"Variables": _variables()},
             },
@@ -174,7 +176,12 @@ def _template() -> dict[str, Any]:
         }
     return {
         "Resources": resources,
-        "Outputs": {"PassiveCellStatus": {"Value": "active-not-routed"}},
+        "Outputs": {
+            "PassiveCellStatus": {"Value": "active-not-routed"},
+            "RegionalFaultTargetExecutionRoleArn": {
+                "Value": {"Fn::GetAtt": ["RuntimeRole", "Arn"]}
+            },
+        },
     }
 
 
@@ -198,6 +205,7 @@ def test_complete_active_template_is_bounded_and_not_routed() -> None:
         "signingKeyArn": _KEY,
         "entraTenantId": _ENTRA,
         "aaiTenantId": _TENANT,
+        "faultTargetRoleLogicalId": "RuntimeRole",
     }
 
 
@@ -246,6 +254,16 @@ def test_complete_active_template_is_bounded_and_not_routed() -> None:
         (
             lambda value: value["Outputs"].update({"ApiUrl": {"Value": "unsafe"}}),
             "advertises traffic",
+        ),
+        (
+            lambda value: value["Outputs"].pop("RegionalFaultTargetExecutionRoleArn"),
+            "fault target role output",
+        ),
+        (
+            lambda value: value["Outputs"]["RegionalFaultTargetExecutionRoleArn"].update(
+                {"Value": {"Fn::GetAtt": ["DifferentRole", "Arn"]}}
+            ),
+            "fault target role",
         ),
         (
             lambda value: value["Resources"]["HandlerPolicy"]["Properties"]["PolicyDocument"][
