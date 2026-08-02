@@ -1176,10 +1176,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#routing-compare-and-swap" class="md-nav__link">
+  <a href="#implemented-routing-compare-and-swap" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Routing compare-and-swap
+        Implemented routing compare-and-swap
       
     </span>
   </a>
@@ -2826,10 +2826,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#routing-compare-and-swap" class="md-nav__link">
+  <a href="#implemented-routing-compare-and-swap" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Routing compare-and-swap
+        Implemented routing compare-and-swap
       
     </span>
   </a>
@@ -3000,10 +3000,10 @@ reintroduce a globally unique alternate-domain conflict.</p>
 <li><a href="https://docs.aws.amazon.com/apigateway/latest/developerguide/integrating-api-with-aws-services-s3.html">API Gateway S3 proxy integration</a></li>
 <li><a href="https://docs.aws.amazon.com/Route53/latest/APIReference/API_ChangeResourceRecordSets.html">Route 53 transactional change batches</a></li>
 </ul>
-<h2 id="routing-compare-and-swap">Routing compare-and-swap</h2>
+<h2 id="implemented-routing-compare-and-swap">Implemented routing compare-and-swap</h2>
 <p>Route 53 change batches are transactional—all records in a valid batch change
 or none do—but Route 53 does not expose a conditional generation token. The
-single-writer witness therefore remains the CAS authority. The planned route
+single-writer witness therefore remains the CAS authority. The implemented route
 step is:</p>
 <pre><code class="language-text">TARGET_JOBS_RECONCILED_NOT_ROUTED
   -&gt; VERIFYING_TARGET_INGRESS
@@ -3012,15 +3012,19 @@ step is:</p>
   -&gt; VERIFYING_STABLE_ROUTE
   -&gt; STABLE (generation + 1, activeRegion = target)
 </code></pre>
-<p>Before <code>ROUTING_TARGET</code>, the executor will repeat source fencing, target live
-posture, zero-action job reconciliation, canary authentication, policy read,
-signed decision write and immutable audit verification. It will strongly read
+<p>Before <code>ROUTING_TARGET</code>, the executor repeats source fencing, target live
+posture, zero-action job reconciliation, canary authentication and policy read.
+It strongly reads
 the witness generation and exact current Route 53 API, UI and generation-marker
 records. One Route 53 change batch will delete the byte-equivalent source
 aliases and marker and create the exact target aliases and next marker. It will
 wait for the returned change ID to become <code>INSYNC</code>, then independently read
 Route 53 and probe both stable names before committing the new journal
-generation.</p>
+generation. It validates the public hosted zone, reads a bounded paginated
+record inventory, rejects parallel AAAA/CNAME/routing records, and accepts only
+the exact source state or exact next-generation target state. A retry after
+provider acceptance but before journal advancement recognizes only that exact
+target state.</p>
 <p>An out-of-band DNS administrator could still race the provider between the
 exact read and Route 53 mutation. Production acceptance therefore also
 requires a dedicated transition role, removal of ordinary Route 53 write
@@ -3030,9 +3034,10 @@ detect divergence but cannot truthfully claim provider-level CAS.</p>
 <h2 id="failed-cutover-and-failback">Failed cutover and failback</h2>
 <p>If Route 53 rejects the change batch, no DNS record changes and the journal
 remains <code>ROUTING_TARGET</code>. If Route 53 accepts the batch but stable probes fail,
-the executor must not mark the target stable. A separately recorded rollback
-phase applies the exact inverse transactional batch, waits for <code>INSYNC</code>, proves
-source routing and leaves the failed transition sealed for investigation.</p>
+the executor does not mark the target stable. It also refuses DNS-only
+rollback: the source was intentionally fenced, so routing users back before
+independent source reactivation would create an outage. Symmetric reactivation,
+canary proof and inverse routing are the next required implementation tranche.</p>
 <p>Failback is not implemented by swapping labels in the failover code. The
 primary runtime needs the same active-template verifier, target job
 reconciliation, regional ingress and canary contracts first. Only then may the
@@ -3051,7 +3056,8 @@ same state machine run with source and target reversed.</p>
 <li>a scheduled two-person recovery exercise.</li>
 </ul>
 <p>No Route 53 record, certificate, custom domain, UI proxy or live AWS transition
-was created by this implementation tranche. P0-11 remains <strong>Partial</strong>.</p>
+was created by this implementation tranche. The executor is implemented and
+synthetically tested; P0-11 remains <strong>Partial</strong>.</p>
 
 
 

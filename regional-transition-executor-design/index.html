@@ -2885,7 +2885,8 @@ steps without implementing traffic movement. It can independently check an
 active-but-not-routed target, fence source execution, deploy the exact verified
 target assembly, or reconcile the live target runtime and Region-local jobs. It
 cannot update DNS, CloudFront, Route 53, Global Accelerator, custom domains or
-API routing.</p>
+API routing. Routing is isolated in <code>scripts/execute_aws_regional_routing.py</code>,
+which requires schema-v3 authority and cannot activate compute.</p>
 <p>A successful target deployment means <strong>active-not-routed</strong>, not “failover
 complete.” The recovery cell has no SCIM endpoint. Existing recovery identities
 can use the runtime during an outage, but joiner/mover/leaver changes remain
@@ -2930,6 +2931,12 @@ the <a href="../regional-activation-and-exercise-design/">regional activation de
 </tr>
 </tbody>
 </table>
+<p>The routing component exposes exactly three forward steps: <code>verify-ingress</code>
+proves invalid-token rejection, authenticated policy read and HSTS UI delivery
+on target canaries; <code>route-target</code> repeats source-fence, target-runtime and
+zero-action reconciliation proofs before one transactional Route 53 batch;
+and <code>verify-stable</code> repeats stable API/UI probes before committing the next
+journal generation. Each has a distinct confirmation flag.</p>
 <p>The commands cannot be combined. A later command repeats preflight rather than
 trusting prior terminal output. Source ingress is disabled before Lambda
 concurrency, the complete bounded mutation set is attempted, and any partial
@@ -3015,8 +3022,14 @@ reviewed assembly.</p>
   --profile p1 \
   --confirm-target-reconciliation
 </code></pre>
-<p>Exit code <code>2</code> is fail-closed. Never treat terminal output as permission to move
-traffic. Public-ingress smoke, routing CAS, transition sealing, primary
+<p>Create an owner-only file containing a short-lived operator JWT (<code>chmod 600</code>),
+then execute one routing step at a time with
+<code>scripts/execute_aws_regional_routing.py</code>. The commands require the same four
+authority files as this executor plus <code>--operator-token-file</code>. Confirmation
+flags are <code>--confirm-journal-ingress</code>, <code>--confirm-route53-cutover</code>, and
+<code>--confirm-stable-completion</code> respectively.</p>
+<p>Exit code <code>2</code> is fail-closed. The rollback command always refuses until source
+runtime reactivation is independently implemented and proved. Primary
 reactivation, failback and retained live RTO/RPO evidence remain separate
 incomplete gates. See <a href="../regional-target-readiness-and-stable-ingress-design/">Regional target readiness and stable ingress</a>.</p>
 <h2 id="test-evidence-and-non-guarantees">Test evidence and non-guarantees</h2>
@@ -3026,8 +3039,8 @@ reads, identity/signing substitution, exact assembly deployment, unknown IAM
 actions, mismatched bucket policies and absence of routing commands. CI
 synthesizes standby and synthetic active variants with separate verifiers.</p>
 <p>No live AWS mutation was performed by this tranche. P0-11 remains <strong>Partial</strong>
-until real identity, trust, stable-origin, passive/witness deployment,
-routing CAS and rehearsed exercise gates all pass.</p>
+until real identity, trust, stable-origin, passive/witness/ingress deployment,
+safe rollback/failback and rehearsed exercise gates all pass.</p>
 
 
 

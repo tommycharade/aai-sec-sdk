@@ -1127,10 +1127,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#schema-v2-transition-authority" class="md-nav__link">
+  <a href="#schema-v2-and-schema-v3-transition-authority" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Schema-v2 transition authority
+        Schema-v2 and schema-v3 transition authority
       
     </span>
   </a>
@@ -2815,10 +2815,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#schema-v2-transition-authority" class="md-nav__link">
+  <a href="#schema-v2-and-schema-v3-transition-authority" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Schema-v2 transition authority
+        Schema-v2 and schema-v3 transition authority
       
     </span>
   </a>
@@ -2935,7 +2935,7 @@ table/stack names, and is persisted as an encrypted SSM parameter. The guard
 strips ambient CDK authority, derives the AWS account through STS, verifies the
 template, binds its SHA-256 and deploys only the exact <code>cdk.out</code> assembly. It
 cannot initialize the journal.</p>
-<h2 id="schema-v2-transition-authority">Schema-v2 transition authority</h2>
+<h2 id="schema-v2-and-schema-v3-transition-authority">Schema-v2 and schema-v3 transition authority</h2>
 <p>Mutating transition commands reject legacy schema-v1 manifests. Schema v2 adds:</p>
 <table>
 <thead>
@@ -2972,6 +2972,11 @@ generation are included in <code>authoritySha256</code>; the retained activation
 must contain that digest.</p>
 <p>The journal stores only principal-independent SHA-256 approval evidence in its
 events. It does not store tokens, claims, secrets or approval content.</p>
+<p>Routing requires schema v3. It additionally binds the exact primary and
+recovery ingress stack names, four Region-specific canary names, stable-route
+generation marker, dedicated routing-role ARN and retained routing-authority
+evidence reference. Schema v2 remains valid for non-routing runtime steps but
+is rejected before ingress journaling or Route 53 access.</p>
 <h2 id="state-model">State model</h2>
 <p>The strongly consistent singleton record is <code>pk=AUTHORITY, sk=CURRENT</code>.
 Generation changes only in the future routing CAS step; revision changes on
@@ -2983,6 +2988,11 @@ every journal phase.</p>
   -&gt; TARGET_ACTIVE_NOT_ROUTED
   -&gt; RECONCILING_TARGET_JOBS
   -&gt; TARGET_JOBS_RECONCILED_NOT_ROUTED
+  -&gt; VERIFYING_TARGET_INGRESS
+  -&gt; TARGET_INGRESS_VERIFIED_NOT_ROUTED
+  -&gt; ROUTING_TARGET
+  -&gt; VERIFYING_STABLE_ROUTE
+  -&gt; STABLE (generation + 1, activeRegion = target)
 </code></pre>
 <p>Every phase change is one DynamoDB transaction containing:</p>
 <ol>
@@ -3005,6 +3015,11 @@ append a duplicate event.</p>
 dispatch. Completion appends a SHA-256 over the independently verified source
 fence, live target resource set, check/apply results and final zero-action
 check. An idempotent completed retry must present that exact digest.</p>
+<p>Ingress and route phases follow the same revision CAS. Stable completion is a
+single DynamoDB transaction that increments generation, changes active Region,
+removes active-transition fields and appends the final immutable evidence
+event. An exact retry verifies the existing event digest; a changed stable
+probe or substituted authority is denied.</p>
 <h2 id="initialization">Initialization</h2>
 <p>The stack starts with no authority record. After deployment, the guarded
 executor exposes a separate <code>initialize-journal</code> command requiring
@@ -3103,11 +3118,12 @@ records, weakened table posture, replicated infrastructure, unknown runtime
 resources, ambient deployment substitution and post-verification template
 replacement.</p>
 <h2 id="current-non-guarantees">Current non-guarantees</h2>
-<p>The target-runtime and job-reconciliation smoke is implemented, but it does not
-exercise public ingress. This tranche does not implement stable ingress,
-stable-route compare-and-swap, public authenticated smoke, transition sealing,
-primary reactivation or failback execution. It has not deployed or initialized
-the live witness. Those remain required before P0-11 is complete.</p>
+<p>Stable ingress, public authenticated smoke, journal-governed transactional
+Route 53 movement and transition sealing are implemented but have not been run
+against live customer domains. Primary reactivation, safe rollback and
+failback remain deliberately unavailable. The live witness is not deployed or
+initialized. Those gates and a retained exercise remain required before P0-11
+is complete.</p>
 
 
 
