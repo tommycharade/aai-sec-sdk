@@ -11,12 +11,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import boto3
-from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+try:
+    import boto3
+except ImportError:  # pragma: no cover - AWS Lambda provides boto3.
+    boto3 = None
 
 from scripts.regional_fault_controller_lambda import (
     ControllerConfig,
     RegionalFaultControllerError,
+    _missing_entity,
     _policy_name,
     _role_name,
 )
@@ -93,8 +96,8 @@ def cleanup(event: object, *, config: ControllerConfig, dynamodb: Any, iam: Any)
     role_name = _role_name(config.target(cell_role).role_arn)
     try:
         iam.delete_role_policy(RoleName=role_name, PolicyName=_policy_name(fault_id))
-    except ClientError as error:
-        if error.response.get("Error", {}).get("Code") != "NoSuchEntity":
+    except Exception as error:
+        if not _missing_entity(error):
             raise
     dynamodb.transact_write_items(
         TransactItems=[
@@ -134,6 +137,8 @@ def cleanup(event: object, *, config: ControllerConfig, dynamodb: Any, iam: Any)
 
 def handler(event: object, _context: object) -> dict[str, Any]:
     """AWS Lambda cleanup entry point with no create or attach authority."""
+    if boto3 is None:
+        raise RegionalFaultControllerError("boto3 is required in the AWS Lambda runtime")
     return cleanup(
         event,
         config=ControllerConfig.from_environment(),

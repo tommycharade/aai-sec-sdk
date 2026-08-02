@@ -16,8 +16,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-import boto3
-from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+try:
+    import boto3
+except ImportError:  # pragma: no cover - AWS Lambda provides boto3.
+    boto3 = None
 
 from scripts import plan_aws_regional_fault_exercise as fault
 from scripts import verify_aws_regional_activation as activation
@@ -248,15 +250,28 @@ def _cleanup_payload(authority: fault.RegionalFaultAuthority) -> dict[str, Any]:
     }
 
 
-def _condition_failure(error: ClientError) -> bool:
+def _aws_error_code(error: BaseException) -> str:
+    """Read a botocore-shaped error code without requiring botocore locally."""
+    response = getattr(error, "response", None)
+    if not isinstance(response, dict):
+        return ""
+    details = response.get("Error")
+    if not isinstance(details, dict):
+        return ""
+    return str(details.get("Code", ""))
+
+
+def _condition_failure(error: BaseException) -> bool:
     """Identify one DynamoDB conditional conflict without hiding other errors."""
-    code = str(error.response.get("Error", {}).get("Code", ""))
-    return code == "ConditionalCheckFailedException"
+    return _aws_error_code(error) in {
+        "ConditionalCheckFailedException",
+        "TransactionCanceledException",
+    }
 
 
-def _missing_entity(error: ClientError) -> bool:
+def _missing_entity(error: BaseException) -> bool:
     """Identify an already-absent exact IAM policy for idempotent cleanup."""
-    return str(error.response.get("Error", {}).get("Code", "")) == "NoSuchEntity"
+    return _aws_error_code(error) == "NoSuchEntity"
 
 
 def execute(
@@ -292,7 +307,7 @@ def execute(
                 },
                 ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)",
             )
-        except ClientError as error:
+        except Exception as error:
             if _condition_failure(error):
                 existing = dynamodb.get_item(
                     TableName=config.journal_table_name,
@@ -399,7 +414,7 @@ def execute(
     elif operation == "remove-deny":
         try:
             iam.delete_role_policy(RoleName=role_name, PolicyName=policy_name)
-        except ClientError as error:
+        except Exception as error:
             if not _missing_entity(error):
                 raise
         dynamodb.update_item(
@@ -465,7 +480,7 @@ def execute(
                     },
                 ]
             )
-        except ClientError as error:
+        except Exception as error:
             if not _condition_failure(error):
                 raise
             existing = dynamodb.get_item(
@@ -497,6 +512,8 @@ def execute(
 
 def handler(event: object, _context: object) -> dict[str, Any]:
     """AWS Lambda entry point using ambient credentials only after validation."""
+    if boto3 is None:
+        raise RegionalFaultControllerError("boto3 is required in the AWS Lambda runtime")
     return execute(
         event,
         config=ControllerConfig.from_environment(),

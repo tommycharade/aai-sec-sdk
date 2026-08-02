@@ -7,7 +7,14 @@ import json
 from typing import Any
 
 import pytest
-from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+
+
+class FakeClientError(Exception):
+    """Botocore-shaped synthetic provider error with no AWS dependency."""
+
+    def __init__(self, code: str, operation: str) -> None:
+        super().__init__(f"{operation}: {code}")
+        self.response = {"Error": {"Code": code, "Message": "synthetic"}}
 
 
 def _module() -> Any:
@@ -150,10 +157,7 @@ class FakeDynamoDB:
     def put_item(self, **kwargs: Any) -> None:
         self.calls.append(("put_item", kwargs))
         if self.item is not None:
-            raise ClientError(
-                {"Error": {"Code": "ConditionalCheckFailedException", "Message": "exists"}},
-                "PutItem",
-            )
+            raise FakeClientError("ConditionalCheckFailedException", "PutItem")
         self.item = kwargs["Item"]
 
     def get_item(self, **kwargs: Any) -> dict[str, Any]:
