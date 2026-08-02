@@ -242,7 +242,14 @@ def test_active_environment_uses_persisted_identity_and_rejects_substitution(
     module = _load()
     regional = _regional(module)
     passive_cell = type("Passive", (), {})()
-    manifest = type("Activation", (), {"evidence": type("Evidence", (), {"sha256": "a" * 64})()})()
+    manifest = type(
+        "Activation",
+        (),
+        {
+            "evidence": type("Evidence", (), {"sha256": "a" * 64})(),
+            "stable_ui_domain": "security.example.com",
+        },
+    )()
     key = "arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
     entra = module.control_plane.EntraDeploymentManifest.parse(
         json.dumps(
@@ -279,6 +286,7 @@ def test_active_environment_uses_persisted_identity_and_rejects_substitution(
     )
     assert environment["RECOVERY_CELL_MODE"] == "active"
     assert environment["RECOVERY_ACTIVATION_EVIDENCE_SHA256"] == "a" * 64
+    assert environment["RECOVERY_STABLE_UI_ORIGIN"] == "https://security.example.com"
     assert environment["ENTRA_TENANT_ID"] == entra.entra_tenant_id
     with pytest.raises(module.ActiveCellDeploymentError, match="Entra tenant differs"):
         module.active_environment(

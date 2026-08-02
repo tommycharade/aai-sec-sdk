@@ -168,12 +168,16 @@ def verify(template: dict[str, Any]) -> dict[str, int | str]:
             raise PassiveCellVerificationError("Lambda executable authority is not disabled")
 
     apis = _resources(template, "AWS::ApiGatewayV2::Api")
+    api_properties = _object(apis[0].get("Properties"), "API properties") if apis else {}
     if (
         len(apis) != 1
-        or _object(apis[0].get("Properties"), "API properties").get("DisableExecuteApiEndpoint")
-        is not True
+        or api_properties.get("DisableExecuteApiEndpoint") is not True
+        or api_properties.get("CorsConfiguration", {}).get("AllowOrigins")
+        != ["https://not-serving.invalid"]
     ):
-        raise PassiveCellVerificationError("execute-api origin must be disabled")
+        raise PassiveCellVerificationError(
+            "execute-api and passive browser origins must be disabled"
+        )
     if _resources(template, "AWS::ApiGatewayV2::DomainName"):
         raise PassiveCellVerificationError("passive cell must not attach a custom API domain")
 

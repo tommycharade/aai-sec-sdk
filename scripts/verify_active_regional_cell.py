@@ -244,6 +244,7 @@ def verify(
     signing_key_arn: str,
     entra_tenant_id: str,
     aai_tenant_id: str,
+    stable_ui_origin: str,
 ) -> dict[str, Any]:
     """Verify one exact active-but-not-routed recovery CloudFormation template."""
     if not _SHA256.fullmatch(activation_evidence_sha256):
@@ -259,13 +260,18 @@ def verify(
         if resource_type.startswith(_ROUTING_TYPES):
             raise ActiveCellVerificationError("active runtime template must not route traffic")
 
+    if not re.fullmatch(r"https://[a-z0-9](?:[a-z0-9.-]{1,251}[a-z0-9])", stable_ui_origin):
+        raise ActiveCellVerificationError("expected stable UI origin is invalid")
     apis = _resources(template, "AWS::ApiGatewayV2::Api")
+    api_properties = _object(apis[0].get("Properties"), "API properties") if apis else {}
     if (
         len(apis) != 1
-        or _object(apis[0].get("Properties"), "API properties").get("DisableExecuteApiEndpoint")
-        is not True
+        or api_properties.get("DisableExecuteApiEndpoint") is not True
+        or api_properties.get("CorsConfiguration", {}).get("AllowOrigins") != [stable_ui_origin]
     ):
-        raise ActiveCellVerificationError("active cell raw execute-api endpoint must be disabled")
+        raise ActiveCellVerificationError(
+            "active execute-api endpoint or stable UI origin contract is invalid"
+        )
 
     functions = _resources(template, "AWS::Lambda::Function")
     if len(functions) != 3:
@@ -342,6 +348,7 @@ def main() -> int:
     parser.add_argument("--signing-key-arn", required=True)
     parser.add_argument("--entra-tenant-id", required=True)
     parser.add_argument("--aai-tenant-id", required=True)
+    parser.add_argument("--stable-ui-origin", required=True)
     arguments = parser.parse_args()
     if arguments.template.stat().st_size > 5_000_000:
         raise ActiveCellVerificationError("CloudFormation template exceeds 5 MiB")
@@ -357,6 +364,7 @@ def main() -> int:
                 signing_key_arn=arguments.signing_key_arn,
                 entra_tenant_id=arguments.entra_tenant_id,
                 aai_tenant_id=arguments.aai_tenant_id,
+                stable_ui_origin=arguments.stable_ui_origin,
             ),
             sort_keys=True,
         )

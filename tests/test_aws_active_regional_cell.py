@@ -87,7 +87,10 @@ def _template() -> dict[str, Any]:
     resources: dict[str, Any] = {
         "Api": {
             "Type": "AWS::ApiGatewayV2::Api",
-            "Properties": {"DisableExecuteApiEndpoint": True},
+            "Properties": {
+                "DisableExecuteApiEndpoint": True,
+                "CorsConfiguration": {"AllowOrigins": ["https://security.example.com"]},
+            },
         },
         "Ui": _bucket(),
         "EvidenceReports": _bucket(),
@@ -181,6 +184,7 @@ def test_complete_active_template_is_bounded_and_not_routed() -> None:
         signing_key_arn=_KEY,
         entra_tenant_id=_ENTRA,
         aai_tenant_id=_TENANT,
+        stable_ui_origin="https://security.example.com",
     ) == {
         "status": "verified-active-not-routed",
         "lambdaConcurrency": [5, 5, 100],
@@ -296,6 +300,7 @@ def test_active_template_rejects_missing_or_widened_authority(mutation: Any, mes
             signing_key_arn=_KEY,
             entra_tenant_id=_ENTRA,
             aai_tenant_id=_TENANT,
+            stable_ui_origin="https://security.example.com",
         )
 
 

@@ -738,6 +738,7 @@ def active_environment(
             "ENTRA_TENANT_ID": entra.entra_tenant_id,
             "RECOVERY_ACTIVATION_EVIDENCE_SHA256": manifest.evidence.sha256,
             "RECOVERY_CELL_MODE": "active",
+            "RECOVERY_STABLE_UI_ORIGIN": f"https://{manifest.stable_ui_domain}",
         }
     )
     return environment
@@ -776,6 +777,7 @@ def prepare_active_template(
             signing_key_arn=environment["RECOVERY_POLICY_SIGNING_KEY_ARN"],
             entra_tenant_id=environment["ENTRA_TENANT_ID"],
             aai_tenant_id=environment["ENTRA_AAI_TENANT_ID"],
+            stable_ui_origin=environment["RECOVERY_STABLE_UI_ORIGIN"],
         )
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
         raise ActiveCellDeploymentError("synthesized active cell failed verification") from error
