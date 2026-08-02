@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/architecture/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/aws-regional-exercise-provider-design/">
       
       
-        <link rel="prev" href="../production-readiness/">
+        <link rel="prev" href="../regional-activation-and-exercise-design/">
       
       
-        <link rel="next" href="../integrations/">
+        <link rel="next" href="../regional-transition-executor-design/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Architecture - Agentic AI Security SDK</title>
+        <title>AWS Regional recovery exercise provider - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#architecture" class="md-skip">
+        <a href="#aws-regional-recovery-exercise-provider" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Architecture
+              AWS Regional recovery exercise provider
             
           </span>
         </div>
@@ -448,37 +448,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Architecture
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
         
   
   
@@ -494,59 +467,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#explicit-security-components" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Explicit security components
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#current-runtime-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Current runtime scope
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#enterprise-fleet-control-plane" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Enterprise fleet control plane
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1095,10 +1015,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../aws-regional-exercise-provider-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS Regional recovery exercise provider
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1114,6 +1061,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#outcome-and-trust-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outcome and trust boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#synthetic-fleet-authority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synthetic fleet authority
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network-and-replay-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Network and replay controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operator-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fault-controller-design-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fault-controller design gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threats-and-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threats and controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2765,10 +2809,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#explicit-security-components" class="md-nav__link">
+  <a href="#outcome-and-trust-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Explicit security components
+        Outcome and trust boundary
       
     </span>
   </a>
@@ -2776,10 +2820,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#current-runtime-scope" class="md-nav__link">
+  <a href="#synthetic-fleet-authority" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Current runtime scope
+        Synthetic fleet authority
       
     </span>
   </a>
@@ -2787,10 +2831,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#enterprise-fleet-control-plane" class="md-nav__link">
+  <a href="#network-and-replay-controls" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Enterprise fleet control plane
+        Network and replay controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operator-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fault-controller-design-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fault-controller design gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threats-and-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threats and controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current non-guarantees
       
     </span>
   </a>
@@ -2817,136 +2905,137 @@
   
 
 
-<h1 id="architecture">Architecture</h1>
-<p>The core runtime should remain small and provider-neutral:</p>
-<pre><code class="language-text">model/provider -&gt; adapter -&gt; security runtime -&gt; tool adapter -&gt; system
-                                  |
-             context / policy / approvals / budgets / audit / kill switch
+<h1 id="aws-regional-recovery-exercise-provider">AWS Regional recovery exercise provider</h1>
+<h2 id="outcome-and-trust-boundary">Outcome and trust boundary</h2>
+<p><code>scripts/run_aws_regional_recovery_exercise.py</code> is the first live AWS adapter
+for the bounded Regional recovery harness. It measures the target cell through
+the authenticated agent routes used by managed Claude Code and Codex hosts:</p>
+<ol>
+<li><code>POST heartbeat</code> validates enrolled identity, project root, runtime
+   attestation and managed configuration, then renews the session;</li>
+<li><code>GET effective-policy</code> proves current signed policy delivery; and</li>
+<li><code>POST decisions</code> writes deterministic, content-free, replay-safe evidence
+   bound to the transition and exact enrolled agent.</li>
+</ol>
+<p>The generic harness—not the adapter—calculates population completeness, p99
+latency, error rate and acceptance. The adapter cannot return an aggregate pass
+assertion. Its dependency and consistency methods deliberately fail until the
+separate fault-controller authority is implemented.</p>
+<h2 id="synthetic-fleet-authority">Synthetic fleet authority</h2>
+<p>Pre-enrolled sessions are stored only in AWS Secrets Manager in the transition
+target Region and the same account as the dedicated routing role. The secret is
+limited to one MiB and has this exact schema:</p>
+<pre><code class="language-json">{
+  &quot;schemaVersion&quot;: 1,
+  &quot;transitionId&quot;: &quot;00000000-0000-4000-8000-000000000000&quot;,
+  &quot;authoritySha256&quot;: &quot;&lt;schema-v4 transition authority digest&gt;&quot;,
+  &quot;targetRegion&quot;: &quot;eu-west-1&quot;,
+  &quot;apiBaseUrl&quot;: &quot;https://api-recovery.example.com&quot;,
+  &quot;agents&quot;: [
+    {
+      &quot;agentNumber&quot;: 0,
+      &quot;deploymentId&quot;: &quot;synthetic-deployment-0&quot;,
+      &quot;agentId&quot;: &quot;synthetic-agent-0&quot;,
+      &quot;accessToken&quot;: &quot;&lt;short-lived synthetic session token&gt;&quot;,
+      &quot;projectRootSha256&quot;: &quot;&lt;synthetic project-root digest&gt;&quot;,
+      &quot;heartbeat&quot;: {}
+    }
+  ]
+}
 </code></pre>
-<p>Agent-host integrations sit at the adapter boundary. The bundled MCP gateway
-normalizes host tool calls into <code>ActionProposal</code> objects and serializes typed
-<code>ExecutionResult</code> values; it never creates identity or policy evidence. Host
-profiles are labels and configuration guidance, not permissions. See
-<a href="../integrations/">Agent integrations</a>.</p>
-<p>The execution pipeline is ordered deliberately:</p>
-<pre><code class="language-text">proposal -&gt; normalize -&gt; schema/business validation -&gt; policy -&gt; approval
-         -&gt; budget/idempotency -&gt; credential mint -&gt; scoped execution -&gt; result handling -&gt; audit
-</code></pre>
-<p>No side effect or privileged credential mint may happen before applicable checks pass. A credential broker receives only the application-owned context, validated live resources, and registered tool definition; the resulting short-lived credential is attached to the handler context and is never copied into proposals or audit payloads. Provider integrations, policy engines, credential brokers, sandboxes, telemetry backends, and approval systems belong behind adapters.</p>
-<h2 id="explicit-security-components">Explicit security components</h2>
-<p>The runtime boundary is decomposed into immutable, typed components:</p>
+<p>Agent numbers must form the exact range from zero to fleet size minus one;
+deployment/agent pairs must be unique. The URL must be HTTPS with no port,
+path, query, credentials or fragment and exactly equal the target Region's
+schema-v4 canary domain. Transition UUID, authority digest, Region and fleet
+size must match. Heartbeat bodies are bounded to 128 KiB and contain only the
+synthetic attestation and managed-configuration evidence required by policy.</p>
+<p>Do not place this JSON in source control, shell history, evidence output or
+operator chat. The command requests only <code>AWSCURRENT</code>; output contains
+latencies and counts, never tokens, heartbeat content or policy content.</p>
+<h2 id="network-and-replay-controls">Network and replay controls</h2>
 <ul>
-<li><code>ActionFacts</code> is the host-derived snapshot of the proposal, recursively
-  frozen validated arguments, resources, registered tool, and action
-  fingerprint. The lifecycle gives handlers a defensive copy, so handler code
-  cannot mutate the evidence used for authorization.</li>
-<li><code>PreExecutionAuthorizer</code> is the centralized final decision point. It accepts
-  provider evidence and issues an <code>ExecutionPermit</code> only when policy,
-  approval, identity, tenant/resource, credential, isolation, and delegation
-  checks all pass.</li>
-<li><code>ExecutionPermit</code> is an immutable capability bound to those exact facts and
-  the host-owned handler context. A proposal or model result is not a permit.</li>
-<li><code>ExecutionLifecycle</code> performs the final emergency-stop check and is the only
-  runtime path that invokes a handler. Its invocation remains bounded and
-  cooperatively cancellable, with late-worker accounting preserved.</li>
-<li><code>BoundedOperationExecutor</code> and <code>BoundedOperationTracker</code> own bounded worker
-  admission, phase timeout classification, and late-worker lifecycle counters.
-  <code>ActionBudgetLease</code> owns atomic one-shot action-budget release. The runtime
-  remains the ordering façade and supplies provider operations to these
-  components.</li>
-<li><code>TerminalRecorder</code> owns final idempotency persistence and audit outcome
-  handling; a side effect is never reported as safely complete when terminal
-  persistence fails.</li>
-<li><code>ActionPreparation</code> owns argument/resource validation, host identity checks,
-  and nonce-bound isolation verification before policy evaluation.</li>
-<li><code>PolicyPreparation</code> owns normalization of tool-declared approval requirements;
-  provider results cannot weaken a registered tool contract.</li>
-<li><code>CredentialPreparation</code> owns the final exact tool/resource scope check on
-  broker-issued credentials before a credential enters handler context.</li>
+<li>TLS certificate validation uses the operating-system trust store.</li>
+<li>Redirects are disabled so a target response cannot forward a bearer token.</li>
+<li>Responses are bounded to one MiB; requests have a 0.1–30-second timeout.</li>
+<li>A failed heartbeat stops before policy or decision calls; a failed policy
+  read stops before decision write.</li>
+<li>Renewed heartbeat tokens remain only in process memory.</li>
+<li>Decision ID and action digest are SHA-256 over transition authority plus the
+  deployment and agent identity, so retries use server duplicate handling.</li>
+<li>The server derives tenant, policy, version and observation time and marks the
+  record as agent-reported evidence.</li>
 </ul>
-<p>These components are provider-neutral. The runtime remains an orchestration
-façade and owns bounded provider calls because timeout, worker capacity,
-ordering, and stop state are part of the host security boundary. Adapters
-supply policy, approval, credential, isolation, audit, and idempotency
-infrastructure.</p>
-<h2 id="current-runtime-scope">Current runtime scope</h2>
-<p>The current stable release provides the framework-neutral core: explicit tool
-registration, deterministic argument validation, deny-by-default local policy,
-mandatory tenant/resource checks, scoped in-memory approvals for development and tests,
-budgets, emergency stop, idempotency, and redaction-aware hash-chain audit
-events. The <code>CredentialBroker</code> contract, synthetic broker, and
-<code>TokenCredentialBroker</code> provide development and deployment integration
-surfaces. <code>JsonlAuditSink</code>, bounded HTTP OPA/Cedar/approval adapters, and a
-no-shell subprocess process boundary are included as explicit adapters.</p>
-<p>The current runtime provides a bounded caller wait and cooperative cancellation
-for handlers that observe the context token; it cannot forcibly terminate a
-thread blocked in external code. A timed-out non-cooperative handler keeps its
-reserved concurrency slot until its worker exits, preventing timeout retries
-from bypassing the configured concurrency boundary. It provides configurable
-rate, active fan-out, cost-unit, and delegation budgets, but not full
-OS/container sandboxing. Durable JSONL audit and
-bounded HTTP policy/approval adapters are provided, but deployments must still
-configure authenticated endpoints and operational storage controls.
-Side-effect safety is adapter-based: <code>IdempotencyStore</code> is the durable claim
-boundary and <code>IsolationVerifier</code> is the platform evidence boundary. The core
-ships process-local references for tests and development; deployments must
-provide transactional durable storage and real sandbox/attestation evidence
-for consequential or hostile workloads.
-When an evaluator returns <code>policy_version</code>/<code>version</code> or
-<code>provenance</code>/<code>source</code>, those values are retained in execution audit evidence.</p>
-<p>The first telemetry adapter is <code>OpenTelemetryAuditSink</code>. It wraps an
-authoritative audit sink and emits one span per redacted security event.
-OpenTelemetry is optional; applications install <code>opentelemetry-api</code> and pass
-their configured tracer to the adapter.</p>
-<p>Durable audit is an explicit two-stage boundary. <code>JsonlAuditSink</code> provides
-local fsync, locking, size limits, chain verification, and a reserved tail for
-a linked fail-closed result when required export fails. The tail scales down to
-at most half of small explicit file limits so normal writes retain capacity.
-<code>ReplicatedAuditSink</code>
-requires an <code>AuditExporter</code> acknowledgement and raises on remote failure, so
-the runtime cannot report a normally recorded consequential action when the
-configured replica is unavailable. WORM storage, retention, signing, and
-access control remain deployment responsibilities.</p>
-<p>The policy adapter layer provides <code>OpaPolicyEngine</code> and <code>CedarPolicyEngine</code>.
-They accept injected evaluators, serialize the same live identity/argument/
-resource request, and map only explicit external decisions. Transport errors,
-malformed responses, and unknown decisions are denied.</p>
-<h2 id="enterprise-fleet-control-plane">Enterprise fleet control plane</h2>
-<p>The optional <code>EnterpriseFleetStore</code> and <code>EnterpriseFleetApplication</code> add a
-provider-neutral management plane around the runtime. The control plane owns
-inventory, tenant/project scope, agent presence, desired configuration,
-rollout state, drift, health, alerts, and emergency-stop intent. It does not
-execute tools and it does not mint credentials. A deployment-specific
-<code>FleetDeploymentAuthority</code> adapter is the trust boundary for synchronous local
-applications. In the hosted AWS path, authenticated enrolled endpoints pull an
-immutable package bound to the live rollout; the control plane derives
-convergence only from fresh exact endpoint evidence. An operator write changes
-desired rollout authority but cannot write applied state.</p>
-<pre><code class="language-text">enterprise UI / API client
-          |
-authenticated fleet API -&gt; tenant/RBAC checks -&gt; immutable desired version
-          |                                      |
-          +-&gt; bounded rollout reconciler &lt;-------+-- ring / pause / rollback
-          |                                      |
-          +-&gt; attested package channel &lt;---------+-- exact package revision
-          |                                      |
-          +&lt;- authenticated endpoint evidence ---+-- derived convergence
-          |
-          +-&gt; inventory, drift, health, alerts, redacted audit
+<h2 id="operator-usage">Operator usage</h2>
+<p>Run only against a prepared, active-but-not-routed target canary with synthetic
+agents enrolled, assigned exactly one policy and reporting current attestation
+and managed configuration:</p>
+<pre><code class="language-bash">python3 scripts/run_aws_regional_recovery_exercise.py \
+  --manifest /secure/path/activation-draft.json \
+  --synthetic-fleet-secret-arn \
+    arn:aws:secretsmanager:eu-west-1:111111111111:secret:aai/regional/fleet-AbCdEf \
+  --profile p1 \
+  --max-workers 64
 </code></pre>
-<p>SQLite is a reference adapter for a single control-plane process and local
-development. Production deployments should provide an authenticated,
-transactional, highly available persistence adapter and connect each
-deployment to a real authority adapter. The core intentionally does not
-assume a particular database, IAM product, secrets manager, alert transport,
-or orchestration platform.</p>
-<p>The hosted control plane stores a tenant-wide emergency stop as independent
-server-owned control state. Agent effective-policy retrieval checks that state
-before returning authority, so the stop also covers agents enrolled after an
-incident begins. Fleet, deployment, group, and agent stop scopes remain
-independent: clearing the fleet scope cannot silently clear a narrower stop.
-The operator dashboard derives its critical posture from the same durable
-state rather than from browser state or a cached presentation flag.</p>
+<p>Exit code <code>0</code> prints only the verified <code>load</code> section accepted by the generic
+harness. Exit code <code>2</code> reports the first blocker. A synthetic contract test is
+not live load evidence; the customer run must retain this output with complete
+dependency, consistency, backup and operations sections.</p>
+<h2 id="fault-controller-design-gate">Fault-controller design gate</h2>
+<p>Dependency injection must not be generic AWS mutation code. The next boundary
+requires a schema-bound exercise role that affects only the
+active-but-not-routed target cell and one synthetic tenant. It must apply one
+fault at a time, prove target denial and source continuity, restore exact
+template-bound state, and verify recovery before advancing. DNS, Global Table
+data, source-cell IAM, customer identity and signing-key material remain outside
+that role. Until this exists, <code>exercise_dependency</code> and
+<code>exercise_consistency</code> fail closed.</p>
+<h2 id="threats-and-controls">Threats and controls</h2>
+<table>
+<thead>
+<tr>
+<th>Threat</th>
+<th>Control</th>
+<th>Failure posture</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Secret from another exercise is replayed</td>
+<td>UUID, authority digest, Region/domain and fleet binding</td>
+<td>Secret rejected</td>
+</tr>
+<tr>
+<td>Bearer token is redirected</td>
+<td>HTTPS-only URL and disabled redirects</td>
+<td>Request fails</td>
+</tr>
+<tr>
+<td>One credential represents multiple agents</td>
+<td>Complete numeric range and unique identities</td>
+<td>Fleet rejected</td>
+</tr>
+<tr>
+<td>Failed heartbeat is hidden by later success</td>
+<td>No later calls and maximum failed latency</td>
+<td>Aggregate exercise fails</td>
+</tr>
+<tr>
+<td>Decision retry creates duplicate evidence</td>
+<td>Deterministic digest and server idempotency</td>
+<td>Exact duplicate only</td>
+</tr>
+<tr>
+<td>Adapter self-certifies unavailable controls</td>
+<td>Dependency/consistency methods raise</td>
+<td>Complete exercise cannot pass</td>
+</tr>
+</tbody>
+</table>
+<h2 id="current-non-guarantees">Current non-guarantees</h2>
+<p>The implementation is contract-tested but has not run against the live AWS
+target. It does not provision agents, generate attestation/managed evidence,
+inject dependency failures, prove backup/key recovery or move traffic. P0-11
+remains <strong>Partial</strong>.</p>
 
 
 

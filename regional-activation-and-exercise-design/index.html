@@ -16,7 +16,7 @@
         <link rel="prev" href="../passive-regional-cell-design/">
       
       
-        <link rel="next" href="../regional-transition-executor-design/">
+        <link rel="next" href="../aws-regional-exercise-provider-design/">
       
       
         
@@ -1153,6 +1153,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aws-regional-exercise-provider-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS Regional recovery exercise provider
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2994,11 +3021,14 @@ aggregate pass assertion. The harness:</p>
 <li>exercises approval, audit, identity, idempotency and policy consistency; and</li>
 <li>refuses replay, more than one side effect or any authority widening.</li>
 </ul>
-<p>The generic harness is not itself a live AWS adapter. Its typed adapter
-boundary exists so the eventual AWS driver can use synthetic tenant identities
-and bounded fault controls without placing credentials or customer data in the
-evidence schema. Until that adapter runs during a rehearsed activation and its
-output is retained, load/dependency/consistency acceptance remains incomplete.</p>
+<p>The generic harness is not itself a live AWS adapter. The
+<a href="../aws-regional-exercise-provider-design/">AWS Regional exercise provider</a> now
+implements real target-canary heartbeat, signed-policy read and content-free
+decision-write measurement for a transition-bound fleet of pre-enrolled
+synthetic agents. Dependency and consistency fault controls remain deliberately
+unimplemented because they require a separate target-cell-only mutation role.
+Until both adapter layers run during a rehearsed activation and their output is
+retained, load/dependency/consistency acceptance remains incomplete.</p>
 <h2 id="immutable-evidence-retention">Immutable evidence retention</h2>
 <p><code>scripts/retain_aws_regional_activation_evidence.py</code> closes the packaging gap
 without self-certifying any exercise. It accepts one already complete JSON
