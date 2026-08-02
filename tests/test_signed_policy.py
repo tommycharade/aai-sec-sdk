@@ -23,6 +23,7 @@ from agentic_security import (
 )
 
 KEY_ID = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789abc"
+MRK_ID = "arn:aws:kms:eu-west-2:123456789012:key/mrk-1234567890abcdef1234567890abcdef"
 TENANT_ID = "tenant-a"
 
 
@@ -80,6 +81,18 @@ def test_valid_bundle_verifies_and_returns_exact_configuration() -> None:
 
     assert verified.configuration == {"runtime": {"allowedTools": ["read_repository"]}}
     assert verified.content_hash == bundle.content_hash
+
+
+def test_multi_region_kms_identity_is_valid_trust_authority() -> None:
+    private_key, trusted_key = _key_material()
+    regional_key = TrustedPolicyKey(MRK_ID, trusted_key.public_key_pem)
+    wire = _wire_bundle(private_key)
+    integrity = wire["integrity"]
+    assert isinstance(integrity, dict)
+    integrity["keyId"] = MRK_ID
+    bundle = SignedPolicyBundle.from_wire(wire)
+    verified = PolicyTrustStore((regional_key,)).verify(bundle, expected_tenant_id=TENANT_ID)
+    assert verified.key_id == MRK_ID
 
 
 @pytest.mark.parametrize("field", ["tenantId", "policyId", "version", "configuration"])

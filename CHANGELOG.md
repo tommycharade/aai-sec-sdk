@@ -1,5 +1,20 @@
 # Changelog
 
+- Added the P0-11 active-passive regional recovery foundation: explicit pilot
+  RTO/RPO/fleet targets, four protected Global Table prerequisites, bounded
+  exact-content replication canaries, a persisted secret-free recovery
+  manifest, a staged non-active multi-Region policy-signing key, adversarial
+  contracts, cost posture and a fail-closed storage runbook. This foundation
+  deliberately does not claim traffic, identity or API failover.
+
+- Deployed and independently verified the P0-11 storage and signing-trust
+  foundations in `eu-west-2`/`eu-west-1`: all four protected Global Table
+  replicas passed exact create/delete canaries within the 60-second RPO, and a
+  retained P-256 KMS multi-Region replica shares the staged key material without
+  changing active signing authority. Trust-bundle export now supports a bounded
+  old/new/replica overlap and both runtime verifiers accept exact KMS `mrk-`
+  identities.
+
 - Completed live cross-region audit recovery acceptance: 603 exact S3 versions
   passed independent identity, ordering, SHA-256, metadata, COMPLIANCE retention
   and replica-provenance verification after bounded historical repair.

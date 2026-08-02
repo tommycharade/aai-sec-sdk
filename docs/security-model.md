@@ -192,6 +192,17 @@ bytes, digest metadata and retention. This proves evidence recoverability, not
 regional API failover or a contractual RTO/RPO. See the
 [audit-recovery deployment guard](audit-recovery-deployment-guard-design.md).
 
+Regional control-plane recovery is a larger authority boundary than audit
+replication. The active-passive design requires replicated control, presence,
+idempotency and SCIM state; overlapping policy-signing trust; replicated
+identity; Region-local queue reconciliation; bidirectional immutable audit; and
+one advertised active endpoint. DynamoDB eventual replication is not treated
+as a distributed lock, and a provisioned passive API is not permitted to serve
+traffic before a controlled activation. Disconnected agents do not infer an
+outage bypass from cached policy because revocation, emergency-stop, approval
+and session state may have changed. See the
+[regional recovery design](regional-control-plane-recovery-design.md).
+
 Mass-retention extension is a separate irreversible boundary. The API
 atomically binds a longer future-write policy to an idempotent job, waits longer
 than any evidence-writing Lambda can run and then extends every pre-cutover S3
