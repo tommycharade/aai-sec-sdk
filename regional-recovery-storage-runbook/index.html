@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/audit-recovery-deployment-guard-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/regional-recovery-storage-runbook/">
       
       
-        <link rel="prev" href="../durable-evidence-governance-design/">
+        <link rel="prev" href="../regional-control-plane-recovery-design/">
       
       
-        <link rel="next" href="../cross-region-audit-recovery-acceptance-2026-08-01/">
+        <link rel="next" href="../regional-recovery-storage-acceptance-2026-08-02/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Persistent audit-recovery deployment guard - Agentic AI Security SDK</title>
+        <title>Regional recovery storage runbook - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#persistent-audit-recovery-deployment-guard" class="md-skip">
+        <a href="#regional-recovery-storage-runbook" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Persistent audit-recovery deployment guard
+              Regional recovery storage runbook
             
           </span>
         </div>
@@ -826,37 +826,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Persistent audit-recovery deployment guard
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../audit-recovery-deployment-guard-design/" class="md-nav__link">
         
   
   
@@ -872,70 +845,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decision
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#historical-repair" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Historical repair
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#independent-acceptance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Independent acceptance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#failure-and-recovery" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Failure and recovery
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -998,10 +907,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../regional-recovery-storage-runbook/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional recovery storage runbook
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1017,6 +953,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-validate-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Validate locally
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-deploy-the-primary-prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Deploy the primary prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-add-and-prove-storage-replicas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Add and prove storage replicas
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-independent-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Independent check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-create-and-prove-the-staged-signing-replica" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Create and prove the staged signing replica
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure handling
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2506,10 +2539,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
+  <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Decision
+        Prerequisites
       
     </span>
   </a>
@@ -2517,10 +2550,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#historical-repair" class="md-nav__link">
+  <a href="#1-validate-locally" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Historical repair
+        1. Validate locally
       
     </span>
   </a>
@@ -2528,10 +2561,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#independent-acceptance" class="md-nav__link">
+  <a href="#2-deploy-the-primary-prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Independent acceptance
+        2. Deploy the primary prerequisites
       
     </span>
   </a>
@@ -2539,10 +2572,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#failure-and-recovery" class="md-nav__link">
+  <a href="#3-add-and-prove-storage-replicas" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Failure and recovery
+        3. Add and prove storage replicas
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-independent-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Independent check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-create-and-prove-the-staged-signing-replica" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Create and prove the staged signing replica
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure handling
       
     </span>
   </a>
@@ -2569,65 +2635,125 @@
   
 
 
-<h1 id="persistent-audit-recovery-deployment-guard">Persistent audit-recovery deployment guard</h1>
-<h2 id="decision">Decision</h2>
-<p>Cross-region audit recovery is deployment authority, not ambient shell state.
-The primary control-plane deployer loads one reviewed, secret-free recovery
-manifest from encrypted Parameter Store and removes any ambient
-<code>AUDIT_REPLICA_*</code> values before synthesis. Once the stack reports a replica,
-losing that manifest blocks deployment instead of silently removing the S3
-replication rule.</p>
-<p>The manifest binds one exact destination bucket ARN, a distinct AWS Region and
-an opaque recovery-review reference. Configuration succeeds only when AWS
-proves that the destination is versioned and defaults to at least 365 days of
-COMPLIANCE Object Lock. A post-deployment check requires the exact destination,
-region and historical Batch Replication role outputs.</p>
-<h2 id="historical-repair">Historical repair</h2>
-<p>Live S3 replication protects versions written after a rule is active; it does
-not repair older versions. <code>scripts/backfill_aws_audit_replication.py</code> creates a
-bounded S3 Batch Replication job for exact versions with <code>NONE</code>, <code>FAILED</code> or
-<code>COMPLETED</code> replication status at a fixed cutoff. <code>COMPLETED</code> versions are
-intentionally reprocessed: their bytes may exist while destination retention or
-metadata is stale after a later source-side change. The script:</p>
+<h1 id="regional-recovery-storage-runbook">Regional recovery storage runbook</h1>
+<p>This runbook prepares phases 1 and 2 of the
+<a href="../regional-control-plane-recovery-design/">regional control-plane recovery design</a>.
+It creates no recovery API and changes no traffic, Cognito configuration,
+active policy signer or audit retention.</p>
+<h2 id="prerequisites">Prerequisites</h2>
 <ul>
-<li>counts source versions and refuses more than the reviewed safety bound;</li>
-<li>asks S3 to generate the version-aware manifest in the source Region;</li>
-<li>uses a dedicated least-privilege Batch Operations role;</li>
-<li>writes a provider completion report outside the immutable audit namespace;</li>
-<li>fails on timeout, terminal provider failure or any failed task.</li>
+<li>Use a clean, reviewed revision of the SDK repository.</li>
+<li>Confirm the primary stack is <code>UPDATE_COMPLETE</code>.</li>
+<li>Confirm the immutable audit recovery verifier passes.</li>
+<li>Review <code>infra/aws-control-plane/regional-recovery.example.json</code> and replace
+  <code>approvalEvidenceRef</code> with the approved change/evidence identifier.</li>
+<li>Record the expected incremental cost and maintenance window.</li>
+<li>Run with an AWS profile authorized for CloudFormation, DynamoDB, KMS, SSM and
+  read-only S3 posture checks. Never put credentials or secret values in the
+  manifest.</li>
 </ul>
-<p>The role can initiate replication for source audit objects and write only under
-the recovery-report prefix. The existing S3 replication role remains the
-principal authorized to read immutable source versions and create replicas.
-Replication metrics enable object-level failed/not-tracked events, which enter
-the existing durable security-alert SNS/SQS channel with provider failure
-reasons. CloudWatch replication metrics are best-effort and published in the
-destination Region, so they are not treated as the sole failure signal.
-The rule uses the explicit V2 schema required by metrics: priority 1, an empty
-prefix that covers every evidence object, and disabled delete-marker replication
-because delete markers are not retained evidence records.</p>
-<h2 id="independent-acceptance">Independent acceptance</h2>
-<p><code>scripts/verify_aws_audit_recovery.py</code> does not trust the Batch Operations
-completion count. It independently enumerates both versioned buckets and
-requires exact key/version identity and canonical ordering, SHA-256 equality,
-preserved content-digest metadata, COMPLIANCE mode, destination retention no
-shorter than source retention and <code>REPLICA</code> provenance. Verification is bounded
-and emits a canonical manifest digest suitable for retained acceptance evidence.</p>
-<p>Delete markers are not evidence records and are excluded from the retained
-version proof. Production audit writers never delete records; unexpected delete
-markers should be investigated separately.</p>
-<h2 id="failure-and-recovery">Failure and recovery</h2>
+<h2 id="1-validate-locally">1. Validate locally</h2>
+<pre><code class="language-bash">PYTHONPATH=&quot;$PWD/src&quot; python3 -m pytest -q tests/test_aws_regional_recovery.py
+cd infra/aws-control-plane
+npm run build
+npx cdk synth AaiSecControlPlane
+</code></pre>
+<p>Review <code>cdk diff</code>. The foundation diff must contain only:</p>
 <ul>
-<li>Missing or malformed persisted authority: deployment stops before synthesis.</li>
-<li>Same-region or weakly retained destination: configuration and deployment stop.</li>
-<li>Historical job failure: live replication remains enabled; inspect the
-  completion report, correct the failure and rerun the idempotent repair.</li>
-<li>Verification mismatch: do not declare recovery ready. Preserve both provider
-  reports and verifier output, then investigate the exact object/version.</li>
+<li>streams, deletion protection and missing PITR on the four tables;</li>
+<li>one retained, staged multi-Region P-256 signing key;</li>
+<li>table/key outputs.</li>
 </ul>
-<p>This control proves immutable audit data recoverability. It does not by itself
-provide a second regional API, an approved RTO/RPO or automated control-plane
-failover.</p>
+<p>It must not replace a table or key, change <code>POLICY_SIGNING_KEY_ARN</code>, remove
+audit replication, alter Cognito, or route traffic.</p>
+<h2 id="2-deploy-the-primary-prerequisites">2. Deploy the primary prerequisites</h2>
+<p>Use the guarded deployer so persisted Entra and audit-recovery configuration is
+reloaded instead of trusting ambient shell variables:</p>
+<pre><code class="language-bash">python3 scripts/deploy_aws_control_plane.py deploy \
+  --profile p1 \
+  --region eu-west-2 \
+  --stack-name AaiSecControlPlane
+</code></pre>
+<p>Abort if CloudFormation proposes replacement or deletion of an authoritative
+store, identity provider, KMS key or Object Lock bucket.</p>
+<h2 id="3-add-and-prove-storage-replicas">3. Add and prove storage replicas</h2>
+<p>Copy the example outside the repository if it contains a customer change
+identifier. Then run:</p>
+<pre><code class="language-bash">python3 scripts/manage_aws_regional_recovery.py prepare-storage \
+  --config /absolute/path/to/regional-recovery.json \
+  --profile p1 \
+  --confirm-storage-replication \
+  --evidence-out /absolute/path/to/regional-recovery-storage-evidence.json
+</code></pre>
+<p>The command:</p>
+<ol>
+<li>derives table identities from exact CloudFormation outputs;</li>
+<li>refuses missing streams, deletion protection or primary PITR;</li>
+<li>creates only absent <code>eu-west-1</code> replicas and waits within RTO;</li>
+<li>enables recovery deletion protection and PITR;</li>
+<li>writes a synthetic, non-authoritative canary to every table;</li>
+<li>requires exact content in the recovery Region within RPO;</li>
+<li>conditionally deletes the canary and proves delete replication;</li>
+<li>verifies the staged signing key remains multi-Region but inactive; and</li>
+<li>persists the secret-free recovery manifest only after success.</li>
+</ol>
+<p>The evidence file contains resource names and synthetic digests, not tokens,
+customer records or secret values. Retain it with the change record.</p>
+<h2 id="4-independent-check">4. Independent check</h2>
+<pre><code class="language-bash">python3 scripts/manage_aws_regional_recovery.py check \
+  --config /absolute/path/to/regional-recovery.json \
+  --profile p1
+</code></pre>
+<p>Also inspect each table from both Regions and verify <code>ACTIVE</code>, PITR enabled,
+deletion protection enabled and a current Global Tables version. Do not infer
+exact replication from <code>ItemCount</code>; it is approximate. Use the canary evidence.</p>
+<h2 id="5-create-and-prove-the-staged-signing-replica">5. Create and prove the staged signing replica</h2>
+<p>This step creates the recovery-Region replica of the staged multi-Region key.
+It does not switch the active policy signer or activate recovery traffic:</p>
+<pre><code class="language-bash">python3 scripts/manage_aws_regional_recovery.py prepare-trust \
+  --config /absolute/path/to/regional-recovery.json \
+  --profile p1 \
+  --confirm-trust-replication \
+  --evidence-out /absolute/path/to/regional-recovery-trust-evidence.json
+</code></pre>
+<p>The command requires the exact manifest previously persisted by the successful
+storage exercise. It deploys only the retained KMS replica, then proves the
+primary and replica share one <code>mrk-</code> key ID, use P-256 <code>SIGN_VERIFY</code>, are
+enabled in the intended Regions and remain staged rather than active authority.
+An independent read-only check is:</p>
+<pre><code class="language-bash">python3 scripts/manage_aws_regional_recovery.py check-trust \
+  --config /absolute/path/to/regional-recovery.json \
+  --profile p1
+</code></pre>
+<p>Generate an overlapping endpoint trust bundle before signer cutover. Repeat
+<code>--key-arn</code> once for the existing signer, staged primary and staged replica:</p>
+<pre><code class="language-bash">python3 scripts/export_policy_trust_bundle.py \
+  --profile p1 \
+  --key-arn arn:aws:kms:eu-west-2:ACCOUNT:key/EXISTING_KEY \
+  --key-arn arn:aws:kms:eu-west-2:ACCOUNT:key/mrk-STAGED_KEY \
+  --key-arn arn:aws:kms:eu-west-1:ACCOUNT:key/mrk-STAGED_KEY \
+  --output /administrator-owned/path/policy-trust-overlap.json
+</code></pre>
+<p>The exporter creates a new mode-<code>0600</code> file, refuses overwrite, rejects
+duplicate key identities and permits at most eight exact P-256 signing keys.
+Publishing the file is not convergence evidence. Do not switch the signer
+until every governed endpoint reports the expected trust-bundle digest.</p>
+<h2 id="failure-handling">Failure handling</h2>
+<ul>
+<li><strong>Primary prerequisite failure:</strong> do not add replicas. Restore the reviewed
+  stack revision; never remove table data.</li>
+<li><strong>Replica creation timeout/failure:</strong> leave the existing primary table and
+  any provider-created replica intact, retain provider events, and investigate.
+  Do not delete a partially created replica during the incident.</li>
+<li><strong>Canary exceeds RPO or differs:</strong> do not persist or declare the storage
+  foundation ready. Preserve the exact digest and table status.</li>
+<li><strong>PITR/deletion protection cannot be proven:</strong> recovery remains incomplete.</li>
+<li><strong>Staged signing key check fails:</strong> do not rotate the active signer.</li>
+<li><strong>Replica relationship differs or the persisted manifest changes:</strong> do not
+  publish trust or rotate the signer; retain both keys and investigate.</li>
+</ul>
+<p>No phase-1 failure authorizes traffic failover. Enrolled runtimes continue to
+fail closed when the primary control plane is unavailable.</p>
 
 
 

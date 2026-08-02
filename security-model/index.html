@@ -1106,6 +1106,87 @@
   
   
     <li class="md-nav__item">
+      <a href="../regional-control-plane-recovery-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional control-plane recovery design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../regional-recovery-storage-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional recovery storage runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../regional-recovery-storage-acceptance-2026-08-02/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional recovery storage acceptance (2026-08-02)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../asynchronous-retention-design/" class="md-nav__link">
         
   
@@ -2923,6 +3004,16 @@ acceptance independently compares every source and replica version's identity,
 bytes, digest metadata and retention. This proves evidence recoverability, not
 regional API failover or a contractual RTO/RPO. See the
 <a href="../audit-recovery-deployment-guard-design/">audit-recovery deployment guard</a>.</p>
+<p>Regional control-plane recovery is a larger authority boundary than audit
+replication. The active-passive design requires replicated control, presence,
+idempotency and SCIM state; overlapping policy-signing trust; replicated
+identity; Region-local queue reconciliation; bidirectional immutable audit; and
+one advertised active endpoint. DynamoDB eventual replication is not treated
+as a distributed lock, and a provisioned passive API is not permitted to serve
+traffic before a controlled activation. Disconnected agents do not infer an
+outage bypass from cached policy because revocation, emergency-stop, approval
+and session state may have changed. See the
+<a href="../regional-control-plane-recovery-design/">regional recovery design</a>.</p>
 <p>Mass-retention extension is a separate irreversible boundary. The API
 atomically binds a longer future-write policy to an idempotent job, waits longer
 than any evidence-writing Lambda can run and then extends every pre-cutover S3

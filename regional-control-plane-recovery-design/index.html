@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/audit-recovery-deployment-guard-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/regional-control-plane-recovery-design/">
       
       
-        <link rel="prev" href="../durable-evidence-governance-design/">
+        <link rel="prev" href="../cross-region-audit-recovery-acceptance-2026-08-01/">
       
       
-        <link rel="next" href="../cross-region-audit-recovery-acceptance-2026-08-01/">
+        <link rel="next" href="../regional-recovery-storage-runbook/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Persistent audit-recovery deployment guard - Agentic AI Security SDK</title>
+        <title>Regional control-plane recovery design - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#persistent-audit-recovery-deployment-guard" class="md-skip">
+        <a href="#regional-control-plane-recovery-design" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Persistent audit-recovery deployment guard
+              Regional control-plane recovery design
             
           </span>
         </div>
@@ -826,6 +826,60 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../audit-recovery-deployment-guard-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Persistent audit-recovery deployment guard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cross-region-audit-recovery-acceptance-2026-08-01/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cross-region audit recovery acceptance — 2026-08-01
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -845,7 +899,7 @@
   <span class="md-ellipsis">
     
   
-    Persistent audit-recovery deployment guard
+    Regional control-plane recovery design
   
 
     
@@ -863,7 +917,7 @@
   <span class="md-ellipsis">
     
   
-    Persistent audit-recovery deployment guard
+    Regional control-plane recovery design
   
 
     
@@ -900,10 +954,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#historical-repair" class="md-nav__link">
+  <a href="#risk-and-trust-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Historical repair
+        Risk and trust boundary
       
     </span>
   </a>
@@ -911,10 +965,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#independent-acceptance" class="md-nav__link">
+  <a href="#architecture" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Independent acceptance
+        Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authoritative-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authoritative data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#policy-signing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy signing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit-and-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit and evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#api-ui-and-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API, UI and routing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delivery-phases-and-acceptance-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery phases and acceptance gates
       
     </span>
   </a>
@@ -922,10 +1048,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#failure-and-recovery" class="md-nav__link">
+  <a href="#cost-position" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Failure and recovery
+        Cost position
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-guarantees
       
     </span>
   </a>
@@ -936,60 +1073,6 @@
   
 </nav>
       
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cross-region-audit-recovery-acceptance-2026-08-01/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cross-region audit recovery acceptance — 2026-08-01
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../regional-control-plane-recovery-design/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Regional control-plane recovery design
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -2517,10 +2600,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#historical-repair" class="md-nav__link">
+  <a href="#risk-and-trust-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Historical repair
+        Risk and trust boundary
       
     </span>
   </a>
@@ -2528,10 +2611,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#independent-acceptance" class="md-nav__link">
+  <a href="#architecture" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Independent acceptance
+        Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authoritative-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authoritative data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#policy-signing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy signing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit-and-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit and evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#api-ui-and-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API, UI and routing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delivery-phases-and-acceptance-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery phases and acceptance gates
       
     </span>
   </a>
@@ -2539,10 +2694,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#failure-and-recovery" class="md-nav__link">
+  <a href="#cost-position" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Failure and recovery
+        Cost position
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-guarantees
       
     </span>
   </a>
@@ -2569,65 +2735,180 @@
   
 
 
-<h1 id="persistent-audit-recovery-deployment-guard">Persistent audit-recovery deployment guard</h1>
+<h1 id="regional-control-plane-recovery-design">Regional control-plane recovery design</h1>
 <h2 id="decision">Decision</h2>
-<p>Cross-region audit recovery is deployment authority, not ambient shell state.
-The primary control-plane deployer loads one reviewed, secret-free recovery
-manifest from encrypted Parameter Store and removes any ambient
-<code>AUDIT_REPLICA_*</code> values before synthesis. Once the stack reports a replica,
-losing that manifest blocks deployment instead of silently removing the S3
-replication rule.</p>
-<p>The manifest binds one exact destination bucket ARN, a distinct AWS Region and
-an opaque recovery-review reference. Configuration succeeds only when AWS
-proves that the destination is versioned and defaults to at least 365 days of
-COMPLIANCE Object Lock. A post-deployment check requires the exact destination,
-region and historical Batch Replication role outputs.</p>
-<h2 id="historical-repair">Historical repair</h2>
-<p>Live S3 replication protects versions written after a rule is active; it does
-not repair older versions. <code>scripts/backfill_aws_audit_replication.py</code> creates a
-bounded S3 Batch Replication job for exact versions with <code>NONE</code>, <code>FAILED</code> or
-<code>COMPLETED</code> replication status at a fixed cutoff. <code>COMPLETED</code> versions are
-intentionally reprocessed: their bytes may exist while destination retention or
-metadata is stale after a later source-side change. The script:</p>
+<p>P0-11 uses a fail-closed, active-passive AWS design. The first-customer target
+is a fleet of 1,000 enrolled Claude Code or Codex agents, a 30-minute recovery
+time objective (RTO), and a 60-second recovery point objective (RPO) for
+authoritative DynamoDB state. These are engineering targets until a customer
+security owner approves the manifest's evidence reference and a live exercise
+meets them. They are not a contractual SLA.</p>
+<p>The recovery cell is <code>eu-west-1</code>; the current primary is <code>eu-west-2</code>. No second
+cell may receive production traffic merely because its resources exist. A
+regional activation must prove identity, signing-key trust, global-table
+replication, immutable audit posture, queue reconciliation, endpoint routing
+and operator authority before it changes traffic.</p>
+<h2 id="risk-and-trust-boundary">Risk and trust boundary</h2>
+<p>A partial recovery can be worse than an outage. A second API with stale policy,
+identity, approval or idempotency state can widen authority, replay an action,
+or create two conflicting control planes. The design therefore treats every
+regional dependency as part of one security boundary:</p>
+<pre><code class="language-text">operator/agent endpoint
+  -&gt; one advertised active cell
+  -&gt; replicated identity and policy signing trust
+  -&gt; replicated policy, approval, session and idempotency state
+  -&gt; Region-local workers and queues reconciled from authoritative records
+  -&gt; bidirectional immutable audit persistence
+</code></pre>
+<p>During an unproven outage, enrolled runtimes retain no implicit bypass. The MCP
+gateway stops execution when heartbeats or policy refresh fail. A signed policy
+cached on disk can prove policy integrity, but it does not prove current
+emergency-stop, revocation, approval or session state and therefore does not
+authorize disconnected operation.</p>
+<h2 id="architecture">Architecture</h2>
+<h3 id="authoritative-data">Authoritative data</h3>
+<p>The control, presence, idempotency and SCIM lifecycle tables become DynamoDB
+Global Tables with <code>NEW_AND_OLD_IMAGES</code> streams, deletion protection and
+point-in-time recovery in both Regions. The first phase uses multi-Region
+eventual consistency because the existing TTL-backed tables cannot be converted
+to multi-Region strong consistency without a new-table data migration: MRSC
+does not support TTL.</p>
+<p>MREC is not a distributed lock. The system therefore remains active-passive.
+Only one control-plane endpoint may be advertised, the recovery API starts in a
+non-serving posture, and activation is a controlled operation rather than an
+automatic health-check reaction. The exercise measures actual create and
+delete replication for all four tables. A result above 60 seconds prevents
+activation.</p>
+<p>Region-local SQS messages are delivery mechanisms, not authority. Jobs,
+revisions, approvals and idempotency records remain in DynamoDB. Recovery
+workers reload those records before doing work; missing or conflicting state
+fails closed. The activation runbook reconciles pending and stale jobs instead
+of copying queue messages.</p>
+<h3 id="identity">Identity</h3>
+<p>Amazon Cognito native multi-Region replication is the target identity design.
+The primary pool must use the Essentials or Plus plan, a multi-Region KMS key
+and a multi-Region issuer before an <code>ACTIVE</code> replica is created. Microsoft Entra
+remains the first federation provider. Entra OIDC and SCIM configuration stays
+tenant-bound and secret values stay in Secrets Manager.</p>
+<p>The secondary Cognito pool can authenticate existing users during failover but
+has documented limitations, including no user creation/profile mutation and no
+TOTP MFA in the secondary. Enterprise activation therefore requires Entra
+federation with Conditional Access evidence; native TOTP-only users are not an
+accepted recovery population. Until real Entra and Cognito replication are
+configured and exercised, identity recovery remains incomplete.</p>
+<h3 id="policy-signing">Policy signing</h3>
+<p>The deployed signing key is single-Region and cannot be converted in place.
+The primary stack therefore stages a retained P-256 multi-Region signing key
+without making it active. The safe migration is:</p>
+<ol>
+<li>Create its KMS replica in the recovery Region.</li>
+<li>Publish an endpoint trust bundle containing both old and new public keys.</li>
+<li>Prove every governed endpoint has the overlapping bundle.</li>
+<li>Switch new policy signatures to the multi-Region key.</li>
+<li>Exercise verification and signing in both Regions.</li>
+<li>Keep the old key trusted for all still-valid historical bundles.</li>
+</ol>
+<p>Creating the staged key is not signer cutover evidence. The stack continues to
+set <code>POLICY_SIGNING_KEY_ARN</code> to the existing key until the measured rollout is
+complete.</p>
+<h3 id="audit-and-evidence">Audit and evidence</h3>
+<p>The existing S3 replica already proves exact immutable recovery for retained
+evidence. Before the recovery cell can write audit events, two-way replication
+and replica-modification sync must be enabled and independently verified. This
+ensures direct writes during failover return to the former primary without
+shortening Object Lock retention. Delete markers remain excluded because they
+are not retained evidence.</p>
+<h3 id="api-ui-and-routing">API, UI and routing</h3>
+<p>The passive cell will contain Region-local Lambda, API Gateway, SQS/SNS,
+EventBridge schedules, CloudWatch alarms and a UI origin. A production customer
+supplies a custom API/authentication domain and certificates. A controlled
+Route 53 or AWS ARC Region Switch operation then advertises one cell.</p>
+<p>The public <code>execute-api</code> origins must not become an alternate bypass route once
+custom routing is enabled. Recovery activation must also update the UI's API
+and Cognito issuer configuration atomically from a reviewed deployment
+manifest. Agents use the stable managed endpoint; they are not asked to edit
+every project during an incident.</p>
+<h2 id="delivery-phases-and-acceptance-gates">Delivery phases and acceptance gates</h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Deliverable</th>
+<th>Activation permitted?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. Storage foundation</td>
+<td>Streams, PITR, deletion protection, four active Global Table replicas, measured canaries, staged signing key</td>
+<td>No</td>
+</tr>
+<tr>
+<td>2. Trust foundation</td>
+<td>Multi-Region signing-key replica and measured endpoint trust overlap</td>
+<td>No</td>
+</tr>
+<tr>
+<td>3. Identity foundation</td>
+<td>Cognito MRR, Entra OIDC/SCIM, Conditional Access and joiner/mover/leaver exercise</td>
+<td>No</td>
+</tr>
+<tr>
+<td>4. Passive cell</td>
+<td>Full API/workers/alerts/UI with schedules disabled and direct-origin bypass closed</td>
+<td>No</td>
+</tr>
+<tr>
+<td>5. Evidence continuity</td>
+<td>Two-way Object Lock replication and worker/job reconciliation</td>
+<td>No</td>
+</tr>
+<tr>
+<td>6. Recovery exercise</td>
+<td>Load, dependency failure, regional failover, emergency access, key recovery and failback within targets</td>
+<td>Yes, after approval</td>
+</tr>
+</tbody>
+</table>
+<p>Acceptance requires retained evidence that:</p>
 <ul>
-<li>counts source versions and refuses more than the reviewed safety bound;</li>
-<li>asks S3 to generate the version-aware manifest in the source Region;</li>
-<li>uses a dedicated least-privilege Batch Operations role;</li>
-<li>writes a provider completion report outside the immutable audit namespace;</li>
-<li>fails on timeout, terminal provider failure or any failed task.</li>
+<li>all four table replicas are active and match schema, PITR and deletion posture;</li>
+<li>canary create/delete replication is within RPO;</li>
+<li>policy, identity, approvals, sessions and idempotency do not widen or replay;</li>
+<li>every still-valid policy verifies before and after signer/cell transition;</li>
+<li>audit writes made in either Region have exact immutable counterparts;</li>
+<li>1,000 simulated agents meet heartbeat, policy-read and decision-ingest load;</li>
+<li>dependency failures stop execution and do not activate a bypass;</li>
+<li>backup restore, KMS recovery, emergency access and return-to-service are
+  rehearsed within RTO.</li>
 </ul>
-<p>The role can initiate replication for source audit objects and write only under
-the recovery-report prefix. The existing S3 replication role remains the
-principal authorized to read immutable source versions and create replicas.
-Replication metrics enable object-level failed/not-tracked events, which enter
-the existing durable security-alert SNS/SQS channel with provider failure
-reasons. CloudWatch replication metrics are best-effort and published in the
-destination Region, so they are not treated as the sole failure signal.
-The rule uses the explicit V2 schema required by metrics: priority 1, an empty
-prefix that covers every evidence object, and disabled delete-marker replication
-because delete markers are not retained evidence records.</p>
-<h2 id="independent-acceptance">Independent acceptance</h2>
-<p><code>scripts/verify_aws_audit_recovery.py</code> does not trust the Batch Operations
-completion count. It independently enumerates both versioned buckets and
-requires exact key/version identity and canonical ordering, SHA-256 equality,
-preserved content-digest metadata, COMPLIANCE mode, destination retention no
-shorter than source retention and <code>REPLICA</code> provenance. Verification is bounded
-and emits a canonical manifest digest suitable for retained acceptance evidence.</p>
-<p>Delete markers are not evidence records and are excluded from the retained
-version proof. Production audit writers never delete records; unexpected delete
-markers should be investigated separately.</p>
-<h2 id="failure-and-recovery">Failure and recovery</h2>
+<h2 id="cost-position">Cost position</h2>
+<p>The implementation deliberately avoids an ARC routing-control cluster for the
+first-customer tier: AWS currently prices one at $2.50/hour, approximately
+$1,825/month. ARC Region Switch is a more appropriate optional enterprise
+upgrade at $70/month per plan.</p>
+<p>The passive serverless cell has low fixed cost. At pilot volume, the working
+planning range is <strong>$10–$30/month plus usage</strong>, before optional Region Switch:</p>
 <ul>
-<li>Missing or malformed persisted authority: deployment stops before synthesis.</li>
-<li>Same-region or weakly retained destination: configuration and deployment stop.</li>
-<li>Historical job failure: live replication remains enabled; inspect the
-  completion report, correct the failure and rerun the idempotent repair.</li>
-<li>Verification mismatch: do not declare recovery ready. Preserve both provider
-  reports and verifier output, then investigate the exact object/version.</li>
+<li>Global Tables duplicate storage and bill replicated writes in each Region;</li>
+<li>the staged primary and eventual replica KMS keys are each billed as a key;</li>
+<li>passive Lambda, API Gateway, SQS/SNS and CloudWatch are usage-based;</li>
+<li>Cognito MRR Essentials is $0.0045 per monthly active user in the replica
+  Region, plus a 30% M2M add-on;</li>
+<li>Route 53, logs, backup storage and cross-Region restore add small variable
+  charges.</li>
 </ul>
-<p>This control proves immutable audit data recoverability. It does not by itself
-provide a second regional API, an approved RTO/RPO or automated control-plane
-failover.</p>
+<p>This range must be recalculated from observed requests, storage, retention and
+operator MAU before a customer quote. See the authoritative AWS pricing pages
+for <a href="https://aws.amazon.com/dynamodb/pricing/">DynamoDB</a>,
+<a href="https://aws.amazon.com/cognito/pricing/">Cognito</a> and
+<a href="https://aws.amazon.com/application-recovery-controller/pricing/">Application Recovery Controller</a>.</p>
+<h2 id="non-guarantees">Non-guarantees</h2>
+<p>The storage foundation alone is not regional failover. It does not replicate
+Cognito, create a recovery API, activate a multi-Region signer, provide
+bidirectional audit writes, route agents, prove load, or approve an SLA. The UI
+must continue to show P0-11 as partial until every phase and live exercise is
+complete.</p>
 
 
 

@@ -883,6 +883,87 @@
   
   
     <li class="md-nav__item">
+      <a href="../regional-control-plane-recovery-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional control-plane recovery design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../regional-recovery-storage-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional recovery storage runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../regional-recovery-storage-acceptance-2026-08-02/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Regional recovery storage acceptance (2026-08-02)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../asynchronous-retention-design/" class="md-nav__link">
         
   
@@ -2733,8 +2814,8 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.</p>
 <td>P0-11</td>
 <td>HA/DR</td>
 <td>Partial</td>
-<td>Durable AWS stores, audit replication and recovery checks</td>
-<td>Approved RTO/RPO, regional control-plane recovery and rehearsed runbooks</td>
+<td>Durable AWS stores; complete immutable audit replication; active-passive regional design; persisted secret-free 1,000-agent/30-minute-RTO/60-second-RPO authority; four live protected Global Table replicas with exact-content create/delete RPO canaries; retained staged P-256 multi-Region signing primary and replica; three-key overlap export; adversarial contracts, runbook and 2026-08-02 live acceptance</td>
+<td>Prove endpoint trust-bundle convergence before signer cutover, then complete Cognito MRR/Entra, passive API/workers/UI, bidirectional audit writes, routing, 1,000-agent load, backup/key recovery and rehearsed failover/failback</td>
 </tr>
 <tr>
 <td>P0-12</td>
