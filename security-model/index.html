@@ -3301,10 +3301,14 @@ re-verifies source fencing and the exact live recovery Lambda, queue-mapping,
 schedule, signer, evidence and Entra authority before invoking the internal job
 reconciler. Runtime output is treated as untrusted data and completion requires
 a bounded zero-action check plus an append-only evidence digest. Traffic stays
-on the source. The planned stable ingress uses same-name Regional API Gateway
-custom domains and a transactional Route 53 API/UI change batch; because Route
-53 has no conditional generation token, the witness plus exclusive IAM/SCP DNS
-authority remains necessary. See <a href="../regional-target-readiness-and-stable-ingress-design/">Regional target readiness and stable ingress</a>.</p>
+on the source. The implemented non-routing ingress creates same-name Regional
+API Gateway custom domains, exact stable/canary mappings and a read-only
+private-bucket UI proxy. Its deployment guard derives provider identities,
+validates exact ACM names and deploys only an independently verified assembly;
+it contains no DNS resource or command. A later transactional Route 53 API/UI
+change batch moves traffic. Because Route 53 has no conditional generation
+token, the witness plus exclusive IAM/SCP DNS authority remains necessary. See
+<a href="../regional-target-readiness-and-stable-ingress-design/">Regional target readiness and stable ingress</a>.</p>
 <p>Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while
 excluding delete markers, and synthesized CloudFormation is rejected unless
