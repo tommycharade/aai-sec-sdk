@@ -1165,6 +1165,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../evidence-continuity-and-job-reconciliation-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evidence continuity and recovery-job reconciliation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../policy-trust-convergence-design/" class="md-nav__link">
         
   
@@ -2899,6 +2926,10 @@ and replica-modification sync must be enabled and independently verified. This
 ensures direct writes during failover return to the former primary without
 shortening Object Lock retention. Delete markers remain excluded because they
 are not retained evidence.</p>
+<p>The phase-5 implementation and its fail-closed job planner are specified in
+<a href="../evidence-continuity-and-job-reconciliation-design/">Evidence continuity and recovery-job reconciliation</a>.
+Source and verifier completion is not live acceptance: the current AWS replica
+remains one-way until the guarded deployment and two-direction canary pass.</p>
 <h3 id="api-ui-and-routing">API, UI and routing</h3>
 <p>The passive cell will contain Region-local Lambda, API Gateway, SQS/SNS,
 EventBridge schedules, CloudWatch alarms and a UI origin. A production customer
