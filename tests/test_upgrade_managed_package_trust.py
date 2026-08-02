@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
 
 from agentic_security import (
     AgentHost,
@@ -23,6 +21,12 @@ from agentic_security import (
     PolicyTrustStore,
     TrustedPolicyKey,
 )
+
+_SYNTHETIC_P256_PUBLIC_PEM = """-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE9AednGdWX5tOVVBzU4graM3pMoB7
+1zN9CeMI3CdIylAEaD5uETFZniRiQmvKmYClaOEdOrDhpXqNTe7q+cLtCw==
+-----END PUBLIC KEY-----
+"""
 
 
 def _load() -> Any:
@@ -51,20 +55,11 @@ def _inputs(tmp_path: Path) -> tuple[Path, ManagedDeploymentPackage, Path, str]:
     package_path = tmp_path / "package-v1.json"
     package_path.write_bytes(package.to_json())
     package_path.chmod(0o600)
-    public_pem = (
-        ec.generate_private_key(ec.SECP256R1())
-        .public_key()
-        .public_bytes(
-            serialization.Encoding.PEM,
-            serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-        .decode("ascii")
-    )
     trust = PolicyTrustStore(
         (
             TrustedPolicyKey(
                 "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789abc",
-                public_pem,
+                _SYNTHETIC_P256_PUBLIC_PEM,
             ),
         )
     ).to_json()

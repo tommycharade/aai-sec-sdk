@@ -10,8 +10,6 @@ from dataclasses import replace
 from typing import Any, cast
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
 
 import agentic_security.managed_deployment as managed_deployment
 from agentic_security import (
@@ -30,23 +28,20 @@ from agentic_security import (
     TrustedPolicyKey,
 )
 
+_SYNTHETIC_P256_PUBLIC_PEM = """-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE9AednGdWX5tOVVBzU4graM3pMoB7
+1zN9CeMI3CdIylAEaD5uETFZniRiQmvKmYClaOEdOrDhpXqNTe7q+cLtCw==
+-----END PUBLIC KEY-----
+"""
+
 
 def _trust_store() -> PolicyTrustStore:
     """Return one synthetic deployment-pinned signing authority."""
-    public_pem = (
-        ec.generate_private_key(ec.SECP256R1())
-        .public_key()
-        .public_bytes(
-            serialization.Encoding.PEM,
-            serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-        .decode("ascii")
-    )
     return PolicyTrustStore(
         (
             TrustedPolicyKey(
                 "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789abc",
-                public_pem,
+                _SYNTHETIC_P256_PUBLIC_PEM,
             ),
         )
     )

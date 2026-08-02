@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
 from scripts.verify_incident_case_export import verify_artifact
 
 from agentic_security import (
@@ -31,6 +29,12 @@ from agentic_security import (
     PolicyTrustStore,
     TrustedPolicyKey,
 )
+
+_SYNTHETIC_P256_PUBLIC_PEM = """-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE9AednGdWX5tOVVBzU4graM3pMoB7
+1zN9CeMI3CdIylAEaD5uETFZniRiQmvKmYClaOEdOrDhpXqNTe7q+cLtCw==
+-----END PUBLIC KEY-----
+"""
 
 
 class ConditionalFailure(Exception):
@@ -1761,19 +1765,10 @@ def _managed_package_fixture(
         platform=ManagedPlatform.LINUX,
         hook_command=hook_path,
     )
-    public_pem = (
-        ec.generate_private_key(ec.SECP256R1())
-        .public_key()
-        .public_bytes(
-            serialization.Encoding.PEM,
-            serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-        .decode("ascii")
-    )
     trust_store = (
         PolicyTrustStore(
             tuple(
-                TrustedPolicyKey(key_id, public_pem)
+                TrustedPolicyKey(key_id, _SYNTHETIC_P256_PUBLIC_PEM)
                 for key_id in (
                     "arn:aws:kms:eu-west-2:111111111111:key/12345678-1234-1234-1234-123456789abc",
                     "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef",
