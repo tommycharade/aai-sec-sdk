@@ -40,6 +40,7 @@ class ActiveCellDeploymentError(RuntimeError):
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 Clock = Callable[[], float]
+Sleeper = Callable[[float], None]
 _RESOURCE_LIMITS = {
     "AWS::Lambda::Function": 50,
     "AWS::Lambda::EventSourceMapping": 20,
@@ -47,6 +48,11 @@ _RESOURCE_LIMITS = {
 }
 _STACK_STABLE = {"CREATE_COMPLETE", "UPDATE_COMPLETE"}
 _ACCOUNT = re.compile(r"^\d{12}$")
+_LAMBDA_CODE_SHA256 = re.compile(r"^[A-Za-z0-9+/]{43}=$")
+_REVISION_ID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -71,6 +77,33 @@ class SourceResources:
 
     def sha256(self) -> str:
         """Return the digest of the exact source resource set."""
+        return hashlib.sha256(self.canonical_json().encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class TargetResources:
+    """Exact provider-discovered recovery runtime used for readiness checks."""
+
+    handler: str
+    workers: tuple[str, str]
+    event_source_mappings: tuple[str, str]
+    event_rules: tuple[str, str, str, str]
+
+    def canonical_json(self) -> str:
+        """Return the deterministic target resource identity set."""
+        return json.dumps(
+            {
+                "eventRules": list(self.event_rules),
+                "eventSourceMappings": list(self.event_source_mappings),
+                "handler": self.handler,
+                "workers": list(self.workers),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def sha256(self) -> str:
+        """Return the target resource-set digest retained with readiness evidence."""
         return hashlib.sha256(self.canonical_json().encode()).hexdigest()
 
 
@@ -167,6 +200,113 @@ def discover_source_resources(
     )
 
 
+def discover_target_resources(
+    *,
+    stack_name: str,
+    target_region: str,
+    profile: str,
+    runner: Runner = subprocess.run,
+) -> TargetResources:
+    """Discover the exact stable active-not-routed recovery runtime."""
+    stack_response = _aws(
+        ["cloudformation", "describe-stacks", "--stack-name", stack_name],
+        profile=profile,
+        region=target_region,
+        runner=runner,
+    )
+    stacks = stack_response.get("Stacks")
+    if (
+        not isinstance(stacks, list)
+        or len(stacks) != 1
+        or not isinstance(stacks[0], dict)
+        or stacks[0].get("StackStatus") not in _STACK_STABLE
+    ):
+        raise ActiveCellDeploymentError("target stack is not stable")
+    try:
+        status = passive._stack_output(stack_response, "PassiveCellStatus")
+    except passive.PassiveCellDeploymentError as error:
+        raise ActiveCellDeploymentError(str(error)) from error
+    if status != "active-not-routed":
+        raise ActiveCellDeploymentError("target stack is not active-not-routed")
+
+    functions: dict[str, str] = {}
+    mappings: list[str] = []
+    rules: list[str] = []
+    token: str | None = None
+    for _page in range(1, 11):
+        command = ["cloudformation", "list-stack-resources", "--stack-name", stack_name]
+        if token is not None:
+            command.extend(["--next-token", token])
+        response = _aws(
+            command,
+            profile=profile,
+            region=target_region,
+            runner=runner,
+        )
+        summaries = response.get("StackResourceSummaries")
+        if not isinstance(summaries, list) or len(summaries) > 100:
+            raise ActiveCellDeploymentError("target stack resources are malformed")
+        for item in summaries:
+            if not isinstance(item, dict):
+                raise ActiveCellDeploymentError("target stack resource is malformed")
+            kind = item.get("ResourceType")
+            logical = item.get("LogicalResourceId")
+            physical = item.get("PhysicalResourceId")
+            if kind not in {
+                "AWS::Lambda::Function",
+                "AWS::Lambda::EventSourceMapping",
+                "AWS::Events::Rule",
+            }:
+                continue
+            if (
+                not isinstance(logical, str)
+                or not logical
+                or not isinstance(physical, str)
+                or not 1 <= len(physical) <= 512
+            ):
+                raise ActiveCellDeploymentError("target runtime identity is malformed")
+            if kind == "AWS::Lambda::Function":
+                if logical.startswith("PassiveControlPlaneHandler"):
+                    role = "handler"
+                elif logical.startswith("PassiveEvidenceWorker"):
+                    role = "evidence-worker"
+                elif logical.startswith("PassiveRetentionWorker"):
+                    role = "retention-worker"
+                else:
+                    raise ActiveCellDeploymentError("target contains an unknown Lambda function")
+                if role in functions:
+                    raise ActiveCellDeploymentError("target Lambda role is duplicated")
+                functions[role] = physical
+            elif kind == "AWS::Lambda::EventSourceMapping":
+                mappings.append(physical)
+            else:
+                rules.append(physical)
+        next_token = response.get("NextToken")
+        if next_token is None:
+            break
+        if not isinstance(next_token, str) or not next_token or next_token == token:
+            raise ActiveCellDeploymentError("target resource pagination is malformed")
+        token = next_token
+    else:
+        raise ActiveCellDeploymentError("target resource discovery exceeded 10 pages")
+    if (
+        set(functions) != {"handler", "evidence-worker", "retention-worker"}
+        or len(mappings) != 2
+        or len(set(mappings)) != 2
+        or len(rules) != 4
+        or len(set(rules)) != 4
+    ):
+        raise ActiveCellDeploymentError("target runtime resource set is incomplete or ambiguous")
+    ordered_mappings = sorted(mappings)
+    ordered_rules = sorted(rules)
+    return TargetResources(
+        functions["handler"],
+        (functions["evidence-worker"], functions["retention-worker"]),
+        (ordered_mappings[0], ordered_mappings[1]),
+        (ordered_rules[0], ordered_rules[1], ordered_rules[2], ordered_rules[3]),
+    )
+
+
 def verify_source_fence(
     resources: SourceResources,
     *,
@@ -210,6 +350,302 @@ def verify_source_fence(
         "functionCount": len(resources.functions),
         "resourceSetSha256": resources.sha256(),
         "status": "source-fence-verified",
+    }
+
+
+def verify_target_runtime(
+    resources: TargetResources,
+    manifest: activation.ActivationManifest,
+    expected_environment: dict[str, str],
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+) -> dict[str, Any]:
+    """Independently prove live target compute matches reviewed active authority."""
+    required_environment = {
+        "ACTIVATION_EVIDENCE_SHA256": expected_environment["RECOVERY_ACTIVATION_EVIDENCE_SHA256"],
+        "POLICY_SIGNING_KEY_ARN": expected_environment["RECOVERY_POLICY_SIGNING_KEY_ARN"],
+        "REGIONAL_POLICY_SIGNING_KEY_ARN": expected_environment["RECOVERY_POLICY_SIGNING_KEY_ARN"],
+        "ENTRA_TENANT_ID": expected_environment["ENTRA_TENANT_ID"],
+        "ENTRA_AAI_TENANT_ID": expected_environment["ENTRA_AAI_TENANT_ID"],
+        **{
+            "PASSIVE_CELL_MODE": "active",
+            "RECOVERY_JOB_RECONCILIATION_ENABLED": "true",
+            "ENTRA_PROVIDER_ENABLED": "true",
+            "ENTRA_STRONG_AUTH_ENFORCED": "true",
+        },
+    }
+    if required_environment["ACTIVATION_EVIDENCE_SHA256"] != manifest.evidence.sha256:
+        raise ActiveCellDeploymentError("target environment names different activation evidence")
+    expected_functions = {
+        resources.handler: (100, "handler.handler", 512, 15),
+        resources.workers[0]: (5, "evidence_worker.handler", 1024, 60),
+        resources.workers[1]: (5, "retention_worker.handler", 1024, 60),
+    }
+    function_evidence: dict[str, dict[str, str]] = {}
+    for function, (concurrency, handler, memory, timeout) in expected_functions.items():
+        response = _aws(
+            ["lambda", "get-function-configuration", "--function-name", function],
+            profile=profile,
+            region=manifest.target_region,
+            runner=runner,
+        )
+        variables = response.get("Environment", {}).get("Variables")
+        code_sha256 = response.get("CodeSha256")
+        revision_id = response.get("RevisionId")
+        if (
+            response.get("FunctionName") != function
+            or response.get("State") != "Active"
+            or response.get("LastUpdateStatus") != "Successful"
+            or response.get("Runtime") != "python3.13"
+            or response.get("Handler") != handler
+            or response.get("MemorySize") != memory
+            or response.get("Timeout") != timeout
+            or response.get("Architectures") != ["arm64"]
+            or response.get("PackageType") != "Zip"
+            or response.get("TracingConfig") != {"Mode": "PassThrough"}
+            or response.get("ReservedConcurrentExecutions") != concurrency
+            or not isinstance(code_sha256, str)
+            or not _LAMBDA_CODE_SHA256.fullmatch(code_sha256)
+            or not isinstance(revision_id, str)
+            or not _REVISION_ID.fullmatch(revision_id)
+            or not isinstance(variables, dict)
+            or any(variables.get(key) != value for key, value in required_environment.items())
+        ):
+            raise ActiveCellDeploymentError(f"target Lambda authority is not live: {function}")
+        function_evidence[function] = {
+            "codeSha256": code_sha256,
+            "revisionId": revision_id,
+        }
+    for mapping in resources.event_source_mappings:
+        response = _aws(
+            ["lambda", "get-event-source-mapping", "--uuid", mapping],
+            profile=profile,
+            region=manifest.target_region,
+            runner=runner,
+        )
+        if response.get("UUID") != mapping or response.get("State") != "Enabled":
+            raise ActiveCellDeploymentError(
+                f"target event-source mapping is not enabled: {mapping}"
+            )
+    for rule in resources.event_rules:
+        response = _aws(
+            ["events", "describe-rule", "--name", rule],
+            profile=profile,
+            region=manifest.target_region,
+            runner=runner,
+        )
+        if response.get("Name") != rule or response.get("State") != "ENABLED":
+            raise ActiveCellDeploymentError(f"target EventBridge rule is not enabled: {rule}")
+    return {
+        "eventRuleCount": 4,
+        "eventSourceMappingCount": 2,
+        "functionCount": 3,
+        "functions": function_evidence,
+        "resourceSetSha256": resources.sha256(),
+        "status": "target-runtime-live-not-routed",
+    }
+
+
+def _reconciliation_evidence_ref(manifest: activation.ActivationManifest) -> str:
+    """Return a secret-free correlation value bound to exact transition authority."""
+    return f"transition/{manifest.transition_id}/{manifest.authority_sha256()}"
+
+
+def _reconciliation_result(
+    response: object,
+    *,
+    mode: str,
+    evidence_ref: str,
+) -> dict[str, Any]:
+    """Validate one bounded target reconciliation result from untrusted runtime output."""
+    if not isinstance(response, dict) or set(response) != {
+        "mode",
+        "activationEvidenceRefSha256",
+        "processedTenants",
+        "plannedActions",
+        "dispatchedJobs",
+        "failedStaleJobs",
+        "deferredJobs",
+        "queueSource",
+    }:
+        raise ActiveCellDeploymentError("target reconciliation response schema is invalid")
+    counts = {
+        key: response[key]
+        for key in (
+            "processedTenants",
+            "plannedActions",
+            "dispatchedJobs",
+            "failedStaleJobs",
+            "deferredJobs",
+        )
+    }
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100_000
+        for value in counts.values()
+    ):
+        raise ActiveCellDeploymentError("target reconciliation counts are invalid")
+    expected_ref_sha256 = hashlib.sha256(evidence_ref.encode()).hexdigest()
+    if (
+        response.get("mode") != mode
+        or response.get("activationEvidenceRefSha256") != expected_ref_sha256
+        or response.get("queueSource") != "authoritative-dynamodb-job-records"
+        or (mode == "check" and (counts["dispatchedJobs"] or counts["failedStaleJobs"]))
+        or (
+            mode == "apply"
+            and counts["plannedActions"] != counts["dispatchedJobs"] + counts["failedStaleJobs"]
+        )
+    ):
+        raise ActiveCellDeploymentError("target reconciliation result is inconsistent")
+    return response
+
+
+def invoke_target_reconciliation(
+    client: Any,
+    function_name: str,
+    manifest: activation.ActivationManifest,
+    *,
+    mode: str,
+) -> dict[str, Any]:
+    """Invoke the exact target handler synchronously and validate its complete result."""
+    if mode not in {"check", "apply"}:
+        raise ActiveCellDeploymentError("target reconciliation mode is unsupported")
+    evidence_ref = _reconciliation_evidence_ref(manifest)
+    payload = json.dumps(
+        {
+            "source": "aai.regional-recovery-jobs",
+            "schemaVersion": 1,
+            "mode": mode,
+            "activationEvidenceRef": evidence_ref,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    try:
+        response = client.invoke(
+            FunctionName=function_name,
+            InvocationType="RequestResponse",
+            Payload=payload,
+        )
+        stream = response.get("Payload")
+        if not hasattr(stream, "read"):
+            raise ActiveCellDeploymentError("target reconciliation payload is unavailable")
+        try:
+            body = stream.read(1_048_577)
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+    except ActiveCellDeploymentError:
+        raise
+    except Exception as error:
+        raise ActiveCellDeploymentError("target reconciliation invocation failed") from error
+    if (
+        response.get("StatusCode") != 200
+        or response.get("FunctionError") is not None
+        or not isinstance(body, bytes)
+        or len(body) > 1_048_576
+    ):
+        raise ActiveCellDeploymentError("target reconciliation Lambda reported failure")
+    try:
+        result = json.loads(body, object_pairs_hook=activation._strict_object)
+    except (
+        UnicodeError,
+        json.JSONDecodeError,
+        activation.RegionalActivationVerificationError,
+    ) as error:
+        raise ActiveCellDeploymentError("target reconciliation payload is malformed") from error
+    return _reconciliation_result(result, mode=mode, evidence_ref=evidence_ref)
+
+
+def reconcile_target_step(
+    witness: Any,
+    lambda_client: Any,
+    manifest: activation.ActivationManifest,
+    source_resources: SourceResources,
+    target_resources: TargetResources,
+    expected_environment: dict[str, str],
+    *,
+    profile: str,
+    runner: Runner = subprocess.run,
+    clock: Clock = time.time,
+    sleeper: Sleeper = time.sleep,
+    attempts: int = 60,
+) -> dict[str, Any]:
+    """Claim and reconcile target jobs, leaving traffic explicitly unrouted."""
+    if isinstance(attempts, bool) or not 1 <= attempts <= 120:
+        raise ActiveCellDeploymentError("target reconciliation attempts must be 1 through 120")
+    claimed = journal.advance_phase(
+        witness,
+        manifest,
+        expected_phase="TARGET_ACTIVE_NOT_ROUTED",
+        next_phase="RECONCILING_TARGET_JOBS",
+        now=int(clock()),
+    )
+    source_fence = verify_source_fence(
+        source_resources,
+        profile=profile,
+        region=manifest.source_region,
+        runner=runner,
+    )
+    runtime_before = verify_target_runtime(
+        target_resources,
+        manifest,
+        expected_environment,
+        profile=profile,
+        runner=runner,
+    )
+    checked = invoke_target_reconciliation(
+        lambda_client, target_resources.handler, manifest, mode="check"
+    )
+    applied = invoke_target_reconciliation(
+        lambda_client, target_resources.handler, manifest, mode="apply"
+    )
+    final: dict[str, Any] | None = None
+    for attempt in range(attempts):
+        final = invoke_target_reconciliation(
+            lambda_client, target_resources.handler, manifest, mode="check"
+        )
+        if final["plannedActions"] == 0:
+            break
+        if attempt + 1 < attempts:
+            sleeper(10.0)
+    if final is None or final["plannedActions"] != 0:
+        raise ActiveCellDeploymentError("target jobs did not reconcile within the bounded window")
+    runtime_after = verify_target_runtime(
+        target_resources,
+        manifest,
+        expected_environment,
+        profile=profile,
+        runner=runner,
+    )
+    if runtime_after != runtime_before:
+        raise ActiveCellDeploymentError("target runtime changed during reconciliation")
+    step_evidence = {
+        "applied": applied,
+        "checked": checked,
+        "final": final,
+        "runtimeAfter": runtime_after,
+        "runtimeBefore": runtime_before,
+        "sourceFence": source_fence,
+    }
+    step_sha256 = hashlib.sha256(
+        json.dumps(step_evidence, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    completed = journal.advance_phase(
+        witness,
+        manifest,
+        expected_phase="RECONCILING_TARGET_JOBS",
+        next_phase="TARGET_JOBS_RECONCILED_NOT_ROUTED",
+        now=int(clock()),
+        step_evidence_sha256=step_sha256,
+    )
+    return {
+        "journalClaim": claimed,
+        "journal": completed["journal"],
+        "reconciliation": step_evidence,
+        "stepEvidenceSha256": step_sha256,
+        "trafficRouted": False,
     }
 
 
@@ -433,11 +869,17 @@ def activate_target_step(
 
 
 def _parser() -> argparse.ArgumentParser:
-    """Build a three-step command surface with no routing capability."""
+    """Build the bounded transition-step surface with no routing capability."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("check", "initialize-journal", "fence-source", "activate-target"),
+        choices=(
+            "check",
+            "initialize-journal",
+            "fence-source",
+            "activate-target",
+            "reconcile-target",
+        ),
     )
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--regional-recovery-config", type=Path, required=True)
@@ -446,6 +888,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", default="p1")
     parser.add_argument("--confirm-source-fence", action="store_true")
     parser.add_argument("--confirm-target-activation", action="store_true")
+    parser.add_argument("--confirm-target-reconciliation", action="store_true")
     parser.add_argument("--confirm-journal-initialization", action="store_true")
     return parser
 
@@ -476,6 +919,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             passive_cell,
             profile=arguments.profile,
             s3_factory=lambda region: session.client("s3", region_name=region),
+            expected_cell_status=(
+                "active-not-routed"
+                if arguments.command == "reconcile-target"
+                else "staged-not-serving"
+            ),
         )
         manifest.require_journal_authority()
         if arguments.command != "check" and manifest.direction != "failover":
@@ -543,6 +991,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 next_phase="SOURCE_FENCED",
                 now=int(time.time()),
             )["journal"]
+        elif arguments.command == "reconcile-target":
+            environment = active_environment(
+                manifest,
+                regional,
+                passive_cell,
+                checked["verified"],
+                profile=arguments.profile,
+            )
+            if not arguments.confirm_target_reconciliation:
+                raise ActiveCellDeploymentError("--confirm-target-reconciliation is required")
+            target_resources = discover_target_resources(
+                stack_name=passive_cell.stack_name,
+                target_region=manifest.target_region,
+                profile=arguments.profile,
+            )
+            result.update(
+                reconcile_target_step(
+                    witness,
+                    session.client("lambda", region_name=manifest.target_region),
+                    manifest,
+                    resources,
+                    target_resources,
+                    environment,
+                    profile=arguments.profile,
+                )
+            )
+            result["activationExecuted"] = True
+            result["status"] = "target-jobs-reconciled-not-routed"
         else:
             environment = active_environment(
                 manifest,

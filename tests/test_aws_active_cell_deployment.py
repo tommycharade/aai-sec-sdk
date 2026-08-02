@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -44,6 +45,67 @@ def _regional(module: Any) -> Any:
             }
         )
     )
+
+
+def _activation(module: Any) -> Any:
+    return module.activation.ActivationManifest.parse(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "transitionId": "12345678-1234-4234-8234-123456789abc",
+                "direction": "failover",
+                "primaryRegion": "eu-west-2",
+                "recoveryRegion": "eu-west-1",
+                "sourceRegion": "eu-west-2",
+                "targetRegion": "eu-west-1",
+                "stableApiDomain": "api.security.example.com",
+                "stableUiDomain": "security.example.com",
+                "route53HostedZoneId": "Z1234567890ABC",
+                "targetFleetSize": 1000,
+                "rtoMinutes": 30,
+                "rpoSeconds": 60,
+                "evidenceBundle": {
+                    "bucketArn": "arn:aws:s3:::synthetic-retained-evidence",
+                    "key": "regional-activation/transition.json",
+                    "versionId": "version-1",
+                    "sha256": "a" * 64,
+                },
+                "approvalEvidenceRef": "change/DR-1234",
+                "expiresAt": 1200,
+                "activationPermitted": True,
+                "automaticActivation": False,
+                "coordinationRegion": "eu-central-1",
+                "journalTableName": "AaiSecRegionalTransitionJournal",
+                "expectedRoutingGeneration": 0,
+                "approvals": [
+                    {
+                        "principalId": "22345678-1234-4234-8234-123456789abc",
+                        "evidenceRef": "entra/operator-a",
+                        "approvedAt": 990,
+                        "strongAuthAt": 970,
+                    },
+                    {
+                        "principalId": "32345678-1234-4234-8234-123456789abc",
+                        "evidenceRef": "entra/operator-b",
+                        "approvedAt": 995,
+                        "strongAuthAt": 980,
+                    },
+                ],
+            }
+        ),
+        now=1000,
+    )
+
+
+def _active_environment() -> dict[str, str]:
+    return {
+        "RECOVERY_ACTIVATION_EVIDENCE_SHA256": "a" * 64,
+        "RECOVERY_POLICY_SIGNING_KEY_ARN": (
+            "arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
+        ),
+        "ENTRA_TENANT_ID": "12345678-1234-4234-8234-123456789abc",
+        "ENTRA_AAI_TENANT_ID": "synthetic-enterprise",
+    }
 
 
 def test_source_discovery_is_stable_paginated_bounded_and_digest_bound() -> None:
@@ -292,11 +354,276 @@ def test_target_deployment_failure_leaves_journal_in_progress(monkeypatch: Any) 
     assert phases == [("SOURCE_FENCED", "ACTIVATING_TARGET")]
 
 
+def test_target_discovery_and_live_runtime_are_exact_and_provider_verified() -> None:
+    module = _load()
+    resources = [
+        ("PassiveControlPlaneHandlerABC", "AWS::Lambda::Function", "handler-fn"),
+        ("PassiveEvidenceWorkerABC", "AWS::Lambda::Function", "evidence-fn"),
+        ("PassiveRetentionWorkerABC", "AWS::Lambda::Function", "retention-fn"),
+        ("EvidenceMapping", "AWS::Lambda::EventSourceMapping", "map-a"),
+        ("RetentionMapping", "AWS::Lambda::EventSourceMapping", "map-b"),
+        *[(f"Schedule{index}", "AWS::Events::Rule", f"rule-{index}") for index in range(4)],
+    ]
+    expected_environment = _active_environment()
+    actual_environment = {
+        "ACTIVATION_EVIDENCE_SHA256": expected_environment["RECOVERY_ACTIVATION_EVIDENCE_SHA256"],
+        "POLICY_SIGNING_KEY_ARN": expected_environment["RECOVERY_POLICY_SIGNING_KEY_ARN"],
+        "REGIONAL_POLICY_SIGNING_KEY_ARN": expected_environment["RECOVERY_POLICY_SIGNING_KEY_ARN"],
+        "ENTRA_TENANT_ID": expected_environment["ENTRA_TENANT_ID"],
+        "ENTRA_AAI_TENANT_ID": expected_environment["ENTRA_AAI_TENANT_ID"],
+        "PASSIVE_CELL_MODE": "active",
+        "RECOVERY_JOB_RECONCILIATION_ENABLED": "true",
+        "ENTRA_PROVIDER_ENABLED": "true",
+        "ENTRA_STRONG_AUTH_ENFORCED": "true",
+    }
+
+    def runner(command: list[str], **_: Any) -> Any:
+        if "describe-stacks" in command:
+            return _completed(
+                {
+                    "Stacks": [
+                        {
+                            "StackStatus": "UPDATE_COMPLETE",
+                            "Outputs": [
+                                {
+                                    "OutputKey": "PassiveCellStatus",
+                                    "OutputValue": "active-not-routed",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+        if "list-stack-resources" in command:
+            return _completed(
+                {
+                    "StackResourceSummaries": [
+                        {
+                            "LogicalResourceId": logical,
+                            "ResourceType": kind,
+                            "PhysicalResourceId": physical,
+                        }
+                        for logical, kind, physical in resources
+                    ]
+                }
+            )
+        if "get-function-configuration" in command:
+            name = command[command.index("--function-name") + 1]
+            handlers = {
+                "handler-fn": ("handler.handler", 512, 15),
+                "evidence-fn": ("evidence_worker.handler", 1024, 60),
+                "retention-fn": ("retention_worker.handler", 1024, 60),
+            }
+            handler, memory, timeout = handlers[name]
+            return _completed(
+                {
+                    "FunctionName": name,
+                    "State": "Active",
+                    "LastUpdateStatus": "Successful",
+                    "Runtime": "python3.13",
+                    "Handler": handler,
+                    "MemorySize": memory,
+                    "Timeout": timeout,
+                    "Architectures": ["arm64"],
+                    "PackageType": "Zip",
+                    "TracingConfig": {"Mode": "PassThrough"},
+                    "CodeSha256": "A" * 43 + "=",
+                    "RevisionId": "42345678-1234-4234-8234-123456789abc",
+                    "ReservedConcurrentExecutions": 100 if name == "handler-fn" else 5,
+                    "Environment": {"Variables": actual_environment},
+                }
+            )
+        if "get-event-source-mapping" in command:
+            return _completed({"UUID": command[command.index("--uuid") + 1], "State": "Enabled"})
+        if "describe-rule" in command:
+            return _completed({"Name": command[command.index("--name") + 1], "State": "ENABLED"})
+        raise AssertionError(command)
+
+    discovered = module.discover_target_resources(
+        stack_name="AaiSecPassiveRegionalCell",
+        target_region="eu-west-1",
+        profile="synthetic",
+        runner=runner,
+    )
+    verified = module.verify_target_runtime(
+        discovered,
+        _activation(module),
+        expected_environment,
+        profile="synthetic",
+        runner=runner,
+    )
+    assert discovered.handler == "handler-fn"
+    assert verified["status"] == "target-runtime-live-not-routed"
+    assert len(verified["resourceSetSha256"]) == 64
+
+    resources.append(("UnknownFunction", "AWS::Lambda::Function", "unknown-fn"))
+    with pytest.raises(module.ActiveCellDeploymentError, match="unknown Lambda"):
+        module.discover_target_resources(
+            stack_name="AaiSecPassiveRegionalCell",
+            target_region="eu-west-1",
+            profile="synthetic",
+            runner=runner,
+        )
+
+
+def test_reconciliation_invocation_rejects_runtime_failure_and_inconsistent_counts() -> None:
+    module = _load()
+    manifest = _activation(module)
+
+    class Client:
+        def __init__(self, result: dict[str, Any], *, failed: bool = False) -> None:
+            self.result = result
+            self.failed = failed
+
+        def invoke(self, **kwargs: Any) -> dict[str, Any]:
+            event = json.loads(kwargs["Payload"])
+            assert event["source"] == "aai.regional-recovery-jobs"
+            return {
+                "StatusCode": 200,
+                **({"FunctionError": "Unhandled"} if self.failed else {}),
+                "Payload": io.BytesIO(json.dumps(self.result).encode()),
+            }
+
+    evidence_ref = module._reconciliation_evidence_ref(manifest)
+    result = {
+        "mode": "apply",
+        "activationEvidenceRefSha256": hashlib.sha256(evidence_ref.encode()).hexdigest(),
+        "processedTenants": 1,
+        "plannedActions": 2,
+        "dispatchedJobs": 2,
+        "failedStaleJobs": 0,
+        "deferredJobs": 0,
+        "queueSource": "authoritative-dynamodb-job-records",
+    }
+    assert (
+        module.invoke_target_reconciliation(Client(result), "handler-fn", manifest, mode="apply")[
+            "dispatchedJobs"
+        ]
+        == 2
+    )
+    with pytest.raises(module.ActiveCellDeploymentError, match="reported failure"):
+        module.invoke_target_reconciliation(
+            Client(result, failed=True), "handler-fn", manifest, mode="apply"
+        )
+    with pytest.raises(module.ActiveCellDeploymentError, match="inconsistent"):
+        module.invoke_target_reconciliation(
+            Client({**result, "dispatchedJobs": 1}),
+            "handler-fn",
+            manifest,
+            mode="apply",
+        )
+
+
+def test_target_reconciliation_completes_only_after_zero_action_check(monkeypatch: Any) -> None:
+    module = _load()
+    manifest = _activation(module)
+    resources = module.TargetResources(
+        "handler-fn",
+        ("evidence-fn", "retention-fn"),
+        ("map-a", "map-b"),
+        ("rule-a", "rule-b", "rule-c", "rule-d"),
+    )
+    phases: list[tuple[str, str, str | None]] = []
+
+    def advance(
+        *_args: Any,
+        expected_phase: str,
+        next_phase: str,
+        step_evidence_sha256: str | None = None,
+        **_kwargs: Any,
+    ) -> Any:
+        phases.append((expected_phase, next_phase, step_evidence_sha256))
+        return {"claim": "advanced", "journal": {"phase": next_phase}}
+
+    monkeypatch.setattr(module.journal, "advance_phase", advance)
+    monkeypatch.setattr(module, "verify_source_fence", lambda *_a, **_k: {"status": "fenced"})
+    monkeypatch.setattr(module, "verify_target_runtime", lambda *_a, **_k: {"status": "live"})
+    results = iter(
+        [
+            {"mode": "check", "plannedActions": 1},
+            {"mode": "apply", "plannedActions": 1, "dispatchedJobs": 1},
+            {"mode": "check", "plannedActions": 1},
+            {"mode": "check", "plannedActions": 0},
+        ]
+    )
+    monkeypatch.setattr(module, "invoke_target_reconciliation", lambda *_a, **_k: next(results))
+    sleeps: list[float] = []
+    result = module.reconcile_target_step(
+        object(),
+        object(),
+        manifest,
+        module.SourceResources(("source",), (), ()),
+        resources,
+        _active_environment(),
+        profile="synthetic",
+        clock=lambda: 1001.0,
+        sleeper=sleeps.append,
+        attempts=2,
+    )
+    assert sleeps == [10.0]
+    assert result["trafficRouted"] is False
+    assert len(result["stepEvidenceSha256"]) == 64
+    assert phases[0] == (
+        "TARGET_ACTIVE_NOT_ROUTED",
+        "RECONCILING_TARGET_JOBS",
+        None,
+    )
+    assert phases[1][:2] == (
+        "RECONCILING_TARGET_JOBS",
+        "TARGET_JOBS_RECONCILED_NOT_ROUTED",
+    )
+    assert phases[1][2] == result["stepEvidenceSha256"]
+
+
+def test_target_reconciliation_timeout_leaves_journal_in_progress(monkeypatch: Any) -> None:
+    module = _load()
+    phases: list[tuple[str, str]] = []
+
+    def advance(*_args: Any, expected_phase: str, next_phase: str, **_kwargs: Any) -> Any:
+        phases.append((expected_phase, next_phase))
+        return {"claim": "advanced", "journal": {"phase": next_phase}}
+
+    monkeypatch.setattr(
+        module.journal,
+        "advance_phase",
+        advance,
+    )
+    monkeypatch.setattr(module, "verify_source_fence", lambda *_a, **_k: {})
+    monkeypatch.setattr(module, "verify_target_runtime", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        module,
+        "invoke_target_reconciliation",
+        lambda *_a, mode, **_k: {
+            "mode": mode,
+            "plannedActions": 1,
+            "dispatchedJobs": 1 if mode == "apply" else 0,
+        },
+    )
+    with pytest.raises(module.ActiveCellDeploymentError, match="bounded window"):
+        module.reconcile_target_step(
+            object(),
+            object(),
+            _activation(module),
+            module.SourceResources(("source",), (), ()),
+            module.TargetResources(
+                "handler",
+                ("worker-a", "worker-b"),
+                ("map-a", "map-b"),
+                ("rule-a", "rule-b", "rule-c", "rule-d"),
+            ),
+            _active_environment(),
+            profile="synthetic",
+            attempts=1,
+        )
+    assert phases == [("TARGET_ACTIVE_NOT_ROUTED", "RECONCILING_TARGET_JOBS")]
+
+
 def test_command_surface_exposes_no_routing_or_combined_failover() -> None:
     source = (Path(__file__).parents[1] / "scripts" / "deploy_aws_active_cell.py").read_text(
         encoding="utf-8"
     )
-    assert '"initialize-journal", "fence-source", "activate-target"' in source
+    assert '"reconcile-target"' in source
+    assert "--confirm-target-reconciliation" in source
     assert "route53" not in source.lower()
     assert "provider_preflight(" in source
     assert source.index("provider_preflight(") < source.index(

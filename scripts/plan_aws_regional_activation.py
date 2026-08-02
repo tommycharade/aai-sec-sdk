@@ -154,9 +154,12 @@ def verify_passive_stack(
     manifest: passive.PassiveCellManifest,
     *,
     profile: str,
+    expected_status: str = "staged-not-serving",
     runner: Runner = subprocess.run,
 ) -> str:
-    """Require one deployed, complete and explicitly non-serving passive stack."""
+    """Require one stable recovery stack in the exact reviewed lifecycle state."""
+    if expected_status not in {"staged-not-serving", "active-not-routed"}:
+        raise RegionalActivationPreflightError("expected recovery-cell status is unsupported")
     response = _aws(
         ["cloudformation", "describe-stacks", "--stack-name", manifest.stack_name],
         profile=profile,
@@ -174,8 +177,8 @@ def verify_passive_stack(
         api_id = passive._stack_output(response, "PassiveControlPlaneApiId")
     except passive.PassiveCellDeploymentError as error:
         raise RegionalActivationPreflightError(str(error)) from error
-    if status != "staged-not-serving":
-        raise RegionalActivationPreflightError("passive-cell stack is not staged non-serving")
+    if status != expected_status:
+        raise RegionalActivationPreflightError(f"recovery-cell stack is not {expected_status}")
     return api_id
 
 
@@ -251,6 +254,7 @@ def provider_preflight(
     s3_factory: S3Factory,
     runner: Runner = subprocess.run,
     now_epoch: int | None = None,
+    expected_cell_status: str = "staged-not-serving",
 ) -> dict[str, Any]:
     """Repeat live provider checks and return a non-mutating transition plan."""
     verify_authority_alignment(manifest, regional, evidence_continuity, passive_cell)
@@ -289,7 +293,12 @@ def provider_preflight(
         passive.PassiveCellDeploymentError,
     ) as error:
         raise RegionalActivationPreflightError(str(error)) from error
-    api_id = verify_passive_stack(passive_cell, profile=profile, runner=runner)
+    api_id = verify_passive_stack(
+        passive_cell,
+        profile=profile,
+        expected_status=expected_cell_status,
+        runner=runner,
+    )
     origins = verify_api_origin_fencing(
         primary_api_url=primary_outputs.get("ApiUrl", ""),
         passive_api_id=api_id,

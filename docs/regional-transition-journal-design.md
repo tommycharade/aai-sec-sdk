@@ -77,6 +77,8 @@ STABLE
   -> SOURCE_FENCED
   -> ACTIVATING_TARGET
   -> TARGET_ACTIVE_NOT_ROUTED
+  -> RECONCILING_TARGET_JOBS
+  -> TARGET_JOBS_RECONCILED_NOT_ROUTED
 ```
 
 Every phase change is one DynamoDB transaction containing:
@@ -97,6 +99,11 @@ with byte-equivalent authority may resume that step. A different transition,
 changed approver, changed evidence, changed generation, expired authority or
 out-of-order command is denied. A completed phase is idempotent and does not
 append a duplicate event.
+
+Target reconciliation claims its in-progress phase before the first job
+dispatch. Completion appends a SHA-256 over the independently verified source
+fence, live target resource set, check/apply results and final zero-action
+check. An idempotent completed retry must present that exact digest.
 
 ## Initialization
 
@@ -168,7 +175,8 @@ replacement.
 
 ## Current non-guarantees
 
-This tranche does not implement stable-route compare-and-swap, target smoke,
-job reconciliation completion, transition sealing, primary reactivation or
-failback execution. It has not deployed or initialized the live witness. Those
-remain required before P0-11 is complete.
+The target-runtime and job-reconciliation smoke is implemented, but it does not
+exercise public ingress. This tranche does not implement stable ingress,
+stable-route compare-and-swap, public authenticated smoke, transition sealing,
+primary reactivation or failback execution. It has not deployed or initialized
+the live witness. Those remain required before P0-11 is complete.

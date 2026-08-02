@@ -2,11 +2,12 @@
 
 ## Outcome and boundary
 
-`scripts/deploy_aws_active_cell.py` implements the first two mutable recovery
+`scripts/deploy_aws_active_cell.py` implements the first three mutable recovery
 steps without implementing traffic movement. It can independently check an
-active-but-not-routed target, fence source execution, or deploy the exact
-verified target assembly. It cannot update DNS, CloudFront, Route 53, Global
-Accelerator, custom domains or API routing.
+active-but-not-routed target, fence source execution, deploy the exact verified
+target assembly, or reconcile the live target runtime and Region-local jobs. It
+cannot update DNS, CloudFront, Route 53, Global Accelerator, custom domains or
+API routing.
 
 A successful target deployment means **active-not-routed**, not “failover
 complete.” The recovery cell has no SCIM endpoint. Existing recovery identities
@@ -25,6 +26,7 @@ the [regional activation design](regional-activation-and-exercise-design.md).
 | `initialize-journal` | Creates only generation-zero primary `STABLE` authority | Requires schema-v2 two-person authority and `--confirm-journal-initialization` |
 | `fence-source` | Claims `FENCING_SOURCE`, disables source rules/mappings and all source-stack Lambda concurrency, then records `SOURCE_FENCED` | Requires `--confirm-source-fence` and independently reads every resulting state |
 | `activate-target` | Claims `ACTIVATING_TARGET`, deploys the exact verified CDK assembly, then records `TARGET_ACTIVE_NOT_ROUTED` | Requires `--confirm-target-activation` and a newly verified complete source fence |
+| `reconcile-target` | Claims `RECONCILING_TARGET_JOBS`, verifies exact live target authority and rebuilds Region-local work from DynamoDB, then records `TARGET_JOBS_RECONCILED_NOT_ROUTED` | Requires `--confirm-target-reconciliation`, active-not-routed provider state and a bounded zero-action final check |
 
 The commands cannot be combined. A later command repeats preflight rather than
 trusting prior terminal output. Source ingress is disabled before Lambda
@@ -121,10 +123,22 @@ python3 scripts/deploy_aws_active_cell.py activate-target \
   --confirm-target-activation
 ```
 
+After the stack reports `active-not-routed`, reconcile the exact live target:
+
+```bash
+python3 scripts/deploy_aws_active_cell.py reconcile-target \
+  --manifest /absolute/path/to/activation-manifest.json \
+  --regional-recovery-config /absolute/path/to/regional-recovery.json \
+  --evidence-continuity-config /absolute/path/to/evidence-continuity.json \
+  --passive-cell-config /absolute/path/to/passive-cell.json \
+  --profile p1 \
+  --confirm-target-reconciliation
+```
+
 Exit code `2` is fail-closed. Never treat terminal output as permission to move
-traffic. Routing CAS, target smoke, job reconciliation, transition sealing,
-primary reactivation, failback and retained live RTO/RPO evidence remain
-separate incomplete gates.
+traffic. Public-ingress smoke, routing CAS, transition sealing, primary
+reactivation, failback and retained live RTO/RPO evidence remain separate
+incomplete gates. See [Regional target readiness and stable ingress](regional-target-readiness-and-stable-ingress-design.md).
 
 ## Test evidence and non-guarantees
 

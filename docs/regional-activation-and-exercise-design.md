@@ -140,9 +140,10 @@ custom domains or Route 53 records.
 ## Current non-guarantees
 
 This tranche does not deploy identity or prove live RTO/RPO. A guarded executor
-now covers journal-governed source fencing and active-but-not-routed target
-deployment, but not routing CAS, smoke/reconciliation, evidence sealing,
-primary reactivation or failback.
+now covers journal-governed source fencing, active-but-not-routed target
+deployment and target-runtime/job reconciliation. It does not yet cover
+Regional custom-domain ingress, public authenticated smoke, routing CAS,
+evidence sealing, primary reactivation or failback.
 The current AWS
 environment still requires Microsoft Entra/SCIM, recovery Cognito, real managed
 endpoint trust convergence, stable domains, direct-origin closure and the live

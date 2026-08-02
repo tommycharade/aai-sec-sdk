@@ -129,6 +129,10 @@ class _Client:
 
     def get_item(self, **kwargs: Any) -> dict[str, Any]:
         assert kwargs["ConsistentRead"] is True
+        key = kwargs["Key"]
+        if key.get("pk", {}).get("S", "").startswith("TRANSITION#"):
+            event = self.events.get((key["pk"]["S"], key["sk"]["S"]))
+            return {"Item": copy.deepcopy(event)} if event is not None else {}
         return {"Item": copy.deepcopy(self.state)}
 
     def transact_write_items(self, *, TransactItems: list[dict[str, Any]]) -> None:
@@ -289,7 +293,44 @@ def test_transition_claim_and_phases_are_cas_ordered_and_retry_safe() -> None:
         now=1006,
     )
     assert completed["journal"]["phase"] == "TARGET_ACTIVE_NOT_ROUTED"
-    assert len(client.events) == 4
+    module.advance_phase(
+        client,
+        manifest,
+        expected_phase="TARGET_ACTIVE_NOT_ROUTED",
+        next_phase="RECONCILING_TARGET_JOBS",
+        now=1007,
+    )
+    evidence_sha256 = "c" * 64
+    reconciled = module.advance_phase(
+        client,
+        manifest,
+        expected_phase="RECONCILING_TARGET_JOBS",
+        next_phase="TARGET_JOBS_RECONCILED_NOT_ROUTED",
+        now=1008,
+        step_evidence_sha256=evidence_sha256,
+    )
+    assert reconciled["stepEvidenceSha256"] == evidence_sha256
+    assert (
+        module.advance_phase(
+            client,
+            manifest,
+            expected_phase="RECONCILING_TARGET_JOBS",
+            next_phase="TARGET_JOBS_RECONCILED_NOT_ROUTED",
+            now=1009,
+            step_evidence_sha256=evidence_sha256,
+        )["claim"]
+        == "already-completed"
+    )
+    with pytest.raises(module.TransitionJournalError, match="differs from retry"):
+        module.advance_phase(
+            client,
+            manifest,
+            expected_phase="RECONCILING_TARGET_JOBS",
+            next_phase="TARGET_JOBS_RECONCILED_NOT_ROUTED",
+            now=1010,
+            step_evidence_sha256="d" * 64,
+        )
+    assert len(client.events) == 6
 
 
 def test_initialization_is_primary_generation_zero_and_two_person_bound() -> None:

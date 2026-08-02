@@ -1,5 +1,13 @@
 # Changelog
 
+- Added a journal-governed target-readiness step after recovery activation.
+  It re-verifies the source fence and exact live target runtime, invokes the
+  revision-bound Region-local job reconciler, waits for a bounded zero-action
+  result and appends a digest of the complete step evidence while traffic
+  remains unrouted. The stable-ingress design now uses same-name Regional API
+  Gateway custom domains and one transactional Route 53 API/UI change batch;
+  certificates, ingress deployment and routing execution remain incomplete.
+
 - Added the third-Region single-writer transition witness and journal. A
   retained, customer-key-encrypted, PITR-enabled DynamoDB table provides strong
   transactional CAS without Global Table last-writer-wins ambiguity. Schema-v2
