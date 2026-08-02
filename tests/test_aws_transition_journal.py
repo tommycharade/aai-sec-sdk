@@ -72,9 +72,10 @@ def _manifest(module: Any, **updates: Any) -> Any:
 
 def _routing_manifest(module: Any, **updates: Any) -> Any:
     """Return schema-v3 authority bound to exact ingress and routing identities."""
+    schema_version = updates.pop("schemaVersion", 3)
     return _manifest(
         module,
-        schemaVersion=3,
+        schemaVersion=schema_version,
         primaryIngressStackName="AaiSecPrimaryRegionalIngress",
         recoveryIngressStackName="AaiSecRecoveryRegionalIngress",
         primaryCanaryApiDomain="api-primary.security.example.com",
@@ -84,6 +85,19 @@ def _routing_manifest(module: Any, **updates: Any) -> Any:
         routingMarkerName="routing-generation.security.example.com",
         routingRoleArn="arn:aws:iam::111111111111:role/AaiSecRegionalRouting",
         routingAuthorityEvidenceRef="change/ROUTING-AUTHORITY-123",
+        **updates,
+    )
+
+
+def _reactivation_manifest(module: Any, **updates: Any) -> Any:
+    """Return schema-v4 authority with exact reversible runtime templates."""
+    return _routing_manifest(
+        module,
+        schemaVersion=4,
+        primaryRuntimeStackName="AaiSecControlPlane",
+        primaryRuntimeTemplateSha256="b" * 64,
+        recoveryRuntimeStackName="AaiSecPassiveRegionalCell",
+        recoveryRuntimeTemplateSha256="c" * 64,
         **updates,
     )
 
@@ -184,12 +198,17 @@ class _Client:
             ):
                 if self.state[field] != values[token]:
                     raise _ConditionalError("substituted completion authority")
+            active_region = (
+                values[":source"]
+                if "activeRegion=:source" in update["UpdateExpression"]
+                else values[":target"]
+            )
             self.state = {
                 "pk": {"S": "AUTHORITY"},
                 "sk": {"S": "CURRENT"},
                 "schemaVersion": {"N": "1"},
                 "generation": copy.deepcopy(values[":nextGeneration"]),
-                "activeRegion": copy.deepcopy(values[":target"]),
+                "activeRegion": copy.deepcopy(active_region),
                 "phase": copy.deepcopy(values[":stable"]),
                 "revision": {"N": str(expected_revision + 1)},
                 "updatedAt": copy.deepcopy(values[":now"]),
@@ -437,6 +456,58 @@ def test_routing_phases_complete_one_generation_and_are_retry_safe() -> None:
     )
     with pytest.raises(module.TransitionJournalError, match="differs from retry"):
         module.complete_transition(client, manifest, now=1014, step_evidence_sha256="f" * 64)
+
+
+def test_failed_target_rolls_back_at_a_new_generation_and_seals_outcome() -> None:
+    module = _load()
+    client = _Client()
+    manifest = _reactivation_manifest(module)
+    module.claim_source_fence(client, manifest, now=1001)
+    forward = [
+        ("FENCING_SOURCE", "SOURCE_FENCED"),
+        ("SOURCE_FENCED", "ACTIVATING_TARGET"),
+        ("ACTIVATING_TARGET", "TARGET_ACTIVE_NOT_ROUTED"),
+        ("TARGET_ACTIVE_NOT_ROUTED", "RECONCILING_TARGET_JOBS"),
+        ("RECONCILING_TARGET_JOBS", "TARGET_JOBS_RECONCILED_NOT_ROUTED"),
+        ("TARGET_JOBS_RECONCILED_NOT_ROUTED", "VERIFYING_TARGET_INGRESS"),
+        ("VERIFYING_TARGET_INGRESS", "TARGET_INGRESS_VERIFIED_NOT_ROUTED"),
+        ("TARGET_INGRESS_VERIFIED_NOT_ROUTED", "ROUTING_TARGET"),
+        ("ROUTING_TARGET", "VERIFYING_STABLE_ROUTE"),
+    ]
+    rollback = [
+        ("VERIFYING_STABLE_ROUTE", "FENCING_FAILED_TARGET"),
+        ("FENCING_FAILED_TARGET", "FAILED_TARGET_FENCED"),
+        ("FAILED_TARGET_FENCED", "REACTIVATING_SOURCE"),
+        ("REACTIVATING_SOURCE", "SOURCE_REACTIVATED_NOT_ROUTED"),
+        ("SOURCE_REACTIVATED_NOT_ROUTED", "VERIFYING_SOURCE_INGRESS"),
+        ("VERIFYING_SOURCE_INGRESS", "SOURCE_INGRESS_VERIFIED_NOT_ROUTED"),
+        ("SOURCE_INGRESS_VERIFIED_NOT_ROUTED", "ROUTING_SOURCE_ROLLBACK"),
+        ("ROUTING_SOURCE_ROLLBACK", "VERIFYING_SOURCE_ROLLBACK"),
+    ]
+    for offset, (expected, next_phase) in enumerate(forward + rollback, start=2):
+        module.advance_phase(
+            client,
+            manifest,
+            expected_phase=expected,
+            next_phase=next_phase,
+            now=1000 + offset,
+        )
+    digest = "9" * 64
+    completed = module.complete_rollback(client, manifest, now=1020, step_evidence_sha256=digest)
+    assert completed["claim"] == "rolled-back"
+    assert completed["journal"] == {
+        "activeRegion": "eu-west-2",
+        "activeTransitionId": None,
+        "generation": 2,
+        "phase": "STABLE",
+        "revision": 26,
+        "updatedAt": 1020,
+    }
+    assert any(key[1].endswith("#ROLLED_BACK") for key in client.events)
+    assert (
+        module.complete_rollback(client, manifest, now=1021, step_evidence_sha256=digest)["claim"]
+        == "already-completed"
+    )
 
 
 def test_stale_generation_wrong_source_and_competing_transition_fail_before_write() -> None:

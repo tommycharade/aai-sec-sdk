@@ -1,12 +1,22 @@
 # Changelog
 
+- Added schema-v4, journal-governed failed-cutover rollback. The approved
+  authority now binds the exact processed primary and recovery runtime
+  templates. The executor fences the failed target, restores every source
+  Lambda concurrency, event mapping and EventBridge rule to that reviewed
+  template, proves source canary authentication, and moves API, UI and marker
+  back in one transactional Route 53 batch at generation + 2. Stable source
+  smoke seals an explicit `ROLLED_BACK` event. Every phase is retry-safe and
+  planned failback remains denied until primary-side job reconciliation exists.
+  No live routing was performed.
+
 - Added schema-v3, journal-governed Regional routing. A dedicated-role executor
   verifies exact custom domains and mappings, authenticates canary API/UI,
   repeats source fencing, target immutability and zero-action reconciliation,
   then moves API, UI and generation marker in one transactional Route 53 batch.
   Stable authenticated smoke seals the next journal generation. Provider
-  retries are idempotent; mixed DNS fails closed; DNS-only rollback is refused
-  until independent source reactivation exists. No live routing was performed.
+  retries are idempotent and mixed DNS fails closed. No live routing was
+  performed.
 
 - Added independently verified, non-routing Regional ingress for the stable
   API/UI and Region-specific canaries. The private-bucket UI proxy has bounded

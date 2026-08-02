@@ -328,6 +328,59 @@ def test_schema_v3_binds_exact_ingress_canaries_marker_and_routing_role() -> Non
             module.ActivationManifest.parse(json.dumps(_manifest(payload, **invalid)), now=1000)
 
 
+def test_schema_v4_binds_both_runtime_templates_for_reactivation() -> None:
+    module = _load()
+    payload = _payload()
+    authority = {
+        "schemaVersion": 4,
+        "coordinationRegion": "eu-central-1",
+        "journalTableName": "AaiSecRegionalTransitionJournal",
+        "expectedRoutingGeneration": 0,
+        "approvals": [
+            {
+                "principalId": "22345678-1234-4234-8234-123456789abc",
+                "evidenceRef": "entra/approval-operator-a",
+                "approvedAt": 990,
+                "strongAuthAt": 970,
+            },
+            {
+                "principalId": "32345678-1234-4234-8234-123456789abc",
+                "evidenceRef": "entra/approval-operator-b",
+                "approvedAt": 995,
+                "strongAuthAt": 980,
+            },
+        ],
+        "primaryIngressStackName": "AaiSecPrimaryRegionalIngress",
+        "recoveryIngressStackName": "AaiSecRecoveryRegionalIngress",
+        "primaryCanaryApiDomain": "api-primary.security.example.com",
+        "primaryCanaryUiDomain": "primary.security.example.com",
+        "recoveryCanaryApiDomain": "api-recovery.security.example.com",
+        "recoveryCanaryUiDomain": "recovery.security.example.com",
+        "routingMarkerName": "routing-generation.security.example.com",
+        "routingRoleArn": "arn:aws:iam::111111111111:role/AaiSecRegionalRouting",
+        "routingAuthorityEvidenceRef": "change/ROUTING-AUTHORITY-123",
+        "primaryRuntimeStackName": "AaiSecControlPlane",
+        "primaryRuntimeTemplateSha256": "b" * 64,
+        "recoveryRuntimeStackName": "AaiSecPassiveRegionalCell",
+        "recoveryRuntimeTemplateSha256": "c" * 64,
+    }
+    manifest = module.ActivationManifest.parse(
+        json.dumps(_manifest(payload, **authority)), now=1000
+    )
+    manifest.require_reactivation_authority()
+    original = manifest.authority_sha256()
+    changed_authority = copy.deepcopy(authority)
+    changed_authority["primaryRuntimeTemplateSha256"] = "d" * 64
+    changed = module.ActivationManifest.parse(
+        json.dumps(_manifest(payload, **changed_authority)), now=1000
+    )
+    assert changed.authority_sha256() != original
+    invalid = copy.deepcopy(authority)
+    invalid["recoveryRuntimeStackName"] = "AaiSecOtherCell"
+    with pytest.raises(module.RegionalActivationVerificationError, match="stack identities"):
+        module.ActivationManifest.parse(json.dumps(_manifest(payload, **invalid)), now=1000)
+
+
 @pytest.mark.parametrize(
     ("section", "field", "value", "message"),
     [

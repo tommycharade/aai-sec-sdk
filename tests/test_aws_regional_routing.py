@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from scripts import deploy_aws_active_cell as active
 from scripts import execute_aws_regional_routing as routing
 from scripts import manage_aws_transition_journal as journal
 from scripts import verify_aws_regional_activation as activation
@@ -94,6 +95,27 @@ def _cell(role: str) -> routing.IngressCell:
     )
 
 
+def _reactivation_manifest() -> activation.ActivationManifest:
+    return _manifest(
+        schemaVersion=4,
+        primaryRuntimeStackName="AaiSecControlPlane",
+        primaryRuntimeTemplateSha256="b" * 64,
+        recoveryRuntimeStackName="AaiSecPassiveRegionalCell",
+        recoveryRuntimeTemplateSha256="c" * 64,
+    )
+
+
+def _reactivation_plan() -> active.SourceReactivationPlan:
+    return active.SourceReactivationPlan(
+        "AaiSecControlPlane",
+        "eu-west-2",
+        "b" * 64,
+        (active.FunctionRestoreState("source-function", 10),),
+        (active.MappingRestoreState("source-mapping", True),),
+        (active.RuleRestoreState("source-rule", True),),
+    )
+
+
 def _completed(value: dict[str, Any]) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess([], 0, json.dumps(value), "")
 
@@ -106,6 +128,19 @@ def _runtime_proof() -> dict[str, Any]:
             json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest(),
         "status": "fresh-runtime-and-zero-action-proof",
+    }
+
+
+def _successful_probe(url: str, token: str | None) -> dict[str, Any]:
+    """Return the exact synthetic responses required by ingress smoke tests."""
+    if token == "invalid-routing-smoke-token":  # noqa: S105 - synthetic denial input
+        return {"status": 401}
+    if token is not None:
+        return {"status": 200, "contentType": "application/json", "jsonValid": True}
+    return {
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "strictTransportSecurity": "max-age=31536000; includeSubDomains",
     }
 
 
@@ -402,6 +437,268 @@ def test_route_refuses_missing_or_forged_fresh_runtime_proof(
         )
 
 
-def test_unsafe_rollback_is_explicitly_refused() -> None:
-    with pytest.raises(routing.RegionalRoutingError, match="independently reactivated"):
-        routing.refuse_unsafe_rollback()
+def test_rollback_routes_failed_target_to_source_at_generation_two(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _reactivation_manifest()
+    source, target = _cell("primary"), _cell("recovery")
+    target_state = routing.expected_route_state(
+        manifest,
+        target,
+        generation=1,
+        transition_id=manifest.transition_id,
+        marker_required=True,
+    )
+    source_state = routing.expected_route_state(
+        manifest,
+        source,
+        generation=2,
+        transition_id=manifest.transition_id,
+        marker_required=True,
+    )
+    observed = iter((target_state, source_state))
+    monkeypatch.setattr(
+        routing,
+        "require_routing_role",
+        lambda *_, **__: {"roleArn": manifest.routing_role_arn},
+    )
+    monkeypatch.setattr(
+        journal,
+        "read_state",
+        lambda *_: SimpleNamespace(
+            phase="SOURCE_INGRESS_VERIFIED_NOT_ROUTED",
+            evidence=lambda: {"phase": "SOURCE_INGRESS_VERIFIED_NOT_ROUTED"},
+        ),
+    )
+    monkeypatch.setattr(
+        journal,
+        "advance_phase",
+        lambda *_, **__: {"claim": "advanced", "journal": {"phase": "VERIFYING_SOURCE_ROLLBACK"}},
+    )
+    monkeypatch.setattr(routing, "read_route_state", lambda *_, **__: next(observed))
+    batches: list[dict[str, Any]] = []
+
+    def runner(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if "change-resource-record-sets" in command:
+            batches.append(json.loads(command[command.index("--change-batch") + 1]))
+            return _completed({"ChangeInfo": {"Id": "/change/ROLLBACK1", "Status": "PENDING"}})
+        return _completed({"ChangeInfo": {"Id": "/change/ROLLBACK1", "Status": "INSYNC"}})
+
+    result = routing.route_source_rollback_step(
+        object(),
+        manifest,
+        source,
+        target,
+        profile="p1",
+        runner=runner,
+        sleeper=lambda _: None,
+    )
+    assert result["trafficRouted"] is True
+    assert [change["Action"] for change in batches[0]["Changes"]] == [
+        "DELETE",
+        "DELETE",
+        "DELETE",
+        "CREATE",
+        "CREATE",
+        "CREATE",
+    ]
+    marker = next(record for record in result["records"] if record["Type"] == "TXT")
+    assert ":g=2:" in marker["ResourceRecords"][0]["Value"]
+
+
+def test_completed_source_ingress_retry_reprobes_and_reuses_exact_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _reactivation_manifest()
+    source = _cell("primary")
+    state = SimpleNamespace(
+        phase="SOURCE_INGRESS_VERIFIED_NOT_ROUTED",
+        evidence=lambda: {"phase": "SOURCE_INGRESS_VERIFIED_NOT_ROUTED"},
+    )
+    monkeypatch.setattr(routing, "require_routing_role", lambda *_, **__: {})
+    monkeypatch.setattr(journal, "read_state", lambda *_: state)
+    advances: list[dict[str, Any]] = []
+
+    def advance(*_: Any, **kwargs: Any) -> dict[str, Any]:
+        advances.append(kwargs)
+        return {"claim": "already-completed", "journal": state.evidence()}
+
+    monkeypatch.setattr(journal, "advance_phase", advance)
+    result = routing.verify_source_ingress_step(
+        object(),
+        manifest,
+        source,
+        "x" * 32,
+        profile="p1",
+        probe=_successful_probe,
+    )
+    assert result["journalClaim"]["claim"] == "resume-completed"
+    assert advances[0]["expected_phase"] == "VERIFYING_SOURCE_INGRESS"
+    assert advances[0]["next_phase"] == "SOURCE_INGRESS_VERIFIED_NOT_ROUTED"
+    assert len(advances[0]["step_evidence_sha256"]) == 64
+
+
+def test_completed_failed_target_fence_retry_verifies_without_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _reactivation_manifest()
+    resources = active.SourceResources(("target-function",), (), ())
+    state = SimpleNamespace(
+        phase="FAILED_TARGET_FENCED",
+        evidence=lambda: {"phase": "FAILED_TARGET_FENCED"},
+    )
+    monkeypatch.setattr(routing, "require_routing_role", lambda *_, **__: {})
+    monkeypatch.setattr(journal, "read_state", lambda *_: state)
+    monkeypatch.setattr(
+        active,
+        "verify_source_fence",
+        lambda *_, **__: resources.fence_evidence(),
+    )
+    monkeypatch.setattr(
+        active,
+        "fence_source",
+        lambda *_, **__: pytest.fail("completed retry must not repeat mutations"),
+    )
+    advances: list[dict[str, Any]] = []
+
+    def advance(*_: Any, **kwargs: Any) -> dict[str, Any]:
+        advances.append(kwargs)
+        return {"claim": "already-completed", "journal": state.evidence()}
+
+    monkeypatch.setattr(journal, "advance_phase", advance)
+    result = routing.fence_failed_target_step(object(), manifest, resources, profile="p1")
+    assert result["journalClaim"]["claim"] == "resume-completed"
+    assert advances[0]["next_phase"] == "FAILED_TARGET_FENCED"
+
+
+def test_completed_source_reactivation_retry_only_reverifies_active_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _reactivation_manifest()
+    plan = _reactivation_plan()
+    target = active.SourceResources(("target-function",), (), ())
+    state = SimpleNamespace(
+        phase="SOURCE_REACTIVATED_NOT_ROUTED",
+        evidence=lambda: {"phase": "SOURCE_REACTIVATED_NOT_ROUTED"},
+    )
+    monkeypatch.setattr(routing, "require_routing_role", lambda *_, **__: {})
+    monkeypatch.setattr(journal, "read_state", lambda *_: state)
+    monkeypatch.setattr(
+        active,
+        "verify_source_fence",
+        lambda *_, **__: target.fence_evidence(),
+    )
+    monkeypatch.setattr(
+        active,
+        "verify_source_reactivation",
+        lambda *_, **__: {
+            "planSha256": plan.sha256(),
+            "resourceCount": 3,
+            "status": "source-runtime-reactivated",
+            "templateSha256": plan.template_sha256,
+        },
+    )
+    monkeypatch.setattr(
+        active,
+        "reactivate_source",
+        lambda *_, **__: pytest.fail("completed retry must not repeat mutations"),
+    )
+    advances: list[dict[str, Any]] = []
+
+    def advance(*_: Any, **kwargs: Any) -> dict[str, Any]:
+        advances.append(kwargs)
+        return {"claim": "already-completed", "journal": state.evidence()}
+
+    monkeypatch.setattr(journal, "advance_phase", advance)
+    result = routing.reactivate_source_step(object(), manifest, target, plan, profile="p1")
+    assert result["journalClaim"]["claim"] == "resume-completed"
+    assert advances[0]["next_phase"] == "SOURCE_REACTIVATED_NOT_ROUTED"
+
+
+def test_partial_source_reactivation_retry_reapplies_plan_with_target_fenced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _reactivation_manifest()
+    plan = _reactivation_plan()
+    target = active.SourceResources(("target-function",), (), ())
+    state = SimpleNamespace(
+        phase="REACTIVATING_SOURCE",
+        evidence=lambda: {"phase": "REACTIVATING_SOURCE"},
+    )
+    monkeypatch.setattr(routing, "require_routing_role", lambda *_, **__: {})
+    monkeypatch.setattr(journal, "read_state", lambda *_: state)
+    verified_resources: list[active.SourceResources] = []
+
+    def verify_fence(resources: active.SourceResources, **_: Any) -> dict[str, Any]:
+        verified_resources.append(resources)
+        return resources.fence_evidence()
+
+    monkeypatch.setattr(active, "verify_source_fence", verify_fence)
+    reapplications: list[str] = []
+
+    def reactivate(*_: Any, **__: Any) -> dict[str, Any]:
+        reapplications.append(plan.sha256())
+        return {
+            "planSha256": plan.sha256(),
+            "resourceCount": 3,
+            "status": "source-runtime-reactivated",
+            "templateSha256": plan.template_sha256,
+        }
+
+    monkeypatch.setattr(active, "reactivate_source", reactivate)
+    monkeypatch.setattr(
+        journal,
+        "advance_phase",
+        lambda *_, **__: {"claim": "already-completed", "journal": state.evidence()},
+    )
+    routing.reactivate_source_step(object(), manifest, target, plan, profile="p1")
+    assert verified_resources == [target]
+    assert reapplications == [plan.sha256()]
+
+
+def test_completed_rollback_route_retry_does_not_mutate_route53(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _reactivation_manifest()
+    source, target = _cell("primary"), _cell("recovery")
+    source_state = routing.expected_route_state(
+        manifest,
+        source,
+        generation=2,
+        transition_id=manifest.transition_id,
+        marker_required=True,
+    )
+    state = SimpleNamespace(
+        phase="VERIFYING_SOURCE_ROLLBACK",
+        evidence=lambda: {"phase": "VERIFYING_SOURCE_ROLLBACK"},
+    )
+    monkeypatch.setattr(
+        routing,
+        "require_routing_role",
+        lambda *_, **__: {"roleArn": manifest.routing_role_arn},
+    )
+    monkeypatch.setattr(journal, "read_state", lambda *_: state)
+    monkeypatch.setattr(routing, "read_route_state", lambda *_, **__: source_state)
+    advances: list[dict[str, Any]] = []
+
+    def advance(*_: Any, **kwargs: Any) -> dict[str, Any]:
+        advances.append(kwargs)
+        return {"claim": "already-completed", "journal": state.evidence()}
+
+    monkeypatch.setattr(journal, "advance_phase", advance)
+
+    def runner(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        raise AssertionError(f"unexpected Route 53 mutation: {command}")
+
+    result = routing.route_source_rollback_step(
+        object(), manifest, source, target, profile="p1", runner=runner
+    )
+    assert result["journalClaim"]["claim"] == "resume-completed"
+    assert result["changeId"] is None
+    assert advances[0]["expected_phase"] == "ROUTING_SOURCE_ROLLBACK"
+    assert advances[0]["next_phase"] == "VERIFYING_SOURCE_ROLLBACK"
+
+
+def test_planned_failback_remains_explicitly_refused() -> None:
+    with pytest.raises(routing.RegionalRoutingError, match="primary target reconciliation"):
+        routing.refuse_unsafe_failback()

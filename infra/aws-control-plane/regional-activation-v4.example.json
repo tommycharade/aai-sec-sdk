@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "transitionId": "00000000-0000-4000-8000-000000000001",
   "direction": "failover",
   "primaryRegion": "eu-west-2",
@@ -47,5 +47,9 @@
   "recoveryCanaryUiDomain": "recovery.security.example.com",
   "routingMarkerName": "routing-generation.security.example.com",
   "routingRoleArn": "arn:aws:iam::111111111111:role/AaiSecRegionalRouting",
-  "routingAuthorityEvidenceRef": "replace-with-exclusive-dns-authority-evidence"
+  "routingAuthorityEvidenceRef": "replace-with-exclusive-dns-authority-evidence",
+  "primaryRuntimeStackName": "AaiSecControlPlane",
+  "primaryRuntimeTemplateSha256": "replace-with-primary-processed-template-sha256",
+  "recoveryRuntimeStackName": "AaiSecPassiveRegionalCell",
+  "recoveryRuntimeTemplateSha256": "replace-with-recovery-processed-template-sha256"
 }
