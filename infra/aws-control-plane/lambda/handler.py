@@ -2195,13 +2195,20 @@ def _agent_telemetry(value):
     return result
 
 
-_MANAGED_HOST_FIELDS = {
+_MANAGED_HOST_BASE_FIELDS = {
     "host",
     "hostVersion",
     "platform",
     "bundleHash",
     "policyId",
     "policyVersion",
+}
+_MANAGED_TRUST_FIELD = "policyTrustBundleSha256"
+_MANAGED_HOST_FIELDS = _MANAGED_HOST_BASE_FIELDS | {_MANAGED_TRUST_FIELD}
+_MANAGED_REPORT_BASE_FIELDS = _MANAGED_HOST_BASE_FIELDS | {
+    "source",
+    "verifiedAt",
+    "expiresAt",
 }
 _MANAGED_REPORT_FIELDS = _MANAGED_HOST_FIELDS | {"source", "verifiedAt", "expiresAt"}
 _MANAGED_SOURCES = {
@@ -2213,7 +2220,7 @@ _MANAGED_SOURCES = {
     "codex-mdm",
 }
 _MAX_MANAGED_PACKAGE_BYTES = 280 * 1024
-_MANAGED_PACKAGE_FIELDS = {
+_MANAGED_PACKAGE_FIELDS_V1 = {
     "schemaVersion",
     "host",
     "hostVersion",
@@ -2224,6 +2231,7 @@ _MANAGED_PACKAGE_FIELDS = {
     "artifacts",
     "requiredExecutables",
 }
+_MANAGED_PACKAGE_FIELDS_V2 = _MANAGED_PACKAGE_FIELDS_V1 | {"policyTrust"}
 _ROLLOUT_STATES = frozenset(
     {
         "staged",
@@ -2273,8 +2281,14 @@ def _managed_integer(value, name, *, positive=False):
 
 def _managed_host(value, *, report=False):
     """Validate desired or endpoint-observed managed host configuration."""
-    expected = _MANAGED_REPORT_FIELDS if report else _MANAGED_HOST_FIELDS
-    if not isinstance(value, dict) or set(value) != expected:
+    expected = (
+        (_MANAGED_REPORT_BASE_FIELDS, _MANAGED_REPORT_FIELDS)
+        if report
+        else (_MANAGED_HOST_BASE_FIELDS, _MANAGED_HOST_FIELDS)
+    )
+    if not isinstance(value, dict) or frozenset(value) not in {
+        frozenset(fields) for fields in expected
+    }:
         raise ValueError("managed host configuration has an invalid schema")
     host = _agent_host(value.get("host"))
     platform = _bounded_text(value.get("platform"), "platform", 16)
@@ -2294,6 +2308,11 @@ def _managed_host(value, *, report=False):
         "policyId": _bounded_identifier(value.get("policyId"), "policyId"),
         "policyVersion": policy_version,
     }
+    if _MANAGED_TRUST_FIELD in value:
+        trust_digest = _bounded_text(value.get(_MANAGED_TRUST_FIELD), _MANAGED_TRUST_FIELD, 64)
+        if not re.fullmatch(r"[0-9a-f]{64}", trust_digest):
+            raise ValueError("managed host policy trust must be lowercase SHA-256")
+        result[_MANAGED_TRUST_FIELD] = trust_digest
     if report:
         source = _bounded_text(value.get("source"), "source", 64)
         verified_at = _managed_integer(value.get("verifiedAt"), "managed configuration verifiedAt")
@@ -2338,6 +2357,37 @@ def _expected_managed_artifacts(host, platform):
     )
 
 
+def _expected_policy_trust_path(platform):
+    """Return the sole administrator-owned signer trust path."""
+    return (
+        r"C:\Program Files\AAI Security\trust\policy-signing.json"
+        if platform == "windows"
+        else "/opt/aai-security/trust/policy-signing.json"
+    )
+
+
+def _required_policy_trust_key_ids():
+    """Return the deployment-owned old/new/replica trust identities."""
+    active = os.environ.get("POLICY_SIGNING_KEY_ARN", "")
+    staged = os.environ.get("REGIONAL_POLICY_SIGNING_KEY_ARN", "")
+    recovery_region = os.environ.get("RECOVERY_REGION", "")
+    staged_match = re.fullmatch(
+        r"(arn:(?:aws|aws-us-gov|aws-cn):kms:)[a-z0-9-]+(:[0-9]{12}:key/mrk-[0-9a-f]{32})",
+        staged,
+    )
+    if (
+        not re.fullmatch(
+            r"arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36}",
+            active,
+        )
+        or staged_match is None
+        or not re.fullmatch(r"[a-z]{2}(?:-gov)?-[a-z]+-[0-9]", recovery_region)
+    ):
+        raise ValueError("managed policy trust deployment authority is unavailable")
+    replica = f"{staged_match.group(1)}{recovery_region}{staged_match.group(2)}"
+    return {active, staged, replica}
+
+
 def _managed_package(package_base64, expected_digest):
     """Decode and independently validate one canonical credential-free package."""
     if (
@@ -2361,10 +2411,13 @@ def _managed_package(package_base64, expected_digest):
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError("managed package is malformed") from error
-    if (
-        not isinstance(value, dict)
-        or set(value) != _MANAGED_PACKAGE_FIELDS
-        or value.get("schemaVersion") != 1
+    schema_version = value.get("schemaVersion") if isinstance(value, dict) else None
+    if not isinstance(value, dict) or (
+        schema_version == 1
+        and set(value) != _MANAGED_PACKAGE_FIELDS_V1
+        or schema_version == 2
+        and set(value) != _MANAGED_PACKAGE_FIELDS_V2
+        or schema_version not in {1, 2}
     ):
         raise ValueError("managed package schema is invalid")
     canonical = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
@@ -2436,6 +2489,63 @@ def _managed_package(package_base64, expected_digest):
         executable_paths.append(path)
     if len(executable_paths) != len(set(executable_paths)):
         raise ValueError("managed package executable paths are ambiguous")
+    if schema_version == 2:
+        trust = value.get("policyTrust")
+        if not isinstance(trust, dict) or set(trust) != {
+            "path",
+            "mediaType",
+            "content",
+            "sha256",
+        }:
+            raise ValueError("managed package policy trust schema is invalid")
+        trust_content = trust.get("content")
+        trust_digest = trust.get("sha256")
+        if (
+            trust.get("path") != _expected_policy_trust_path(target["platform"])
+            or trust.get("mediaType") != "application/json"
+            or not isinstance(trust_content, str)
+            or not trust_content
+            or len(trust_content.encode("utf-8")) > 128_000
+            or not isinstance(trust_digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", trust_digest)
+            or not secrets.compare_digest(
+                hashlib.sha256(trust_content.encode("utf-8")).hexdigest(), trust_digest
+            )
+        ):
+            raise ValueError("managed package policy trust artifact is invalid")
+        try:
+            trust_value = json.loads(
+                trust_content, object_pairs_hook=_reject_duplicate_package_keys
+            )
+        except json.JSONDecodeError as error:
+            raise ValueError("managed package policy trust is malformed") from error
+        if (
+            not isinstance(trust_value, dict)
+            or set(trust_value) != {"schemaVersion", "keys"}
+            or trust_value.get("schemaVersion") != 1
+            or not isinstance(trust_value.get("keys"), list)
+            or not 1 <= len(trust_value["keys"]) <= 8
+            or json.dumps(trust_value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+            != trust_content
+        ):
+            raise ValueError("managed package policy trust is not canonical")
+        key_ids = []
+        for item in trust_value["keys"]:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"keyId", "algorithm", "publicKeyPem"}
+                or item.get("algorithm") != "ECDSA_SHA_256"
+                or not isinstance(item.get("keyId"), str)
+                or not isinstance(item.get("publicKeyPem"), str)
+                or not item["publicKeyPem"].startswith("-----BEGIN PUBLIC KEY-----\n")
+                or not item["publicKeyPem"].endswith("-----END PUBLIC KEY-----\n")
+                or not 100 <= len(item["publicKeyPem"]) <= 2_000
+            ):
+                raise ValueError("managed package policy trust key is invalid")
+            key_ids.append(item["keyId"])
+        if len(key_ids) != len(set(key_ids)) or set(key_ids) != _required_policy_trust_key_ids():
+            raise ValueError("managed package policy trust identities are not deployment-owned")
+        target[_MANAGED_TRUST_FIELD] = trust_digest
     return value, target, encoded
 
 
@@ -2472,6 +2582,11 @@ def _managed_package_metadata(tenant, deployment_id, package=None):
         "policyVersion": _managed_integer(
             package.get("policyVersion"), "managed package policyVersion", positive=True
         ),
+        **(
+            {_MANAGED_TRUST_FIELD: package.get(_MANAGED_TRUST_FIELD)}
+            if package.get(_MANAGED_TRUST_FIELD) is not None
+            else {}
+        ),
     }
     return {
         "revision": _managed_integer(
@@ -2485,6 +2600,11 @@ def _managed_package_metadata(tenant, deployment_id, package=None):
         "platform": package.get("platform"),
         "policyId": package.get("policyId"),
         "policyVersion": target["policyVersion"],
+        **(
+            {_MANAGED_TRUST_FIELD: target[_MANAGED_TRUST_FIELD]}
+            if _MANAGED_TRUST_FIELD in target
+            else {}
+        ),
         "publishedAt": _managed_integer(package.get("publishedAt"), "publishedAt"),
         "publishedBy": package.get("publishedBy"),
     }
@@ -2546,6 +2666,11 @@ def _publish_managed_package(tenant, deployment_id, body, actor):
         "publishedAt": now,
         "publishedBy": actor,
         "artifactCount": len(package_value["artifacts"]),
+        **(
+            {_MANAGED_TRUST_FIELD: target[_MANAGED_TRUST_FIELD]}
+            if _MANAGED_TRUST_FIELD in target
+            else {}
+        ),
     }
     revision_id = f"{deployment_id}:{record['revision']:020d}"
     immutable = {
@@ -2614,7 +2739,7 @@ def _agent_managed_package(tenant, deployment_id, agent_id, agent):
     if target != desired:
         raise ManagedPackageConflict("managed package does not match current desired state")
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2 if _MANAGED_TRUST_FIELD in metadata else 1,
         "deploymentId": deployment_id,
         "agentId": agent_id,
         **metadata,
@@ -2643,9 +2768,9 @@ def _managed_configuration_posture(tenant, agent, *, now=None):
         return {"status": "not_configured", "desired": None, "observed": observed}
     if observed is None:
         return {"status": "missing", "desired": desired, "observed": None}
-    identity_fields = tuple(_MANAGED_HOST_FIELDS)
+    identity_fields = tuple(desired)
     if agent.get("host") != desired["host"] or any(
-        observed[field] != desired[field] for field in identity_fields
+        observed.get(field) != desired[field] for field in identity_fields
     ):
         status = "conflict"
     else:
@@ -2656,6 +2781,105 @@ def _managed_configuration_posture(tenant, agent, *, now=None):
             else "enforced"
         )
     return {"status": status, "desired": desired, "observed": observed}
+
+
+def _policy_trust_convergence(tenant, *, now=None):
+    """Return server-derived signer-trust rollout posture for active endpoints."""
+    current = int(time.time()) if now is None else now
+    active_agents = [
+        agent
+        for agent in _list(tenant, "AGENT", consistent_read=True)
+        if agent.get("host") in {"claude-code", "codex-cli"}
+        and _agent_lifecycle_state(agent) == "active"
+    ]
+    by_deployment = {}
+    for agent in active_agents:
+        deployment_id = agent.get("deployment_id")
+        if isinstance(deployment_id, str):
+            by_deployment.setdefault(deployment_id, []).append(agent)
+    deployments = []
+    expected_digests = set()
+    for deployment_id in sorted(by_deployment):
+        agents = by_deployment[deployment_id]
+        configuration = TABLE.get_item(
+            Key=_item_key(tenant, "CONFIGURATION", deployment_id), ConsistentRead=True
+        ).get("Item")
+        desired_value = (
+            configuration.get("desiredConfiguration", {}).get("managedHost")
+            if isinstance(configuration, dict)
+            and isinstance(configuration.get("desiredConfiguration"), dict)
+            else None
+        )
+        desired = _managed_host(desired_value) if isinstance(desired_value, dict) else None
+        desired_digest = desired.get(_MANAGED_TRUST_FIELD) if desired else None
+        if isinstance(desired_digest, str):
+            expected_digests.add(desired_digest)
+        package_current = False
+        package_digest = None
+        try:
+            package = _managed_package_metadata(tenant, deployment_id)
+            package_digest = package.get(_MANAGED_TRUST_FIELD)
+            package_current = (
+                package.get("status") == "current"
+                and isinstance(desired_digest, str)
+                and package_digest == desired_digest
+            )
+        except (ManagedPackageNotFound, ValueError):
+            package_current = False
+        postures = [_managed_configuration_posture(tenant, agent, now=current) for agent in agents]
+        enforced = sum(posture.get("status") == "enforced" for posture in postures)
+        rollout_converged = bool(
+            configuration
+            and configuration.get("rolloutState") == "converged"
+            and _managed_integer(configuration.get("rolloutPercentage", 0), "rollout percentage")
+            == 100
+        )
+        ready = bool(
+            desired_digest and package_current and rollout_converged and enforced == len(agents)
+        )
+        deployments.append(
+            {
+                "deploymentId": deployment_id,
+                "agentCount": len(agents),
+                "enforcedAgentCount": enforced,
+                "policyTrustBundleSha256": desired_digest,
+                "packageTrustBundleSha256": package_digest,
+                "packageCurrent": package_current,
+                "rolloutConverged": rollout_converged,
+                "ready": ready,
+            }
+        )
+    try:
+        required_keys = sorted(_required_policy_trust_key_ids())
+        deployment_authority_configured = True
+    except ValueError:
+        required_keys = []
+        deployment_authority_configured = False
+    ready_count = sum(item["ready"] for item in deployments)
+    common_digest = next(iter(expected_digests)) if len(expected_digests) == 1 else None
+    return {
+        "schemaVersion": 1,
+        "checkedAt": current,
+        "activeSigningKeyArn": os.environ.get("POLICY_SIGNING_KEY_ARN", ""),
+        "stagedSigningKeyArn": os.environ.get("REGIONAL_POLICY_SIGNING_KEY_ARN", ""),
+        "requiredTrustKeyArns": required_keys,
+        "deploymentAuthorityConfigured": deployment_authority_configured,
+        "policyTrustBundleSha256": common_digest,
+        "agentCount": len(active_agents),
+        "enforcedAgentCount": sum(item["enforcedAgentCount"] for item in deployments),
+        "deploymentCount": len(deployments),
+        "readyDeploymentCount": ready_count,
+        "readyForSignerCutover": bool(
+            deployment_authority_configured
+            and active_agents
+            and deployments
+            and ready_count == len(deployments)
+            and common_digest
+            and os.environ.get("POLICY_SIGNING_KEY_ARN")
+            != os.environ.get("REGIONAL_POLICY_SIGNING_KEY_ARN")
+        ),
+        "deployments": deployments,
+    }
 
 
 def _rollout_agent_selected(tenant, agent_key, percentage):
@@ -14098,6 +14322,10 @@ def handler(event, context):
                 return _response(200, _identity_access(tenant, event))
             if method == "GET" and parts == ["integrations"]:
                 return _response(200, _enterprise_integrations())
+            if method == "GET" and parts == ["resilience", "policy-trust"]:
+                if not _operator_roles(event):
+                    return _response(403, {"error": "tenant-wide trust posture requires a role"})
+                return _response(200, _policy_trust_convergence(tenant))
             if method == "GET" and parts == ["tenant"]:
                 root = TABLE.get_item(
                     Key=_item_key(tenant, "TENANT", "root"), ConsistentRead=True

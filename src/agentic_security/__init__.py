@@ -165,7 +165,11 @@ from .managed_configuration import (
     measure_managed_configuration,
     reconcile_effective_authority,
 )
-from .managed_deployment import ManagedDeploymentPackage, ManagedExecutableRequirement
+from .managed_deployment import (
+    ManagedDeploymentPackage,
+    ManagedExecutableRequirement,
+    measure_managed_deployment_package,
+)
 from .policies import AllowListPolicy, PolicyDecision, PolicyEngine, PolicyResult
 from .policy_adapters import CedarPolicyEngine, OpaPolicyEngine, PolicyRequest
 from .runtime import GuardedRuntime, RuntimeConfig
@@ -321,6 +325,7 @@ __all__ = [
     "reconcile_effective_authority",
     "ManagedDeploymentPackage",
     "ManagedExecutableRequirement",
+    "measure_managed_deployment_package",
     "ControlPlaneApplication",
     "AgentPresence",
     "AgentPresenceStore",

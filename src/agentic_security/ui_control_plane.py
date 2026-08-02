@@ -812,7 +812,7 @@ class ControlPlaneAgentClient:
         except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
             raise ControlPlaneDependencyError("managed package lookup failed") from exc
         result = dict(_mapping(value, "managed package response"))
-        fields = {
+        fields_v1 = {
             "schemaVersion",
             "deploymentId",
             "agentId",
@@ -829,7 +829,15 @@ class ControlPlaneAgentClient:
             "publishedBy",
             "packageBase64",
         }
-        if set(result) != fields or result.get("schemaVersion") != 1:
+        fields_v2 = fields_v1 | {"policyTrustBundleSha256"}
+        schema_version = result.get("schemaVersion")
+        if (
+            schema_version == 1
+            and set(result) != fields_v1
+            or schema_version == 2
+            and set(result) != fields_v2
+            or schema_version not in {1, 2}
+        ):
             raise ControlPlaneDependencyError("managed package response schema is invalid")
         if (
             result.get("deploymentId") != self.deployment_id
@@ -854,7 +862,14 @@ class ControlPlaneAgentClient:
         try:
             package = ManagedDeploymentPackage.from_json(encoded, expected_package_sha256=digest)
             package.require_target(
-                host=self.host, platform=expected_platform, bundle_hash=bundle_hash
+                host=self.host,
+                platform=expected_platform,
+                bundle_hash=bundle_hash,
+                policy_trust_bundle_sha256=(
+                    result.get("policyTrustBundleSha256")
+                    if isinstance(result.get("policyTrustBundleSha256"), str)
+                    else None
+                ),
             )
         except (TypeError, ValueError) as exc:
             raise ControlPlaneDependencyError("managed package verification failed") from exc
@@ -866,6 +881,11 @@ class ControlPlaneAgentClient:
             "policyVersion": package.policy_version,
             "bundleHash": package.bundle_hash,
             "packageSha256": package.package_sha256,
+            **(
+                {"policyTrustBundleSha256": package.policy_trust_bundle_sha256}
+                if package.policy_trust_bundle_sha256 is not None
+                else {}
+            ),
         }
         if any(result.get(key) != expected for key, expected in metadata.items()):
             raise ControlPlaneDependencyError("managed package metadata does not match content")

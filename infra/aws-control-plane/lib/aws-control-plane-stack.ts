@@ -687,7 +687,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
       timeout: cdk.Duration.seconds(15),
       memorySize: 512,
-      environment: controlPlaneEnvironment,
+      environment: {
+        ...controlPlaneEnvironment,
+        REGIONAL_POLICY_SIGNING_KEY_ARN: regionalPolicySigningKey.keyArn,
+        RECOVERY_REGION: process.env.AUDIT_REPLICA_REGION ?? "eu-west-1",
+      },
       tracing: lambda.Tracing.PASS_THROUGH,
     });
     table.grantReadWriteData(handler);

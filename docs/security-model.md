@@ -203,6 +203,13 @@ outage bypass from cached policy because revocation, emergency-stop, approval
 and session state may have changed. See the
 [regional recovery design](regional-control-plane-recovery-design.md).
 
+Regional signer migration additionally binds the old/new/replica public trust
+set into a schema-v2 managed endpoint package while keeping its expected digest
+as separate server-owned desired state. Root installation is all-or-rollback;
+heartbeats remeasure native configuration and trust; and cutover readiness is
+derived only from every active endpoint. Readiness never changes KMS or signing
+authority. See [policy trust convergence](policy-trust-convergence-design.md).
+
 Mass-retention extension is a separate irreversible boundary. The API
 atomically binds a longer future-write policy to an idempotent job, waits longer
 than any evidence-writing Lambda can run and then extends every pre-cutover S3

@@ -262,6 +262,7 @@ class ManagedConfigurationEvidence:
     source: ManagedConfigurationSource
     verified_at: float
     expires_at: float
+    policy_trust_bundle_sha256: str | None = None
 
     def __post_init__(self) -> None:
         """Reject ambiguous identity or non-expiring evidence at construction."""
@@ -306,10 +307,15 @@ class ManagedConfigurationEvidence:
             or self.expires_at <= self.verified_at
         ):
             raise SecurityConfigurationError("managed evidence expiry is invalid")
+        if (
+            self.policy_trust_bundle_sha256 is not None
+            and _SHA256_PATTERN.fullmatch(self.policy_trust_bundle_sha256) is None
+        ):
+            raise SecurityConfigurationError("managed evidence policy trust must be SHA-256")
 
     def to_wire(self) -> dict[str, object]:
         """Return the fixed control-plane heartbeat schema."""
-        return {
+        value: dict[str, object] = {
             "host": self.host.value,
             "hostVersion": self.host_version,
             "platform": self.platform.value,
@@ -320,6 +326,9 @@ class ManagedConfigurationEvidence:
             "verifiedAt": self.verified_at,
             "expiresAt": self.expires_at,
         }
+        if self.policy_trust_bundle_sha256 is not None:
+            value["policyTrustBundleSha256"] = self.policy_trust_bundle_sha256
+        return value
 
 
 @dataclass(frozen=True, slots=True)

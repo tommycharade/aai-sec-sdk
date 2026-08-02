@@ -1,5 +1,12 @@
 # Changelog
 
+- Added fail-closed managed policy-signing trust convergence. Backward-compatible
+  schema-v2 endpoint packages bind canonical old/new/replica public trust while
+  requiring its SHA-256 through separate desired state; privileged installation
+  is all-or-rollback, heartbeats remeasure trust, AWS rejects non-deployment key
+  identities, and a role-protected fleet endpoint derives signer-cutover
+  readiness without changing signing authority.
+
 - Added the P0-11 active-passive regional recovery foundation: explicit pilot
   RTO/RPO/fleet targets, four protected Global Table prerequisites, bounded
   exact-content replication canaries, a persisted secret-free recovery
