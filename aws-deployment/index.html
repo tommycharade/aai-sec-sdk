@@ -1477,6 +1477,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../github-app-policy-source-auth-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub App policy-source authentication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../policy-governance-design/" class="md-nav__link">
         
   
@@ -3194,10 +3221,10 @@ prevents a browser-supplied tenant, group, or upstream claim from widening
 authority.</p>
 <h2 id="reviewed-policy-github-source">Reviewed policy GitHub source</h2>
 <p>The hosted policy import is disabled unless both an exact credential reference
-and an explicit repository allow-list are present at synthesis. Store a
-short-lived, externally rotated GitHub App installation token as an exact JSON
-object in Secrets Manager:</p>
-<pre><code class="language-json">{&quot;token&quot;:&quot;&lt;short-lived-installation-token&gt;&quot;}
+and an explicit repository allow-list are present at synthesis. For schema-v2
+production authority, store the GitHub App private key as an exact JSON object
+in Secrets Manager:</p>
+<pre><code class="language-json">{&quot;privateKeyPem&quot;:&quot;-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n&quot;}
 </code></pre>
 <p>The GitHub App installation requires read-only <strong>Contents</strong>, <strong>Metadata</strong> and
 <strong>Pull requests</strong> access only for every allow-listed policy repository. It must
@@ -3216,16 +3243,21 @@ python3 scripts/deploy_aws_control_plane.py configure-policy-github \
 python3 scripts/deploy_aws_control_plane.py deploy \
   --profile p1 --region eu-west-2
 </code></pre>
-<p>Repository identities are exact <code>github.com/owner/name</code> values; wildcards,
-branches and abbreviated commit IDs are rejected. The secret-free manifest is
+<p>Schema-v2 repositories must belong to the same App installation owner. The
+dedicated broker mints a repository- and permission-scoped one-hour token for
+each import; no installation token is stored or manually rotated. Repository
+identities are exact <code>github.com/owner/name</code> values; wildcards, branches and
+abbreviated commit IDs are rejected. The secret-free manifest is
 stored in an encrypted, stack-specific SSM parameter. Routine deployments erase
 ambient policy-source variables and load only that persisted authority. If a
 configured stack loses its manifest, deployment fails instead of silently
-disabling the verifier. Automatic GitHub App installation-token rotation is
-still required before unattended production use; a manually rotated token is
-suitable only for a controlled pilot.</p>
-<p>The dedicated verifier Lambda owns the secret and outbound GitHub calls but has
-no DynamoDB or KMS signing access. The main handler cannot read the token. It
+disabling the verifier. Schema-v1 externally rotated <code>{"token":"..."}</code> secrets
+remain supported only to migrate a controlled pilot.</p>
+<p>The dedicated token broker owns the private key and installation-token exchange
+but has no DynamoDB, KMS signing or control-plane mutation access. The verifier
+can invoke only that broker, receives the short-lived token in memory and owns
+the remaining bounded GitHub reads. The main handler can invoke only the
+verifier and cannot read either credential. It
 revalidates the worker response and atomically writes an inactive draft plus
 immutable provenance. Import never submits, approves, stages, activates or
 assigns a policy. Export uses the existing asymmetric policy-signing KMS key.</p>
@@ -3239,6 +3271,8 @@ one unsigned commit, one dismissed latest review, one cross-tenant document,
 one verifier outage, one replay and one transaction race. Retain the import,
 review, draft, export signature and denial evidence. Synthetic CI proves the
 software contract but is not live GitHub acceptance.</p>
+<p>See <a href="../github-app-policy-source-auth-design/">GitHub App policy-source authentication</a>
+for JWT, permission, migration and failure-boundary details.</p>
 <h2 id="microsoft-entra-id-federation">Microsoft Entra ID federation</h2>
 <p>Create a single-tenant Microsoft Entra application registration. Configure its
 web redirect URI as the Cognito domain followed by <code>/oauth2/idpresponse</code>. Store
