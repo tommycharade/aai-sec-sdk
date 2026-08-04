@@ -1,5 +1,12 @@
 # Changelog
 
+- Added governed, expiring alert suppression and stable deduplication for
+  endpoint and agent-behavior detections. Exact-scope suppressions retain the
+  alert and audit evidence while withholding outbound delivery and automatic
+  containment; wildcard, broad, permanent and unauthorized silence fails
+  closed. The private UI adds a typed, contextual-help workflow and explicit
+  revocation.
+
 - Added independently reviewed explainable behavior detection for Claude Code
   and Codex. Alert-only rules cover new tools, new MCP server identities,
   denied-action spikes, approval-request spikes and decision-volume spikes;

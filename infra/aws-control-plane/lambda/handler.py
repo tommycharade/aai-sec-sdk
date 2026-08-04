@@ -1029,6 +1029,8 @@ def _required_mutation_capability(path):
         return "incident_response"
     if normalized.startswith("/enterprise/alerts/"):
         return "incident_response"
+    if normalized.startswith("/enterprise/alert-suppressions"):
+        return "incident_response"
     if normalized.startswith("/enterprise/cases"):
         return "incident_response"
     if re.fullmatch(
@@ -1293,6 +1295,7 @@ _DELEGATED_READ_ROLES = {
     "SLO": frozenset({"fleet-operator", "incident-responder", "security-operator", "auditor"}),
     "APPROVAL": frozenset({"policy-approver", "security-operator", "auditor"}),
     "ALERT": frozenset({"incident-responder", "security-operator", "auditor"}),
+    "ALERT_SUPPRESSION": frozenset({"incident-responder", "security-operator", "auditor"}),
     "CASE": frozenset({"incident-responder", "security-operator", "auditor"}),
     "AUDIT": frozenset({"security-operator", "auditor"}),
 }
@@ -2450,6 +2453,12 @@ def _create_delegated_grant(tenant, event, body):
     reason = _bounded_text(body.get("reason"), "reason", 500)
     if len(reason) < 20:
         raise ValueError("reason must contain at least 20 characters")
+    if re.search(
+        r"(?i)(authorization\s*:\s*bearer|-----BEGIN [A-Z ]+PRIVATE KEY-----|"
+        r"(?:token|secret|password|api[_ -]?key)\s*[:=]\s*\S+)",
+        reason,
+    ):
+        raise ValueError("reason must not contain credential material")
     duration_days = body.get("durationDays")
     if isinstance(duration_days, bool) or not isinstance(duration_days, int):
         raise ValueError("durationDays must be an integer")
@@ -2568,6 +2577,12 @@ def _create_break_glass_request(tenant, event, body):
     reason = _bounded_text(body.get("reason"), "reason", 500)
     if len(reason) < 20:
         raise ValueError("reason must contain at least 20 characters")
+    if re.search(
+        r"(?i)(authorization\s*:\s*bearer|-----BEGIN [A-Z ]+PRIVATE KEY-----|"
+        r"(?:token|secret|password|api[_ -]?key)\s*[:=]\s*\S+)",
+        reason,
+    ):
+        raise ValueError("reason must not contain credential material")
     capabilities = body.get("capabilities")
     if (
         not isinstance(capabilities, list)
@@ -12382,6 +12397,9 @@ def _endpoint_alert_view(item):
         "firstObservedAt": int(item.get("firstObservedAt", 0)),
         "lastObservedAt": int(item.get("lastObservedAt", 0)),
         "occurrenceCount": int(item.get("occurrenceCount", 0)),
+        "deduplicationKey": item.get("deduplicationKey"),
+        "suppressionId": item.get("suppressionId"),
+        "suppressedUntil": item.get("suppressedUntil"),
         "acknowledgedAt": item.get("acknowledgedAt"),
         "acknowledgedBy": item.get("acknowledgedBy"),
         "acknowledgementReason": item.get("acknowledgementReason"),
@@ -12390,6 +12408,221 @@ def _endpoint_alert_view(item):
         "deliveryStatus": item.get("deliveryStatus", "pending"),
         "deliveredAt": item.get("deliveredAt"),
     }
+
+
+def _alert_suppression_view(item, *, now=None):
+    """Project one immutable-scope alert suppression without hidden authority."""
+    current_time = int(time.time()) if now is None else int(now)
+    status = item.get("status")
+    if status == "active" and int(item.get("expires_at", 0)) <= current_time:
+        status = "expired"
+    return {
+        "id": item.get("id"),
+        "name": item.get("name"),
+        "reason": item.get("reason"),
+        "match": _json(item.get("match")),
+        "status": status,
+        "revision": int(item.get("revision", 0)),
+        "createdAt": int(item.get("created_at", 0)),
+        "createdBy": item.get("created_by"),
+        "expiresAt": int(item.get("expires_at", 0)),
+        "revokedAt": item.get("revoked_at"),
+        "revokedBy": item.get("revoked_by"),
+        "revocationReason": item.get("revocation_reason"),
+        "contentHash": item.get("content_hash"),
+    }
+
+
+def _alert_suppression_match(value):
+    """Validate the closed, exact-match language used to reduce alert noise."""
+    if not isinstance(value, dict) or set(value) != {
+        "sources",
+        "severities",
+        "reasonCodes",
+        "deploymentIds",
+        "agentIds",
+        "deviceIds",
+        "responseRuleIds",
+    }:
+        raise ValueError("alert suppression match has an invalid schema")
+    allowed = {
+        "sources": {"endpoint_evidence", "behavior_analytics"},
+        "severities": {"low", "medium", "high", "critical"},
+    }
+    normalized = {}
+    for field in (
+        "sources",
+        "severities",
+        "reasonCodes",
+        "deploymentIds",
+        "agentIds",
+        "deviceIds",
+        "responseRuleIds",
+    ):
+        raw = value.get(field)
+        if not isinstance(raw, list) or len(raw) > 20:
+            raise ValueError(f"alert suppression {field} must be a bounded list")
+        items = [_bounded_identifier(item, field) for item in raw]
+        if len(set(items)) != len(items):
+            raise ValueError(f"alert suppression {field} contains duplicates")
+        if field in allowed and (not items or not set(items) <= allowed[field]):
+            raise ValueError(f"alert suppression {field} is unsupported")
+        normalized[field] = sorted(items)
+    if not any(
+        normalized[field]
+        for field in (
+            "reasonCodes",
+            "deploymentIds",
+            "agentIds",
+            "deviceIds",
+            "responseRuleIds",
+        )
+    ):
+        raise ValueError("alert suppression requires an exact identity selector")
+    return normalized
+
+
+def _create_alert_suppression(tenant, body, actor):
+    """Create one non-widenable, expiring suppression under responder authority."""
+    if not isinstance(body, dict) or set(body) != {"id", "name", "reason", "expiresAt", "match"}:
+        raise ValueError("alert suppression request has an invalid schema")
+    now = int(time.time())
+    suppression_id = _bounded_identifier(body.get("id"), "suppressionId")
+    name = _bounded_text(body.get("name"), "name", 120)
+    reason = _bounded_text(body.get("reason"), "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("reason must contain at least 20 characters")
+    if re.search(
+        r"(?i)(authorization\s*:\s*bearer|-----BEGIN [A-Z ]+PRIVATE KEY-----|"
+        r"(?:token|secret|password|api[_ -]?key)\s*[:=]\s*\S+)",
+        reason,
+    ):
+        raise ValueError("reason must not contain credential material")
+    expires_at = _discovery_integer(body.get("expiresAt"), "expiresAt", minimum=now + 300)
+    if expires_at > now + (7 * 24 * 60 * 60):
+        raise ValueError("alert suppression cannot exceed seven days")
+    match = _alert_suppression_match(body.get("match"))
+    active = [
+        item
+        for item in _list(tenant, "ALERT_SUPPRESSION", consistent_read=True)
+        if item.get("status") == "active" and int(item.get("expires_at", 0)) > now
+    ]
+    if len(active) >= 100:
+        raise ValueError("active alert suppression limit reached")
+    record = {
+        **_item_key(tenant, "ALERT_SUPPRESSION", suppression_id),
+        "tenant_id": tenant,
+        "id": suppression_id,
+        "name": name,
+        "reason": reason,
+        "match": match,
+        "status": "active",
+        "revision": 1,
+        "created_at": now,
+        "created_by": actor,
+        "expires_at": expires_at,
+        "content_hash": _configuration_hash({"match": match, "expiresAt": expires_at}),
+        "ttl": expires_at + (90 * 24 * 60 * 60),
+    }
+    try:
+        TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("alert suppression already exists") from error
+        raise
+    _audit(
+        tenant,
+        "alert_suppression_created",
+        actor,
+        {
+            "suppression_id": suppression_id,
+            "expires_at": expires_at,
+            "match_digest": _configuration_hash(match),
+        },
+    )
+    return _alert_suppression_view(record, now=now)
+
+
+def _revoke_alert_suppression(tenant, suppression_id, body, actor):
+    """Revoke a suppression without deleting its scope or evidence."""
+    if not isinstance(body, dict) or set(body) != {"expectedRevision", "reason"}:
+        raise ValueError("alert suppression revocation has an invalid schema")
+    suppression_id = _bounded_identifier(suppression_id, "suppressionId")
+    expected = _discovery_integer(body.get("expectedRevision"), "expectedRevision", minimum=1)
+    reason = _bounded_text(body.get("reason"), "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("reason must contain at least 20 characters")
+    if re.search(
+        r"(?i)(authorization\s*:\s*bearer|-----BEGIN [A-Z ]+PRIVATE KEY-----|"
+        r"(?:token|secret|password|api[_ -]?key)\s*[:=]\s*\S+)",
+        reason,
+    ):
+        raise ValueError("reason must not contain credential material")
+    key = _item_key(tenant, "ALERT_SUPPRESSION", suppression_id)
+    current = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if not current:
+        raise LookupError("alert suppression not found")
+    if int(current.get("revision", 0)) != expected or current.get("status") != "active":
+        raise PolicyConflict("alert suppression is no longer active at that revision")
+    now = int(time.time())
+    revoked = {
+        **current,
+        "status": "revoked",
+        "revision": expected + 1,
+        "revoked_at": now,
+        "revoked_by": actor,
+        "revocation_reason": reason,
+    }
+    try:
+        TABLE.put_item(
+            Item=revoked,
+            ConditionExpression="revision = :expected_revision",
+            ExpressionAttributeValues={":expected_revision": expected},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("alert suppression revision changed") from error
+        raise
+    _audit(
+        tenant,
+        "alert_suppression_revoked",
+        actor,
+        {"suppression_id": suppression_id, "revision": expected + 1},
+    )
+    return _alert_suppression_view(revoked, now=now)
+
+
+def _matching_alert_suppression(tenant, alert, *, now):
+    """Return the first exact active suppression; expiry fails open for detection."""
+    matches = []
+    for item in _list(tenant, "ALERT_SUPPRESSION", consistent_read=True):
+        try:
+            expires_at = int(item.get("expires_at", 0))
+            match = _alert_suppression_match(item.get("match"))
+            integrity_valid = item.get("content_hash") == _configuration_hash(
+                {"match": match, "expiresAt": expires_at}
+            )
+        except (TypeError, ValueError):
+            # Invalid stored state must restore alerting, never create silence.
+            continue
+        if item.get("status") != "active" or expires_at <= now or not integrity_valid:
+            continue
+        behavior = alert.get("behavior") or {}
+        comparisons = {
+            "sources": alert.get("source"),
+            "severities": alert.get("severity"),
+            "reasonCodes": alert.get("reasonCode"),
+            "deploymentIds": alert.get("deploymentId"),
+            "agentIds": alert.get("agentId"),
+            "deviceIds": alert.get("deviceId"),
+            "responseRuleIds": behavior.get("ruleId"),
+        }
+        if all(
+            not match.get(field) or value in match[field] for field, value in comparisons.items()
+        ):
+            matches.append(item)
+    matches.sort(key=lambda item: (int(item.get("expires_at", 0)), str(item.get("id", ""))))
+    return matches[0] if matches else None
 
 
 def _publish_endpoint_alert(tenant, alert):
@@ -12488,14 +12721,13 @@ def _queue_endpoint_alert_webhooks(tenant, alert):
 def _deliver_pending_endpoint_alerts(tenant):
     """Retry undelivered active alerts without losing their durable record."""
     for alert in _list(tenant, "ALERT", consistent_read=True):
-        if (
-            alert.get("source") in {"endpoint_evidence", "behavior_analytics"}
-            and alert.get("status") != "resolved"
-        ):
+        if alert.get("source") in {"endpoint_evidence", "behavior_analytics"} and alert.get(
+            "status"
+        ) not in {"resolved", "suppressed"}:
             _queue_endpoint_alert_webhooks(tenant, alert)
         if (
             alert.get("source") not in {"endpoint_evidence", "behavior_analytics"}
-            or alert.get("status") == "resolved"
+            or alert.get("status") in {"resolved", "suppressed"}
             or alert.get("deliveryStatus") == "delivered"
         ):
             continue
@@ -12548,9 +12780,27 @@ def _open_endpoint_alert(tenant, device_id, reason_code, *, now, reopen_acknowle
         "firstObservedAt": int(existing.get("firstObservedAt", now)) if existing else now,
         "lastObservedAt": now,
         "occurrenceCount": int(existing.get("occurrenceCount", 0)) + 1 if existing else 1,
+        "deduplicationKey": alert_id,
         "deliveryStatus": "pending",
         "reopenedAt": now if existing else None,
     }
+    suppression = _matching_alert_suppression(tenant, record, now=now)
+    if (
+        existing
+        and existing.get("status") == "suppressed"
+        and suppression
+        and existing.get("suppressionId") == suppression.get("id")
+    ):
+        return existing
+    if suppression:
+        record.update(
+            {
+                "status": "suppressed",
+                "suppressionId": suppression["id"],
+                "suppressedUntil": int(suppression["expires_at"]),
+                "deliveryStatus": "suppressed",
+            }
+        )
     arguments = {"Item": record}
     if existing:
         arguments.update(
@@ -12569,7 +12819,11 @@ def _open_endpoint_alert(tenant, device_id, reason_code, *, now, reopen_acknowle
         raise
     _audit(
         tenant,
-        "endpoint_alert_opened" if not existing else "endpoint_alert_reopened",
+        "endpoint_alert_suppressed"
+        if suppression
+        else "endpoint_alert_opened"
+        if not existing
+        else "endpoint_alert_reopened",
         "system:endpoint-detection",
         {
             "alert_id": alert_id,
@@ -12577,6 +12831,7 @@ def _open_endpoint_alert(tenant, device_id, reason_code, *, now, reopen_acknowle
             "reason_code": reason_code,
             "severity": severity,
             "revision": revision + 1,
+            "suppression_id": suppression.get("id") if suppression else None,
         },
     )
     return record
@@ -14361,6 +14616,15 @@ def _open_behavior_alert(tenant, rule, agent, metric, *, now):
     window_seconds = int(configuration["baseline"]["currentWindowMinutes"]) * 60
     window_start = now - (now % window_seconds)
     dimension_hash = metric.get("dimensionHash") or ("0" * 64)
+    deduplication_key = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            (
+                f"aai-behavior-group:{tenant}:{rule['id']}:{int(rule['active_version'])}:"
+                f"{agent['deployment_id']}:{agent['id']}:{signal}:{dimension_hash}"
+            ),
+        )
+    )
     alert_id = str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
@@ -14413,8 +14677,19 @@ def _open_behavior_alert(tenant, rule, agent, metric, *, now):
         "firstObservedAt": now,
         "lastObservedAt": now,
         "occurrenceCount": 1,
+        "deduplicationKey": deduplication_key,
         "deliveryStatus": "pending",
     }
+    suppression = _matching_alert_suppression(tenant, record, now=now)
+    if suppression:
+        record.update(
+            {
+                "status": "suppressed",
+                "suppressionId": suppression["id"],
+                "suppressedUntil": int(suppression["expires_at"]),
+                "deliveryStatus": "suppressed",
+            }
+        )
     try:
         TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
     except Exception as error:
@@ -14423,7 +14698,7 @@ def _open_behavior_alert(tenant, rule, agent, metric, *, now):
         raise
     _audit(
         tenant,
-        "behavior_alert_opened",
+        "behavior_alert_suppressed" if suppression else "behavior_alert_opened",
         f"system:response-rule:{rule['id']}:v{int(rule['active_version'])}",
         {
             "alert_id": alert_id,
@@ -14432,18 +14707,21 @@ def _open_behavior_alert(tenant, rule, agent, metric, *, now):
             "rule_id": rule["id"],
             "rule_version": int(rule["active_version"]),
             "evidence_digest": metric["evidenceDigest"],
+            "deduplication_key": deduplication_key,
+            "suppression_id": suppression.get("id") if suppression else None,
         },
     )
     _record_response_execution(
         tenant,
         rule,
         record,
-        outcome="alerted",
-        reason_code=signal,
+        outcome="suppressed" if suppression else "alerted",
+        reason_code="active_suppression" if suppression else signal,
         agent_key=record["agentKey"],
         now=now,
     )
-    _deliver_pending_endpoint_alerts(tenant)
+    if not suppression:
+        _deliver_pending_endpoint_alerts(tenant)
     return record
 
 
@@ -14563,7 +14841,7 @@ def _response_rule_preview(tenant, configuration):
     alerts = [
         item
         for item in _list(tenant, "ALERT", consistent_read=True)
-        if item.get("source") == "endpoint_evidence" and item.get("status") != "resolved"
+        if item.get("source") == "endpoint_evidence" and item.get("status") == "open"
     ]
     matches = []
     synthetic_rule = {"id": "preview", "configuration": normalized}
@@ -14618,7 +14896,7 @@ def _evaluate_response_rules(tenant, *, now=None):
     alerts = [
         item
         for item in _list(tenant, "ALERT", consistent_read=True)
-        if item.get("source") == "endpoint_evidence" and item.get("status") != "resolved"
+        if item.get("source") == "endpoint_evidence" and item.get("status") == "open"
     ]
     outcomes = []
     for rule in rules:
@@ -17431,6 +17709,7 @@ def handler(event, context):
                     "health",
                     "slo",
                     "alerts",
+                    "alert-suppressions",
                     "cases",
                     "response-rules",
                     "response-executions",
@@ -17454,6 +17733,7 @@ def handler(event, context):
                     "health": "HEALTH",
                     "slo": "SLO",
                     "alerts": "ALERT",
+                    "alert-suppressions": "ALERT_SUPPRESSION",
                     "cases": "CASE",
                     "response-rules": "RESPONSE_RULE",
                     "response-executions": "RESPONSE_EXECUTION",
@@ -17483,6 +17763,15 @@ def handler(event, context):
                     ]
                     items.sort(
                         key=lambda item: (int(item.get("updatedAt", 0)), str(item.get("id", ""))),
+                        reverse=True,
+                    )
+                elif parts[0] == "alert-suppressions":
+                    items = [
+                        _alert_suppression_view(item)
+                        for item in _list(tenant, "ALERT_SUPPRESSION", consistent_read=True)
+                    ]
+                    items.sort(
+                        key=lambda item: (int(item.get("expiresAt", 0)), str(item.get("id", ""))),
                         reverse=True,
                     )
                 elif parts[0] == "response-rules":
@@ -17536,6 +17825,18 @@ def handler(event, context):
                 return _response(200, {"items": items, "nextCursor": None})
             if method == "POST" and parts == ["policy-exceptions"]:
                 return _response(201, _create_policy_exception(tenant, _body(event), actor))
+            if method == "POST" and parts == ["alert-suppressions"]:
+                return _response(201, _create_alert_suppression(tenant, _body(event), actor))
+            if (
+                method == "POST"
+                and len(parts) == 3
+                and parts[0] == "alert-suppressions"
+                and parts[2] == "revoke"
+            ):
+                return _response(
+                    200,
+                    _revoke_alert_suppression(tenant, parts[1], _body(event), actor),
+                )
             if (
                 method == "POST"
                 and len(parts) == 3

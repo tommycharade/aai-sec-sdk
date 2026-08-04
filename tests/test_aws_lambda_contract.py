@@ -8626,6 +8626,251 @@ def test_endpoint_reads_cannot_trigger_automatic_response(monkeypatch: Any) -> N
     assert evaluations == [tenant]
 
 
+def test_alert_suppression_is_exact_expiring_audited_and_non_destructive(
+    monkeypatch: Any,
+) -> None:
+    """Suppression retains evidence, cannot hide another target and revokes cleanly."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-alert-suppression"
+    now = int(time.time())
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["incident-responder"],
+        "sub": "suppression-owner",
+    }
+    match = {
+        "sources": ["endpoint_evidence"],
+        "severities": ["high", "critical"],
+        "reasonCodes": ["signature_invalid"],
+        "deploymentIds": [],
+        "agentIds": [],
+        "deviceIds": ["device-a"],
+        "responseRuleIds": [],
+    }
+    created = _invoke(
+        module,
+        _event(
+            "/api/enterprise/alert-suppressions",
+            "POST",
+            body={
+                "id": "planned-device-maintenance",
+                "name": "Planned endpoint maintenance",
+                "reason": "Approved maintenance for the exact synthetic endpoint only.",
+                "expiresAt": now + 3_600,
+                "match": match,
+            },
+            claims=claims,
+        ),
+    )
+    assert created["statusCode"] == 201, created
+    suppression = json.loads(created["body"])
+    assert suppression["status"] == "active"
+    listed = _invoke(
+        module,
+        _event("/api/enterprise/alert-suppressions", "GET", claims=claims),
+    )
+    assert listed["statusCode"] == 200, listed
+    assert json.loads(listed["body"])["items"] == [suppression]
+
+    suppressed = module._open_endpoint_alert(tenant, "device-a", "signature_invalid", now=now + 1)
+    assert suppressed["status"] == "suppressed"
+    assert suppressed["deliveryStatus"] == "suppressed"
+    assert suppressed["suppressionId"] == suppression["id"]
+    assert suppressed["deduplicationKey"] == suppressed["id"]
+    assert module._list(tenant, "RESPONSE_EXECUTION") == []
+
+    unrelated = module._open_endpoint_alert(tenant, "device-b", "signature_invalid", now=now + 1)
+    assert unrelated["status"] == "open"
+    assert unrelated.get("suppressionId") is None
+
+    revoked = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/alert-suppressions/{suppression['id']}/revoke",
+            "POST",
+            body={
+                "expectedRevision": suppression["revision"],
+                "reason": "Maintenance ended and alert delivery must resume immediately.",
+            },
+            claims=claims,
+        ),
+    )
+    assert revoked["statusCode"] == 200, revoked
+    reopened = module._open_endpoint_alert(
+        tenant, "device-a", "signature_invalid", now=now + 2, reopen_acknowledged=True
+    )
+    assert reopened["status"] == "open"
+    assert reopened["revision"] == 2
+    assert reopened["occurrenceCount"] == 2
+    assert table.items[(f"TENANT#{tenant}", f"ALERT#{suppressed['id']}")]["status"] == "open"
+    audit_types = {
+        json.loads(record["Body"])["event_type"] for record in module._fake_s3.objects.values()
+    }
+    assert {
+        "alert_suppression_created",
+        "endpoint_alert_suppressed",
+        "alert_suppression_revoked",
+        "endpoint_alert_reopened",
+    } <= audit_types
+
+
+def test_behavior_alert_windows_share_deduplication_identity_when_suppressed(
+    monkeypatch: Any,
+) -> None:
+    """Repeated behavior windows group stably while retaining each evidence record."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-behavior-suppression"
+    now = int(time.time())
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["incident-responder"],
+        "sub": "suppression-owner",
+    }
+    created = _invoke(
+        module,
+        _event(
+            "/api/enterprise/alert-suppressions",
+            "POST",
+            body={
+                "id": "known-mcp-rollout",
+                "name": "Known MCP rollout",
+                "reason": "Approved rollout of one exact behavior detection rule.",
+                "expiresAt": now + 3_600,
+                "match": {
+                    "sources": ["behavior_analytics"],
+                    "severities": ["high"],
+                    "reasonCodes": ["new_mcp_server"],
+                    "deploymentIds": ["dep-a"],
+                    "agentIds": ["agent-a"],
+                    "deviceIds": [],
+                    "responseRuleIds": ["detect-new-mcp"],
+                },
+            },
+            claims=claims,
+        ),
+    )
+    assert created["statusCode"] == 201, created
+    configuration = {
+        "match": {
+            "source": "agent_activity",
+            "signalTypes": ["new_mcp_server"],
+            "hosts": ["claude-code"],
+            "severity": "high",
+        },
+        "action": {"type": "create_alert"},
+        "baseline": {
+            "lookbackDays": 7,
+            "currentWindowMinutes": 15,
+            "minimumBaselineEvents": 5,
+            "minimumCurrentEvents": 2,
+            "sensitivityMultiplier": 3.0,
+        },
+        "priority": 100,
+    }
+    rule = {
+        "id": "detect-new-mcp",
+        "active_version": 1,
+        "configuration": configuration,
+        "content_hash": module._configuration_hash(configuration),
+    }
+    agent = {"id": "agent-a", "deployment_id": "dep-a", "host": "claude-code"}
+    metric = {
+        "signalType": "new_mcp_server",
+        "baselineCount": 5,
+        "currentCount": 2,
+        "threshold": 2,
+        "expectedCurrentCount": 0.0,
+        "dimension": "github",
+        "dimensionHash": hashlib.sha256(b"github").hexdigest(),
+        "evidenceDigest": hashlib.sha256(b"synthetic-evidence").hexdigest(),
+    }
+    first = module._open_behavior_alert(tenant, rule, agent, metric, now=now + 1)
+    second = module._open_behavior_alert(tenant, rule, agent, metric, now=now + 901)
+    assert first["id"] != second["id"]
+    assert first["deduplicationKey"] == second["deduplicationKey"]
+    assert first["status"] == second["status"] == "suppressed"
+    assert len(module._list(tenant, "ALERT")) == 2
+    executions = module._list(tenant, "RESPONSE_EXECUTION")
+    assert {item["outcome"] for item in executions} == {"suppressed"}
+    assert {item["reason_code"] for item in executions} == {"active_suppression"}
+
+
+@pytest.mark.parametrize("attack", ["broad", "overlong", "wildcard", "unauthorized"])
+def test_alert_suppression_bypasses_fail_closed(monkeypatch: Any, attack: str) -> None:
+    """Browser input cannot create broad, permanent, wildcard or unauthorized silence."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-suppression-bypass"
+    now = int(time.time())
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    match = {
+        "sources": ["behavior_analytics"],
+        "severities": ["high"],
+        "reasonCodes": ["new_mcp_server"],
+        "deploymentIds": [],
+        "agentIds": [],
+        "deviceIds": [],
+        "responseRuleIds": ["detect-new-mcp"],
+    }
+    if attack == "broad":
+        match["reasonCodes"] = []
+        match["responseRuleIds"] = []
+    elif attack == "wildcard":
+        match["responseRuleIds"] = ["*"]
+    response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/alert-suppressions",
+            "POST",
+            body={
+                "id": f"reject-{attack}",
+                "name": "Rejected suppression",
+                "reason": "Synthetic bypass attempt must fail closed at the API boundary.",
+                "expiresAt": now + (8 * 24 * 60 * 60) if attack == "overlong" else now + 3_600,
+                "match": match,
+            },
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": [
+                    "policy-author" if attack == "unauthorized" else "incident-responder"
+                ],
+                "sub": "synthetic-attacker",
+            },
+        ),
+    )
+    assert response["statusCode"] in {400, 403}
+    assert module._list(tenant, "ALERT_SUPPRESSION") == []
+
+
+def test_tampered_stored_suppression_restores_alerting(monkeypatch: Any) -> None:
+    """Corrupt persistence must fail open for detection rather than hide an alert."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-tampered-suppression"
+    now = int(time.time())
+    table.put_item(
+        Item=module._item_key(tenant, "ALERT_SUPPRESSION", "tampered")
+        | {
+            "id": "tampered",
+            "status": "active",
+            "expires_at": now + 3_600,
+            "match": {
+                "sources": ["endpoint_evidence"],
+                "severities": ["high"],
+                "reasonCodes": [],
+                "deploymentIds": [],
+                "agentIds": [],
+                "deviceIds": [],
+                "responseRuleIds": [],
+            },
+            "content_hash": "0" * 64,
+        }
+    )
+    alert = module._open_endpoint_alert(tenant, "device-a", "signature_invalid", now=now + 1)
+    assert alert["status"] == "open"
+    assert alert.get("suppressionId") is None
+
+
 def test_behavior_rule_is_explainable_alert_only_and_case_bound(monkeypatch: Any) -> None:
     """Agent observations may create governed alerts but never automatic authority."""
     module, table = _load_handler(monkeypatch)

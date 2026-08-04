@@ -1059,6 +1059,14 @@ prevents browser or agent output from selecting authority while preserving a
 manual response path. See [Explainable agent behavior
 detection](behavior-detection-design.md).
 
+Alert suppression is incident-response authority, not presentation state. The
+server requires an exact identity selector, derives operator and time, limits
+duration to seven days, retains the matched alert, withholds outbound delivery,
+and prevents a suppressed endpoint alert from entering automatic containment.
+Expiry or revocation restores routing for later observations without rewriting
+earlier evidence. See [Governed alert suppression and
+deduplication](alert-suppression-design.md).
+
 Policy simulation is not execution and does not grant authority. The control
 plane evaluates only a pending immutable version against a bounded tenant- and
 policy-scoped window of redacted decision evidence. It reports missing command

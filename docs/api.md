@@ -558,6 +558,17 @@ prompts and results are excluded. See [Endpoint detection and
 response](endpoint-detection-response.md) and [Explainable agent behavior
 detection](behavior-detection-design.md).
 
+`GET /enterprise/alert-suppressions` returns retained active, expired and
+revoked exact-scope records. `POST /enterprise/alert-suppressions` requires
+`incident_response`, a stable ID, a 20–500-character rationale, a server-future
+expiry no more than seven days away, explicit source/severity lists and at
+least one exact reason, rule, deployment, agent or device selector. Wildcards
+and unknown fields fail closed. `POST
+/enterprise/alert-suppressions/{suppressionId}/revoke` requires the current
+revision and a rationale. Suppression retains the alert but withholds outbound
+delivery and automatic endpoint containment; see [Governed alert suppression
+and deduplication](alert-suppression-design.md).
+
 ## Policy change assurance
 
 `GET /enterprise/policies/{policyId}/versions/{version}` returns a typed
