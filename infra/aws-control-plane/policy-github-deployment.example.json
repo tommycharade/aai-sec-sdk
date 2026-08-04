@@ -1,6 +1,8 @@
 {
-  "schemaVersion": 1,
-  "credentialSecretName": "aai-sec/policy/github-app-installation",
+  "schemaVersion": 2,
+  "appPrivateKeySecretName": "aai-sec/policy/github-app-private-key",
+  "appClientId": "Iv1.replace-with-github-app-client-id",
+  "installationId": "12345678",
   "allowedRepositories": [
     "github.com/example/security-policy"
   ],

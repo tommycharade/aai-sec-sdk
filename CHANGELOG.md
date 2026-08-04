@@ -1,5 +1,11 @@
 # Changelog
 
+- Added unattended GitHub App authentication for reviewed policy imports. A
+  dedicated least-privilege broker owns the RSA private key and mints
+  repository- and permission-scoped installation tokens on demand; the
+  verifier and control-plane handler retain separate, narrower authorities.
+  Schema-v1 manually rotated tokens remain available only for pilot migration.
+
 - Added AWS-hosted parity for reviewed policy GitOps. A dedicated
   least-privilege verifier Lambda owns the allow-listed GitHub credential and
   outbound calls but has no fleet or signing authority; the control plane

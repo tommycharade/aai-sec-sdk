@@ -80,12 +80,12 @@ authority.
 ## Reviewed policy GitHub source
 
 The hosted policy import is disabled unless both an exact credential reference
-and an explicit repository allow-list are present at synthesis. Store a
-short-lived, externally rotated GitHub App installation token as an exact JSON
-object in Secrets Manager:
+and an explicit repository allow-list are present at synthesis. For schema-v2
+production authority, store the GitHub App private key as an exact JSON object
+in Secrets Manager:
 
 ```json
-{"token":"<short-lived-installation-token>"}
+{"privateKeyPem":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"}
 ```
 
 The GitHub App installation requires read-only **Contents**, **Metadata** and
@@ -108,17 +108,22 @@ python3 scripts/deploy_aws_control_plane.py deploy \
   --profile p1 --region eu-west-2
 ```
 
-Repository identities are exact `github.com/owner/name` values; wildcards,
-branches and abbreviated commit IDs are rejected. The secret-free manifest is
+Schema-v2 repositories must belong to the same App installation owner. The
+dedicated broker mints a repository- and permission-scoped one-hour token for
+each import; no installation token is stored or manually rotated. Repository
+identities are exact `github.com/owner/name` values; wildcards, branches and
+abbreviated commit IDs are rejected. The secret-free manifest is
 stored in an encrypted, stack-specific SSM parameter. Routine deployments erase
 ambient policy-source variables and load only that persisted authority. If a
 configured stack loses its manifest, deployment fails instead of silently
-disabling the verifier. Automatic GitHub App installation-token rotation is
-still required before unattended production use; a manually rotated token is
-suitable only for a controlled pilot.
+disabling the verifier. Schema-v1 externally rotated `{"token":"..."}` secrets
+remain supported only to migrate a controlled pilot.
 
-The dedicated verifier Lambda owns the secret and outbound GitHub calls but has
-no DynamoDB or KMS signing access. The main handler cannot read the token. It
+The dedicated token broker owns the private key and installation-token exchange
+but has no DynamoDB, KMS signing or control-plane mutation access. The verifier
+can invoke only that broker, receives the short-lived token in memory and owns
+the remaining bounded GitHub reads. The main handler can invoke only the
+verifier and cannot read either credential. It
 revalidates the worker response and atomically writes an inactive draft plus
 immutable provenance. Import never submits, approves, stages, activates or
 assigns a policy. Export uses the existing asymmetric policy-signing KMS key.
@@ -136,6 +141,9 @@ one unsigned commit, one dismissed latest review, one cross-tenant document,
 one verifier outage, one replay and one transaction race. Retain the import,
 review, draft, export signature and denial evidence. Synthetic CI proves the
 software contract but is not live GitHub acceptance.
+
+See [GitHub App policy-source authentication](github-app-policy-source-auth-design.md)
+for JWT, permission, migration and failure-boundary details.
 
 ## Microsoft Entra ID federation
 

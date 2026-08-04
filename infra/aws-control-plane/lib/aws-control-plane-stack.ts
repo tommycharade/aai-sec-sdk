@@ -10,6 +10,7 @@ import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as lambdaEventSources from "aws-cdk-lib/aws-lambda-event-sources";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
@@ -176,6 +177,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     const entraAaiTenantId = process.env.ENTRA_AAI_TENANT_ID?.trim();
     const entraScimTokenSecretName = process.env.ENTRA_SCIM_TOKEN_SECRET_NAME?.trim();
     const policyGitHubSecretName = process.env.POLICY_GITHUB_SECRET_NAME?.trim();
+    const policyGitHubAppSecretName = process.env.POLICY_GITHUB_APP_SECRET_NAME?.trim();
+    const policyGitHubAppClientId = process.env.POLICY_GITHUB_APP_CLIENT_ID?.trim();
+    const policyGitHubInstallationId = process.env.POLICY_GITHUB_INSTALLATION_ID?.trim();
     const policyGitHubRepositories = (process.env.POLICY_GITHUB_ALLOWED_REPOSITORIES ?? "")
       .split(",")
       .map((value) => value.trim())
@@ -215,10 +219,36 @@ export class AwsControlPlaneStack extends cdk.Stack {
     if (entraStrongAuthEnforced && !entraInputs.every(Boolean)) {
       throw new Error("ENTRA_STRONG_AUTH_ENFORCED requires the complete Entra OIDC configuration");
     }
-    if (Boolean(policyGitHubSecretName) !== Boolean(policyGitHubRepositories.length)) {
+    const policyGitHubAppInputs = [
+      policyGitHubAppSecretName,
+      policyGitHubAppClientId,
+      policyGitHubInstallationId,
+    ];
+    if (policyGitHubAppInputs.some(Boolean) && !policyGitHubAppInputs.every(Boolean)) {
       throw new Error(
-        "POLICY_GITHUB_SECRET_NAME and POLICY_GITHUB_ALLOWED_REPOSITORIES must be configured together",
+        "POLICY_GITHUB_APP_SECRET_NAME, POLICY_GITHUB_APP_CLIENT_ID and POLICY_GITHUB_INSTALLATION_ID must be configured together",
       );
+    }
+    if (policyGitHubSecretName && policyGitHubAppInputs.some(Boolean)) {
+      throw new Error("legacy token and GitHub App policy-source authority are mutually exclusive");
+    }
+    const policyGitHubConfigured = Boolean(policyGitHubSecretName || policyGitHubAppInputs.every(Boolean));
+    if (policyGitHubConfigured !== Boolean(policyGitHubRepositories.length)) {
+      throw new Error(
+        "GitHub policy-source credentials and POLICY_GITHUB_ALLOWED_REPOSITORIES must be configured together",
+      );
+    }
+    if (
+      policyGitHubAppClientId
+      && !/^[A-Za-z0-9._-]{6,128}$/.test(policyGitHubAppClientId)
+    ) {
+      throw new Error("POLICY_GITHUB_APP_CLIENT_ID is invalid");
+    }
+    if (
+      policyGitHubInstallationId
+      && !/^[1-9][0-9]{0,19}$/.test(policyGitHubInstallationId)
+    ) {
+      throw new Error("POLICY_GITHUB_INSTALLATION_ID is invalid");
     }
     if (
       policyGitHubRepositories.length > 100
@@ -228,6 +258,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
       )
     ) {
       throw new Error("POLICY_GITHUB_ALLOWED_REPOSITORIES is invalid");
+    }
+    const policyGitHubRepositoryOwners = new Set(
+      policyGitHubRepositories.map((repository) => repository.split("/")[1].toLowerCase()),
+    );
+    if (policyGitHubAppInputs.every(Boolean) && policyGitHubRepositoryOwners.size !== 1) {
+      throw new Error("GitHub App policy repositories must share one installation owner");
     }
 
     const table = new dynamodb.Table(this, "ControlPlaneTable", {
@@ -750,30 +786,63 @@ export class AwsControlPlaneStack extends cdk.Stack {
     presence.grantReadWriteData(handler);
     idempotency.grantReadWriteData(handler);
     scim.grantReadWriteData(handler);
-    if (policyGitHubSecretName) {
+    if (policyGitHubConfigured) {
       // Provider credentials and outbound GitHub access are isolated from the
       // policy-writing handler. The worker cannot mutate DynamoDB or sign a
       // policy; the handler can only invoke this exact function.
-      const policyGitHubSecret = secretsmanager.Secret.fromSecretNameV2(
-        this,
-        "PolicyGitHubCredential",
-        policyGitHubSecretName,
-      );
+      const verifierEnvironment: Record<string, string> = {
+        POLICY_GITHUB_ALLOWED_REPOSITORIES: policyGitHubRepositories.join(","),
+      };
+      let policyGitHubSecret: secretsmanager.ISecret | undefined;
+      let tokenBroker: NodejsFunction | undefined;
+      if (policyGitHubSecretName) {
+        policyGitHubSecret = secretsmanager.Secret.fromSecretNameV2(
+          this,
+          "PolicyGitHubCredential",
+          policyGitHubSecretName,
+        );
+        verifierEnvironment.POLICY_GITHUB_SECRET_ARN = policyGitHubSecret.secretArn;
+      } else {
+        const appSecret = secretsmanager.Secret.fromSecretNameV2(
+          this,
+          "PolicyGitHubAppCredential",
+          policyGitHubAppSecretName!,
+        );
+        tokenBroker = new NodejsFunction(this, "PolicyGitHubTokenBroker", {
+          runtime: lambda.Runtime.NODEJS_22_X,
+          architecture: lambda.Architecture.ARM_64,
+          entry: path.join(__dirname, "../lambda-node/github_app_token_broker.ts"),
+          handler: "handler",
+          timeout: cdk.Duration.seconds(10),
+          memorySize: 256,
+          reservedConcurrentExecutions: 5,
+          bundling: { externalModules: [], minify: true, sourceMap: false },
+          environment: {
+            POLICY_GITHUB_APP_SECRET_ARN: appSecret.secretArn,
+            POLICY_GITHUB_APP_CLIENT_ID: policyGitHubAppClientId!,
+            POLICY_GITHUB_INSTALLATION_ID: policyGitHubInstallationId!,
+            POLICY_GITHUB_REPOSITORY_NAMES: policyGitHubRepositories
+              .map((repository) => repository.split("/")[2])
+              .join(","),
+          },
+          tracing: lambda.Tracing.PASS_THROUGH,
+        });
+        appSecret.grantRead(tokenBroker);
+        verifierEnvironment.POLICY_GITHUB_TOKEN_BROKER_ARN = tokenBroker.functionArn;
+      }
       const policySourceVerifier = new lambda.Function(this, "PolicySourceVerifier", {
         runtime: lambda.Runtime.PYTHON_3_13,
         architecture: lambda.Architecture.ARM_64,
         handler: "policy_source_verifier.handler",
         code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
-        timeout: cdk.Duration.seconds(30),
+        timeout: cdk.Duration.seconds(45),
         memorySize: 256,
         reservedConcurrentExecutions: 10,
-        environment: {
-          POLICY_GITHUB_SECRET_ARN: policyGitHubSecret.secretArn,
-          POLICY_GITHUB_ALLOWED_REPOSITORIES: policyGitHubRepositories.join(","),
-        },
+        environment: verifierEnvironment,
         tracing: lambda.Tracing.PASS_THROUGH,
       });
-      policyGitHubSecret.grantRead(policySourceVerifier);
+      policyGitHubSecret?.grantRead(policySourceVerifier);
+      tokenBroker?.grantInvoke(policySourceVerifier);
       policySourceVerifier.grantInvoke(handler);
       handler.addEnvironment("POLICY_SOURCE_VERIFIER_ARN", policySourceVerifier.functionArn);
     }
@@ -1294,7 +1363,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       value: entraProvider ? "configured" : "not-configured",
     });
     new cdk.CfnOutput(this, "PolicyGitHubSourceStatus", {
-      value: policyGitHubSecretName ? "configured" : "not-configured",
+      value: policyGitHubConfigured ? "configured" : "not-configured",
     });
     new cdk.CfnOutput(this, "MicrosoftEntraScimStatus", { value: scimEndpointStatus });
     new cdk.CfnOutput(this, "RuntimeAttestationStatus", {

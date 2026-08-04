@@ -929,6 +929,14 @@ independently prove all-repository access, and a centrally installed GitHub App
 is the preferred future credential model. See
 [AWS-managed discovery connectors](scheduled-discovery-connectors-design.md).
 
+Reviewed policy imports use a separate GitHub App authority. A dedicated broker
+alone reads the RSA private key and exchanges a short-lived App JWT for an
+installation token narrowed to the exact configured repositories and read-only
+Contents, Metadata and Pull requests. The verifier may invoke the broker but
+cannot read its key; the control-plane handler may invoke the verifier but not
+the broker. Malformed keys, broader returned permissions, implausible expiry,
+redirects or invocation failure deny import before provider content is read.
+
 Intune is authoritative only for its managed-device population. The collector
 does not infer binary presence, process activity or project roots from device
 enrollment, and it excludes device names, serial numbers, email addresses and

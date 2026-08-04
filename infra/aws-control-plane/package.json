@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test:github-app": "tsx --test test/github-app-token-broker.test.ts",
     "synth": "npm run build && cdk synth",
     "deploy": "python3 ../../scripts/deploy_aws_control_plane.py deploy",
     "deploy:replica": "npm run build && cdk --app 'npx ts-node --prefer-ts-exts bin/audit-replica.ts' deploy AaiSecAuditReplica --require-approval never",
@@ -16,10 +17,13 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@aws-sdk/client-secrets-manager": "3.1102.0",
     "aws-cdk": "2.1133.0",
     "aws-cdk-lib": "2.263.0",
     "constructs": "10.7.2",
+    "esbuild": "0.28.1",
     "ts-node": "^10.9.2",
+    "tsx": "4.23.5",
     "typescript": "^5.9.0"
   }
 }

@@ -22,6 +22,9 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
 
 class DeploymentConfigurationError(ValueError):
     """Raised when identity deployment input cannot prove a safe configuration."""
@@ -45,9 +48,17 @@ _RECOVERY_MANIFEST_FIELDS = {
     "replicaRegion",
     "recoveryEvidenceRef",
 }
-_POLICY_GITHUB_MANIFEST_FIELDS = {
+_POLICY_GITHUB_MANIFEST_V1_FIELDS = {
     "schemaVersion",
     "credentialSecretName",
+    "allowedRepositories",
+    "reviewEvidenceRef",
+}
+_POLICY_GITHUB_MANIFEST_V2_FIELDS = {
+    "schemaVersion",
+    "appPrivateKeySecretName",
+    "appClientId",
+    "installationId",
     "allowedRepositories",
     "reviewEvidenceRef",
 }
@@ -67,6 +78,9 @@ _ENTRA_ENVIRONMENT_FIELDS = (
 _RECOVERY_ENVIRONMENT_FIELDS = ("AUDIT_REPLICA_BUCKET_ARN", "AUDIT_REPLICA_REGION")
 _POLICY_GITHUB_ENVIRONMENT_FIELDS = (
     "POLICY_GITHUB_SECRET_NAME",
+    "POLICY_GITHUB_APP_SECRET_NAME",
+    "POLICY_GITHUB_APP_CLIENT_ID",
+    "POLICY_GITHUB_INSTALLATION_ID",
     "POLICY_GITHUB_ALLOWED_REPOSITORIES",
 )
 _S3_BUCKET_ARN = re.compile(r"^arn:(aws|aws-us-gov|aws-cn):s3:::[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
@@ -263,7 +277,11 @@ class AuditRecoveryManifest:
 class PolicyGitHubDeploymentManifest:
     """Reviewed, secret-free authority for exact-version GitHub policy sources."""
 
-    credential_secret_name: str
+    schema_version: int
+    credential_secret_name: str | None
+    app_private_key_secret_name: str | None
+    app_client_id: str | None
+    installation_id: str | None
     allowed_repositories: tuple[str, ...]
     review_evidence_ref: str
 
@@ -278,19 +296,25 @@ class PolicyGitHubDeploymentManifest:
             raise DeploymentConfigurationError(
                 "policy GitHub manifest is not valid JSON"
             ) from error
-        if not isinstance(value, dict) or set(value) != _POLICY_GITHUB_MANIFEST_FIELDS:
+        if not isinstance(value, dict) or value.get("schemaVersion") not in {1, 2}:
             raise DeploymentConfigurationError(
-                "policy GitHub manifest fields do not exactly match schema version 1"
+                "policy GitHub manifest fields require schemaVersion 1 or 2"
             )
-        if value["schemaVersion"] != 1:
-            raise DeploymentConfigurationError("policy GitHub manifest schemaVersion must be 1")
-        secret_name = _bounded_string(
-            value["credentialSecretName"], "credentialSecretName", maximum=512
+        schema_version = value["schemaVersion"]
+        expected_fields = (
+            _POLICY_GITHUB_MANIFEST_V1_FIELDS
+            if schema_version == 1
+            else _POLICY_GITHUB_MANIFEST_V2_FIELDS
         )
-        if not _AWS_SECRET_NAME.fullmatch(secret_name):
+        if set(value) != expected_fields:
             raise DeploymentConfigurationError(
-                "credentialSecretName contains unsupported characters"
+                "policy GitHub manifest fields do not exactly match "
+                f"schema version {schema_version}"
             )
+        secret_field = "credentialSecretName" if schema_version == 1 else "appPrivateKeySecretName"
+        secret_name = _bounded_string(value[secret_field], secret_field, maximum=512)
+        if not _AWS_SECRET_NAME.fullmatch(secret_name):
+            raise DeploymentConfigurationError(f"{secret_field} contains unsupported characters")
         repositories = value["allowedRepositories"]
         if (
             not isinstance(repositories, list)
@@ -310,27 +334,56 @@ class PolicyGitHubDeploymentManifest:
             raise DeploymentConfigurationError(
                 "reviewEvidenceRef must be an opaque non-secret reference"
             )
-        return cls(secret_name, normalized, evidence_ref)
+        if schema_version == 1:
+            return cls(1, secret_name, None, None, None, normalized, evidence_ref)
+        client_id = _bounded_string(value["appClientId"], "appClientId", maximum=128)
+        installation_id = _bounded_string(value["installationId"], "installationId", maximum=20)
+        owners = {repository.split("/")[1].lower() for repository in normalized}
+        if not re.fullmatch(r"[A-Za-z0-9._-]{6,128}", client_id):
+            raise DeploymentConfigurationError("appClientId is malformed")
+        if not re.fullmatch(r"[1-9][0-9]{0,19}", installation_id):
+            raise DeploymentConfigurationError("installationId is malformed")
+        if len(owners) != 1:
+            raise DeploymentConfigurationError(
+                "schema-v2 allowedRepositories must share one installation owner"
+            )
+        return cls(2, None, secret_name, client_id, installation_id, normalized, evidence_ref)
 
     def canonical_json(self) -> str:
         """Return the deterministic secret-free manifest persisted in Parameter Store."""
-        return json.dumps(
-            {
-                "allowedRepositories": list(self.allowed_repositories),
-                "credentialSecretName": self.credential_secret_name,
-                "reviewEvidenceRef": self.review_evidence_ref,
-                "schemaVersion": 1,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        value: dict[str, object] = {
+            "allowedRepositories": list(self.allowed_repositories),
+            "reviewEvidenceRef": self.review_evidence_ref,
+            "schemaVersion": self.schema_version,
+        }
+        if self.schema_version == 1:
+            value["credentialSecretName"] = self.credential_secret_name
+        else:
+            value.update(
+                {
+                    "appClientId": self.app_client_id,
+                    "appPrivateKeySecretName": self.app_private_key_secret_name,
+                    "installationId": self.installation_id,
+                }
+            )
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
     def deployment_environment(self) -> dict[str, str]:
         """Return exact reviewed repository authority and one credential reference."""
-        return {
-            "POLICY_GITHUB_SECRET_NAME": self.credential_secret_name,
+        environment = {
             "POLICY_GITHUB_ALLOWED_REPOSITORIES": ",".join(self.allowed_repositories),
         }
+        if self.schema_version == 1:
+            environment["POLICY_GITHUB_SECRET_NAME"] = self.credential_secret_name or ""
+        else:
+            environment.update(
+                {
+                    "POLICY_GITHUB_APP_SECRET_NAME": self.app_private_key_secret_name or "",
+                    "POLICY_GITHUB_APP_CLIENT_ID": self.app_client_id or "",
+                    "POLICY_GITHUB_INSTALLATION_ID": self.installation_id or "",
+                }
+            )
+        return environment
 
 
 def _aws(
@@ -577,16 +630,44 @@ def verify_policy_github_credential(
     region: str,
     runner: Runner = subprocess.run,
 ) -> None:
-    """Verify the exact one-field GitHub credential shape without emitting its value."""
-    secret = _secret_value(
-        manifest.credential_secret_name, profile=profile, region=region, runner=runner
+    """Verify the selected GitHub credential shape without emitting its value."""
+    secret_name = (
+        manifest.credential_secret_name
+        if manifest.schema_version == 1
+        else manifest.app_private_key_secret_name
     )
+    if secret_name is None:
+        raise DeploymentConfigurationError("policy GitHub credential reference is missing")
+    secret = _secret_value(secret_name, profile=profile, region=region, runner=runner)
     try:
         value = json.loads(secret, object_pairs_hook=_strict_object)
     except json.JSONDecodeError as error:
         raise DeploymentConfigurationError(
             "policy GitHub secret contains malformed JSON"
         ) from error
+    if manifest.schema_version == 2:
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"privateKeyPem"}
+            or not isinstance(value["privateKeyPem"], str)
+            or len(value["privateKeyPem"].encode("utf-8")) > 32_768
+        ):
+            raise DeploymentConfigurationError(
+                "policy GitHub App secret must contain only a bounded privateKeyPem"
+            )
+        try:
+            key = serialization.load_pem_private_key(
+                value["privateKeyPem"].encode("utf-8"), password=None
+            )
+        except (TypeError, ValueError) as error:
+            raise DeploymentConfigurationError(
+                "policy GitHub App private key is malformed"
+            ) from error
+        if not isinstance(key, rsa.RSAPrivateKey) or key.key_size < 2048:
+            raise DeploymentConfigurationError(
+                "policy GitHub App private key must be RSA with at least 2048 bits"
+            )
+        return
     if (
         not isinstance(value, dict)
         or set(value) != {"token"}

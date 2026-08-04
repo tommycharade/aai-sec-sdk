@@ -173,6 +173,9 @@ jobs:
       - name: Install pinned AWS infrastructure dependencies
         working-directory: infra/aws-control-plane
         run: npm ci
+      - name: Prove GitHub App token-broker contracts
+        working-directory: infra/aws-control-plane
+        run: npm run test:github-app
       - name: Prove policy-source verifier privilege separation
         run: python -m pytest -q tests/test_aws_policy_source_stack.py
 

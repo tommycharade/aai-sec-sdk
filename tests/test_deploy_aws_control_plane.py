@@ -11,6 +11,35 @@ from typing import Any
 
 import pytest
 
+SYNTHETIC_RSA_PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----
+MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQCn/CqjSUfACxgL
+MC5UjgOHaIK36bFt/t4pqYN8bZSRNwcbXbw5BKjEN82xCh0P2JCe6IOcbbFxxFNA
+Bjs4KHNWsCwIBx0rdGdYUQGHjtys79lDkfq2BZVPioxyKczPjdOrUmX928IwWlEU
+XmR2QdYHlydPBgre7otZAafJbsEVBe4SOs/qJs6OwsdACh8GwYEWgq9ntP4sE8j6
+N+3UPGJbIexvJl84wvOx1RaFFIhureNyd3id+P/Gn/DTqeR9lRMKdzEpMLIjlYD1
+LqIfdHoAJzwvTPZR30XSUQME0kaj+aW/MImLSUrXrQFgJrDOaKa+UMsLydkaROuB
+g3JWYhTVAgMBAAECggEAELlBk2z9uChClgaPbjqPLmFgtieNUvqPKo2mOfJ82nIk
+gnxz+yc0GAjIMQplN0kjqLZUN/QRuNZHRXX5Wk9ooCY80/XFWSinCztRUCoQXSUp
+t5jmYU2v/jG4ZrszmSww+PrkjX/d1st/C+yTytQmFy5cqvjahzQvakaIajzc+xcp
+F5mtKuAHfDwIFpwfYydSwqUTszhPL/rnINiLXPY94CBYOhKekZRj6tL4k3yiNMiu
+KvGPA/rZfVEd4cTNDK/xeEZgJAG2HWbVq0ZaRH1jgd2om8/0e8PTFTDKaTOdN1j0
+S1E0RY5V5nYbMpRVSYrNS2v0oJ/tecjAxUrZSYgXcQKBgQDibjU2OnFUMfaPKeBm
+sqp8expSyAKC9vpwJplJ5ZFnZ/y7OSB4mSIEvhT43lkzoBBvoWi0SGhtIuwp3vkZ
+O1mqYVNGge3ybejMdFi4RKW7iJUP2vF8Im2TLOE5Wtnd5R5MJQNqbVP9hEJ81XeO
+PS2Uoxjc/Bgluwwppsj+dbz3TQKBgQC97BHP4867dyoFfDqhlHgX0I9oj0u+WYba
+ODdDVMwGIy6YXhwBVgCmyZNKslty4qFWt725nwBmD10Yb3SDjddtcGP0SmSqC+s+
+4wtVJ1oxAjoggDOt/SFs7AdL3w6ArnL+j/mKmIePBB5QVHo1vUU9TBP3sNZS/424
+4xTAujKfqQKBgQDUWfMBdnHOOkU3IljXN3v33iNjuzvPwvw/rZNY4DkrNzSoCP1Q
+3Jwwwms8spoJdnWzmzZszPNSVswQwJHwfd6rkTbeCwAyuaz4Aa0qswaTB5Z0Fise
+9dK5kf9vIKruFPADDTtU1k9MlHseQ7wp42oZ2ZN5u9qRmAfiEA6zxYuAiQKBgQCj
+qfd/ivTwH7SanX95FpSXESdEF5hSJJxNGPymjUB0WYUh0JeZnx9Ym4TObfzYd+xI
+6nYYq6iQStUS5ZkmdOkcain4rtMoprTGsKlnbE4QxbaJo3DlkqlnT87J1yKMScjX
+DgMhKGhJGmd1GhdmkABG3nSmkkFfrNHYbffITayqYQKBgQCjOKgswf12bdBTIFJx
+0BT19B2TcGbxmCrQcTeolmoPeUznPcqcpQ8YlM72Z/Y1B98AAbG8oJ9zjOmhXfIW
+xdDYeIvjpzZdleHANkUGyl3JfIuh/H0SSAiHbpWoogDwkPeXC5nm07JX1at9x9lT
+IFT5RXGbSTMKq3SgJ0w86JChMQ==
+-----END PRIVATE KEY-----"""  # noqa: S105 - synthetic test-only key
+
 
 def _load() -> Any:
     path = Path(__file__).parents[1] / "scripts" / "deploy_aws_control_plane.py"
@@ -52,6 +81,19 @@ def _policy_github_manifest(**updates: Any) -> dict[str, Any]:
     value: dict[str, Any] = {
         "schemaVersion": 1,
         "credentialSecretName": "aai-sec/policy/github-app-installation",
+        "allowedRepositories": ["github.com/example/security-policy"],
+        "reviewEvidenceRef": "SEC-REVIEW-1234",
+    }
+    value.update(updates)
+    return value
+
+
+def _policy_github_app_manifest(**updates: Any) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "schemaVersion": 2,
+        "appPrivateKeySecretName": "aai-sec/policy/github-app-private-key",
+        "appClientId": "Iv1.synthetic-client",
+        "installationId": "12345678",
         "allowedRepositories": ["github.com/example/security-policy"],
         "reviewEvidenceRef": "SEC-REVIEW-1234",
     }
@@ -175,6 +217,30 @@ def test_policy_github_manifest_is_strict_exact_and_secret_free() -> None:
     with pytest.raises(module.DeploymentConfigurationError, match="opaque non-secret"):
         module.PolicyGitHubDeploymentManifest.parse(
             json.dumps(_policy_github_manifest(reviewEvidenceRef="secret review notes"))
+        )
+
+
+def test_policy_github_app_manifest_is_exact_and_single_installation() -> None:
+    module = _load()
+    value = _policy_github_app_manifest()
+    manifest = module.PolicyGitHubDeploymentManifest.parse(json.dumps(value))
+    assert json.loads(manifest.canonical_json()) == value
+    assert manifest.deployment_environment() == {
+        "POLICY_GITHUB_APP_SECRET_NAME": "aai-sec/policy/github-app-private-key",
+        "POLICY_GITHUB_APP_CLIENT_ID": "Iv1.synthetic-client",
+        "POLICY_GITHUB_INSTALLATION_ID": "12345678",
+        "POLICY_GITHUB_ALLOWED_REPOSITORIES": "github.com/example/security-policy",
+    }
+    with pytest.raises(module.DeploymentConfigurationError, match="one installation owner"):
+        module.PolicyGitHubDeploymentManifest.parse(
+            json.dumps(
+                _policy_github_app_manifest(
+                    allowedRepositories=[
+                        "github.com/example/security-policy",
+                        "github.com/other/security-policy",
+                    ]
+                )
+            )
         )
 
 
@@ -629,6 +695,36 @@ def test_policy_github_credential_is_exact_bounded_and_never_returned() -> None:
         module.verify_policy_github_credential(
             manifest, profile="synthetic", region="eu-west-2", runner=extra
         )
+
+
+def test_policy_github_app_private_key_is_rsa_and_secret_value_never_returned() -> None:
+    module = _load()
+    manifest = module.PolicyGitHubDeploymentManifest.parse(
+        json.dumps(_policy_github_app_manifest())
+    )
+
+    def valid(_command: list[str], **_: Any) -> Any:
+        return _completed(
+            json.dumps({"SecretString": json.dumps({"privateKeyPem": SYNTHETIC_RSA_PRIVATE_KEY})})
+        )
+
+    assert (
+        module.verify_policy_github_credential(
+            manifest, profile="synthetic", region="eu-west-2", runner=valid
+        )
+        is None
+    )
+
+    def malformed(_command: list[str], **_: Any) -> Any:
+        return _completed(
+            json.dumps({"SecretString": json.dumps({"privateKeyPem": "must-not-escape"})})
+        )
+
+    with pytest.raises(module.DeploymentConfigurationError, match="malformed") as error:
+        module.verify_policy_github_credential(
+            manifest, profile="synthetic", region="eu-west-2", runner=malformed
+        )
+    assert "must-not-escape" not in str(error.value)
 
 
 def test_deploy_uses_only_persisted_policy_github_authority(monkeypatch: Any) -> None:
