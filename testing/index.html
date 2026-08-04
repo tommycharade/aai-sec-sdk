@@ -2864,10 +2864,12 @@ Step Functions, Lambda and Scheduler stack from synthetic exact resource maps.
 <code>scripts/verify_regional_fault_controller_stack.py</code> independently rejects
 public execution grants, precondition bypass, reordered or uncompensated
 mutations, unbounded retries, broad IAM, execution-data logging, weakened
-watchdog DLQ posture and a falsely ready probe status. The probe handler tests
-prove every phase validates complete short-lived authority and then fails
-closed. These are infrastructure and protocol contracts; they are not live AWS
-dependency-failure evidence.</p>
+watchdog DLQ posture and a falsely ready probe status. Provider-shaped tests
+prove complete short-lived authority, exact witness state, processed-template
+binding, complete bounded runtime inventory, source fencing, target state,
+source-only routing, real access-denial evidence and recovery. Cognito and
+unrecognized provider failures fail closed. These are infrastructure and
+protocol contracts; they are not live AWS dependency-failure evidence.</p>
 <p>The optional live PostgreSQL path is exercised by the <code>postgres-integration</code>
 GitHub Actions job. Locally, install <code>.[postgres]</code>, set
 <code>AAI_SEC_POSTGRES_DSN</code>, and run:</p>

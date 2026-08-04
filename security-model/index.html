@@ -3412,10 +3412,15 @@ policy namespace because IAM does not offer a compare-and-swap attach API.
 The private Standard Step Functions topology now encodes the complete normal
 order, bounded provider retries, immediate exception cleanup and independent
 Scheduler fallback. It has no API/UI or <code>StartExecution</code> grant and excludes
-execution data from error logs. Its first task is a probe Lambda with no AWS
-authority or configuration bypass; that task always fails after validating the
-complete authority until real target-only provider probes are implemented, so
-the synthesized stack cannot currently acquire the lock or mutate IAM. A
+execution data from error logs. Its first task uses read-only AWS APIs to bind
+the live witness, both processed templates, all stack-owned execution paths and
+the stable Route 53 records to the reviewed authority. Several inventory APIs
+require wildcard resource scope, so code and IaC verification constrain the
+exact action set while runtime checks bind account, Regions, stack names,
+digests and hosted zone. Later phases directly invoke the exact target handler
+role and accept only real AWS access denial or successful recovery evidence.
+Cognito fails before mutation because its authentication boundary is outside
+that role. A
 14-day encrypted DLQ and five security-topic alarms make workflow and watchdog
 delivery failure observable. The workflow role's sole wildcard resource is the
 exact CloudWatch Logs delivery control-plane action set required because those
