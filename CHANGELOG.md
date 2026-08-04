@@ -1,5 +1,13 @@
 # Changelog
 
+- Added private, versioned fleet integrity baseline storage for newly committed
+  source-control generations. Exact S3 object versions and SHA-256 digests are
+  committed into DynamoDB, independently revalidated before detection and
+  cached once per invocation across matching agents. Missing, partial,
+  oversized or tampered objects fail closed; legacy DynamoDB generations remain
+  compatible. The existing 2,000-observation ingestion bound is unchanged and
+  is documented rather than overstated as unlimited fleet scale.
+
 - Added independently derived repository and configuration anomaly detection
   for Claude Code and Codex. Governed alert-only rules compare complete,
   re-hashed consecutive repository generations, server-owned desired managed

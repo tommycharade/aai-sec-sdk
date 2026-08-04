@@ -61,6 +61,8 @@ The stack creates:
   reverse-chronological dashboard reads;
 - a retained, point-in-time-recoverable DynamoDB idempotency table with TTL;
 - an S3 Object Lock audit bucket;
+- a retained private, encrypted and versioned integrity-baseline bucket whose
+  exact object versions are digest-bound to committed source-control generations;
 - an SNS security-alert topic wired to Lambda and idempotency CloudWatch
   alarms (subscribe the enterprise SOC endpoint before production);
 - a private S3 UI bucket behind CloudFront.

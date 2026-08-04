@@ -387,8 +387,15 @@ class FakeS3:
     def __init__(self) -> None:
         self.objects: dict[tuple[str, str], dict[str, Any]] = {}
         self.counter = 0
+        self.get_requests: list[dict[str, Any]] = []
 
     def put_object(self, **value: Any) -> dict[str, str]:
+        if value.get("IfNoneMatch") == "*" and any(
+            key == value["Key"] for key, _version_id in self.objects
+        ):
+            error = ConditionalFailure()
+            error.response = {"Error": {"Code": "PreconditionFailed"}}
+            raise error
         self.counter += 1
         version_id = f"version-{self.counter}"
         body = value.get("Body", b"")
@@ -440,10 +447,21 @@ class FakeS3:
         }
 
     def head_object(self, **value: Any) -> dict[str, Any]:
-        record = self.objects[(value["Key"], value["VersionId"])]
-        return {"Metadata": dict(record["Metadata"]), "ContentLength": len(record["Body"])}
+        version_id = value.get("VersionId")
+        if version_id is None:
+            versions = [
+                candidate_version for key, candidate_version in self.objects if key == value["Key"]
+            ]
+            version_id = max(versions, key=lambda item: int(item.removeprefix("version-")))
+        record = self.objects[(value["Key"], version_id)]
+        return {
+            "Metadata": dict(record["Metadata"]),
+            "ContentLength": len(record["Body"]),
+            "VersionId": version_id,
+        }
 
     def get_object(self, **value: Any) -> dict[str, bytes]:
+        self.get_requests.append(dict(value))
         version_id = value.get("VersionId")
         if version_id is None:
             candidates = [
@@ -632,6 +650,7 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("IDEMPOTENCY_TABLE", "idempotency")
     monkeypatch.setenv("AUDIT_BUCKET", "audit")
     monkeypatch.setenv("EVIDENCE_REPORT_BUCKET", "evidence-reports")
+    monkeypatch.setenv("INTEGRITY_BASELINE_BUCKET", "integrity-baselines")
     monkeypatch.setenv("EVIDENCE_QUEUE_URL", "https://sqs.example.invalid/evidence.fifo")
     monkeypatch.setenv(
         "EVIDENCE_RETENTION_QUEUE_URL",
@@ -9624,6 +9643,35 @@ def test_integrity_baseline_tamper_and_rule_widening_fail_closed(monkeypatch: An
             "contentHash": "1" * 64,
         }
     )
+    baseline_key = module._item_key(tenant, "DISCOVERY_GENERATION", "github-a:baseline")
+    incomplete_reference = table.get_item(Key=baseline_key, ConsistentRead=True)["Item"]
+    table.put_item(Item={**incomplete_reference, "baselineObjectKey": "tenant=x/incomplete"})
+    with pytest.raises(ValueError, match="reference is incomplete"):
+        module._verified_repository_generation(tenant, "github-a", "baseline")
+    table.put_item(
+        Item={
+            **incomplete_reference,
+            "baselineObjectKey": (
+                "tenant=another/source=github-a/generation=baseline/repository-baseline.json"
+            ),
+            "baselineObjectVersionId": "version-cross-tenant",
+            "baselineObjectSha256": "a" * 64,
+        }
+    )
+    with pytest.raises(ValueError, match="crosses its committed scope"):
+        module._verified_repository_generation(tenant, "github-a", "baseline")
+    table.put_item(
+        Item={
+            **incomplete_reference,
+            "baselineObjectKey": module._integrity_baseline_object_key(
+                tenant, "github-a", "baseline"
+            ),
+            "baselineObjectVersionId": "version-missing",
+            "baselineObjectSha256": "a" * 64,
+        }
+    )
+    with pytest.raises(ValueError, match="object is unavailable"):
+        module._verified_repository_generation(tenant, "github-a", "baseline")
     configuration: dict[str, Any] = {
         "match": {
             "source": "integrity_evidence",
@@ -10527,6 +10575,27 @@ def test_aws_endpoint_detection_is_scheduled_bounded_and_monitored() -> None:
     assert '"EndpointDetectionDeadLetters"' in stack
     assert "securityAlerts.grantPublish(handler)" in stack
     assert "SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn" in stack
+
+
+def test_aws_integrity_baselines_are_private_versioned_and_handler_scoped() -> None:
+    """Fleet baselines must use exact-version private storage, not public state."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    start = stack.index('new s3.Bucket(this, "IntegrityBaselineBucket"')
+    end = stack.index("});", start)
+    bucket = stack[start:end]
+    assert "versioned: true" in bucket
+    assert "s3.BucketEncryption.S3_MANAGED" in bucket
+    assert "s3.BlockPublicAccess.BLOCK_ALL" in bucket
+    assert "enforceSSL: true" in bucket
+    assert "cdk.RemovalPolicy.RETAIN" in bucket
+    assert '"s3:GetObjectVersion"' in stack
+    assert '"s3:PutObject"' in stack
+    assert 'integrityBaselines.arnForObjects("tenant=*")' in stack
+    assert "integrityBaselines.grantReadWrite(handler)" not in stack
+    assert "INTEGRITY_BASELINE_BUCKET: integrityBaselines.bucketName" in stack
+    assert 'CfnOutput(this, "IntegrityBaselineBucketName"' in stack
 
 
 def test_aws_dynamic_groups_have_a_monitored_internal_reconciliation_schedule() -> None:
@@ -13739,6 +13808,28 @@ def test_discovery_connector_commits_complete_paginated_generation_atomically(
         ),
     )
     assert committed["statusCode"] == 200
+    committed_record = table.items[generation_key]
+    assert committed_record["baselineObjectKey"].startswith("tenant=")
+    assert committed_record["baselineObjectVersionId"].startswith("version-")
+    assert re.fullmatch(r"[0-9a-f]{64}", committed_record["baselineObjectSha256"])
+    object_key = committed_record["baselineObjectKey"]
+    object_version = committed_record["baselineObjectVersionId"]
+    stored_baseline = module.S3.objects[(object_key, object_version)]
+    assert b"/synthetic/repository" not in stored_baseline["Body"]
+    _record, repositories = module._verified_repository_generation(
+        tenant, "github", "github-page-set-1"
+    )
+    assert sorted(repositories) == ["repository-a", "repository-b"]
+    before_cached_reads = len(module.S3.get_requests)
+    cache: dict[tuple[str, str, str], Any] = {}
+    module._verified_repository_generation(tenant, "github", "github-page-set-1", cache=cache)
+    module._verified_repository_generation(tenant, "github", "github-page-set-1", cache=cache)
+    assert len(module.S3.get_requests) == before_cached_reads + 1
+    original_body = stored_baseline["Body"]
+    stored_baseline["Body"] = original_body + b" "
+    with pytest.raises(ValueError, match="object digest"):
+        module._verified_repository_generation(tenant, "github", "github-page-set-1")
+    stored_baseline["Body"] = original_body
     current = json.loads(
         _invoke(module, _event("/api/enterprise/discovery", "GET", claims=platform))["body"]
     )

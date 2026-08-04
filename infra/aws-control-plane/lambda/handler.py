@@ -167,6 +167,8 @@ _DISCOVERY_GENERATION_PAGE_LIMIT = 100
 # request at 2,000 observations and 20 strong reads, keeping Lambda work and
 # response construction bounded until pages move to dedicated object storage.
 _DISCOVERY_GENERATION_MAX_PAGES = 20
+_INTEGRITY_BASELINE_SCHEMA_VERSION = 1
+_INTEGRITY_BASELINE_MAX_BYTES = 16_000_000
 _DISCOVERY_EXPECTED_HOST_LIMIT = 2
 _DISCOVERY_MAX_VALIDITY_SECONDS = 24 * 60 * 60
 _MANAGED_DISCOVERY_INTERVALS = frozenset({5, 15, 30, 60, 180, 360, 720, 1440})
@@ -8388,6 +8390,94 @@ def _put_discovery_generation_page(tenant, source_id, generation, page_number, v
     return {"pageNumber": page_number, "pageHash": page_hash, "observationCount": len(normalized)}
 
 
+def _integrity_baseline_object_key(tenant, source_id, generation):
+    """Return a server-derived, tenant-isolated key for one immutable baseline."""
+    tenant_digest = hashlib.sha256(str(tenant).encode()).hexdigest()
+    return (
+        f"tenant={tenant_digest}/source={source_id}/generation={generation}/"
+        "repository-baseline.json"
+    )
+
+
+def _store_repository_integrity_baseline(
+    tenant,
+    source_id,
+    generation,
+    *,
+    observed_at,
+    expires_at,
+    page_hashes,
+    pages,
+    content_hash,
+):
+    """Persist one content-bound baseline outside the control-state table.
+
+    The object contains normalized discovery observations, not credentials or
+    repository contents. Its exact S3 version and SHA-256 digest are committed
+    into DynamoDB so a later overwrite can never change detector evidence.
+    """
+    bucket = os.environ.get("INTEGRITY_BASELINE_BUCKET", "").strip()
+    if not bucket:
+        raise RuntimeError("integrity baseline storage is not configured")
+    normalized_pages = [page.get("observations", []) for page in pages]
+    document = {
+        "schemaVersion": _INTEGRITY_BASELINE_SCHEMA_VERSION,
+        "sourceId": source_id,
+        "sourceKind": "source_control",
+        "generation": generation,
+        "observedAt": observed_at,
+        "expiresAt": expires_at,
+        "pageHashes": page_hashes,
+        "pages": normalized_pages,
+        "contentHash": content_hash,
+    }
+    body = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    if len(body) > _INTEGRITY_BASELINE_MAX_BYTES:
+        raise ValueError("repository integrity baseline exceeds its safe object bound")
+    digest = hashlib.sha256(body).hexdigest()
+    key = _integrity_baseline_object_key(tenant, source_id, generation)
+    try:
+        response = S3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+            ServerSideEncryption="AES256",
+            IfNoneMatch="*",
+            Metadata={
+                "sha256": digest,
+                "schema-version": str(_INTEGRITY_BASELINE_SCHEMA_VERSION),
+            },
+        )
+        version_id = response.get("VersionId")
+    except Exception as error:
+        if getattr(error, "response", {}).get("Error", {}).get("Code") != "PreconditionFailed":
+            raise
+        # A prior commit attempt may have stored the immutable object before a
+        # DynamoDB compare-and-swap lost its race. Reuse only byte-identical
+        # evidence; a key collision with different bytes remains fail-closed.
+        head = S3.head_object(Bucket=bucket, Key=key)
+        version_id = head.get("VersionId")
+        existing = S3.get_object(Bucket=bucket, Key=key, VersionId=version_id).get("Body")
+        existing_body = (
+            existing.read(_INTEGRITY_BASELINE_MAX_BYTES + 1)
+            if hasattr(existing, "read")
+            else existing
+        )
+        if (
+            not isinstance(existing_body, bytes)
+            or not secrets.compare_digest(hashlib.sha256(existing_body).hexdigest(), digest)
+        ):
+            raise ValueError("repository integrity baseline object collision") from error
+    if not isinstance(version_id, str) or not version_id:
+        raise RuntimeError("integrity baseline storage did not return an immutable version")
+    return {
+        "baselineObjectKey": key,
+        "baselineObjectVersionId": version_id,
+        "baselineObjectSha256": digest,
+    }
+
+
 def _commit_discovery_generation(tenant, source_id, generation, value, actor):
     """Atomically make a complete, hash-bound generation current for its source."""
     if not isinstance(value, dict) or set(value) != {"pageHashes"}:
@@ -8441,6 +8531,18 @@ def _commit_discovery_generation(tenant, source_id, generation, value, actor):
             separators=(",", ":"),
         ).encode()
     ).hexdigest()
+    baseline_reference = {}
+    if staged["sourceKind"] == "source_control":
+        baseline_reference = _store_repository_integrity_baseline(
+            tenant,
+            source_id,
+            generation,
+            observed_at=observed_at,
+            expires_at=expires_at,
+            page_hashes=page_hashes,
+            pages=pages,
+            content_hash=content_hash,
+        )
     now = int(time.time())
     expected = int(staged["expectedRevision"])
     source_record = {
@@ -8455,6 +8557,7 @@ def _commit_discovery_generation(tenant, source_id, generation, value, actor):
         "pageCount": page_count,
         "observationCount": len(observations),
         "contentHash": content_hash,
+        **baseline_reference,
         "revision": expected + 1,
         "publishedAt": now,
         "publishedBy": actor,
@@ -8465,6 +8568,7 @@ def _commit_discovery_generation(tenant, source_id, generation, value, actor):
         "committedAt": now,
         "contentHash": content_hash,
         "observationCount": len(observations),
+        **baseline_reference,
     }
     source_condition = "attribute_not_exists(pk)" if expected == 0 else "revision = :revision"
     source_values = None if expected == 0 else {":revision": expected}
@@ -8499,10 +8603,22 @@ def _commit_discovery_generation(tenant, source_id, generation, value, actor):
             "page_count": len(pages),
             "observation_count": len(observations),
             "content_hash": content_hash,
+            **(
+                {
+                    "baseline_object_version_id": baseline_reference[
+                        "baselineObjectVersionId"
+                    ],
+                    "baseline_object_sha256": baseline_reference["baselineObjectSha256"],
+                }
+                if baseline_reference
+                else {}
+            ),
         },
     )
     return {
-        key: item for key, item in source_record.items() if key not in {"pk", "sk", "tenant_id"}
+        key: item
+        for key, item in source_record.items()
+        if key not in {"pk", "sk", "tenant_id"} and not key.startswith("baselineObject")
     }
 
 
@@ -14970,8 +15086,81 @@ def _record_integrity_health(tenant, status, *, now=None):
         print(json.dumps({"warning": "integrity detection health persistence failed"}))
 
 
-def _verified_repository_generation(tenant, source_id, generation):
+def _repository_baseline_document(tenant, source_id, generation, record):
+    """Load one exact-version baseline object and verify its stored digest."""
+    reference_fields = {
+        "baselineObjectKey",
+        "baselineObjectVersionId",
+        "baselineObjectSha256",
+    }
+    present = {field for field in reference_fields if record.get(field)}
+    if not present:
+        return None
+    if present != reference_fields:
+        raise ValueError("repository baseline object reference is incomplete")
+    expected_key = _integrity_baseline_object_key(
+        tenant,
+        source_id,
+        generation,
+    )
+    if record.get("baselineObjectKey") != expected_key:
+        raise ValueError("repository baseline object key crosses its committed scope")
+    version_id = record.get("baselineObjectVersionId")
+    digest_reference = record.get("baselineObjectSha256")
+    if (
+        not isinstance(version_id, str)
+        or not 1 <= len(version_id) <= 1_024
+        or not isinstance(digest_reference, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", digest_reference)
+    ):
+        raise ValueError("repository baseline object reference is malformed")
+    bucket = os.environ.get("INTEGRITY_BASELINE_BUCKET", "").strip()
+    if not bucket:
+        raise ValueError("repository baseline storage is unavailable")
+    try:
+        response = S3.get_object(
+            Bucket=bucket,
+            Key=record["baselineObjectKey"],
+            VersionId=version_id,
+        )
+        stream = response.get("Body")
+        body = (
+            stream.read(_INTEGRITY_BASELINE_MAX_BYTES + 1)
+            if hasattr(stream, "read")
+            else stream
+        )
+    except Exception as error:
+        raise ValueError("repository baseline object is unavailable") from error
+    if not isinstance(body, bytes) or not 1 <= len(body) <= _INTEGRITY_BASELINE_MAX_BYTES:
+        raise ValueError("repository baseline object size is invalid")
+    digest = hashlib.sha256(body).hexdigest()
+    if not secrets.compare_digest(digest_reference, digest):
+        raise ValueError("repository baseline object digest is invalid")
+    try:
+        document = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("repository baseline object is malformed") from error
+    required = {
+        "schemaVersion",
+        "sourceId",
+        "sourceKind",
+        "generation",
+        "observedAt",
+        "expiresAt",
+        "pageHashes",
+        "pages",
+        "contentHash",
+    }
+    if not isinstance(document, dict) or set(document) != required:
+        raise ValueError("repository baseline object schema is invalid")
+    return document
+
+
+def _verified_repository_generation(tenant, source_id, generation, *, cache=None):
     """Load and independently re-hash one committed source-control generation."""
+    cache_key = (str(tenant), str(source_id), str(generation))
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
     record = TABLE.get_item(
         Key=_item_key(tenant, "DISCOVERY_GENERATION", f"{source_id}:{generation}"),
         ConsistentRead=True,
@@ -14990,27 +15179,53 @@ def _verified_repository_generation(tenant, source_id, generation):
         minimum=1,
         maximum=_DISCOVERY_GENERATION_MAX_PAGES,
     )
+    document = _repository_baseline_document(tenant, source_id, generation, record)
+    if document is not None:
+        if (
+            document.get("schemaVersion") != _INTEGRITY_BASELINE_SCHEMA_VERSION
+            or document.get("sourceId") != source_id
+            or document.get("sourceKind") != "source_control"
+            or document.get("generation") != generation
+            or document.get("contentHash") != record.get("contentHash")
+            or _discovery_integer(document.get("observedAt"), "observedAt")
+            != _discovery_integer(record.get("observedAt"), "observedAt")
+            or _discovery_integer(document.get("expiresAt"), "expiresAt")
+            != _discovery_integer(record.get("expiresAt"), "expiresAt")
+            or not isinstance(document.get("pages"), list)
+            or len(document["pages"]) != page_count
+            or not isinstance(document.get("pageHashes"), list)
+            or len(document["pageHashes"]) != page_count
+        ):
+            raise ValueError("repository baseline object does not match committed metadata")
+        page_values = document["pages"]
+        declared_hashes = document["pageHashes"]
+    else:
+        page_values = []
+        declared_hashes = []
+        for page_number in range(page_count):
+            page = TABLE.get_item(
+                Key=_item_key(
+                    tenant,
+                    "DISCOVERY_PAGE",
+                    f"{source_id}:{generation}:{page_number:05d}",
+                ),
+                ConsistentRead=True,
+            ).get("Item")
+            if not page or int(page.get("pageNumber", -1)) != page_number:
+                raise ValueError("repository generation page is missing")
+            page_values.append(page.get("observations", []))
+            declared_hashes.append(page.get("pageHash", ""))
     page_hashes = []
     observations = []
-    for page_number in range(page_count):
-        page = TABLE.get_item(
-            Key=_item_key(
-                tenant,
-                "DISCOVERY_PAGE",
-                f"{source_id}:{generation}:{page_number:05d}",
-            ),
-            ConsistentRead=True,
-        ).get("Item")
-        if not page or int(page.get("pageNumber", -1)) != page_number:
-            raise ValueError("repository generation page is missing")
-        normalized = [
-            _discovery_observation(item, "source_control") for item in page.get("observations", [])
-        ]
+    for page_number, page_observations in enumerate(page_values):
+        if not isinstance(page_observations, list):
+            raise ValueError("repository baseline page is malformed")
+        normalized = [_discovery_observation(item, "source_control") for item in page_observations]
         normalized.sort(key=lambda item: (item["kind"], item["id"]))
         page_hash = hashlib.sha256(
             json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
-        if not secrets.compare_digest(str(page.get("pageHash", "")), page_hash):
+        if not secrets.compare_digest(str(declared_hashes[page_number]), page_hash):
             raise ValueError("repository generation page integrity failed")
         page_hashes.append(page_hash)
         observations.extend(normalized)
@@ -15041,7 +15256,10 @@ def _verified_repository_generation(tenant, source_id, generation):
         for item in observations
         if item.get("kind") == "repository"
     }
-    return record, repositories
+    result = (record, repositories)
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
 def _integrity_baseline_insufficient(signal, agent_key, reason_code):
@@ -15064,7 +15282,7 @@ def _integrity_baseline_insufficient(signal, agent_key, reason_code):
     }
 
 
-def _repository_integrity_metrics(tenant, agent, *, now):
+def _repository_integrity_metrics(tenant, agent, *, now, baseline_cache=None):
     """Compare consecutive complete repository generations for one agent scope."""
     agent_key = f"{agent.get('deployment_id')}:{agent.get('id')}"
     project_root = agent.get("project_root")
@@ -15131,10 +15349,10 @@ def _repository_integrity_metrics(tenant, agent, *, now):
             continue
         try:
             current_record, current_repositories = _verified_repository_generation(
-                tenant, source_id, current_generation
+                tenant, source_id, current_generation, cache=baseline_cache
             )
             previous_record, previous_repositories = _verified_repository_generation(
-                tenant, source_id, previous[0]["generation"]
+                tenant, source_id, previous[0]["generation"], cache=baseline_cache
             )
             if (
                 current_record.get("contentHash") != source.get("contentHash")
@@ -15197,13 +15415,20 @@ def _repository_integrity_metrics(tenant, agent, *, now):
     ]
 
 
-def _integrity_rule_metrics(tenant, configuration, agent, *, now):
+def _integrity_rule_metrics(tenant, configuration, agent, *, now, baseline_cache=None):
     """Evaluate exact repository and configuration integrity for one agent."""
     agent_key = f"{agent.get('deployment_id')}:{agent.get('id')}"
     metrics = []
     for signal in configuration["match"]["signalTypes"]:
         if signal == "repository_mapping_changed":
-            metrics.extend(_repository_integrity_metrics(tenant, agent, now=now))
+            metrics.extend(
+                _repository_integrity_metrics(
+                    tenant,
+                    agent,
+                    now=now,
+                    baseline_cache=baseline_cache,
+                )
+            )
             continue
         if signal == "managed_configuration_drift":
             try:
@@ -15486,6 +15711,7 @@ def _evaluate_integrity_rules(tenant, *, now=None):
     ]
     alerts = []
     degraded = False
+    baseline_cache = {}
     for rule in rules:
         version = int(rule["active_version"])
         version_record = _response_rule_version_record(tenant, rule["id"], version)
@@ -15502,7 +15728,13 @@ def _evaluate_integrity_rules(tenant, *, now=None):
                 not in configuration["match"]["hosts"]
             ):
                 continue
-            for metric in _integrity_rule_metrics(tenant, configuration, agent, now=current_time):
+            for metric in _integrity_rule_metrics(
+                tenant,
+                configuration,
+                agent,
+                now=current_time,
+                baseline_cache=baseline_cache,
+            ):
                 if metric.get("outcome") == "would_alert":
                     alerts.append(
                         _open_integrity_alert(tenant, rule, agent, metric, now=current_time)
@@ -15567,6 +15799,7 @@ def _response_rule_preview(tenant, configuration):
     if normalized["match"]["source"] == "integrity_evidence":
         now = int(time.time())
         matches = []
+        baseline_cache = {}
         agents = [
             item
             for item in _all_agents(tenant, consistent_read=True)
@@ -15576,7 +15809,13 @@ def _response_rule_preview(tenant, configuration):
         for agent in sorted(
             agents, key=lambda item: (str(item.get("deployment_id")), str(item.get("id")))
         ):
-            for metric in _integrity_rule_metrics(tenant, normalized, agent, now=now):
+            for metric in _integrity_rule_metrics(
+                tenant,
+                normalized,
+                agent,
+                now=now,
+                baseline_cache=baseline_cache,
+            ):
                 matches.append(
                     {
                         "alertId": None,

@@ -367,6 +367,17 @@ export class AwsControlPlaneStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       autoDeleteObjects: false,
     });
+    // Repository baselines are normalized, content-minimised detector input.
+    // Keep them out of the control-state table and bind every read to the exact
+    // immutable S3 version committed alongside the discovery generation.
+    const integrityBaselines = new s3.Bucket(this, "IntegrityBaselineBucket", {
+      versioned: true,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      autoDeleteObjects: false,
+    });
     const auditReplicaArn = process.env.AUDIT_REPLICA_BUCKET_ARN;
     let auditBatchReplicationRole: iam.Role | undefined;
     if (auditReplicaArn) {
@@ -810,6 +821,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       WEBHOOK_QUEUE_URL: webhookDeliveryQueue.queueUrl,
       WEBHOOK_SECRET_PREFIX: "aai-sec/webhooks/",
       WEBHOOK_SECRET_KMS_KEY_ARN: webhookSecretKey.keyArn,
+      INTEGRITY_BASELINE_BUCKET: integrityBaselines.bucketName,
       RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
       RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
       POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
@@ -926,6 +938,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
       ],
     }));
     evidenceReports.grantRead(handler);
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"],
+      resources: [integrityBaselines.arnForObjects("tenant=*")],
+    }));
     evidenceWorkerQueue.grantSendMessages(handler);
     evidenceRetentionWorkerQueue.grantSendMessages(handler);
     regionalFaultCanaryQueue.grantSendMessages(handler);
@@ -1491,6 +1507,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
       value: dynamicGroupReconciliationDlq.queueArn,
     });
     new cdk.CfnOutput(this, "EvidenceReportBucketName", { value: evidenceReports.bucketName });
+    new cdk.CfnOutput(this, "IntegrityBaselineBucketName", {
+      value: integrityBaselines.bucketName,
+    });
     new cdk.CfnOutput(this, "EvidenceWorkerDlqArn", { value: evidenceWorkerDlq.queueArn });
     new cdk.CfnOutput(this, "EvidenceScheduleDlqArn", { value: evidenceScheduleDlq.queueArn });
     new cdk.CfnOutput(this, "EvidenceRetentionWorkerDlqArn", {
