@@ -232,3 +232,25 @@ runs as a dedicated background job. The longer policy protects future writes
 immediately, while progress shows every pre-cutover version examined and
 extended. If the job fails, reconcile it; never roll back or accept a sampled UI
 list as the complete tenant record.
+
+## Journey 8: Connect enterprise automation
+
+**Actor:** Platform administrator.
+
+1. Open **Administration → API access** and review active, near-expiry and
+   never-used identities before adding authority.
+2. Select **Create service identity** and use one stable identity for one
+   workload and environment.
+3. State the operational purpose, choose the shortest practical 1–90-day
+   lifetime and grant only the capability routes the workload requires.
+4. Review the immutable human-only exclusions, then create the identity.
+5. Copy the one-time bearer directly to the approved CI or enterprise secret
+   manager. Confirm secure storage before closing the reveal.
+6. Configure the workload to call only `/machine/v1/...`; verify the request
+   appears in the identity's recent usage evidence.
+7. Rotate before expiry, replace the target secret and prove the old bearer is
+   denied. Revoke immediately when the workload is retired or compromised.
+
+The workflow never asks automation to carry a person's Entra session and never
+offers machine authority for policy approval, identity administration,
+break-glass or incident response.

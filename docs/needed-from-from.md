@@ -11,6 +11,24 @@ the approved secrets manager and provide only the secret resource name.
 
 ## Immediate critical-path inputs
 
+### Machine API live acceptance
+
+The scoped service-identity implementation and synthetic adversarial contracts
+are complete. First-customer acceptance still needs owner/platform inputs that
+engineering must not invent:
+
+- one approved non-production CI or evidence-export workload;
+- the enterprise secret-manager destination and operator who can write it;
+- the minimum required capability set and a 7–30-day pilot lifetime;
+- approval to deploy the machine route to the pilot AWS stack;
+- a maintenance window to prove old-bearer denial after rotation and immediate
+  denial after revocation; and
+- the retained change/evidence reference for the exercise.
+
+Do not paste the issued bearer into this document, source control, chat or a
+ticket. The UI reveals it once; the target secret manager is the only approved
+destination.
+
 ### Current `p1` Regional deployment preflight (2026-08-04)
 
 A read-only AWS inspection found the following state. Resource identifiers are

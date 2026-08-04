@@ -93,7 +93,32 @@ installation and convergence are deliberately not claimed.
 | Fleet lifecycle | Partial | Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and monitored five-minute deterministic reevaluation, health, immutable desired/package rollout binding, deterministic canary rings, time-zone maintenance windows, server-derived endpoint convergence, automatic health/deadline pause, exact known-good rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, server-clock-expiring exact-agent policy exceptions, source-reconciled orphan/leaver detection, AWS-managed Entra/Intune/GitHub discovery connectors, signed endpoint installation/process collection, per-device credential lifecycle and server-derived evidence health | Real release manifests for managed SDK/gateway/hook upgrades, physical MDM distribution, real-provider population coverage and response automation |
 | Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, semantic authority diff, bounded redacted historical simulation, restrictive composition, reviewed exact-commit GitHub import, immutable provenance UI, draft-only writes, KMS-signed canonical export, unattended repository- and permission-scoped GitHub App token minting, signed bundles, temporary agent exceptions, canary/scheduling, evidence-only convergence and known-good rollback | Complete live Git-provider acceptance and physical-endpoint rollout-SLO acceptance |
 | Security operations | Partial | Approvals, audit timeline, independent scoped emergency stops, scheduled server-derived endpoint detections, deduplicated alert lifecycle, audited acknowledgement, durable SNS/SQS delivery, revisioned cases, authoritative endpoint-to-agent binding, evidence-preserving agent quarantine, independently approved versioned endpoint-response rules with preview, action limits, cooldown, idempotent evidence, disable and rollback, session revocation, recovery-gated release and integrity-verifiable content-minimised case export | Broader tool/MCP/repository/configuration anomaly rules, credential-broker response, maintenance windows, baselines, MDM/EDR isolation and external workflow integrations |
-| Reporting and administration | Partial | Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; content-hashed export; purpose-specific executive and evidence-reader assurance reports with explicit blind spots, non-guarantees and content-addressed traceability | Customer-validated framework mappings and signed/scheduled report distribution, connector service identities, Terraform, CMK/residency and private access |
+| Reporting and administration | Partial | Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; content-hashed export; purpose-specific executive and evidence-reader assurance reports with explicit blind spots, non-guarantees and content-addressed traceability; scoped expiring service identities with one-time credentials, exact machine-route capabilities, rotation, revocation and usage evidence | Customer-validated framework mappings and signed/scheduled report distribution, real-workload machine-API acceptance, Terraform, CMK/residency and private access |
+
+### P1-ADM-08 implementation evidence
+
+The hosted control plane now separates human Cognito/Entra access from a
+versioned `/machine/v1` bearer boundary. A platform administrator can create a
+tenant-owned service identity with one or more of six exact capabilities and a
+1–90-day expiry. The plaintext credential is returned once; subsequent reads
+expose only a fingerprint. Every request reloads digest-keyed credential and
+strongly consistent identity state, then checks expiry, status, credential
+revision, current pointer and an independently maintained route allowlist.
+Machine context cannot inherit human, delegated or break-glass authority.
+
+Rotation atomically invalidates the old bearer and revocation immediately
+removes future authority. Admitted requests create content-minimised retained
+usage and immutable audit evidence. Contracts prove issue/list secrecy,
+admission, rotation, revocation, expiry, forgery denial, cross-tenant isolation,
+unsupported capability denial and exclusion of policy activation and other
+human governance. The private UI provides typed least-privilege creation,
+one-time secret handling, posture and per-identity evidence.
+
+This completes the implementation foundation of P1-ADM-08. Enterprise
+acceptance remains open until an approved real workload stores the bearer in an
+enterprise secret manager and exercises deployed use, rotation and revocation;
+see [Scoped service identities and machine API](service-identities-design.md)
+and [Inputs needed from the product owner](needed-from-from.md).
 
 ### P1-FLT-01 acceptance evidence
 

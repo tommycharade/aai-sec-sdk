@@ -589,6 +589,28 @@ digest detects later modification but is not a signature, trusted timestamp or
 compliance attestation. See
 [Enterprise assurance reports](enterprise-assurance-reports-design.md).
 
+## Service identities and machine access
+
+Human lifecycle management uses the Cognito/Entra-protected API:
+
+- `GET|POST /api/enterprise/identity/service-identities` lists secret-free
+  posture or creates an identity;
+- `POST /api/enterprise/identity/service-identities/{id}/rotate` atomically
+  replaces the credential using `expectedRevision` and `expiresInDays`;
+- `POST /api/enterprise/identity/service-identities/{id}/revoke` atomically
+  removes authority using `expectedRevision` and a bounded rationale; and
+- `GET /api/enterprise/identity/service-identities/{id}/usage` returns the
+  latest 100 content-minimised admitted-request records.
+
+Only a current platform administrator can change this authority. Create and
+rotate responses contain a one-time `credential`; later reads never do.
+
+Workloads replace `/api` with `/machine/v1` on explicitly supported enterprise
+routes and send the one-time bearer. The server derives tenant and capability
+from live stored state; unsupported methods/routes are denied. See
+[Scoped service identities and machine API](service-identities-design.md) for
+the exact capability matrix, schemas, lifecycle and non-guarantees.
+
 ## Incident cases and response authority
 
 The hosted AWS adapter exposes a revisioned case API for endpoint detections:

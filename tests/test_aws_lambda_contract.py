@@ -181,6 +181,19 @@ class FakeTable:
                 item["endpoint_detection_sk"] = ExpressionAttributeValues[":tenant"]
             self.items[key] = item
             return {"Attributes": dict(item)}
+        if ":method" in ExpressionAttributeValues and ":route" in ExpressionAttributeValues:
+            if (
+                item.get("status") != ExpressionAttributeValues[":active"]
+                or item.get("revision") != ExpressionAttributeValues[":revision"]
+                or item.get("expires_at", 0) <= ExpressionAttributeValues[":now"]
+            ):
+                raise ConditionalFailure()
+            item["last_used_at"] = ExpressionAttributeValues[":now"]
+            item["last_used_method"] = ExpressionAttributeValues[":method"]
+            item["last_used_route"] = ExpressionAttributeValues[":route"]
+            item["use_count"] = int(item.get("use_count", 0)) + ExpressionAttributeValues[":one"]
+            self.items[key] = item
+            return {"Attributes": dict(item)}
         if ":active" in ExpressionAttributeValues and ":one" in ExpressionAttributeValues:
             if "lifecycle_state" in item or "lifecycle_revision" in item:
                 raise ConditionalFailure()
@@ -804,6 +817,310 @@ def test_enterprise_assurance_report_routes_enforce_profile_roles(monkeypatch: A
         )["statusCode"]
         == 403
     )
+
+
+def test_service_identity_lifecycle_is_one_time_scoped_and_evidenced(monkeypatch: Any) -> None:
+    """Machine credentials rotate/revoke live and never appear in later reads."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-service-identity"
+    now = 1_800_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-service-admin",
+    }
+    path = "/api/enterprise/identity/service-identities"
+    created_response = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            claims=platform,
+            body={
+                "serviceIdentityId": "ci-policy-reader",
+                "name": "CI policy reader",
+                "description": "Reads governed inventory for synthetic CI.",
+                "purpose": "Verify desired policy inventory before deployment.",
+                "capabilities": ["inventory_read"],
+                "expiresInDays": 30,
+            },
+        ),
+    )
+    assert created_response["statusCode"] == 201
+    created = json.loads(created_response["body"])
+    token = created["credential"]["accessToken"]
+    assert token.startswith("aai_si_ci-policy-reader.")
+    assert created["revision"] == 1
+
+    listed = json.loads(_invoke(module, _event(path, "GET", claims=platform))["body"])["items"]
+    assert listed[0]["credentialFingerprint"] == created["credentialFingerprint"]
+    assert "credential" not in listed[0]
+    assert token not in json.dumps(listed)
+
+    machine_path = "/machine/v1/enterprise/policies"
+    used = _invoke(module, _event(machine_path, "GET", token=token))
+    assert used["statusCode"] == 200
+    assert json.loads(used["body"])["items"] == []
+    listed_after_use = json.loads(_invoke(module, _event(path, "GET", claims=platform))["body"])[
+        "items"
+    ][0]
+    assert listed_after_use["useCount"] == 1
+    assert listed_after_use["lastUsedRoute"] == "/enterprise/policies"
+    usage = json.loads(
+        _invoke(
+            module,
+            _event(f"{path}/ci-policy-reader/usage", "GET", claims=platform),
+        )["body"]
+    )
+    assert usage["truncated"] is False
+    assert usage["items"][0]["capability"] == "inventory_read"
+    assert usage["items"][0]["credentialRevision"] == 1
+
+    rotated_response = _invoke(
+        module,
+        _event(
+            f"{path}/ci-policy-reader/rotate",
+            "POST",
+            claims=platform,
+            body={"expectedRevision": 1, "expiresInDays": 14},
+        ),
+    )
+    assert rotated_response["statusCode"] == 201
+    rotated = json.loads(rotated_response["body"])
+    replacement = rotated["credential"]["accessToken"]
+    assert replacement != token
+    assert rotated["revision"] == 2
+    assert _invoke(module, _event(machine_path, "GET", token=token))["statusCode"] == 403
+    assert _invoke(module, _event(machine_path, "GET", token=replacement))["statusCode"] == 200
+
+    revoked = _invoke(
+        module,
+        _event(
+            f"{path}/ci-policy-reader/revoke",
+            "POST",
+            claims=platform,
+            body={"expectedRevision": 2, "reason": "Synthetic CI job retired."},
+        ),
+    )
+    assert revoked["statusCode"] == 200
+    assert json.loads(revoked["body"])["status"] == "revoked"
+    assert _invoke(module, _event(machine_path, "GET", token=replacement))["statusCode"] == 403
+    retained = b"\n".join(item["Body"] for item in module.S3.objects.values()).decode()
+    assert token not in retained
+    assert replacement not in retained
+    assert "service_identity_request_admitted" in retained
+
+
+def test_service_identity_denies_escalation_forgery_expiry_and_cross_tenant_access(
+    monkeypatch: Any,
+) -> None:
+    """A bearer cannot widen scope, cross tenants, or survive its server expiry."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-service-scope"
+    other = "tenant-service-other"
+    now = 1_800_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    for tenant_id in (tenant, other):
+        table.put_item(Item=module._item_key(tenant_id, "TENANT", "root") | {"id": tenant_id})
+    table.put_item(
+        Item=module._item_key(other, "POLICY", "other-private")
+        | {"id": "other-private", "tenant_id": other, "version": 1}
+    )
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-service-scope",
+    }
+    path = "/api/enterprise/identity/service-identities"
+    unsupported = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            claims=platform,
+            body={
+                "serviceIdentityId": "forged-admin",
+                "name": "Forged admin",
+                "description": "Synthetic negative case.",
+                "purpose": "Prove excluded capabilities fail closed.",
+                "capabilities": ["identity_admin"],
+                "expiresInDays": 1,
+            },
+        ),
+    )
+    assert unsupported["statusCode"] == 400
+    created = json.loads(
+        _invoke(
+            module,
+            _event(
+                path,
+                "POST",
+                claims=platform,
+                body={
+                    "serviceIdentityId": "bounded-reader",
+                    "name": "Bounded reader",
+                    "description": "Synthetic tenant-bound reader.",
+                    "purpose": "Read only the bound tenant inventory.",
+                    "capabilities": ["inventory_read"],
+                    "expiresInDays": 1,
+                },
+            ),
+        )["body"]
+    )
+    token = created["credential"]["accessToken"]
+    policies = json.loads(
+        _invoke(
+            module,
+            _event("/machine/v1/enterprise/policies", "GET", token=token),
+        )["body"]
+    )["items"]
+    assert "other-private" not in json.dumps(policies)
+    assert (
+        _invoke(
+            module,
+            _event("/machine/v1/enterprise/groups", "POST", token=token, body={}),
+        )["statusCode"]
+        == 403
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/machine/v1/enterprise/policies/policy-a/versions/1/activate",
+                "POST",
+                token=token,
+                body={},
+            ),
+        )["statusCode"]
+        == 403
+    )
+    assert (
+        _invoke(
+            module,
+            _event("/machine/v1/enterprise/policies", "GET", token="forged-" + "token"),
+        )["statusCode"]
+        == 403
+    )
+    monkeypatch.setattr(module.time, "time", lambda: now + 86401)
+    assert (
+        _invoke(
+            module,
+            _event("/machine/v1/enterprise/policies", "GET", token=token),
+        )["statusCode"]
+        == 403
+    )
+
+
+def test_service_identity_management_requires_platform_authority(monkeypatch: Any) -> None:
+    """Human policy, fleet and delegated roles cannot mint machine authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-service-role"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    body = {
+        "serviceIdentityId": "denied-service",
+        "name": "Denied service",
+        "description": "Synthetic negative case.",
+        "purpose": "Prove human least privilege.",
+        "capabilities": ["inventory_read"],
+        "expiresInDays": 7,
+    }
+    for role in ("policy-author", "fleet-operator", "auditor"):
+        response = _invoke(
+            module,
+            _event(
+                "/api/enterprise/identity/service-identities",
+                "POST",
+                claims={
+                    "custom:tenant_id": tenant,
+                    "cognito:groups": [role],
+                    "sub": f"synthetic-{role}",
+                },
+                body=body,
+            ),
+        )
+        assert response["statusCode"] == 403
+        assert json.loads(response["body"])["requiredCapability"] == "identity_admin"
+
+    created = _invoke(
+        module,
+        _event(
+            "/api/enterprise/identity/service-identities",
+            "POST",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["platform-admin"],
+                "sub": "synthetic-platform-admin",
+            },
+            body=body,
+        ),
+    )
+    assert created["statusCode"] == 201
+    listed = _invoke(
+        module,
+        _event(
+            "/api/enterprise/identity/service-identities",
+            "GET",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["auditor"],
+                "sub": "synthetic-auditor",
+            },
+        ),
+    )
+    assert listed["statusCode"] == 200
+    assert json.loads(listed["body"])["items"][0]["id"] == "denied-service"
+    assert "accessToken" not in listed["body"]
+    assert "credential_key" not in listed["body"]
+
+
+def test_machine_api_allowlist_covers_each_scope_and_excludes_human_governance(
+    monkeypatch: Any,
+) -> None:
+    """The versioned allowlist is complete for advertised scopes and deny-first elsewhere."""
+    module, _table = _load_handler(monkeypatch)
+    assert module._machine_route_capability("GET", "/api/enterprise/agents") == "inventory_read"
+    assert (
+        module._machine_route_capability("GET", "/api/enterprise/reports/auditor")
+        == "evidence_read"
+    )
+    assert (
+        module._machine_route_capability("POST", "/api/enterprise/policies/policy-a/versions")
+        == "policy_draft_write"
+    )
+    assert (
+        module._machine_route_capability(
+            "POST", "/api/enterprise/policies/policy-a/versions/1/simulate"
+        )
+        == "policy_simulation"
+    )
+    assert (
+        module._machine_route_capability("POST", "/api/enterprise/groups/group-a/agents/bulk")
+        == "fleet_write"
+    )
+    assert (
+        module._machine_route_capability("POST", "/api/enterprise/deployment-config")
+        == "runtime_write"
+    )
+    for method, path in (
+        ("POST", "/api/enterprise/policies/policy-a/versions/1/activate"),
+        ("POST", "/api/enterprise/approvals/approval-a/decision"),
+        ("POST", "/api/enterprise/identity/service-identities"),
+        ("POST", "/api/enterprise/emergency-stop"),
+        ("GET", "/api/enterprise/identity"),
+    ):
+        assert module._machine_route_capability(method, path) is None
+
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    machine_route = stack.index('path: "/machine/{proxy+}"')
+    jwt_route = stack.index('path: "/{proxy+}", methods: [apigwv2.HttpMethod.ANY]', machine_route)
+    assert machine_route < jwt_route
+    machine_statement = stack[machine_route : stack.index(";", machine_route)]
+    assert "authorizer" not in machine_statement
+    assert "MachineApiIntegration" in machine_statement
 
 
 def test_evidence_assurance_retention_legal_hold_and_export(monkeypatch: Any) -> None:

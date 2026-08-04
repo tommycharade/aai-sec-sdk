@@ -123,6 +123,32 @@ API remains the live resource-authorization boundary. Tenant-wide directory
 roles still take precedence, so removing an operator's broader Entra group is
 a separate prerequisite when converting that operator to scoped access.
 
+### Non-human control-plane authority
+
+Automation never reuses a human Cognito or Entra token. The separate
+`/machine/v1` route accepts only a service bearer whose SHA-256 lookup resolves
+to a live tenant-owned identity. The server rechecks status, expiry, revision,
+current credential binding and the exact route capability before every
+admission. Tenant and capability are server-owned; neither bearer content nor
+request JSON selects them. A private handler marker prevents caller-shaped JWT
+claims from entering this authority path.
+
+Machine capabilities are an explicit, versioned allowlist independent of human
+routes. They permit bounded inventory/evidence reads, draft/simulation work,
+fleet changes and measured runtime rollout operations. They can never grant
+identity administration, policy approval or activation, human approval
+decisions, break glass, emergency/incident response or managed-package
+publication. Delegated grants and emergency grants are not considered for a
+machine request. Unknown routes and unavailable authority state fail closed.
+
+Bearers are returned once and are not persisted in plaintext. Rotation and
+revocation compare the expected revision and atomically invalidate the current
+credential pointer. Every admitted request records content-minimised usage and
+immutable audit evidence before normal routing. This is bearer security, not
+workload attestation or mTLS; the deployment still owns secret-manager delivery,
+network restriction and leak response. See
+[Scoped service identities and machine API](service-identities-design.md).
+
 Group membership and policy assignment are authority edges, not presentation
 metadata. The API consistently reloads the group, agent and policy records and
 requires exact non-empty server-owned organization equality before changing
