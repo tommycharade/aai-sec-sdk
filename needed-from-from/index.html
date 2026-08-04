@@ -1774,6 +1774,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../service-identities-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scoped service identities and machine API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
@@ -2114,6 +2141,17 @@
   
     <nav class="md-nav" aria-label="Immediate critical-path inputs">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#machine-api-live-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Machine API live acceptance
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#current-p1-regional-deployment-preflight-2026-08-04" class="md-nav__link">
@@ -2990,6 +3028,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#machine-api-live-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Machine API live acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#current-p1-regional-deployment-preflight-2026-08-04" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3144,6 +3193,22 @@ only the product owner or an enterprise stakeholder can provide.</p>
 credentials in source control, issues, documentation or chat. Store secrets in
 the approved secrets manager and provide only the secret resource name.</p>
 <h2 id="immediate-critical-path-inputs">Immediate critical-path inputs</h2>
+<h3 id="machine-api-live-acceptance">Machine API live acceptance</h3>
+<p>The scoped service-identity implementation and synthetic adversarial contracts
+are complete. First-customer acceptance still needs owner/platform inputs that
+engineering must not invent:</p>
+<ul>
+<li>one approved non-production CI or evidence-export workload;</li>
+<li>the enterprise secret-manager destination and operator who can write it;</li>
+<li>the minimum required capability set and a 7–30-day pilot lifetime;</li>
+<li>approval to deploy the machine route to the pilot AWS stack;</li>
+<li>a maintenance window to prove old-bearer denial after rotation and immediate
+  denial after revocation; and</li>
+<li>the retained change/evidence reference for the exercise.</li>
+</ul>
+<p>Do not paste the issued bearer into this document, source control, chat or a
+ticket. The UI reveals it once; the target secret manager is the only approved
+destination.</p>
 <h3 id="current-p1-regional-deployment-preflight-2026-08-04">Current <code>p1</code> Regional deployment preflight (2026-08-04)</h3>
 <p>A read-only AWS inspection found the following state. Resource identifiers are
 intentionally omitted from this public document; the provider remains the

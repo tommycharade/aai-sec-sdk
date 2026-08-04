@@ -1774,6 +1774,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../service-identities-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scoped service identities and machine API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
@@ -2132,6 +2159,17 @@
     <span class="md-ellipsis">
       
         Journey 7: Govern durable evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#journey-8-connect-enterprise-automation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journey 8: Connect enterprise automation
       
     </span>
   </a>
@@ -3071,6 +3109,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#journey-8-connect-enterprise-automation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journey 8: Connect enterprise automation
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3304,6 +3353,26 @@ runs as a dedicated background job. The longer policy protects future writes
 immediately, while progress shows every pre-cutover version examined and
 extended. If the job fails, reconcile it; never roll back or accept a sampled UI
 list as the complete tenant record.</p>
+<h2 id="journey-8-connect-enterprise-automation">Journey 8: Connect enterprise automation</h2>
+<p><strong>Actor:</strong> Platform administrator.</p>
+<ol>
+<li>Open <strong>Administration → API access</strong> and review active, near-expiry and
+   never-used identities before adding authority.</li>
+<li>Select <strong>Create service identity</strong> and use one stable identity for one
+   workload and environment.</li>
+<li>State the operational purpose, choose the shortest practical 1–90-day
+   lifetime and grant only the capability routes the workload requires.</li>
+<li>Review the immutable human-only exclusions, then create the identity.</li>
+<li>Copy the one-time bearer directly to the approved CI or enterprise secret
+   manager. Confirm secure storage before closing the reveal.</li>
+<li>Configure the workload to call only <code>/machine/v1/...</code>; verify the request
+   appears in the identity's recent usage evidence.</li>
+<li>Rotate before expiry, replace the target secret and prove the old bearer is
+   denied. Revoke immediately when the workload is retired or compromised.</li>
+</ol>
+<p>The workflow never asks automation to carry a person's Entra session and never
+offers machine authority for policy approval, identity administration,
+break-glass or incident response.</p>
 
 
 

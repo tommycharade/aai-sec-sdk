@@ -406,6 +406,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Operator identity and authorization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#non-human-control-plane-authority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-human control-plane authority
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1997,6 +2014,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../service-identities-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scoped service identities and machine API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
@@ -3046,6 +3090,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Operator identity and authorization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#non-human-control-plane-authority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-human control-plane authority
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3321,6 +3382,28 @@ in but does not copy the delegated role into tenant-wide Cognito groups; the
 API remains the live resource-authorization boundary. Tenant-wide directory
 roles still take precedence, so removing an operator's broader Entra group is
 a separate prerequisite when converting that operator to scoped access.</p>
+<h3 id="non-human-control-plane-authority">Non-human control-plane authority</h3>
+<p>Automation never reuses a human Cognito or Entra token. The separate
+<code>/machine/v1</code> route accepts only a service bearer whose SHA-256 lookup resolves
+to a live tenant-owned identity. The server rechecks status, expiry, revision,
+current credential binding and the exact route capability before every
+admission. Tenant and capability are server-owned; neither bearer content nor
+request JSON selects them. A private handler marker prevents caller-shaped JWT
+claims from entering this authority path.</p>
+<p>Machine capabilities are an explicit, versioned allowlist independent of human
+routes. They permit bounded inventory/evidence reads, draft/simulation work,
+fleet changes and measured runtime rollout operations. They can never grant
+identity administration, policy approval or activation, human approval
+decisions, break glass, emergency/incident response or managed-package
+publication. Delegated grants and emergency grants are not considered for a
+machine request. Unknown routes and unavailable authority state fail closed.</p>
+<p>Bearers are returned once and are not persisted in plaintext. Rotation and
+revocation compare the expected revision and atomically invalidate the current
+credential pointer. Every admitted request records content-minimised usage and
+immutable audit evidence before normal routing. This is bearer security, not
+workload attestation or mTLS; the deployment still owns secret-manager delivery,
+network restriction and leak response. See
+<a href="../service-identities-design/">Scoped service identities and machine API</a>.</p>
 <p>Group membership and policy assignment are authority edges, not presentation
 metadata. The API consistently reloads the group, agent and policy records and
 requires exact non-empty server-owned organization equality before changing

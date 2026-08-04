@@ -1774,6 +1774,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../service-identities-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scoped service identities and machine API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
@@ -2120,6 +2147,17 @@
   
     <nav class="md-nav" aria-label="P1 ledger">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#p1-adm-08-implementation-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1-ADM-08 implementation evidence
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#p1-flt-01-acceptance-evidence" class="md-nav__link">
@@ -3001,6 +3039,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#p1-adm-08-implementation-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1-ADM-08 implementation evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#p1-flt-01-acceptance-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3282,11 +3331,32 @@ installation and convergence are deliberately not claimed.</p>
 <tr>
 <td>Reporting and administration</td>
 <td>Partial</td>
-<td>Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; content-hashed export; purpose-specific executive and evidence-reader assurance reports with explicit blind spots, non-guarantees and content-addressed traceability</td>
-<td>Customer-validated framework mappings and signed/scheduled report distribution, connector service identities, Terraform, CMK/residency and private access</td>
+<td>Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; content-hashed export; purpose-specific executive and evidence-reader assurance reports with explicit blind spots, non-guarantees and content-addressed traceability; scoped expiring service identities with one-time credentials, exact machine-route capabilities, rotation, revocation and usage evidence</td>
+<td>Customer-validated framework mappings and signed/scheduled report distribution, real-workload machine-API acceptance, Terraform, CMK/residency and private access</td>
 </tr>
 </tbody>
 </table>
+<h3 id="p1-adm-08-implementation-evidence">P1-ADM-08 implementation evidence</h3>
+<p>The hosted control plane now separates human Cognito/Entra access from a
+versioned <code>/machine/v1</code> bearer boundary. A platform administrator can create a
+tenant-owned service identity with one or more of six exact capabilities and a
+1–90-day expiry. The plaintext credential is returned once; subsequent reads
+expose only a fingerprint. Every request reloads digest-keyed credential and
+strongly consistent identity state, then checks expiry, status, credential
+revision, current pointer and an independently maintained route allowlist.
+Machine context cannot inherit human, delegated or break-glass authority.</p>
+<p>Rotation atomically invalidates the old bearer and revocation immediately
+removes future authority. Admitted requests create content-minimised retained
+usage and immutable audit evidence. Contracts prove issue/list secrecy,
+admission, rotation, revocation, expiry, forgery denial, cross-tenant isolation,
+unsupported capability denial and exclusion of policy activation and other
+human governance. The private UI provides typed least-privilege creation,
+one-time secret handling, posture and per-identity evidence.</p>
+<p>This completes the implementation foundation of P1-ADM-08. Enterprise
+acceptance remains open until an approved real workload stores the bearer in an
+enterprise secret manager and exercises deployed use, rotation and revocation;
+see <a href="../service-identities-design/">Scoped service identities and machine API</a>
+and <a href="../needed-from-from/">Inputs needed from the product owner</a>.</p>
 <h3 id="p1-flt-01-acceptance-evidence">P1-FLT-01 acceptance evidence</h3>
 <p><strong>Bulk enrollment and assignment is complete for the requirement's “select
 many” path.</strong> The hosted group detail UI selects up to 100 active unassigned

@@ -679,6 +679,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#api-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API access
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1882,6 +1893,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../service-identities-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scoped service identities and machine API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
@@ -2961,6 +2999,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#api-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API access
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3333,6 +3382,20 @@ only a Secrets Manager ARN and the bounded non-secret map; it never accepts or
 stores a provider token. Source rows distinguish provider schedule health,
 credential state and current evidence and show only a redacted organization and
 repository count for GitHub.</p>
+<h2 id="api-access">API access</h2>
+<p><strong>Administration → API access</strong> manages non-human control-plane authority. It
+is table-first: operators see every retained service identity's state,
+capability summary, last admitted request, expiry and non-secret fingerprint.
+Selecting an identity opens its full capability set, purpose, revision, request
+count and recent content-minimised usage evidence.</p>
+<p>Only platform administrators see create, rotate and revoke controls. Creation
+uses typed identity, purpose, expiry and capability fields; each capability has
+inline help and the immutable human-governance exclusions remain visible.
+Plaintext credentials are rendered only in the create or rotate result and the
+operator must acknowledge secure storage before dismissing them. Later reads
+never retrieve the bearer. Read-only operators receive posture without
+authority-changing controls. See
+<a href="../service-identities-design/">Scoped service identities and machine API</a>.</p>
 
 
 

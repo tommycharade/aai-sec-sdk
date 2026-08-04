@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/signed-policy-bundles-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/service-identities-design/">
       
       
-        <link rel="prev" href="../time-limited-policy-exception-acceptance-2026-08-01/">
+        <link rel="prev" href="../enterprise-assurance-reports-design/">
       
       
-        <link rel="next" href="../signed-policy-acceptance-2026-08-01/">
+        <link rel="next" href="../enterprise-integration-design/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Signed policy bundles - Agentic AI Security SDK</title>
+        <title>Scoped service identities and machine API - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#signed-policy-bundles" class="md-skip">
+        <a href="#scoped-service-identities-and-the-machine-api" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Signed policy bundles
+              Scoped service identities and machine API
             
           </span>
         </div>
@@ -1636,37 +1636,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Signed policy bundles
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../signed-policy-bundles-design/" class="md-nav__link">
         
   
   
@@ -1682,125 +1655,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decision
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#trust-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trust boundary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#canonical-signed-payload" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Canonical signed payload
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#runtime-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Runtime verification
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#existing-active-policies-and-trials" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Existing active policies and trials
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#rotation-and-compromise-response" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Rotation and compromise response
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#guarantees" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Guarantees
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#non-guarantees" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Non-guarantees
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required evidence
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1917,10 +1771,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../service-identities-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scoped service identities and machine API
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1936,6 +1817,114 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capability-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Capability contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operator-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#machine-api-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Machine API example
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guarantees-and-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guarantees and non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2966,10 +2955,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
+  <a href="#purpose" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Decision
+        Purpose
       
     </span>
   </a>
@@ -2988,10 +2977,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#canonical-signed-payload" class="md-nav__link">
+  <a href="#lifecycle" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Canonical signed payload
+        Lifecycle
       
     </span>
   </a>
@@ -2999,10 +2988,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#runtime-verification" class="md-nav__link">
+  <a href="#capability-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Runtime verification
+        Capability contract
       
     </span>
   </a>
@@ -3010,10 +2999,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#existing-active-policies-and-trials" class="md-nav__link">
+  <a href="#operator-journey" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Existing active policies and trials
+        Operator journey
       
     </span>
   </a>
@@ -3021,10 +3010,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#rotation-and-compromise-response" class="md-nav__link">
+  <a href="#machine-api-example" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Rotation and compromise response
+        Machine API example
       
     </span>
   </a>
@@ -3032,10 +3021,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#guarantees" class="md-nav__link">
+  <a href="#guarantees-and-non-guarantees" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Guarantees
+        Guarantees and non-guarantees
       
     </span>
   </a>
@@ -3043,21 +3032,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#non-guarantees" class="md-nav__link">
+  <a href="#test-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Non-guarantees
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required evidence
+        Test evidence
       
     </span>
   </a>
@@ -3084,153 +3062,164 @@
   
 
 
-<h1 id="signed-policy-bundles">Signed policy bundles</h1>
-<h2 id="decision">Decision</h2>
-<p>Every newly activated AWS policy is frozen into one canonical effective
-configuration and signed by a deployment-owned asymmetric AWS KMS key. An
-enrolled runtime must verify the signature, tenant, policy identity, version and
-content hash against an administrator-pinned trust bundle before it constructs
-or replaces runtime policy authority.</p>
-<p>This closes P1-POL-08 for the implemented AWS and Python runtime boundary. A
-configuration hash remains useful evidence, but it is not an authenticity
-control and is never accepted as a substitute for a valid trusted signature.</p>
-<h2 id="trust-boundary">Trust boundary</h2>
-<p>The model, project repository and browser are outside the trust boundary. They
-cannot choose the signing key, signature, tenant identity or accepted trust
-anchor.</p>
-<pre><code class="language-text">reviewed policy + enabled registry resources
-                    |
-                    v
-          canonical effective bundle
-                    |
-             AWS KMS Sign
-                    |
-                    v
-       immutable active version record
-                    |
-           authenticated retrieval
-                    |
-                    v
- administrator-pinned public trust bundle
-                    |
-        local signature verification
-                    |
-                    v
-          runtime policy replacement
+<h1 id="scoped-service-identities-and-the-machine-api">Scoped service identities and the machine API</h1>
+<h2 id="purpose">Purpose</h2>
+<p>Enterprise automation must not borrow a person's Cognito or Microsoft Entra
+session. The control plane therefore provides expiring, tenant-bound service
+identities for CI, inventory, evidence collection and bounded fleet workflows.
+The browser remains the only supported place to create, rotate or revoke these
+identities. Workloads use a separate versioned API surface:</p>
+<pre><code class="language-text">human:   /api/enterprise/...       Cognito/Entra JWT
+machine: /machine/v1/enterprise/... scoped service bearer
 </code></pre>
-<p>The private signing key remains inside KMS. The Lambda receives only
-<code>kms:Sign</code> for the exact key. Runtime hosts receive public verification keys
-through an endpoint-management or other administrator-owned channel; they do
-not trust a key merely because the policy response contains it.</p>
-<h2 id="canonical-signed-payload">Canonical signed payload</h2>
-<p>The signed payload is UTF-8 JSON with sorted keys and compact separators:</p>
+<p>This is control-plane automation authority. It is not an enrolled Claude Code
+or Codex runtime identity, an AWS IAM role, or a replacement for workload
+identity federation and an enterprise secret manager.</p>
+<h2 id="trust-boundary">Trust boundary</h2>
+<p>The machine route is deliberately declared without the API Gateway JWT
+authorizer because its bearer is not a Cognito JWT. The Lambda handler is the
+mandatory authenticator for that route. It hashes the presented bearer, loads
+the digest-keyed credential pointer and strongly reads the tenant-owned service
+identity before admitting every request. It checks status, expiry, credential
+revision, current credential binding and the exact capability required by the
+versioned route.</p>
+<p>The bearer never carries trusted tenant, role or scope claims. Server records
+derive all three. A private in-process marker distinguishes this derived
+context from caller-shaped JWT claims. Machine authority cannot inherit a
+human role, delegated grant or break-glass grant.</p>
+<p>The unversioned <code>/machine/...</code> path, unknown routes, malformed records, missing
+bearers, stale revisions, expired credentials and failed authority reads all
+fail closed.</p>
+<h2 id="lifecycle">Lifecycle</h2>
+<p>Only a current <code>platform-admin</code> can manage service identities. Delegated and
+emergency authority cannot satisfy this check.</p>
+<ol>
+<li><strong>Create.</strong> Supply a stable ID, display name, purpose, optional description,
+   one or more capabilities and a lifetime of 1–90 days.</li>
+<li><strong>Reveal once.</strong> The plaintext bearer appears only in the create response.
+   Store it directly in an approved secret manager. Later list and detail reads
+   expose only a short SHA-256 fingerprint.</li>
+<li><strong>Use.</strong> Send the bearer to an explicitly allowed <code>/machine/v1</code> route. Every
+   admitted request records method, canonical route, capability, credential
+   revision and server time; arguments and response bodies are not copied into
+   usage evidence.</li>
+<li><strong>Rotate.</strong> Submit the expected identity revision and a new lifetime. One
+   transaction replaces the credential pointer and revokes the old bearer. The
+   replacement bearer is again shown once.</li>
+<li><strong>Revoke.</strong> Submit the expected revision and rationale. Identity and pointer
+   become inactive atomically. Later requests fail before downstream routing.</li>
+</ol>
+<p>Creation, rotation and revocation also retain content-minimised authority-change
+records and export immutable Object Lock audit evidence. Usage records expire
+after 90 days; lifecycle records remain available under the control plane's
+normal retention model.</p>
+<h2 id="capability-contract">Capability contract</h2>
+<p>Capabilities map to an explicit route allowlist. Adding a human endpoint does
+not expose it to existing machine credentials.</p>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Permitted workload</th>
+<th>Important exclusions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inventory_read</code></td>
+<td>Read agents, groups, policies and versions, deployments, health, drift, projects, organizations, templates, Skills and MCP registrations</td>
+<td>No identity, approval or incident administration</td>
+</tr>
+<tr>
+<td><code>evidence_read</code></td>
+<td>Read audit, discovery, evidence and executive/auditor assurance exports</td>
+<td>No retention changes, legal hold or case response</td>
+</tr>
+<tr>
+<td><code>policy_draft_write</code></td>
+<td>Create policies, draft versions, Skills and MCP registrations</td>
+<td>No submission, approval, staging, activation, exception or package publication</td>
+</tr>
+<tr>
+<td><code>policy_simulation</code></td>
+<td>Run the bounded historical simulation route for an exact draft version</td>
+<td>No action execution or policy activation</td>
+</tr>
+<tr>
+<td><code>fleet_write</code></td>
+<td>Create projects, groups and deployments; bootstrap/register agents; manage bounded group membership</td>
+<td>No emergency stop, identity lifecycle or incident containment</td>
+</tr>
+<tr>
+<td><code>runtime_write</code></td>
+<td>Create templates and start, pause or roll back measured deployment-configuration rollouts</td>
+<td>No managed-package publication, signing-key governance or emergency authority</td>
+</tr>
+</tbody>
+</table>
+<p>The control plane advertises exactly these six values. Unsupported, duplicated,
+empty or oversized capability lists are rejected. A service identity with
+multiple capabilities receives their union only on the routes listed above.</p>
+<h2 id="operator-journey">Operator journey</h2>
+<p>Open <strong>Administration → API access</strong> in the enterprise UI. The table shows
+identity status, scope summary, last admitted use, expiry and fingerprint. The
+detail panel shows the complete capability set and recent retained usage. The
+posture summary calls out near-expiry and never-used authority.</p>
+<p>Use one identity per workload and environment. Start with a read capability,
+use the shortest practical lifetime, rotate through the target secret manager,
+and revoke identities whose usage evidence does not match their stated purpose.
+The UI requires explicit acknowledgement before dismissing a newly issued
+secret and explains every selectable capability in place.</p>
+<h2 id="machine-api-example">Machine API example</h2>
+<p>Use a synthetic environment variable name in local testing; do not place the
+bearer in a command line, source file or shell history.</p>
+<pre><code class="language-bash">export AAI_SERVICE_TOKEN=&quot;$(security find-generic-password \
+  -a aai-ci-reader -s aai-security -w)&quot;
+
+curl --fail-with-body \
+  --header &quot;Authorization: Bearer ${AAI_SERVICE_TOKEN}&quot; \
+  &quot;https://CONTROL_PLANE.example.invalid/machine/v1/enterprise/policies&quot;
+</code></pre>
+<p>Create, rotate and revoke operations intentionally have no machine route. An
+authenticated platform administrator performs them through the UI or the human
+API. The create request schema is:</p>
 <pre><code class="language-json">{
-  &quot;configuration&quot;: {},
-  &quot;contentHash&quot;: &quot;&lt;sha256&gt;&quot;,
-  &quot;policyId&quot;: &quot;policy-safe-default&quot;,
-  &quot;schemaVersion&quot;: 1,
-  &quot;tenantId&quot;: &quot;tenant-example&quot;,
-  &quot;version&quot;: 2
+  &quot;serviceIdentityId&quot;: &quot;github-policy-check&quot;,
+  &quot;name&quot;: &quot;GitHub policy check&quot;,
+  &quot;description&quot;: &quot;Owned by the policy validation workflow.&quot;,
+  &quot;purpose&quot;: &quot;Read inventory and simulate reviewed policy drafts.&quot;,
+  &quot;capabilities&quot;: [&quot;inventory_read&quot;, &quot;policy_simulation&quot;],
+  &quot;expiresInDays&quot;: 30
 }
 </code></pre>
-<p><code>contentHash</code> is SHA-256 over the separately canonicalized configuration. KMS
-signs the SHA-256 digest of the complete payload using <code>ECDSA_SHA_256</code> and a
-P-256 key. The wire envelope adds the KMS key ARN, algorithm, base64 signature
-and signing time; none of those fields can alter the payload meaning.</p>
-<p>The effective configuration is resolved and frozen at activation. Referenced
-Skills and MCP servers therefore cannot silently change an active policy.
-Changing a registry resource requires a new governed policy version and a new
-signature.</p>
-<h2 id="runtime-verification">Runtime verification</h2>
-<p>The Python SDK accepts a bounded trust bundle containing one or more explicit
-KMS key ARNs and P-256 public keys. Multiple keys permit planned rotation. The
-runtime rejects:</p>
-<ul>
-<li>missing signing metadata;</li>
-<li>unknown keys or algorithms;</li>
-<li>malformed or duplicate trust-bundle entries;</li>
-<li>invalid public keys or signatures;</li>
-<li>modified configuration, content hash, tenant, policy ID or version;</li>
-<li>booleans or non-positive values where an integer version is required;</li>
-<li>oversized, deeply nested or non-JSON policy content; and</li>
-<li>a response for a tenant other than the constructor-owned expected tenant.</li>
-</ul>
-<p>Verification happens before returning effective policy to the host integration.
-A failed refresh cannot preserve an unverified replacement as authority. The
-existing runtime outage behavior remains fail closed.</p>
-<p>Export the public trust bundle with
-<code>scripts/export_policy_trust_bundle.py</code>, then install it through MDM, endpoint
-management or another administrator-owned channel. The exporter validates KMS
-key usage, P-256 key spec and the sole <code>ECDSA_SHA_256</code> algorithm before writing
-a new file; it refuses to overwrite an existing trust bundle. Production
-runtimes require root ownership and reject group/world-writable files and
-symlinks. The operator API may display a key ARN and SHA-256 fingerprint for
-provenance, but the SDK never automatically trusts those network-returned
-bytes.</p>
-<h2 id="existing-active-policies-and-trials">Existing active policies and trials</h2>
-<p>Activation writes signed metadata atomically with the active version. Trial
-provisioning signs the safe default before any policy record is stored. Existing
-active versions are migrated once by signing their exact stored configuration;
-the migration changes no policy authority and records an audit event. If KMS is
-unavailable or the stored content hash is inconsistent, migration and effective
-policy retrieval fail closed.</p>
-<h2 id="rotation-and-compromise-response">Rotation and compromise response</h2>
-<p>Rotation is explicit because runtimes must receive the new public key before
-the control plane uses it:</p>
-<ol>
-<li>Create the replacement KMS signing key.</li>
-<li>Distribute a trust bundle containing old and new public keys.</li>
-<li>Verify endpoint adoption and trust-bundle digest.</li>
-<li>Configure the control plane to sign new activations with the new key.</li>
-<li>Re-sign or replace active policies through governed activation.</li>
-<li>Remove the old key only after no active bundle references it.</li>
-</ol>
-<p>For centrally managed fleets, steps 2 and 3 use the schema-v2 package,
-short-lived heartbeat measurement and server-derived cutover posture described
-in <a href="../policy-trust-convergence-design/">managed policy-signing trust convergence</a>.
-Package delivery alone is never convergence evidence.</p>
-<p>Emergency response may disable the KMS key and activate server-owned stops.
-Disabling a key prevents new signatures; already signed bundles remain
-cryptographically valid until the old public trust anchor is removed. Incident
-runbooks must therefore combine key disablement with session revocation,
-emergency stop and trust-bundle rollout.</p>
-<h2 id="guarantees">Guarantees</h2>
-<ul>
-<li>An altered or unsigned bundle cannot be loaded by a correctly configured SDK
-  runtime.</li>
-<li>Signature verification is local and does not depend on the model or browser.</li>
-<li>Tenant, policy ID, version, configuration and content hash are inseparable
-  under the signature.</li>
-<li>Registry-resolved execution configuration is immutable for the active
-  version.</li>
-<li>The private signing key is non-exportable and is not stored in DynamoDB,
-  project files, Lambda environment values or telemetry.</li>
-</ul>
-<h2 id="non-guarantees">Non-guarantees</h2>
-<ul>
-<li>A signature does not prove that policy content is safe, correctly reviewed or
-  deployed to every endpoint.</li>
-<li>A user-writable trust bundle is not an enterprise trust anchor. Production
-  deployments must install it through an administrator-owned channel.</li>
-<li>This control does not replace runtime attestation, managed-host enforcement,
-  endpoint convergence monitoring, emergency stop or independent approval.</li>
-<li>ECDSA authenticity does not make ordinary DynamoDB records WORM evidence.</li>
-<li>A compromised process with authority to replace the pinned trust bundle can
-  choose a different signer; file ownership and endpoint management remain
-  required controls.</li>
-</ul>
-<h2 id="required-evidence">Required evidence</h2>
-<ul>
-<li>SDK unit and adversarial tests with a real P-256 key pair.</li>
-<li>AWS contract tests proving exact KMS key/algorithm/digest use, atomic signed
-  activation, signed trial defaults and no unsigned effective-policy response.</li>
-<li>Tests for modified payloads, untrusted keys, malformed signatures, tenant
-  replay, resource mutation after activation and KMS outage.</li>
-<li>UI evidence that operators can distinguish signed, unsigned and migration
-  failure states and identify the active key without exposing private material.</li>
-<li>Live AWS acceptance proving signing, local verification and cleanup with
-  synthetic data.</li>
-</ul>
+<h2 id="guarantees-and-non-guarantees">Guarantees and non-guarantees</h2>
+<p>The implementation guarantees, within the hosted control-plane boundary, that
+an admitted machine request has a live tenant-owned identity, current unexpired
+credential and an exact route capability at admission time. Rotation and
+revocation use optimistic revision checks and transactional authority changes.
+Plaintext bearers are not persisted by this feature or returned by list/detail
+APIs.</p>
+<p>It does not prove the identity of the external workload holding a bearer,
+prevent that workload or its logs from leaking the secret, provide mTLS,
+automatically rotate a downstream secret manager, or replace network controls.
+For production, restrict API ingress, alert on unusual route/use patterns,
+store the bearer in a managed secret service and prefer a future short-lived
+federated credential adapter when available.</p>
+<h2 id="test-evidence">Test evidence</h2>
+<p>The AWS Lambda contracts exercise one-time issue, secret-free reads, successful
+machine admission, usage evidence, rotation, immediate revocation, expiry,
+forged credentials, tenant isolation, unsupported capability escalation and
+human-governance route denial. A CDK contract verifies the separate machine
+route is not assigned the human JWT authorizer. UI tests exercise management
+authority, typed capability help, one-time secret handling and usage display.</p>
+<p>Run the relevant suites with:</p>
+<pre><code class="language-bash">python3 -m pytest tests/test_aws_lambda_contract.py -q
+cd aai-sec-ui
+npm run check
+</code></pre>
+<p>Synthetic tests establish implementation behavior, not live workload or secret
+manager acceptance. Production evidence still requires a real CI workload,
+approved secret store, deployed AWS route and observed rotate/revoke exercise.</p>
 
 
 
