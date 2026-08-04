@@ -571,6 +571,24 @@ text or MCP server identity was not retained. It never executes actions or
 changes policy authority. See
 [Policy change assurance](policy-change-assurance-design.md).
 
+## Enterprise assurance reports
+
+`GET /enterprise/reports/executive` returns an aggregate-only leadership view.
+Any canonical tenant operator may read it. `GET
+/enterprise/reports/auditor` requires `evidence_read` and adds bounded policy,
+group and business-scope references plus least-privilege routes to detailed
+evidence.
+
+Both profiles are generated only from bounded server-owned reads. They expose
+population, runtime trust, managed configuration, policy governance,
+exceptions, operational work and immutable-evidence monitoring. Coverage
+percentages remain unavailable when discovery sources are incomplete. Raw
+paths, user names, command content, credentials and free-form decision text are
+excluded. Each section and complete report has a canonical SHA-256 digest; the
+digest detects later modification but is not a signature, trusted timestamp or
+compliance attestation. See
+[Enterprise assurance reports](enterprise-assurance-reports-design.md).
+
 ## Incident cases and response authority
 
 The hosted AWS adapter exposes a revisioned case API for endpoint detections:

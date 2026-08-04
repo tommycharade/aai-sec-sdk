@@ -1,5 +1,11 @@
 # Changelog
 
+- Added purpose-specific enterprise assurance reports. The executive profile is
+  aggregate-only; the evidence-reader profile adds bounded identifiers and
+  least-privilege trace routes. Both preserve unavailable coverage, expose
+  blind spots and non-guarantees, exclude sensitive content and bind every
+  section plus the complete read-only snapshot to canonical SHA-256 evidence.
+
 - Added monitored five-minute reconciliation for approved dynamic policy
   groups. The internal service re-derives membership from strongly consistent
   trusted inventory, atomically advances changed authority with durable audit

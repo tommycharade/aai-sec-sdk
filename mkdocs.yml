@@ -89,6 +89,7 @@ nav:
   - Signed policy bundle acceptance: signed-policy-acceptance-2026-08-01.md
   - Managed Claude resources: claude-managed-resources.md
   - Wider enterprise UI: enterprise-ui.md
+  - Enterprise assurance reports: enterprise-assurance-reports-design.md
   - Enterprise integration design: enterprise-integration-design.md
   - Runtime attestation design: runtime-attestation-design.md
   - Managed host configuration: managed-host-configuration.md

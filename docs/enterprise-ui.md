@@ -14,6 +14,7 @@ the central team's operating workflows.
 The recommended navigation is:
 
 - Dashboard
+- Assurance
 - Coverage
 - Groups
 - Agents
@@ -83,6 +84,24 @@ and must not appear as a failed identity control.
 | Agent groups | Create groups, select a policy, use manual batch assignment or trusted dynamic rules, inspect outcomes and manage agents. |
 | Claude onboarding script | Display or generate the exact onboarding command for a project. |
 | Configuration backups | Show backup status and provide controlled restore operations. |
+| Executive and auditor assurance | Present server-derived, content-hashed posture summaries with explicit blind spots; restrict entity-level evidence lineage to evidence readers and export the exact viewed snapshot. |
+
+## Assurance workspace
+
+**Assurance** is the reporting surface for leadership and assessors. It is not
+a second dashboard and it must not manufacture compliance conclusions. The
+executive profile presents bounded tenant posture, population, runtime,
+policy, exception, operations and evidence summaries without entity details.
+The auditor profile adds only the least-privilege policy, group, discovery and
+source-evidence references required to trace those summaries.
+
+Both profiles are derived by the control plane from strongly read tenant
+records and expose the same report time, section hashes and canonical content
+hash. The UI makes incomplete evidence prominent, states the report's explicit
+non-guarantees and downloads the exact server response. It never converts
+missing coverage into zero, accepts client-authored posture, or treats a
+download as proof of immutable retention. Auditor detail requires the
+`evidence_read` capability.
 
 ## Group and policy relationship
 

@@ -127,6 +127,31 @@ If any source is missing, incomplete, or stale, the journey stops at source
 recovery. The UI must not present a percentage or recommend destructive action
 from absence alone.
 
+### Journey 4b: Review enterprise assurance
+
+**Actor:** Executive sponsor, security leader, auditor or evidence reader.
+
+1. Open **Assurance**. The default executive profile shows a bounded,
+   server-derived summary without agent, policy or group-level details.
+2. Review posture, generation time and every visible blind spot before using
+   the totals. `evidence_incomplete` is an investigation state, not a passing
+   result.
+3. Compare population, runtime, policy, exceptions, operational response and
+   durable-evidence sections. Each section exposes a content hash tied to the
+   displayed report.
+4. An operator with `evidence_read` may switch to **Auditor** to inspect the
+   bounded policy/group references, discovery breakdowns and least-privilege
+   source routes behind the summary. Other roles cannot request that profile.
+5. Download the exact server snapshot for review or handoff. Confirm its
+   canonical content hash before relying on it downstream.
+6. Resolve blind spots in the owning workspace, then request a fresh report;
+   the report itself does not change policy, agents or retained evidence.
+
+The assurance workspace explicitly does not certify a framework, prove data
+residency or immutable retention, replace endpoint/provider acceptance, or
+guarantee that an unobserved agent does not exist. Those claims require their
+own independently retained evidence.
+
 ## Journey 5: Respond to an incident
 
 **Actor:** Security operations engineer.

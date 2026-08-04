@@ -245,13 +245,14 @@ iteration. No Splunk credential is required yet.
 
 Engineering can continue autonomously on:
 
-- bulk enrollment import and dynamic groups;
 - production identity, endpoint and source-control connector packaging for the
   implemented orphan/leaver reconciler;
-- managed upgrades and live acceptance of implemented expiring exceptions;
-- policy inheritance, scheduling and signed bundles;
+- managed SDK, gateway and hook upgrades with approved drift remediation;
+- live customer acceptance of implemented expiring exceptions, policy
+  composition, scheduled rollout and signed bundles;
 - credential-revocation workflows and broader tool/MCP anomaly response;
-- executive and auditor reporting;
+- signed and scheduled assurance-report distribution and reviewed framework
+  mappings;
 - Terraform deployment support;
 - customer-managed key, residency and private-access implementation;
 - UI simplification, accessibility and responsive browser testing; and
