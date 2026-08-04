@@ -103,6 +103,7 @@ jobs:
           RECOVERY_SCIM_TABLE: AaiScim
           RECOVERY_AUDIT_BUCKET: aai-audit-replica-111111
           RECOVERY_POLICY_SIGNING_KEY_ARN: arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef
+          RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN: arn:aws:kms:eu-west-1:111111111111:key/mrk-abcdef1234567890abcdef1234567890
           RECOVERY_USER_POOL_ID: eu-west-1_AbCdEf123
           RECOVERY_USER_POOL_CLIENT_ID: abcdefghij1234567890
           RECOVERY_CELL_MODE: standby
@@ -139,6 +140,7 @@ jobs:
           RECOVERY_SCIM_TABLE: AaiScim
           RECOVERY_AUDIT_BUCKET: aai-audit-replica-111111
           RECOVERY_POLICY_SIGNING_KEY_ARN: arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef
+          RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN: arn:aws:kms:eu-west-1:111111111111:key/mrk-abcdef1234567890abcdef1234567890
           RECOVERY_USER_POOL_ID: eu-west-1_AbCdEf123
           RECOVERY_USER_POOL_CLIENT_ID: abcdefghij1234567890
           RECOVERY_CELL_MODE: active
