@@ -175,6 +175,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
     const entraClientSecretName = process.env.ENTRA_CLIENT_SECRET_NAME?.trim();
     const entraAaiTenantId = process.env.ENTRA_AAI_TENANT_ID?.trim();
     const entraScimTokenSecretName = process.env.ENTRA_SCIM_TOKEN_SECRET_NAME?.trim();
+    const policyGitHubSecretName = process.env.POLICY_GITHUB_SECRET_NAME?.trim();
+    const policyGitHubRepositories = (process.env.POLICY_GITHUB_ALLOWED_REPOSITORIES ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
     const entraStrongAuthValue = process.env.ENTRA_STRONG_AUTH_ENFORCED?.trim();
     if (entraStrongAuthValue && !["true", "false"].includes(entraStrongAuthValue)) {
       throw new Error("ENTRA_STRONG_AUTH_ENFORCED must be true or false");
@@ -209,6 +214,20 @@ export class AwsControlPlaneStack extends cdk.Stack {
     }
     if (entraStrongAuthEnforced && !entraInputs.every(Boolean)) {
       throw new Error("ENTRA_STRONG_AUTH_ENFORCED requires the complete Entra OIDC configuration");
+    }
+    if (Boolean(policyGitHubSecretName) !== Boolean(policyGitHubRepositories.length)) {
+      throw new Error(
+        "POLICY_GITHUB_SECRET_NAME and POLICY_GITHUB_ALLOWED_REPOSITORIES must be configured together",
+      );
+    }
+    if (
+      policyGitHubRepositories.length > 100
+      || new Set(policyGitHubRepositories).size !== policyGitHubRepositories.length
+      || policyGitHubRepositories.some(
+        (repository) => !/^github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository),
+      )
+    ) {
+      throw new Error("POLICY_GITHUB_ALLOWED_REPOSITORIES is invalid");
     }
 
     const table = new dynamodb.Table(this, "ControlPlaneTable", {
@@ -516,12 +535,22 @@ export class AwsControlPlaneStack extends cdk.Stack {
       passwordPolicy: { minLength: 14, requireLowercase: true, requireUppercase: true, requireDigits: true, requireSymbols: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
-    const domainPrefix = `aai-sec-${this.account?.slice(-8) ?? "control"}`.toLowerCase();
-    const userPoolDomain = userPool.addDomain("ManagedLogin", {
-      cognitoDomain: { domainPrefix },
-      // Use the current branding-editor experience so the hosted signup page
-      // can carry the same visual identity as the control-plane landing page.
-      managedLoginVersion: cognito.ManagedLoginVersion.NEWER_MANAGED_LOGIN,
+    // CDK synthesis in an uncredentialed review environment leaves the account
+    // unresolved. Do not derive a literal Cognito name by slicing that token:
+    // the L2 construct rejects it before CloudFormation can resolve it. Normal
+    // account-bound deployments retain the existing account suffix, while an
+    // environment-agnostic template receives a stable stack-identity suffix.
+    const stackUuid = cdk.Fn.select(2, cdk.Fn.split("/", cdk.Aws.STACK_ID));
+    const unresolvedAccountSuffix = cdk.Fn.select(4, cdk.Fn.split("-", stackUuid));
+    const domainSuffix = cdk.Token.isUnresolved(this.account)
+      ? unresolvedAccountSuffix
+      : this.account.slice(-8);
+    const domainPrefix = cdk.Fn.join("", ["aai-sec-", domainSuffix]);
+    new cognito.CfnUserPoolDomain(this, "ManagedLogin", {
+      domain: domainPrefix,
+      userPoolId: userPool.userPoolId,
+      // Version 2 is the current branding-editor managed-login experience.
+      managedLoginVersion: 2,
     });
     const nativeOperatorGroups = [
       ["PlatformAdmins", "platform-admin", "Tenant administration and break-glass recovery"],
@@ -721,6 +750,33 @@ export class AwsControlPlaneStack extends cdk.Stack {
     presence.grantReadWriteData(handler);
     idempotency.grantReadWriteData(handler);
     scim.grantReadWriteData(handler);
+    if (policyGitHubSecretName) {
+      // Provider credentials and outbound GitHub access are isolated from the
+      // policy-writing handler. The worker cannot mutate DynamoDB or sign a
+      // policy; the handler can only invoke this exact function.
+      const policyGitHubSecret = secretsmanager.Secret.fromSecretNameV2(
+        this,
+        "PolicyGitHubCredential",
+        policyGitHubSecretName,
+      );
+      const policySourceVerifier = new lambda.Function(this, "PolicySourceVerifier", {
+        runtime: lambda.Runtime.PYTHON_3_13,
+        architecture: lambda.Architecture.ARM_64,
+        handler: "policy_source_verifier.handler",
+        code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+        timeout: cdk.Duration.seconds(30),
+        memorySize: 256,
+        reservedConcurrentExecutions: 10,
+        environment: {
+          POLICY_GITHUB_SECRET_ARN: policyGitHubSecret.secretArn,
+          POLICY_GITHUB_ALLOWED_REPOSITORIES: policyGitHubRepositories.join(","),
+        },
+        tracing: lambda.Tracing.PASS_THROUGH,
+      });
+      policyGitHubSecret.grantRead(policySourceVerifier);
+      policySourceVerifier.grantInvoke(handler);
+      handler.addEnvironment("POLICY_SOURCE_VERIFIER_ARN", policySourceVerifier.functionArn);
+    }
     audit.grantPut(handler);
     // Evidence governance is tenant-prefix constrained in Lambda and requires
     // exact-version reads before retention or legal-hold mutation. S3 Object
@@ -1176,7 +1232,16 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "ApiUrl", { value: api.apiEndpoint });
     new cdk.CfnOutput(this, "UserPoolId", { value: userPool.userPoolId });
     new cdk.CfnOutput(this, "UserPoolClientId", { value: client.userPoolClientId });
-    new cdk.CfnOutput(this, "CognitoDomain", { value: userPoolDomain.baseUrl() });
+    new cdk.CfnOutput(this, "CognitoDomain", {
+      value: cdk.Fn.join("", [
+        "https://",
+        domainPrefix,
+        ".auth.",
+        this.region,
+        ".",
+        cdk.Aws.URL_SUFFIX,
+      ]),
+    });
     new cdk.CfnOutput(this, "UiUrl", { value: `https://${distribution.domainName}` });
     new cdk.CfnOutput(this, "UiBucketName", { value: uiBucket.bucketName });
     new cdk.CfnOutput(this, "AuditBucketName", { value: audit.bucketName });
@@ -1227,6 +1292,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, "MicrosoftEntraIdStatus", {
       value: entraProvider ? "configured" : "not-configured",
+    });
+    new cdk.CfnOutput(this, "PolicyGitHubSourceStatus", {
+      value: policyGitHubSecretName ? "configured" : "not-configured",
     });
     new cdk.CfnOutput(this, "MicrosoftEntraScimStatus", { value: scimEndpointStatus });
     new cdk.CfnOutput(this, "RuntimeAttestationStatus", {

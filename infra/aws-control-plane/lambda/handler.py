@@ -24,6 +24,12 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from policy_composition import PolicyComponent, PolicyCompositionError, compose_policy
 from policy_signing import bundle_from_record, sign_policy_bundle, verify_policy_bundle
+from policy_sources import (
+    PolicySourceDocument,
+    PolicySourceRequest,
+    PolicySourceVerificationError,
+    VerifiedPolicySource,
+)
 from regional_fault_target import run as run_regional_fault_target_probe
 
 CONTROL_TABLE_NAME = os.environ["CONTROL_TABLE"]
@@ -37,7 +43,9 @@ S3 = boto3.client("s3")
 SNS = boto3.client("sns")
 SQS = boto3.client("sqs")
 KMS = boto3.client("kms")
+LAMBDA = boto3.client("lambda")
 POLICY_SIGNING_KEY_ARN = os.environ.get("POLICY_SIGNING_KEY_ARN", "")
+POLICY_SOURCE_VERIFIER_ARN = os.environ.get("POLICY_SOURCE_VERIFIER_ARN", "")
 
 # Tenant list reads are deliberately finite. Callers that require complete
 # security state fail closed once either bound is reached; they never authorize
@@ -4132,6 +4140,7 @@ def _policy_version_view(tenant, record, versions=None):
         "activatedAt": record.get("activated_at"),
         "changeSummary": semantic_change,
         "composition": composition,
+        "sourceProvenance": _json(record.get("source_provenance", {})) or None,
         "integrity": {
             "status": "signed" if isinstance(integrity, dict) else "unsigned",
             "contentHash": record.get("effective_content_hash"),
@@ -4459,6 +4468,340 @@ def _assert_governed_policy_composition(tenant, record):
         raise PolicyConflict("policy effective configuration no longer reproduces")
     if not secrets.compare_digest(recomposed["graph_digest"], metadata["graphDigest"]):
         raise PolicyConflict("policy composition provenance no longer reproduces")
+
+
+def _policy_source_request(body):
+    """Parse one exact Git locator without accepting browser evidence or content."""
+    if not isinstance(body, dict) or set(body) != {
+        "importId",
+        "repository",
+        "commitSha",
+        "path",
+    }:
+        raise ValueError("policy import request schema is invalid")
+    import_id = _bounded_identifier(body.get("importId"), "importId")
+    try:
+        request = PolicySourceRequest(
+            repository=body.get("repository"),
+            commit_sha=body.get("commitSha"),
+            path=body.get("path"),
+        )
+    except PolicySourceVerificationError as error:
+        raise ValueError(str(error)) from error
+    return import_id, request
+
+
+def _invoke_policy_source_verifier(request):
+    """Invoke the isolated credential-owning worker and revalidate all evidence."""
+    if not POLICY_SOURCE_VERIFIER_ARN:
+        raise ValueError("policy source verification is not configured")
+    try:
+        response = LAMBDA.invoke(
+            FunctionName=POLICY_SOURCE_VERIFIER_ARN,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(request.wire(), sort_keys=True, separators=(",", ":")).encode(),
+        )
+        stream = response.get("Payload")
+        payload = stream.read(2_000_001) if stream is not None else b""
+    except Exception as error:
+        raise ValueError("policy source verification failed") from error
+    if (
+        response.get("StatusCode") != 200
+        or response.get("FunctionError")
+        or len(payload) > 2_000_000
+    ):
+        raise ValueError("policy source verification failed")
+    try:
+        result = json.loads(payload)
+        if not isinstance(result, dict) or set(result) != {
+            "schemaVersion",
+            "evidence",
+            "evidenceDigest",
+            "contentBase64",
+        }:
+            raise ValueError
+        if result.get("schemaVersion") != 1 or not isinstance(result.get("evidence"), dict):
+            raise ValueError
+        evidence = result["evidence"]
+        content = base64.b64decode(result["contentBase64"], validate=True)
+        reviewed_by = evidence.get("reviewedBy")
+        verified = VerifiedPolicySource(
+            provider=evidence.get("provider"),
+            repository=evidence.get("repository"),
+            commit_sha=evidence.get("commitSha"),
+            blob_sha=evidence.get("blobSha"),
+            path=evidence.get("path"),
+            content=content,
+            pull_request=evidence.get("pullRequest"),
+            reviewed_by=tuple(reviewed_by) if isinstance(reviewed_by, list) else (),
+            signer_identity=evidence.get("signerIdentity"),
+            retrieved_at=evidence.get("retrievedAt"),
+            review_verified=evidence.get("reviewVerified"),
+            signature_verified=evidence.get("signatureVerified"),
+        )
+    except Exception as error:
+        raise ValueError("policy source verifier returned invalid evidence") from error
+    if (
+        verified.repository != request.repository
+        or verified.commit_sha != request.commit_sha
+        or verified.path != request.path
+        or not isinstance(result.get("evidenceDigest"), str)
+        or not secrets.compare_digest(verified.evidence_digest, result["evidenceDigest"])
+    ):
+        raise ValueError("policy source verifier returned different evidence")
+    return verified
+
+
+def _policy_import_view(record):
+    """Project one import record without source bytes or provider credentials."""
+    return {
+        "organizationId": record["organization_id"],
+        "importId": record["id"],
+        "status": record["status"],
+        "source": {
+            "repository": record["repository"],
+            "commitSha": record["commit_sha"],
+            "blobSha": record["blob_sha"],
+            "path": record["path"],
+            "sourceDigest": record["source_digest"],
+            "evidenceDigest": record["evidence_digest"],
+        },
+        "draft": {
+            "policyId": record["policy_id"],
+            "version": int(record["policy_version"]),
+            "state": "draft",
+        },
+        "provenance": _json(record["provenance"]),
+        "createdAt": int(record["created_at"]),
+        "createdBy": record["created_by"],
+    }
+
+
+def _import_policy_source(tenant, body, actor):
+    """Verify Git evidence and atomically create only an inactive governed draft."""
+    import_id, request = _policy_source_request(body)
+    request_digest = hashlib.sha256(
+        json.dumps(request.wire(), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    existing = TABLE.get_item(
+        Key=_item_key(tenant, "POLICY_IMPORT", import_id), ConsistentRead=True
+    ).get("Item")
+    if existing:
+        if secrets.compare_digest(str(existing.get("request_digest", "")), request_digest):
+            return _policy_import_view(existing)
+        raise PolicyConflict("policy import ID is bound to a different source")
+    verified = _invoke_policy_source_verifier(request)
+    document = PolicySourceDocument.from_bytes(verified.content)
+    organizations = _list(tenant, "ORG", consistent_read=True)
+    if not any(item.get("id") == document.organization_id for item in organizations):
+        raise PermissionError("policy source organization scope is not permitted")
+    duplicate = next(
+        (
+            item
+            for item in _list(tenant, "POLICY_IMPORT", consistent_read=True)
+            if secrets.compare_digest(
+                str(item.get("evidence_digest", "")), verified.evidence_digest
+            )
+            and secrets.compare_digest(str(item.get("source_digest", "")), document.content_digest)
+        ),
+        None,
+    )
+    if duplicate:
+        return _policy_import_view(duplicate)
+    current = TABLE.get_item(
+        Key=_item_key(tenant, "POLICY", document.policy_id), ConsistentRead=True
+    ).get("Item")
+    versions = _policy_versions(tenant, document.policy_id, consistent_read=True) if current else []
+    if current and current.get("organization_id") != document.organization_id:
+        raise PermissionError("policy source policy scope is not permitted")
+    if any(item.get("state") in _POLICY_PENDING_STATES for item in versions):
+        raise PolicyConflict("policy already has a pending governed version")
+    latest = max((int(item.get("version", 0)) for item in versions), default=0)
+    version_number = latest + 1
+    base_version = int(current.get("version", 0)) if current else 0
+    composition = _compose_governed_policy(
+        tenant,
+        document.organization_id,
+        document.policy_id,
+        {
+            "localConfiguration": document.local_configuration,
+            "componentRefs": list(document.component_refs),
+        },
+    )
+    now = int(time.time())
+    provenance = {
+        "schemaVersion": 1,
+        "importId": import_id,
+        "requestDigest": request_digest,
+        "canonicalSourceDigest": document.content_digest,
+        "providerEvidence": verified.evidence(),
+        "evidenceDigest": verified.evidence_digest,
+    }
+    version = {
+        **_item_key(
+            tenant,
+            "POLICY_VERSION",
+            _policy_version_identifier(document.policy_id, version_number),
+        ),
+        "tenant_id": tenant,
+        "id": _policy_version_identifier(document.policy_id, version_number),
+        "policy_id": document.policy_id,
+        "organization_id": document.organization_id,
+        "version": version_number,
+        "base_version": base_version,
+        "name": document.name,
+        "configuration": composition["configuration"],
+        "local_configuration": composition["local_configuration"],
+        "component_refs": composition["component_refs"],
+        "graph_digest": composition["graph_digest"],
+        "composition_explanation": composition["composition_explanation"],
+        "source_provenance": provenance,
+        "content_hash": _configuration_hash(composition["configuration"]),
+        "state": "draft",
+        "author": actor,
+        "created_at": now,
+    }
+    policy = (
+        {
+            **current,
+            "latestVersion": version_number,
+            "governanceState": "draft",
+            "pendingVersion": version_number,
+            "pendingAuthor": actor,
+            "updatedAt": now,
+        }
+        if current
+        else {
+            **_item_key(tenant, "POLICY", document.policy_id),
+            "tenant_id": tenant,
+            "id": document.policy_id,
+            "organization_id": document.organization_id,
+            "name": document.name,
+            "configuration": {},
+            "version": 0,
+            "activeVersion": None,
+            "latestVersion": 1,
+            "governanceState": "draft",
+            "pendingVersion": 1,
+            "pendingAuthor": actor,
+            "governance_schema_version": 1,
+            "createdAt": now,
+            "author": actor,
+        }
+    )
+    imported = {
+        **_item_key(tenant, "POLICY_IMPORT", import_id),
+        "tenant_id": tenant,
+        "id": import_id,
+        "organization_id": document.organization_id,
+        "request_digest": request_digest,
+        "evidence_digest": verified.evidence_digest,
+        "source_digest": document.content_digest,
+        "repository": verified.repository,
+        "commit_sha": verified.commit_sha,
+        "blob_sha": verified.blob_sha,
+        "path": verified.path,
+        "policy_id": document.policy_id,
+        "policy_version": version_number,
+        "status": "draft_created",
+        "provenance": provenance,
+        "created_at": now,
+        "created_by": actor,
+    }
+    policy_condition = "attribute_not_exists(pk)" if not current else "#v = :v AND #l = :l"
+    policy_names = None if not current else {"#v": "version", "#l": "latestVersion"}
+    policy_values = None if not current else {":v": base_version, ":l": latest}
+    _transact_policy_records(
+        [
+            _transaction_put(version, condition="attribute_not_exists(pk)"),
+            _transaction_put(
+                policy, condition=policy_condition, names=policy_names, values=policy_values
+            ),
+            _transaction_put(imported, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _audit(
+        tenant,
+        "policy_source_imported",
+        actor,
+        {
+            "import_id": import_id,
+            "policy_id": document.policy_id,
+            "version": version_number,
+            "source_digest": document.content_digest,
+            "evidence_digest": verified.evidence_digest,
+        },
+    )
+    return _policy_import_view(imported)
+
+
+def _export_policy_source(tenant, policy_id, version, actor):
+    """Return canonical policy source with a KMS-signed provenance envelope."""
+    if not POLICY_SIGNING_KEY_ARN:
+        raise ValueError("policy export signing is not configured")
+    record = _policy_version_record(tenant, policy_id, version)
+    metadata = _policy_composition_metadata(record)
+    document = PolicySourceDocument.from_bytes(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "policyId": policy_id,
+                "organizationId": record.get("organization_id"),
+                "name": record.get("name"),
+                "componentRefs": metadata["componentRefs"],
+                "localConfiguration": metadata["localConfiguration"],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    )
+    provenance = {
+        "schemaVersion": 1,
+        "organizationId": document.organization_id,
+        "policyId": policy_id,
+        "version": version,
+        "contentHash": record["content_hash"],
+        "graphDigest": metadata["graphDigest"],
+        "sourceSha256": document.content_digest,
+        "exportedBy": actor,
+        "exportedAt": int(time.time()),
+    }
+    payload = json.dumps(provenance, sort_keys=True, separators=(",", ":")).encode()
+    try:
+        signed = KMS.sign(
+            KeyId=POLICY_SIGNING_KEY_ARN,
+            Message=payload,
+            MessageType="RAW",
+            SigningAlgorithm="ECDSA_SHA_256",
+        )
+    except Exception as error:
+        raise ValueError("policy export signing failed") from error
+    if (
+        signed.get("KeyId") != POLICY_SIGNING_KEY_ARN
+        or signed.get("SigningAlgorithm") != "ECDSA_SHA_256"
+        or not isinstance(signed.get("Signature"), bytes)
+    ):
+        raise ValueError("policy export signer returned invalid evidence")
+    _audit(
+        tenant,
+        "policy_source_exported",
+        actor,
+        {"policy_id": policy_id, "version": version, "source_digest": document.content_digest},
+    )
+    return {
+        "document": document.wire(),
+        "canonicalDocument": document.canonical_bytes().decode(),
+        "sourceSha256": document.content_digest,
+        "provenance": {
+            **provenance,
+            "integrity": {
+                "keyId": POLICY_SIGNING_KEY_ARN,
+                "algorithm": "ECDSA_SHA_256",
+                "signature": base64.b64encode(signed["Signature"]).decode(),
+                "signedAt": provenance["exportedAt"],
+            },
+        },
+    }
 
 
 def _create_governed_policy(tenant, body, actor):
@@ -14466,6 +14809,20 @@ def handler(event, context):
             if (
                 method == "GET"
                 and len(parts) == 3
+                and parts[0] == "policies"
+                and parts[1] == "imports"
+            ):
+                import_id = _bounded_identifier(parts[2], "importId")
+                imported = TABLE.get_item(
+                    Key=_item_key(tenant, "POLICY_IMPORT", import_id),
+                    ConsistentRead=True,
+                ).get("Item")
+                if not imported:
+                    return _response(404, {"error": "policy import not found"})
+                return _response(200, _policy_import_view(imported))
+            if (
+                method == "GET"
+                and len(parts) == 3
                 and parts[0] == "response-rules"
                 and parts[2] == "versions"
             ):
@@ -15116,7 +15473,9 @@ def handler(event, context):
                 policy_id = _bounded_identifier(parts[1], "policyId")
                 version = _positive_policy_version(int(parts[3]))
                 action = parts[4]
-                if action == "submit":
+                if action == "export":
+                    result = _export_policy_source(tenant, policy_id, version, actor)
+                elif action == "submit":
                     result = _submit_policy_version(tenant, policy_id, version, actor)
                 elif action == "simulate":
                     result = _simulate_policy_version(tenant, policy_id, version, _body(event))
@@ -15131,6 +15490,8 @@ def handler(event, context):
                 else:
                     raise ValueError("policy transition is unsupported")
                 return _response(200, result)
+            if method == "POST" and parts == ["policies", "imports"]:
+                return _response(201, _import_policy_source(tenant, _body(event), actor))
             if (
                 method == "POST"
                 and len(parts) == 3

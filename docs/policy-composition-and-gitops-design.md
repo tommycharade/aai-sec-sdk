@@ -213,6 +213,16 @@ The names in this abbreviated integration example are application adapters,
 not SDK globals. Production deployments should use PostgreSQL and a KMS/HSM
 signer; SQLite remains the local reference persistence adapter.
 
+The AWS-hosted implementation keeps provider access in a dedicated verifier
+Lambda. That worker can read one configured Secrets Manager secret and call
+only the fixed GitHub API origin; it has no DynamoDB, fleet mutation or KMS
+signing permission. The control-plane Lambda can invoke only that exact worker,
+reconstructs `VerifiedPolicySource` from its bounded response and compares the
+request and evidence digests before writing anything. Policy shell, immutable
+draft and import record commit in one DynamoDB transaction. KMS signs export
+provenance in the control plane. Missing configuration, verifier errors,
+malformed evidence and transaction races fail without a partial policy.
+
 Normal create/update requests gain `componentRefs` and
 `localConfiguration`. Legacy `configuration` remains accepted only when
 `componentRefs` is absent; it maps to local configuration. Sending both forms

@@ -1,5 +1,14 @@
 # Changelog
 
+- Added AWS-hosted parity for reviewed policy GitOps. A dedicated
+  least-privilege verifier Lambda owns the allow-listed GitHub credential and
+  outbound calls but has no fleet or signing authority; the control plane
+  revalidates its evidence, atomically creates only an inactive draft, retains
+  provenance and signs canonical exports with the existing policy KMS key.
+  Exact repository authority and the credential reference are stored as a
+  reviewed encrypted deployment manifest so routine deploys ignore ambient
+  shell configuration and fail closed if persisted authority is lost.
+
 - Added reviewed policy-as-code import/export to the provider-neutral control
   plane. Exact Git commits and blobs are schema-validated, independently
   reviewed and signature-verified before an atomic draft-only import; immutable

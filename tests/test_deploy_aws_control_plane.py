@@ -48,6 +48,17 @@ def _recovery_manifest(**updates: Any) -> dict[str, Any]:
     return value
 
 
+def _policy_github_manifest(**updates: Any) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "schemaVersion": 1,
+        "credentialSecretName": "aai-sec/policy/github-app-installation",
+        "allowedRepositories": ["github.com/example/security-policy"],
+        "reviewEvidenceRef": "SEC-REVIEW-1234",
+    }
+    value.update(updates)
+    return value
+
+
 def _completed(stdout: str = "{}", *, returncode: int = 0, stderr: str = "") -> Any:
     return subprocess.CompletedProcess([], returncode, stdout, stderr)
 
@@ -135,6 +146,35 @@ def test_recovery_manifest_is_strict_canonical_and_bucket_scoped() -> None:
     with pytest.raises(module.DeploymentConfigurationError, match="replicaRegion"):
         module.AuditRecoveryManifest.parse(
             json.dumps(_recovery_manifest(replicaRegion="eu-west-1; unsafe"))
+        )
+
+
+def test_policy_github_manifest_is_strict_exact_and_secret_free() -> None:
+    module = _load()
+    manifest = module.PolicyGitHubDeploymentManifest.parse(json.dumps(_policy_github_manifest()))
+    assert json.loads(manifest.canonical_json()) == _policy_github_manifest()
+    assert manifest.deployment_environment() == {
+        "POLICY_GITHUB_SECRET_NAME": "aai-sec/policy/github-app-installation",
+        "POLICY_GITHUB_ALLOWED_REPOSITORIES": "github.com/example/security-policy",
+    }
+    with pytest.raises(module.DeploymentConfigurationError, match="unique exact"):
+        module.PolicyGitHubDeploymentManifest.parse(
+            json.dumps(
+                _policy_github_manifest(
+                    allowedRepositories=[
+                        "github.com/example/security-policy",
+                        "github.com/example/security-policy",
+                    ]
+                )
+            )
+        )
+    with pytest.raises(module.DeploymentConfigurationError, match="unique exact"):
+        module.PolicyGitHubDeploymentManifest.parse(
+            json.dumps(_policy_github_manifest(allowedRepositories=["github.com/example/*"]))
+        )
+    with pytest.raises(module.DeploymentConfigurationError, match="opaque non-secret"):
+        module.PolicyGitHubDeploymentManifest.parse(
+            json.dumps(_policy_github_manifest(reviewEvidenceRef="secret review notes"))
         )
 
 
@@ -278,6 +318,16 @@ def test_missing_or_malformed_persistent_configuration_fails_closed() -> None:
         module.load_persisted_recovery_manifest(
             "AaiSecControlPlane", profile="synthetic", region="eu-west-2", runner=malformed
         )
+    assert (
+        module.load_persisted_policy_github_manifest(
+            "AaiSecControlPlane", profile="synthetic", region="eu-west-2", runner=missing
+        )
+        is None
+    )
+    with pytest.raises(module.DeploymentConfigurationError, match="GitHub manifest fields"):
+        module.load_persisted_policy_github_manifest(
+            "AaiSecControlPlane", profile="synthetic", region="eu-west-2", runner=malformed
+        )
 
 
 def test_recovery_preflight_requires_distinct_versioned_compliance_destination() -> None:
@@ -362,6 +412,9 @@ def test_configured_stack_cannot_be_deployed_after_manifest_loss(monkeypatch: An
     monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
+        module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
         module,
         "stack_outputs",
         lambda *_args, **_kwargs: {"MicrosoftEntraIdStatus": "configured"},
@@ -374,6 +427,9 @@ def test_configured_replication_cannot_be_deployed_after_manifest_loss(monkeypat
     module = _load()
     monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(
         module,
         "stack_outputs",
@@ -391,6 +447,9 @@ def test_deploy_injects_only_manifest_references_and_verifies_posture(monkeypatc
     manifest = module.EntraDeploymentManifest.parse(json.dumps(_manifest()))
     monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: manifest)
     monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
+    )
     output_sequence = iter(
         [
             {"MicrosoftEntraIdStatus": "not-configured"},
@@ -446,6 +505,9 @@ def test_deploy_uses_only_persisted_recovery_authority(monkeypatch: Any) -> None
     monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: recovery
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
     )
     output_sequence = iter(
         [
@@ -540,3 +602,97 @@ def test_scim_secret_json_is_exact_and_bounded() -> None:
         module._scim_token(json.dumps({"token": token, "extra": True}))
     with pytest.raises(module.DeploymentConfigurationError, match="32-512"):
         module._scim_token("short")
+
+
+def test_policy_github_credential_is_exact_bounded_and_never_returned() -> None:
+    module = _load()
+    manifest = module.PolicyGitHubDeploymentManifest.parse(json.dumps(_policy_github_manifest()))
+    token = "synthetic-github-installation-token"  # noqa: S105
+
+    def valid(command: list[str], **_: Any) -> Any:
+        assert "secretsmanager" in command
+        return _completed(json.dumps({"SecretString": json.dumps({"token": token})}))
+
+    assert (
+        module.verify_policy_github_credential(
+            manifest, profile="synthetic", region="eu-west-2", runner=valid
+        )
+        is None
+    )
+
+    def extra(_command: list[str], **_: Any) -> Any:
+        return _completed(
+            json.dumps({"SecretString": json.dumps({"token": token, "owner": "unsafe"})})
+        )
+
+    with pytest.raises(module.DeploymentConfigurationError, match="only token"):
+        module.verify_policy_github_credential(
+            manifest, profile="synthetic", region="eu-west-2", runner=extra
+        )
+
+
+def test_deploy_uses_only_persisted_policy_github_authority(monkeypatch: Any) -> None:
+    module = _load()
+    policy_github = module.PolicyGitHubDeploymentManifest.parse(
+        json.dumps(_policy_github_manifest())
+    )
+    monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module,
+        "load_persisted_policy_github_manifest",
+        lambda *_args, **_kwargs: policy_github,
+    )
+    output_sequence = iter(
+        [
+            {"PolicyGitHubSourceStatus": "not-configured"},
+            {"PolicyGitHubSourceStatus": "configured"},
+        ]
+    )
+    monkeypatch.setattr(module, "stack_outputs", lambda *_args, **_kwargs: next(output_sequence))
+    monkeypatch.setattr(module, "verify_policy_github_credential", lambda *_args, **_kwargs: None)
+    monkeypatch.setenv("POLICY_GITHUB_SECRET_NAME", "ambient-unsafe-secret")
+    monkeypatch.setenv("POLICY_GITHUB_ALLOWED_REPOSITORIES", "github.com/attacker/unsafe")
+    commands: list[tuple[list[str], dict[str, str]]] = []
+
+    def runner(command: list[str], **kwargs: Any) -> Any:
+        commands.append((command, kwargs.get("env", {})))
+        return _completed()
+
+    module.deploy("AaiSecControlPlane", profile="synthetic", region="eu-west-2", runner=runner)
+    environment = commands[-1][1]
+    assert environment["POLICY_GITHUB_SECRET_NAME"] == policy_github.credential_secret_name
+    assert environment["POLICY_GITHUB_ALLOWED_REPOSITORIES"] == (
+        "github.com/example/security-policy"
+    )
+    assert "ambient-unsafe" not in repr(environment)
+
+
+def test_policy_github_persistence_requires_explicit_review_confirmation(
+    tmp_path: Path, monkeypatch: Any, capsys: Any
+) -> None:
+    module = _load()
+    config = tmp_path / "policy-github.json"
+    config.write_text(json.dumps(_policy_github_manifest()), encoding="utf-8")
+    monkeypatch.setattr(module, "verify_policy_github_credential", lambda *_args, **_kwargs: None)
+    persisted: list[Any] = []
+    monkeypatch.setattr(
+        module,
+        "persist_policy_github_manifest",
+        lambda *args, **kwargs: persisted.append((args, kwargs)),
+    )
+    assert module.main(["configure-policy-github", "--config", str(config)]) == 1
+    assert not persisted
+    assert "--confirm-policy-github-review is required" in capsys.readouterr().err
+    assert (
+        module.main(
+            [
+                "configure-policy-github",
+                "--config",
+                str(config),
+                "--confirm-policy-github-review",
+            ]
+        )
+        == 0
+    )
+    assert len(persisted) == 1
