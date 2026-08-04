@@ -1,8 +1,15 @@
 PYTHON ?= python3
 
-.PHONY: check format lint type test coverage guardrails docs docs-check package-check security-check mutation-check mutation ui-check
+.PHONY: check format lint type test coverage guardrails docs docs-check package-check security-check mutation-check mutation terraform-check ui-check
 
-check: format-check lint type test coverage guardrails docs-check package-check security-check mutation-check ui-check
+check: format-check lint type test coverage guardrails docs-check package-check security-check mutation-check terraform-check ui-check
+
+terraform-check:
+	@test -z "$$(gofmt -l terraform-provider-aai-sec)"
+	cd terraform-provider-aai-sec && go vet ./... && go test ./...
+	cd terraform-provider-aai-sec && go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+	terraform fmt -check -recursive terraform-provider-aai-sec/examples
+	$(PYTHON) scripts/check_terraform_provider.py
 
 ui-check:
 	@if [ -d aai-sec-ui ]; then \

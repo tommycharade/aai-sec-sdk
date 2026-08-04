@@ -18,6 +18,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import boto3
@@ -1679,6 +1680,7 @@ def _machine_route_capability(method, path):
         "/enterprise/skills",
         "/enterprise/slo",
         "/enterprise/templates",
+        "/enterprise/tenant",
     }
     evidence_paths = {
         "/enterprise/audit",
@@ -1711,6 +1713,11 @@ def _machine_route_capability(method, path):
         )
     ):
         return "policy_draft_write"
+    if method in {"PUT", "DELETE"} and re.fullmatch(
+        r"/enterprise/(?:skills|mcp-servers)/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+        normalized,
+    ):
+        return "policy_draft_write"
     if method == "POST" and (
         normalized
         in {
@@ -1734,6 +1741,10 @@ def _machine_route_capability(method, path):
         r"/enterprise/groups/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/agents/"
         r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
         normalized,
+    ):
+        return "fleet_write"
+    if method in {"PUT", "DELETE"} and re.fullmatch(
+        r"/enterprise/groups/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", normalized
     ):
         return "fleet_write"
     if method == "POST" and (
@@ -4286,6 +4297,20 @@ def _transaction_put(record, *, condition, names=None, values=None):
     return {"Put": operation}
 
 
+def _transaction_delete(key, *, condition, names=None, values=None):
+    """Build one explicit conditional Delete operation for TransactWriteItems."""
+    operation = {
+        "TableName": CONTROL_TABLE_NAME,
+        "Key": _ddb_item(key),
+        "ConditionExpression": condition,
+    }
+    if names:
+        operation["ExpressionAttributeNames"] = names
+    if values:
+        operation["ExpressionAttributeValues"] = _ddb_item(values)
+    return {"Delete": operation}
+
+
 def _transact_policy_records(operations):
     """Commit policy authority changes atomically or normalize a stale-state conflict."""
     try:
@@ -6199,6 +6224,346 @@ def _put(tenant, kind, identifier, item):
     record = {**_item_key(tenant, kind, identifier), **item, "tenant_id": tenant}
     TABLE.put_item(Item=record)
     return record
+
+
+def _configuration_audit_record(tenant, event_type, actor, payload, *, now):
+    """Build content-minimised primary evidence for declarative configuration."""
+    event_id = str(uuid.uuid4())
+    redacted = {
+        "event_type": event_type,
+        "actor": actor,
+        "tenant_id": tenant,
+        "occurred_at": now,
+        "payload": payload,
+    }
+    return {
+        **_item_key(tenant, "CONFIGURATION_AUDIT", f"{now:012d}#{event_id}"),
+        **redacted,
+        "id": event_id,
+        "payload_hash": hashlib.sha256(
+            json.dumps(redacted, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+
+
+def _transact_configuration(operations):
+    """Commit desired configuration and primary evidence as one transaction."""
+    try:
+        DYNAMODB.transact_write_items(TransactItems=operations)
+    except Exception as error:
+        code = getattr(error, "response", {}).get("Error", {}).get("Code")
+        if code in {"ConditionalCheckFailedException", "TransactionCanceledException"}:
+            raise PolicyConflict("declarative configuration changed concurrently") from error
+        raise
+
+
+def _export_configuration_audit(tenant, event_type, actor, payload):
+    """Best-effort replicate already durable configuration evidence into S3."""
+    try:
+        _audit(tenant, event_type, actor, payload)
+    except Exception:
+        print(
+            json.dumps({"warning": "configuration audit replication failed", "event": event_type})
+        )
+
+
+def _managed_registration_record(tenant, kind, identifier, body, actor, *, current=None):
+    """Validate one declaratively managed Skill or MCP registration.
+
+    The server owns identity, organization, revision and timestamps.  A machine
+    client may only replace the bounded configuration body and therefore cannot
+    move a registration across a tenant or organization trust boundary.
+    """
+    identifier_field = "skillId" if kind == "SKILL" else "serverId"
+    identifier = _bounded_identifier(identifier, identifier_field)
+    organization_id = _policy_organization(tenant, body)
+    if current and current.get("organizationId") != organization_id:
+        raise PolicyConflict("managed registration organization is immutable")
+    name = _bounded_text(body.get("name", identifier), "name")
+    description = body.get("description", "")
+    if not isinstance(description, str) or len(description) > 1000:
+        raise ValueError("description must be text up to 1000 characters")
+    version = _bounded_text(body.get("version", "1.0.0"), "version", 64)
+    enabled = body.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")
+    now = int(time.time())
+    revision = int(current.get("revision", 1)) + 1 if current else 1
+    common = {
+        "id": identifier,
+        "organizationId": organization_id,
+        "name": name,
+        "description": description,
+        "version": version,
+        "enabled": enabled,
+        "status": "active" if enabled else "disabled",
+        "revision": revision,
+        "createdAt": int(current.get("createdAt", now)) if current else now,
+        "updatedAt": now,
+        "author": actor,
+    }
+    if kind == "SKILL":
+        content = body.get("content", "")
+        if not isinstance(content, str) or not content or len(content) > 100000:
+            raise ValueError("valid bounded Skill content is required")
+        return {
+            **common,
+            "content": content,
+            "digest": f"sha256:{hashlib.sha256(content.encode()).hexdigest()}",
+        }
+    transport = body.get("transport")
+    if transport not in {"stdio", "http"}:
+        raise ValueError("valid MCP transport is required")
+    args = body.get("args", [])
+    references = body.get("environmentReferences", [])
+    if (
+        not isinstance(args, list)
+        or len(args) > 64
+        or any(not isinstance(value, str) or len(value) > 4096 for value in args)
+    ):
+        raise ValueError("MCP args must contain at most 64 bounded strings")
+    if (
+        not isinstance(references, list)
+        or len(references) > 64
+        or any(
+            not isinstance(value, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", value)
+            for value in references
+        )
+    ):
+        raise ValueError("MCP environment references must be bounded variable names")
+    command = body.get("command")
+    url = body.get("url")
+    if transport == "stdio" and (not isinstance(command, str) or not command.strip()):
+        raise ValueError("stdio MCP server command is required")
+    if transport == "http":
+        try:
+            parsed_url = urlsplit(url) if isinstance(url, str) else None
+            hostname = parsed_url.hostname if parsed_url else None
+        except ValueError as error:
+            raise ValueError("HTTP MCP server URL is malformed") from error
+        if (
+            parsed_url is None
+            or parsed_url.scheme != "https"
+            or not hostname
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+            or parsed_url.query
+            or parsed_url.fragment
+            or len(url) > 2048
+        ):
+            raise ValueError(
+                "HTTP MCP server URL must be bounded HTTPS without credentials, query, or fragment"
+            )
+    return {
+        **common,
+        "transport": transport,
+        "command": command.strip() if transport == "stdio" else None,
+        "args": args if transport == "stdio" else [],
+        "url": url if transport == "http" else None,
+        "environmentReferences": references,
+    }
+
+
+def _create_managed_registration(tenant, kind, identifier, body, actor):
+    """Create one registration without allowing an existing ID to be replaced."""
+    record = _managed_registration_record(tenant, kind, identifier, body, actor)
+    event_name = "skill_created" if kind == "SKILL" else "mcp_server_created"
+    created = {**_item_key(tenant, kind, identifier), **record, "tenant_id": tenant}
+    payload = {"registration_id": identifier, "revision": 1}
+    audit = _configuration_audit_record(tenant, event_name, actor, payload, now=int(time.time()))
+    _transact_configuration(
+        [
+            _transaction_put(created, condition="attribute_not_exists(pk)"),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_configuration_audit(tenant, event_name, actor, payload)
+    return created
+
+
+def _replace_managed_registration(tenant, kind, identifier, body, actor):
+    """Replace configuration under an optimistic revision precondition."""
+    current = TABLE.get_item(Key=_item_key(tenant, kind, identifier), ConsistentRead=True).get(
+        "Item"
+    )
+    if not current:
+        raise LookupError("managed registration not found")
+    expected = body.get("expectedRevision")
+    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 1:
+        raise ValueError("expectedRevision must be a positive integer")
+    current_revision = int(current.get("revision", 1))
+    if expected != current_revision:
+        raise PolicyConflict("managed registration changed concurrently")
+    replacement = {
+        **_item_key(tenant, kind, identifier),
+        **_managed_registration_record(tenant, kind, identifier, body, actor, current=current),
+        "tenant_id": tenant,
+    }
+    event_name = "skill_updated" if kind == "SKILL" else "mcp_server_updated"
+    payload = {"registration_id": identifier, "revision": replacement["revision"]}
+    audit = _configuration_audit_record(tenant, event_name, actor, payload, now=int(time.time()))
+    _transact_configuration(
+        [
+            _transaction_put(
+                replacement,
+                condition=(
+                    "attribute_exists(pk) AND "
+                    "(attribute_not_exists(revision) OR revision = :registration_revision)"
+                ),
+                values={":registration_revision": expected},
+            ),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_configuration_audit(tenant, event_name, actor, payload)
+    return replacement
+
+
+def _retire_managed_registration(tenant, kind, identifier, body, actor):
+    """Disable a registration while retaining evidence and policy references."""
+    current = TABLE.get_item(Key=_item_key(tenant, kind, identifier), ConsistentRead=True).get(
+        "Item"
+    )
+    if not current:
+        raise LookupError("managed registration not found")
+    expected = body.get("expectedRevision")
+    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 1:
+        raise ValueError("expectedRevision must be a positive integer")
+    current_revision = int(current.get("revision", 1))
+    if expected != current_revision:
+        raise PolicyConflict("managed registration changed concurrently")
+    if current.get("status") == "retired":
+        return current
+    replacement = {
+        **current,
+        "enabled": False,
+        "status": "retired",
+        "revision": current_revision + 1,
+        "updatedAt": int(time.time()),
+        "retiredBy": actor,
+    }
+    event_name = "skill_retired" if kind == "SKILL" else "mcp_server_retired"
+    payload = {"registration_id": identifier, "revision": replacement["revision"]}
+    audit = _configuration_audit_record(tenant, event_name, actor, payload, now=int(time.time()))
+    _transact_configuration(
+        [
+            _transaction_put(
+                replacement,
+                condition=(
+                    "attribute_exists(pk) AND "
+                    "(attribute_not_exists(revision) OR revision = :registration_revision)"
+                ),
+                values={":registration_revision": expected},
+            ),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_configuration_audit(tenant, event_name, actor, payload)
+    return replacement
+
+
+def _replace_group_configuration(tenant, group_id, body, actor):
+    """Replace group metadata without mutating its independently revised members."""
+    group_id = _bounded_identifier(group_id, "groupId")
+    group = TABLE.get_item(Key=_item_key(tenant, "GROUP", group_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not group:
+        raise LookupError("group not found")
+    expected = body.get("expectedConfigurationRevision")
+    current_revision = int(group.get("configuration_revision", 1))
+    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 1:
+        raise ValueError("expectedConfigurationRevision must be a positive integer")
+    if expected != current_revision:
+        raise PolicyConflict("group configuration changed concurrently")
+    policy_id = _bounded_identifier(body.get("policyId"), "policyId")
+    policy = TABLE.get_item(Key=_item_key(tenant, "POLICY", policy_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not policy:
+        raise LookupError("policy not found")
+    policy = _ensure_policy_governance(tenant, policy)
+    if int(policy.get("version", 0)) <= 0:
+        raise PolicyConflict("group policies must have an active governed version")
+    group_organization = group.get("organizationId") or group.get("organization_id")
+    policy_organization = policy.get("organization_id") or policy.get("organizationId")
+    if not group_organization or group_organization != policy_organization:
+        raise PolicyConflict("group and policy must belong to the same organization")
+    updated = {
+        **group,
+        "name": _bounded_text(body.get("name"), "name"),
+        "policyId": policy_id,
+        "policyName": policy["name"],
+        "configuration_revision": current_revision + 1,
+        "updatedAt": int(time.time()),
+    }
+    event_name = "group_configuration_updated"
+    payload = {"group_id": group_id, "configuration_revision": current_revision + 1}
+    audit = _configuration_audit_record(tenant, event_name, actor, payload, now=int(time.time()))
+    _transact_configuration(
+        [
+            _transaction_put(
+                updated,
+                condition=(
+                    "attribute_exists(pk) AND "
+                    "(attribute_not_exists(configuration_revision) "
+                    "OR configuration_revision = :configuration_revision) "
+                    "AND membership_revision = :membership_revision "
+                    "AND agent_keys = :agent_keys"
+                ),
+                values={
+                    ":configuration_revision": expected,
+                    ":membership_revision": _group_membership_revision(group),
+                    ":agent_keys": _group_agent_keys(group),
+                },
+            ),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_configuration_audit(tenant, event_name, actor, payload)
+    return next(item for item in _fleet(tenant)["groups"] if item["id"] == group_id)
+
+
+def _delete_empty_group(tenant, group_id, body, actor):
+    """Delete only an empty group under exact configuration and membership revisions."""
+    group_id = _bounded_identifier(group_id, "groupId")
+    group = TABLE.get_item(Key=_item_key(tenant, "GROUP", group_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not group:
+        return {"id": group_id, "deleted": True}
+    expected = body.get("expectedConfigurationRevision")
+    if not isinstance(expected, int) or isinstance(expected, bool) or expected < 1:
+        raise ValueError("expectedConfigurationRevision must be a positive integer")
+    current_revision = int(group.get("configuration_revision", 1))
+    if expected != current_revision:
+        raise PolicyConflict("group configuration changed concurrently")
+    if _group_agent_keys(group):
+        raise PolicyConflict("group must be empty before deletion")
+    event_name = "group_deleted"
+    payload = {"group_id": group_id}
+    audit = _configuration_audit_record(tenant, event_name, actor, payload, now=int(time.time()))
+    _transact_configuration(
+        [
+            _transaction_delete(
+                _item_key(tenant, "GROUP", group_id),
+                condition=(
+                    "attribute_exists(pk) AND "
+                    "(attribute_not_exists(configuration_revision) "
+                    "OR configuration_revision = :configuration_revision) "
+                    "AND membership_revision = :membership_revision AND agent_keys = :empty"
+                ),
+                values={
+                    ":configuration_revision": expected,
+                    ":membership_revision": _group_membership_revision(group),
+                    ":empty": [],
+                },
+            ),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_configuration_audit(tenant, event_name, actor, payload)
+    return {"id": group_id, "deleted": True}
 
 
 def _bounded_text(value, field, maximum=128):
@@ -14287,6 +14652,7 @@ def _fleet(tenant):
             or _scope_emergency_stop(tenant, "group", group.get("id", ""))
         )
         group["membershipRevision"] = _group_membership_revision(group)
+        group["configurationRevision"] = int(group.get("configuration_revision", 1))
         group["membershipMode"] = _group_membership_mode(group)
         group["dynamicRule"] = group.get("dynamic_rule")
         group["dynamicRuleHash"] = group.get("dynamic_rule_hash")
@@ -14318,6 +14684,13 @@ def _fleet(tenant):
             versions = _policy_versions(tenant, governed["id"])
         policies.append(_policy_summary(tenant, governed, versions))
     configurations = _deployment_configurations(tenant)
+    skills = _list(tenant, "SKILL")
+    mcp_servers = _list(tenant, "MCP")
+    for registration in [*skills, *mcp_servers]:
+        registration["revision"] = int(registration.get("revision", 1))
+        registration["status"] = registration.get(
+            "status", "active" if registration.get("enabled", True) else "disabled"
+        )
     return {
         "organizations": _list(tenant, "ORG"),
         "projects": _list(tenant, "PROJECT"),
@@ -14328,8 +14701,8 @@ def _fleet(tenant):
         "templates": _list(tenant, "TEMPLATE"),
         "policies": policies,
         "groups": groups,
-        "skills": _list(tenant, "SKILL"),
-        "mcpServers": _list(tenant, "MCP"),
+        "skills": skills,
+        "mcpServers": mcp_servers,
         "configurations": configurations,
         "configurationHistory": _list(tenant, "CONFIGURATION_VERSION"),
         "health": [
@@ -16683,70 +17056,33 @@ def handler(event, context):
                 )
             if method == "POST" and parts == ["skills"]:
                 body = _body(event)
-                organization_id = _policy_organization(tenant, body)
-                content = body.get("content", "")
-                if not isinstance(content, str) or not content or len(content) > 100000:
-                    return _response(400, {"error": "valid bounded Skill content is required"})
-                skill_id = body.get("skillId")
-                digest = f"sha256:{hashlib.sha256(content.encode()).hexdigest()}"
-                item = _put(
-                    tenant,
-                    "SKILL",
-                    skill_id,
-                    {
-                        "id": skill_id,
-                        "organizationId": organization_id,
-                        "name": body.get("name", skill_id),
-                        "description": body.get("description", ""),
-                        "version": body.get("version", "1.0.0"),
-                        "content": content,
-                        "digest": digest,
-                        "enabled": body.get("enabled", True),
-                        "createdAt": int(time.time()),
-                        "author": actor,
-                    },
+                skill_id = _bounded_identifier(body.get("skillId"), "skillId")
+                return _response(
+                    201,
+                    _create_managed_registration(tenant, "SKILL", skill_id, body, actor),
                 )
-                _audit(tenant, "skill_created", actor, {"skill_id": skill_id, "digest": digest})
-                return _response(201, item)
             if method == "POST" and parts == ["mcp-servers"]:
                 body = _body(event)
-                organization_id = _policy_organization(tenant, body)
-                server_id = body.get("serverId")
-                transport = body.get("transport")
-                if (
-                    not isinstance(server_id, str)
-                    or not server_id
-                    or transport not in {"stdio", "http"}
-                ):
-                    return _response(
-                        400, {"error": "valid MCP serverId and transport are required"}
-                    )
-                if transport == "stdio" and not isinstance(body.get("command"), str):
-                    return _response(400, {"error": "stdio MCP server command is required"})
-                if transport == "http" and not isinstance(body.get("url"), str):
-                    return _response(400, {"error": "HTTP MCP server URL is required"})
-                item = _put(
-                    tenant,
-                    "MCP",
-                    server_id,
-                    {
-                        "id": server_id,
-                        "organizationId": organization_id,
-                        "name": body.get("name", server_id),
-                        "description": body.get("description", ""),
-                        "version": body.get("version", "1.0.0"),
-                        "transport": transport,
-                        "command": body.get("command"),
-                        "args": body.get("args", []),
-                        "url": body.get("url"),
-                        "environmentReferences": body.get("environmentReferences", []),
-                        "enabled": body.get("enabled", True),
-                        "createdAt": int(time.time()),
-                        "author": actor,
-                    },
+                server_id = _bounded_identifier(body.get("serverId"), "serverId")
+                return _response(
+                    201,
+                    _create_managed_registration(tenant, "MCP", server_id, body, actor),
                 )
-                _audit(tenant, "mcp_server_created", actor, {"server_id": server_id})
-                return _response(201, item)
+            if (
+                method in {"PUT", "DELETE"}
+                and len(parts) == 2
+                and parts[0] in {"skills", "mcp-servers"}
+            ):
+                identifier = _bounded_identifier(
+                    parts[1], "skillId" if parts[0] == "skills" else "serverId"
+                )
+                kind = "SKILL" if parts[0] == "skills" else "MCP"
+                result = (
+                    _replace_managed_registration(tenant, kind, identifier, _body(event), actor)
+                    if method == "PUT"
+                    else _retire_managed_registration(tenant, kind, identifier, _body(event), actor)
+                )
+                return _response(200, result)
             if method == "POST" and parts == ["policies"]:
                 return _response(201, _create_governed_policy(tenant, _body(event), actor))
             if method == "POST" and parts == ["agents", "bootstrap"]:
@@ -16905,29 +17241,48 @@ def handler(event, context):
                 policy = _ensure_policy_governance(tenant, policy)
                 if int(policy.get("version", 0)) <= 0:
                     raise PolicyConflict("group policies must have an active governed version")
-                try:
-                    item = _create_item(
-                        tenant,
-                        "GROUP",
-                        group_id,
-                        {
-                            "id": group_id,
-                            "organizationId": policy.get("organization_id", ""),
-                            "name": _bounded_text(body.get("name"), "name"),
-                            "policyId": policy["id"],
-                            "policyName": policy["name"],
-                            "createdAt": int(time.time()),
-                            "agent_keys": [],
-                            "membership_revision": 1,
-                            "membership_mode": "manual",
-                        },
-                    )
-                except Exception as error:
-                    if _is_conditional_conflict(error):
-                        return _response(409, {"error": "group already exists"})
-                    raise
-                _audit(tenant, "group_created", actor, {"group_id": group_id})
-                return _response(201, {**item, "membershipRevision": 1, "agents": []})
+                now = int(time.time())
+                item = {
+                    **_item_key(tenant, "GROUP", group_id),
+                    "tenant_id": tenant,
+                    "id": group_id,
+                    "organizationId": policy.get("organization_id", ""),
+                    "name": _bounded_text(body.get("name"), "name"),
+                    "policyId": policy["id"],
+                    "policyName": policy["name"],
+                    "createdAt": now,
+                    "agent_keys": [],
+                    "membership_revision": 1,
+                    "membership_mode": "manual",
+                    "configuration_revision": 1,
+                }
+                payload = {"group_id": group_id, "configuration_revision": 1}
+                audit = _configuration_audit_record(
+                    tenant, "group_created", actor, payload, now=now
+                )
+                _transact_configuration(
+                    [
+                        _transaction_put(item, condition="attribute_not_exists(pk)"),
+                        _transaction_put(audit, condition="attribute_not_exists(pk)"),
+                    ]
+                )
+                _export_configuration_audit(tenant, "group_created", actor, payload)
+                return _response(
+                    201,
+                    {
+                        **item,
+                        "membershipRevision": 1,
+                        "configurationRevision": 1,
+                        "agents": [],
+                    },
+                )
+            if method in {"PUT", "DELETE"} and len(parts) == 2 and parts[0] == "groups":
+                result = (
+                    _replace_group_configuration(tenant, parts[1], _body(event), actor)
+                    if method == "PUT"
+                    else _delete_empty_group(tenant, parts[1], _body(event), actor)
+                )
+                return _response(200, result)
             if (
                 method == "POST"
                 and len(parts) == 3

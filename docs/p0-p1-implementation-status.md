@@ -93,7 +93,7 @@ installation and convergence are deliberately not claimed.
 | Fleet lifecycle | Partial | Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and monitored five-minute deterministic reevaluation, health, immutable desired/package rollout binding, deterministic canary rings, time-zone maintenance windows, server-derived endpoint convergence, automatic health/deadline pause, exact known-good rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, server-clock-expiring exact-agent policy exceptions, source-reconciled orphan/leaver detection, AWS-managed Entra/Intune/GitHub discovery connectors, signed endpoint installation/process collection, per-device credential lifecycle and server-derived evidence health | Real release manifests for managed SDK/gateway/hook upgrades, physical MDM distribution, real-provider population coverage and response automation |
 | Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, semantic authority diff, bounded redacted historical simulation, restrictive composition, reviewed exact-commit GitHub import, immutable provenance UI, draft-only writes, KMS-signed canonical export, unattended repository- and permission-scoped GitHub App token minting, signed bundles, temporary agent exceptions, canary/scheduling, evidence-only convergence and known-good rollback | Complete live Git-provider acceptance and physical-endpoint rollout-SLO acceptance |
 | Security operations | Partial | Approvals, audit timeline, independent scoped emergency stops, scheduled server-derived endpoint detections, deduplicated alert lifecycle, audited acknowledgement, durable SNS/SQS delivery, revisioned cases, authoritative endpoint-to-agent binding, evidence-preserving agent quarantine, independently approved versioned endpoint-response rules with preview, action limits, cooldown, idempotent evidence, disable and rollback, session revocation, recovery-gated release and integrity-verifiable content-minimised case export | Broader tool/MCP/repository/configuration anomaly rules, credential-broker response, maintenance windows, baselines, MDM/EDR isolation and external workflow integrations |
-| Reporting and administration | Partial | Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; content-hashed export; purpose-specific executive and evidence-reader assurance reports with explicit blind spots, non-guarantees and content-addressed traceability; scoped expiring service identities with one-time credentials, exact machine-route capabilities, rotation, revocation and usage evidence | Customer-validated framework mappings and signed/scheduled report distribution, real-workload machine-API acceptance, Terraform, CMK/residency and private access |
+| Reporting and administration | Partial | Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; content-hashed export; purpose-specific executive and evidence-reader assurance reports with explicit blind spots, non-guarantees and content-addressed traceability; scoped expiring service identities with one-time credentials, exact machine-route capabilities, rotation, revocation and usage evidence; versioned Terraform provider for tenant inspection, governed drafts, groups, Skills and MCP servers with import and revision-guarded drift handling | Customer-validated framework mappings and signed/scheduled report distribution, real-workload machine-API and Terraform acceptance, provider Registry release/signing, CMK/residency and private access |
 
 ### P1-ADM-08 implementation evidence
 
@@ -119,6 +119,30 @@ acceptance remains open until an approved real workload stores the bearer in an
 enterprise secret manager and exercises deployed use, rotation and revocation;
 see [Scoped service identities and machine API](service-identities-design.md)
 and [Inputs needed from the product owner](needed-from-from.md).
+
+### P1-ADM-09 implementation evidence
+
+The Go Terraform provider under `terraform-provider-aai-sec/` uses only the
+versioned service-identity boundary. It provides a tenant data source and
+schema-declared resources for governed policy drafts, groups, Skills and MCP
+registrations; policy JSON remains server-schema-validated.
+Refresh/import read exact tenant-scoped IDs; mutable resources send optimistic
+revisions; stale changes return conflict instead of overwriting authority.
+Group configuration and membership revisions are independent, occupied groups
+cannot be deleted, and Skill/MCP destruction retires rather than erases.
+Policy destruction retains the immutable ledger, and no provider route can
+submit, approve, stage or activate policy. Each desired-state mutation and its
+content-minimised primary audit record commit atomically; Object Lock export is
+a replica of that already durable evidence.
+
+Go unit tests cover endpoint and token validation, versioned routing, bounded
+errors, exact-ID lookup and provider inventory. AWS Lambda contracts cover
+create/update/retire/delete behavior, legacy revision migration, stale writes,
+occupied-group deletion and machine-governance denial. `make check` compiles,
+vets and tests the provider and formats its HCL example. Registry publication,
+release signing and a deployed real-workload Terraform apply remain external
+acceptance work; see [Terraform provider and declarative
+management](terraform-provider-design.md).
 
 ### P1-FLT-01 acceptance evidence
 

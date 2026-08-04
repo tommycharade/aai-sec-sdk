@@ -47,6 +47,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Policy change assurance](policy-change-assurance-design.md)
 - [Enterprise assurance reports](enterprise-assurance-reports-design.md)
 - [Scoped service identities and machine API](service-identities-design.md)
+- [Terraform provider and declarative management](terraform-provider-design.md)
 - [Policy change assurance live acceptance — 2026-08-01](policy-change-assurance-acceptance-2026-08-01.md)
 - [Signed policy bundles](signed-policy-bundles-design.md)
 - [Signed policy bundle acceptance — 2026-08-01](signed-policy-acceptance-2026-08-01.md)
@@ -113,6 +114,11 @@ signs the exact tenant, policy version and effective configuration with a
 non-exportable asymmetric KMS key. Claude Code and Codex verify that bundle
 locally against administrator-installed public trust before loading it; see
 [Signed policy bundles](signed-policy-bundles-design.md).
+The Terraform provider adds repeatable tenant inspection, governed policy
+drafts, groups, Skills and MCP registrations through the separately scoped
+machine API. Optimistic revisions detect drift, while approval and activation
+remain human-owned; see [Terraform provider and declarative
+management](terraform-provider-design.md).
 
 ## Development
 

@@ -611,6 +611,23 @@ from live stored state; unsupported methods/routes are denied. See
 [Scoped service identities and machine API](service-identities-design.md) for
 the exact capability matrix, schemas, lifecycle and non-guarantees.
 
+Declarative clients may additionally use revision-guarded management routes:
+
+- `PUT|DELETE /machine/v1/enterprise/skills/{id}` updates or retires a Skill
+  using `expectedRevision`;
+- `PUT|DELETE /machine/v1/enterprise/mcp-servers/{id}` updates or retires an
+  MCP registration using `expectedRevision`;
+- `PUT /machine/v1/enterprise/groups/{id}` changes name or active-policy
+  binding using `expectedConfigurationRevision` without overwriting the
+  independently revised membership; and
+- `DELETE /machine/v1/enterprise/groups/{id}` deletes only an empty group when
+  configuration and membership revisions still match.
+
+`GET /machine/v1/enterprise/tenant` returns only the tenant bound to the live
+service credential. Tenant creation and deletion are not machine API
+operations. See [Terraform provider and declarative
+management](terraform-provider-design.md).
+
 ## Incident cases and response authority
 
 The hosted AWS adapter exposes a revisioned case API for endpoint detections:
