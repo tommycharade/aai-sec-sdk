@@ -121,3 +121,51 @@ def test_policy_source_stack_rejects_partial_or_malformed_configuration() -> Non
             timeout=120,
         )
         assert result.returncode != 0
+
+
+def test_github_app_broker_owns_private_key_and_verifier_gets_only_invoke() -> None:
+    """The App broker, verifier and control handler retain three distinct authorities."""
+    template = synth(
+        POLICY_GITHUB_SECRET_NAME="",
+        POLICY_GITHUB_APP_SECRET_NAME="aai-sec/policy/github-app-private-key",  # noqa: S106
+        POLICY_GITHUB_APP_CLIENT_ID="Iv1.synthetic-client",
+        POLICY_GITHUB_INSTALLATION_ID="12345678",
+    )
+    resources = template["Resources"]
+    broker_key, broker = next(
+        (key, value)
+        for key, value in resources.items()
+        if key.startswith("PolicyGitHubTokenBroker")
+        and value.get("Type") == "AWS::Lambda::Function"
+    )
+    assert broker["Properties"]["Runtime"] == "nodejs22.x"
+    assert broker["Properties"]["Environment"]["Variables"]["POLICY_GITHUB_INSTALLATION_ID"] == (
+        "12345678"
+    )
+    verifier = next(
+        value
+        for value in resources.values()
+        if value.get("Type") == "AWS::Lambda::Function"
+        and value["Properties"].get("Handler") == "policy_source_verifier.handler"
+    )
+    verifier_environment = verifier["Properties"]["Environment"]["Variables"]
+    assert "POLICY_GITHUB_TOKEN_BROKER_ARN" in verifier_environment
+    assert "POLICY_GITHUB_SECRET_ARN" not in verifier_environment
+    broker_policy = next(
+        value
+        for key, value in resources.items()
+        if key.startswith("PolicyGitHubTokenBrokerServiceRoleDefaultPolicy")
+    )
+    assert "secretsmanager:GetSecretValue" in json.dumps(broker_policy)
+    assert not any(
+        forbidden in json.dumps(broker_policy)
+        for forbidden in ("dynamodb:", "kms:Sign", "lambda:InvokeFunction")
+    )
+    verifier_policy = next(
+        value
+        for key, value in resources.items()
+        if key.startswith("PolicySourceVerifierServiceRoleDefaultPolicy")
+    )
+    assert "lambda:InvokeFunction" in json.dumps(verifier_policy)
+    assert broker_key in json.dumps(verifier_policy)
+    assert "secretsmanager:GetSecretValue" not in json.dumps(verifier_policy)

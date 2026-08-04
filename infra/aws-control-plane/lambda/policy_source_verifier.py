@@ -9,6 +9,7 @@ revalidates the returned evidence before an atomic draft-only transaction.
 import base64
 import json
 import os
+import time
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -23,12 +24,14 @@ from policy_sources import PolicySourceRequest, PolicySourceVerificationError
 _MAX_HTTP_BYTES = 2_097_152
 _MAX_GRAPHQL_BODY_BYTES = 65_536
 _SECRET_ARN = os.environ.get("POLICY_GITHUB_SECRET_ARN", "")
+_TOKEN_BROKER_ARN = os.environ.get("POLICY_GITHUB_TOKEN_BROKER_ARN", "")
 _ALLOWED_REPOSITORIES = frozenset(
     item.strip()
     for item in os.environ.get("POLICY_GITHUB_ALLOWED_REPOSITORIES", "").split(",")
     if item.strip()
 )
 _SECRETS = boto3.client("secretsmanager")
+_LAMBDA = boto3.client("lambda")
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -87,7 +90,42 @@ class AwsGitHubHttpTransport:
 
 
 def _github_token():
-    """Resolve one deployment-owned token without returning provider metadata."""
+    """Resolve one short-lived token without exposing private-key authority."""
+    if bool(_SECRET_ARN) == bool(_TOKEN_BROKER_ARN):
+        raise PolicySourceVerificationError("GitHub policy source credential is unavailable")
+    if _TOKEN_BROKER_ARN:
+        if not _TOKEN_BROKER_ARN.startswith("arn:"):
+            raise PolicySourceVerificationError("GitHub policy source credential is unavailable")
+        try:
+            response = _LAMBDA.invoke(
+                FunctionName=_TOKEN_BROKER_ARN,
+                InvocationType="RequestResponse",
+                Payload=json.dumps({"schemaVersion": 1}, separators=(",", ":")).encode("utf-8"),
+            )
+            payload = response.get("Payload")
+            body = payload.read(65_537) if payload is not None else b""
+            value = json.loads(body)
+        except Exception as error:
+            raise PolicySourceVerificationError(
+                "GitHub policy source credential is unavailable"
+            ) from error
+        current_time = time.time()
+        if (
+            response.get("StatusCode") != 200
+            or response.get("FunctionError") is not None
+            or len(body) > 65_536
+            or not isinstance(value, dict)
+            or set(value) != {"schemaVersion", "token", "expiresAt"}
+            or value.get("schemaVersion") != 1
+            or not isinstance(value.get("token"), str)
+            or not 20 <= len(value["token"]) <= 512
+            or value["token"] != value["token"].strip()
+            or any(ord(character) < 33 or ord(character) > 126 for character in value["token"])
+            or not isinstance(value.get("expiresAt"), int)
+            or not current_time + 60 < value["expiresAt"] <= current_time + 3_900
+        ):
+            raise PolicySourceVerificationError("GitHub policy source credential is unavailable")
+        return value["token"]
     if not _SECRET_ARN.startswith("arn:"):
         raise PolicySourceVerificationError("GitHub policy source credential is unavailable")
     try:
@@ -125,7 +163,7 @@ def handler(event, _context):
         verified = GitHubPolicySourceVerifier(
             token_provider=_github_token,
             transport=AwsGitHubHttpTransport(),
-            now=__import__("time").time,
+            now=time.time,
         ).verify(request)
         return {
             "schemaVersion": 1,

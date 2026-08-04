@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 
 def _load() -> Any:
@@ -52,6 +54,19 @@ def _policy_github_manifest(**updates: Any) -> dict[str, Any]:
     value: dict[str, Any] = {
         "schemaVersion": 1,
         "credentialSecretName": "aai-sec/policy/github-app-installation",
+        "allowedRepositories": ["github.com/example/security-policy"],
+        "reviewEvidenceRef": "SEC-REVIEW-1234",
+    }
+    value.update(updates)
+    return value
+
+
+def _policy_github_app_manifest(**updates: Any) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "schemaVersion": 2,
+        "appPrivateKeySecretName": "aai-sec/policy/github-app-private-key",
+        "appClientId": "Iv1.synthetic-client",
+        "installationId": "12345678",
         "allowedRepositories": ["github.com/example/security-policy"],
         "reviewEvidenceRef": "SEC-REVIEW-1234",
     }
@@ -175,6 +190,30 @@ def test_policy_github_manifest_is_strict_exact_and_secret_free() -> None:
     with pytest.raises(module.DeploymentConfigurationError, match="opaque non-secret"):
         module.PolicyGitHubDeploymentManifest.parse(
             json.dumps(_policy_github_manifest(reviewEvidenceRef="secret review notes"))
+        )
+
+
+def test_policy_github_app_manifest_is_exact_and_single_installation() -> None:
+    module = _load()
+    value = _policy_github_app_manifest()
+    manifest = module.PolicyGitHubDeploymentManifest.parse(json.dumps(value))
+    assert json.loads(manifest.canonical_json()) == value
+    assert manifest.deployment_environment() == {
+        "POLICY_GITHUB_APP_SECRET_NAME": "aai-sec/policy/github-app-private-key",
+        "POLICY_GITHUB_APP_CLIENT_ID": "Iv1.synthetic-client",
+        "POLICY_GITHUB_INSTALLATION_ID": "12345678",
+        "POLICY_GITHUB_ALLOWED_REPOSITORIES": "github.com/example/security-policy",
+    }
+    with pytest.raises(module.DeploymentConfigurationError, match="one installation owner"):
+        module.PolicyGitHubDeploymentManifest.parse(
+            json.dumps(
+                _policy_github_app_manifest(
+                    allowedRepositories=[
+                        "github.com/example/security-policy",
+                        "github.com/other/security-policy",
+                    ]
+                )
+            )
         )
 
 
@@ -629,6 +668,40 @@ def test_policy_github_credential_is_exact_bounded_and_never_returned() -> None:
         module.verify_policy_github_credential(
             manifest, profile="synthetic", region="eu-west-2", runner=extra
         )
+
+
+def test_policy_github_app_private_key_is_rsa_and_secret_value_never_returned() -> None:
+    module = _load()
+    manifest = module.PolicyGitHubDeploymentManifest.parse(
+        json.dumps(_policy_github_app_manifest())
+    )
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+
+    def valid(_command: list[str], **_: Any) -> Any:
+        return _completed(json.dumps({"SecretString": json.dumps({"privateKeyPem": pem})}))
+
+    assert (
+        module.verify_policy_github_credential(
+            manifest, profile="synthetic", region="eu-west-2", runner=valid
+        )
+        is None
+    )
+
+    def malformed(_command: list[str], **_: Any) -> Any:
+        return _completed(
+            json.dumps({"SecretString": json.dumps({"privateKeyPem": "must-not-escape"})})
+        )
+
+    with pytest.raises(module.DeploymentConfigurationError, match="malformed") as error:
+        module.verify_policy_github_credential(
+            manifest, profile="synthetic", region="eu-west-2", runner=malformed
+        )
+    assert "must-not-escape" not in str(error.value)
 
 
 def test_deploy_uses_only_persisted_policy_github_authority(monkeypatch: Any) -> None:
