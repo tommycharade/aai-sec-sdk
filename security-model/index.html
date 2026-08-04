@@ -2041,6 +2041,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../terraform-provider-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terraform provider and declarative management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
@@ -3403,7 +3430,12 @@ credential pointer. Every admitted request records content-minimised usage and
 immutable audit evidence before normal routing. This is bearer security, not
 workload attestation or mTLS; the deployment still owns secret-manager delivery,
 network restriction and leak response. See
-<a href="../service-identities-design/">Scoped service identities and machine API</a>.</p>
+<a href="../service-identities-design/">Scoped service identities and machine API</a>.
+The Terraform provider is constrained to that route allow-list. Optimistic
+resource revisions prevent last-writer-wins authority, group deletion requires
+empty membership, and evidence-bearing policy and integration objects are
+retained or retired rather than silently erased. See <a href="../terraform-provider-design/">Terraform provider and
+declarative management</a>.</p>
 <p>Group membership and policy assignment are authority edges, not presentation
 metadata. The API consistently reloads the group, agent and policy records and
 requires exact non-empty server-owned organization equality before changing

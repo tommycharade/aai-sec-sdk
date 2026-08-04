@@ -16,7 +16,7 @@
         <link rel="prev" href="../enterprise-assurance-reports-design/">
       
       
-        <link rel="next" href="../enterprise-integration-design/">
+        <link rel="next" href="../terraform-provider-design/">
       
       
         
@@ -1936,6 +1936,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../terraform-provider-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terraform provider and declarative management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
@@ -3192,6 +3219,11 @@ API. The create request schema is:</p>
   &quot;expiresInDays&quot;: 30
 }
 </code></pre>
+<p>The official Terraform provider uses this same boundary for repeatable policy
+draft, group, Skill and MCP configuration. Its revision-guarded update routes
+are included only in <code>policy_draft_write</code> or <code>fleet_write</code>; human policy
+transitions remain absent. See <a href="../terraform-provider-design/">Terraform provider and declarative
+management</a>.</p>
 <h2 id="guarantees-and-non-guarantees">Guarantees and non-guarantees</h2>
 <p>The implementation guarantees, within the hosted control-plane boundary, that
 an admitted machine request has a live tenant-owned identity, current unexpired
