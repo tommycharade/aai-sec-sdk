@@ -1074,6 +1074,16 @@ configuration bytes or credentials. A case may initiate manual SDK quarantine
 only after the current enrolled-agent binding is revalidated. See [Repository
 and configuration anomaly detection](repository-configuration-anomaly-design.md).
 
+New source-control generations also bind detector input to a private,
+server-derived S3 object key, exact version ID and SHA-256 digest committed in
+the control table. A detector verifies the object size, digest, closed schema,
+page hashes and generation hash before comparison. Partial references,
+overwrites, malformed bytes and unavailable storage fail closed; they cannot be
+interpreted as a clean baseline. An invocation-local tenant/source/generation
+cache avoids repeating the same verified read for every agent and never crosses
+an invocation or creates authority. See [Fleet integrity baseline
+storage](fleet-integrity-baseline-storage-design.md).
+
 Alert suppression is incident-response authority, not presentation state. The
 server requires an exact identity selector, derives operator and time, limits
 duration to seven days, retains the matched alert, withholds outbound delivery,

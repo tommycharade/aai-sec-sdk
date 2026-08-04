@@ -78,6 +78,7 @@ nav:
   - Explainable agent behavior detection: behavior-detection-design.md
   - Governed alert suppression: alert-suppression-design.md
   - Repository and configuration anomaly detection: repository-configuration-anomaly-design.md
+  - Fleet integrity baseline storage: fleet-integrity-baseline-storage-design.md
   - Endpoint evidence publisher acceptance — 2026-08-01: endpoint-evidence-acceptance-2026-08-01.md
   - Dynamic policy groups: dynamic-groups-design.md
   - Policy editor: policy-editor.md

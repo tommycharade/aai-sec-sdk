@@ -113,6 +113,12 @@ Until commit succeeds, a generation has no effect on coverage. Missing pages,
 hash mismatches, duplicate observations, credential revocation, replay, or a
 concurrent source revision all fail closed. A committed generation supports up
 to 2,000 observations while retaining bounded Lambda and DynamoDB work.
+For source-control generations, commit additionally writes a normalized,
+content-minimised baseline to a private versioned S3 bucket and atomically binds
+its exact version and SHA-256 digest into the generation metadata. Integrity
+detection verifies that object independently and caches it once per invocation;
+legacy generations retain the DynamoDB-page verification path. See [Fleet
+integrity baseline storage](fleet-integrity-baseline-storage-design.md).
 
 The deployed API Gateway deliberately exposes this connector-authenticated path
 without the operator `/api` prefix. Supplying `/api/discovery-ingest/...` enters
