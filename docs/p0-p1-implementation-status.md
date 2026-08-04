@@ -119,9 +119,13 @@ materialized membership, canonical rule, optimistic revision, idempotency
 result and primary audit evidence. Contract tests cover trusted-attribute
 changes, deterministic removal, unsupported fields, stale revisions, overlap,
 manual-route bypass and transaction races. UI tests prove typed authoring,
-preview-before-apply and exact request-ID reuse. Scheduled service-driven
-reevaluation and endpoint posture attributes remain outstanding and are not
-claimed.
+preview-before-apply and exact request-ID reuse. A monitored five-minute
+service schedule now reevaluates only previously approved rules, atomically
+materializes changed authority and exposes durable health without member-list
+content. Contract tests prove automatic addition, no-change idempotence,
+last-known-authority preservation on overlap, fixed failure evidence and
+rejection of caller-shaped schedule events. Endpoint posture attributes remain
+outstanding and are not claimed.
 
 ### P1-FLT-08, P1-POL-05 and P1-POL-06 implementation evidence
 

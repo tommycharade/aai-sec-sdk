@@ -1,5 +1,11 @@
 # Changelog
 
+- Added monitored five-minute reconciliation for approved dynamic policy
+  groups. The internal service re-derives membership from strongly consistent
+  trusted inventory, atomically advances changed authority with durable audit
+  evidence, preserves last-known membership on failure and exposes bounded
+  operational status for the enterprise fleet UI.
+
 - Added unattended GitHub App authentication for reviewed policy imports. A
   dedicated least-privilege broker owns the RSA private key and mints
   repository- and permission-scoped installation tokens on demand; the

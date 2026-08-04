@@ -3342,6 +3342,152 @@ def test_dynamic_group_rejects_untrusted_rules_stale_revisions_and_transaction_r
     assert not [key for key in table.items if key[1].startswith("DYNAMIC_GROUP_OPERATION#")]
 
 
+def test_scheduled_dynamic_group_reconciliation_changes_authority_and_surfaces_overlap(
+    monkeypatch: Any,
+) -> None:
+    """The service schedule changes only approved rules and fails closed on overlap."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-dynamic-schedule"
+    rule = {
+        "match": "all",
+        "conditions": [{"field": "team", "operator": "equals_any", "values": ["Platform"]}],
+    }
+    canonical = json.dumps(rule, sort_keys=True, separators=(",", ":"))
+    rule_hash = hashlib.sha256(canonical.encode()).hexdigest()
+    records = [
+        module._item_key(tenant, "TENANT", "root")
+        | {
+            "id": tenant,
+            "endpoint_detection_pk": "ENDPOINT_DETECTION#00",
+            "endpoint_detection_sk": tenant,
+        },
+        module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {
+            "id": "dep-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "team": "Platform",
+            "environment": "prod",
+            "region": "eu-west-2",
+        },
+        module._item_key(tenant, "GROUP", "target")
+        | {
+            "id": "target",
+            "organizationId": "org-a",
+            "name": "Target",
+            "policyId": "policy-a",
+            "policyName": "Policy A",
+            "agent_keys": ["dep-a:agent-old"],
+            "membership_revision": 2,
+            "membership_mode": "dynamic",
+            "dynamic_rule": rule,
+            "dynamic_rule_hash": rule_hash,
+        },
+    ]
+    for agent_id in ("agent-old", "agent-new"):
+        records.append(
+            module._item_key(tenant, "AGENT", f"dep-a:{agent_id}")
+            | {
+                "id": agent_id,
+                "organization_id": "org-a",
+                "project_id": "project-a",
+                "deployment_id": "dep-a",
+                "host": "claude-code",
+                "status": "offline",
+                "expires_at": 0,
+                "lifecycle_state": "active",
+                "lifecycle_revision": 1,
+            }
+        )
+    for record in records:
+        table.put_item(Item=record)
+
+    result = module.handler(
+        {"source": "aai.dynamic-group-reconciliation", "schemaVersion": 1}, None
+    )
+    assert result == {"processedTenants": 1, "processedGroups": 1, "failedGroups": 0}
+    group = table.items[(f"TENANT#{tenant}", "GROUP#target")]
+    assert group["agent_keys"] == ["dep-a:agent-new", "dep-a:agent-old"]
+    assert group["membership_revision"] == 3
+    status = module._dynamic_reconciliation_status(tenant, "target")
+    assert status["outcome"] == "healthy"
+    assert status["changed"] is True
+    assert status["counts"] == {
+        "matched": 2,
+        "additions": 1,
+        "removals": 0,
+        "unchanged": 1,
+    }
+    assert len([key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_AUDIT#")]) == 1
+
+    module.handler({"source": "aai.dynamic-group-reconciliation", "schemaVersion": 1}, None)
+    assert module._dynamic_reconciliation_status(tenant, "target")["changed"] is False
+    assert len([key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_AUDIT#")]) == 1
+
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "conflicting")
+        | {
+            "id": "conflicting",
+            "organizationId": "org-a",
+            "name": "Conflicting",
+            "policyId": "policy-b",
+            "policyName": "Policy B",
+            "agent_keys": ["dep-a:agent-new"],
+            "membership_revision": 1,
+        }
+    )
+    with pytest.raises(RuntimeError, match="dynamic group reconciliations failed"):
+        module.handler({"source": "aai.dynamic-group-reconciliation", "schemaVersion": 1}, None)
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["membership_revision"] == 3
+    failed = module._dynamic_reconciliation_status(tenant, "target")
+    assert failed["outcome"] == "failed"
+    assert failed["errorCode"] == "policy_group_overlap"
+    assert failed["lastSuccessAt"] is not None
+    assert len([key for key in table.items if key[1].startswith("GROUP_MEMBERSHIP_AUDIT#")]) == 2
+
+    with pytest.raises(ValueError, match="schedule event is invalid"):
+        module.handler(
+            {
+                "source": "aai.dynamic-group-reconciliation",
+                "schemaVersion": 1,
+                "tenant": tenant,
+            },
+            None,
+        )
+
+    table.items[(f"TENANT#{tenant}", "GROUP#conflicting")]["agent_keys"] = []
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-third")
+        | {
+            "id": "agent-third",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "deployment_id": "dep-a",
+            "host": "claude-code",
+            "status": "offline",
+            "expires_at": 0,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+
+    def concurrent_membership_change() -> None:
+        current = table.items[(f"TENANT#{tenant}", "GROUP#target")]
+        current["membership_revision"] = 4
+        current["agent_keys"] = ["dep-a:agent-new", "dep-a:agent-old", "dep-a:concurrent"]
+
+    module.DYNAMODB.before_transaction = concurrent_membership_change
+    with pytest.raises(RuntimeError, match="dynamic group reconciliations failed"):
+        module.handler({"source": "aai.dynamic-group-reconciliation", "schemaVersion": 1}, None)
+    raced_group = table.items[(f"TENANT#{tenant}", "GROUP#target")]
+    assert raced_group["membership_revision"] == 4
+    assert "dep-a:concurrent" in raced_group["agent_keys"]
+    raced_status = module._dynamic_reconciliation_status(tenant, "target")
+    assert raced_status["outcome"] == "failed"
+    assert raced_status["errorCode"] == "policy_state_conflict"
+    assert raced_status["membershipRevision"] == 4
+
+
 def test_break_glass_requires_mfa_four_eyes_scope_and_immediate_revocation(
     monkeypatch: Any,
 ) -> None:
@@ -8128,6 +8274,23 @@ def test_aws_endpoint_detection_is_scheduled_bounded_and_monitored() -> None:
     assert '"EndpointDetectionDeadLetters"' in stack
     assert "securityAlerts.grantPublish(handler)" in stack
     assert "SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn" in stack
+
+
+def test_aws_dynamic_groups_have_a_monitored_internal_reconciliation_schedule() -> None:
+    """Approved dynamic rules must converge without relying on a browser session."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    passive = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/passive-regional-cell-stack.ts"
+    ).read_text(encoding="utf-8")
+    for source in (stack, passive):
+        assert '"DynamicGroupReconciliationSchedule"' in source
+        assert 'source: "aai.dynamic-group-reconciliation"' in source
+        assert "events.Schedule.rate(cdk.Duration.minutes(5))" in source
+    assert "deadLetterQueue: dynamicGroupReconciliationDlq" in stack
+    assert '"DynamicGroupReconciliationDeadLetters"' in stack
+    assert "new cloudwatchActions.SnsAction(securityAlerts)" in stack
 
 
 def test_aws_evidence_worker_declares_its_bounded_recursive_queue_workflow() -> None:

@@ -139,6 +139,8 @@ _DYNAMIC_GROUP_OPERATORS = frozenset({"equals_any", "not_equals_any"})
 _DYNAMIC_GROUP_CONDITION_LIMIT = 7
 _DYNAMIC_GROUP_VALUE_LIMIT = 20
 _DYNAMIC_GROUP_MEMBER_LIMIT = 500
+_DYNAMIC_GROUP_RECONCILIATION_LIMIT = 5_000
+_DYNAMIC_GROUP_RECONCILIATION_ACTOR = "system:dynamic-group-reconciler"
 
 # Ownership is operational authority metadata, not a browser label. New
 # identities must carry a reviewed accountable owner and all reviews expire on
@@ -9355,6 +9357,221 @@ def _configure_dynamic_group(tenant, group_id, body, actor):
     return response
 
 
+def _dynamic_reconciliation_status(tenant, group_id):
+    """Return one content-minimised scheduled reconciliation status."""
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "DYNAMIC_GROUP_STATUS", group_id), ConsistentRead=True
+    ).get("Item")
+    if not item:
+        return None
+    outcome = item.get("outcome")
+    if outcome not in {"healthy", "failed"}:
+        raise PolicyConflict("dynamic group reconciliation status is malformed")
+    counts = item.get("counts")
+    if not isinstance(counts, dict) or set(counts) != {
+        "additions",
+        "matched",
+        "removals",
+        "unchanged",
+    }:
+        raise PolicyConflict("dynamic group reconciliation status is malformed")
+    return {
+        "outcome": outcome,
+        "lastAttemptAt": int(item.get("last_attempt_at", 0)),
+        "lastSuccessAt": int(item.get("last_success_at", 0)) or None,
+        "membershipRevision": int(item.get("membership_revision", 0)),
+        "changed": bool(item.get("changed") is True),
+        "counts": {key: int(value) for key, value in counts.items()},
+        "errorCode": item.get("error_code") if outcome == "failed" else None,
+    }
+
+
+def _dynamic_status_record(
+    tenant,
+    group_id,
+    *,
+    now,
+    outcome,
+    membership_revision,
+    counts,
+    changed=False,
+    error_code=None,
+    previous=None,
+):
+    """Build bounded operational state without storing candidate membership."""
+    last_success = now if outcome == "healthy" else (previous or {}).get("last_success_at", 0)
+    return {
+        **_item_key(tenant, "DYNAMIC_GROUP_STATUS", group_id),
+        "id": group_id,
+        "outcome": outcome,
+        "last_attempt_at": now,
+        "last_success_at": last_success,
+        "membership_revision": membership_revision,
+        "changed": bool(changed),
+        "counts": counts,
+        "error_code": error_code,
+    }
+
+
+def _record_dynamic_reconciliation_failure(tenant, group, error_code, *, now):
+    """Persist a failed service evaluation without changing policy authority."""
+    group_id = group.get("id")
+    if not isinstance(group_id, str) or not group_id:
+        raise PolicyConflict("dynamic group identity is malformed")
+    # Failure reporting is not allowed to publish a stale authority revision
+    # after a concurrent writer wins the membership compare-and-swap.
+    live_group = TABLE.get_item(Key=_item_key(tenant, "GROUP", group_id), ConsistentRead=True).get(
+        "Item"
+    )
+    if not live_group:
+        raise PolicyConflict("dynamic group disappeared during reconciliation")
+    group = live_group
+    key = _item_key(tenant, "DYNAMIC_GROUP_STATUS", group_id)
+    previous = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    status = _dynamic_status_record(
+        tenant,
+        group_id,
+        now=now,
+        outcome="failed",
+        membership_revision=_group_membership_revision(group),
+        counts={"matched": 0, "additions": 0, "removals": 0, "unchanged": 0},
+        error_code=error_code,
+        previous=previous,
+    )
+    transitioned = (
+        not previous
+        or previous.get("outcome") != "failed"
+        or previous.get("error_code") != error_code
+    )
+    if transitioned:
+        payload = {
+            "group_id": group_id,
+            "rule_hash": str(group.get("dynamic_rule_hash", "")),
+            "membership_revision": _group_membership_revision(group),
+            "error_code": error_code,
+        }
+        audit = _membership_audit_record(
+            tenant,
+            "dynamic_group_reconciliation_failed",
+            _DYNAMIC_GROUP_RECONCILIATION_ACTOR,
+            payload,
+            now=now,
+        )
+        _transact_group_membership(
+            [
+                _transaction_put(
+                    status,
+                    condition="attribute_not_exists(pk) OR id = :status_id",
+                    values={":status_id": group_id},
+                ),
+                _transaction_put(audit, condition="attribute_not_exists(pk)"),
+            ]
+        )
+        _export_group_membership_audit(
+            tenant,
+            "dynamic_group_reconciliation_failed",
+            _DYNAMIC_GROUP_RECONCILIATION_ACTOR,
+            payload,
+        )
+    else:
+        TABLE.put_item(Item=status)
+    return status
+
+
+def _reconcile_dynamic_group(tenant, group, *, now=None):
+    """Materialize one approved rule under exact live revision authority."""
+    now = int(time.time()) if now is None else now
+    if _group_membership_mode(group) != "dynamic":
+        raise PolicyConflict("only dynamic groups can be reconciled")
+    group_id = group.get("id")
+    if not isinstance(group_id, str) or not group_id:
+        raise PolicyConflict("dynamic group identity is malformed")
+    rule = _dynamic_group_rule(group.get("dynamic_rule"))
+    canonical_rule = json.dumps(rule, sort_keys=True, separators=(",", ":"))
+    rule_hash = hashlib.sha256(canonical_rule.encode()).hexdigest()
+    if not secrets.compare_digest(str(group.get("dynamic_rule_hash", "")), rule_hash):
+        raise PolicyConflict("dynamic group rule integrity check failed")
+    current_revision = _group_membership_revision(group)
+    current_keys = _group_agent_keys(group)
+    desired_keys, conflicts = _dynamic_membership_evaluation(tenant, group, rule)
+    if conflicts:
+        return _record_dynamic_reconciliation_failure(
+            tenant, group, "policy_group_overlap", now=now
+        )
+    additions = sorted(set(desired_keys) - set(current_keys))
+    removals = sorted(set(current_keys) - set(desired_keys))
+    unchanged = sorted(set(current_keys) & set(desired_keys))
+    changed = bool(additions or removals)
+    next_revision = current_revision + 1 if changed else current_revision
+    counts = {
+        "matched": len(desired_keys),
+        "additions": len(additions),
+        "removals": len(removals),
+        "unchanged": len(unchanged),
+    }
+    status_key = _item_key(tenant, "DYNAMIC_GROUP_STATUS", group_id)
+    previous = TABLE.get_item(Key=status_key, ConsistentRead=True).get("Item")
+    status = _dynamic_status_record(
+        tenant,
+        group_id,
+        now=now,
+        outcome="healthy",
+        membership_revision=next_revision,
+        counts=counts,
+        changed=changed,
+        previous=previous,
+    )
+    if not changed:
+        TABLE.put_item(Item=status)
+        return status
+    updated = {
+        **group,
+        "agent_keys": desired_keys,
+        "membership_revision": next_revision,
+        "dynamic_last_evaluated_at": now,
+        "dynamic_last_evaluated_by": _DYNAMIC_GROUP_RECONCILIATION_ACTOR,
+    }
+    payload = {
+        "group_id": group_id,
+        "rule_hash": rule_hash,
+        "membership_revision_before": current_revision,
+        "membership_revision_after": next_revision,
+        "matched_count": len(desired_keys),
+        "addition_count": len(additions),
+        "removal_count": len(removals),
+        "unchanged_count": len(unchanged),
+    }
+    audit = _membership_audit_record(
+        tenant,
+        "dynamic_group_membership_reconciled",
+        _DYNAMIC_GROUP_RECONCILIATION_ACTOR,
+        payload,
+        now=now,
+    )
+    _transact_group_membership(
+        [
+            _transaction_put(
+                updated,
+                condition="agent_keys = :agent_keys AND membership_revision = :membership_revision",
+                values={":agent_keys": current_keys, ":membership_revision": current_revision},
+            ),
+            _transaction_put(
+                status,
+                condition="attribute_not_exists(pk) OR id = :status_id",
+                values={":status_id": group_id},
+            ),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_group_membership_audit(
+        tenant,
+        "dynamic_group_membership_reconciled",
+        _DYNAMIC_GROUP_RECONCILIATION_ACTOR,
+        payload,
+    )
+    return status
+
+
 def _membership_request(body):
     """Validate and normalize one closed-schema bulk assignment request."""
     if not isinstance(body, dict) or set(body) != {
@@ -12862,6 +13079,67 @@ def _rollout_reconciliation_cycle():
     }
 
 
+def _dynamic_reconciliation_error_code(error):
+    """Map internal failures to fixed operator-safe reconciliation codes."""
+    if isinstance(error, ValueError):
+        return "malformed_approved_rule"
+    if isinstance(error, PolicyConflict):
+        return "policy_state_conflict"
+    return "control_plane_failure"
+
+
+def _dynamic_group_reconciliation_cycle():
+    """Reconcile approved dynamic groups on the internal five-minute schedule."""
+    tenants = []
+    for shard in range(_ENDPOINT_DETECTION_SHARDS):
+        result = TABLE.query(
+            IndexName=_ENDPOINT_DETECTION_INDEX,
+            KeyConditionExpression=Key("endpoint_detection_pk").eq(
+                f"ENDPOINT_DETECTION#{shard:02d}"
+            ),
+            Limit=250,
+        )
+        if result.get("LastEvaluatedKey"):
+            raise RuntimeError("dynamic group tenant shard exceeds its safe bound")
+        tenants.extend(result.get("Items", []))
+        if len(tenants) > _ENDPOINT_DETECTION_TENANT_LIMIT:
+            raise RuntimeError("dynamic group tenant inventory exceeds its safe bound")
+    processed_tenants = 0
+    processed_groups = 0
+    failed_groups = 0
+    for registration in tenants:
+        tenant = registration.get("endpoint_detection_sk")
+        if not isinstance(tenant, str) or registration.get("pk") != f"TENANT#{tenant}":
+            failed_groups += 1
+            continue
+        for group in _list(tenant, "GROUP", consistent_read=True):
+            if _group_membership_mode(group) != "dynamic":
+                continue
+            processed_groups += 1
+            if processed_groups > _DYNAMIC_GROUP_RECONCILIATION_LIMIT:
+                raise RuntimeError("dynamic group schedule exceeds its safe bound")
+            try:
+                result = _reconcile_dynamic_group(tenant, group)
+                if result.get("outcome") == "failed":
+                    failed_groups += 1
+            except Exception as error:
+                failed_groups += 1
+                _record_dynamic_reconciliation_failure(
+                    tenant,
+                    group,
+                    _dynamic_reconciliation_error_code(error),
+                    now=int(time.time()),
+                )
+        processed_tenants += 1
+    if failed_groups:
+        raise RuntimeError("one or more dynamic group reconciliations failed")
+    return {
+        "processedTenants": processed_tenants,
+        "processedGroups": processed_groups,
+        "failedGroups": 0,
+    }
+
+
 def _discovery_counts(instances):
     """Count target posture without allowing duplicates to inflate coverage."""
     denominator = len(instances)
@@ -13212,6 +13490,11 @@ def _fleet(tenant):
         group["dynamicRuleHash"] = group.get("dynamic_rule_hash")
         group["dynamicLastEvaluatedAt"] = group.get("dynamic_last_evaluated_at")
         group["dynamicLastEvaluatedBy"] = group.get("dynamic_last_evaluated_by")
+        group["dynamicReconciliation"] = (
+            _dynamic_reconciliation_status(tenant, group.get("id", ""))
+            if group["membershipMode"] == "dynamic"
+            else None
+        )
         group["agents"] = [
             a for a in agents if f"{a['deployment_id']}:{a['id']}" in group.get("agent_keys", [])
         ]
@@ -14129,6 +14412,10 @@ def handler(event, context):
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("rollout reconciliation schedule event is invalid")
         return _rollout_reconciliation_cycle()
+    if isinstance(event, dict) and event.get("source") == "aai.dynamic-group-reconciliation":
+        if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
+            raise ValueError("dynamic group reconciliation schedule event is invalid")
+        return _dynamic_group_reconciliation_cycle()
     if isinstance(event, dict) and event.get("source") == "aai.evidence-assurance":
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("evidence assurance schedule event is invalid")

@@ -499,6 +499,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
+    const dynamicGroupReconciliationDlq = new sqs.Queue(
+      this,
+      "DynamicGroupReconciliationDlq",
+      {
+        encryption: sqs.QueueEncryption.SQS_MANAGED,
+        retentionPeriod: cdk.Duration.days(14),
+        enforceSSL: true,
+      },
+    );
     const evidenceWorkerDlq = new sqs.Queue(this, "EvidenceWorkerDlq", {
       fifo: true,
       encryption: sqs.QueueEncryption.SQS_MANAGED,
@@ -957,6 +966,26 @@ export class AwsControlPlaneStack extends cdk.Stack {
         retryAttempts: 2,
       }),
     );
+    const dynamicGroupReconciliationRule = new events.Rule(
+      this,
+      "DynamicGroupReconciliationSchedule",
+      {
+        description: "Materialize approved dynamic policy-group rules from trusted inventory",
+        schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+        enabled: true,
+      },
+    );
+    dynamicGroupReconciliationRule.addTarget(
+      new eventTargets.LambdaFunction(handler, {
+        event: events.RuleTargetInput.fromObject({
+          source: "aai.dynamic-group-reconciliation",
+          schemaVersion: 1,
+        }),
+        deadLetterQueue: dynamicGroupReconciliationDlq,
+        maxEventAge: cdk.Duration.hours(1),
+        retryAttempts: 2,
+      }),
+    );
     const evidenceAssuranceRule = new events.Rule(this, "EvidenceAssuranceSchedule", {
       description: "Run tenant-wide asynchronous evidence assurance and gap detection",
       schedule: events.Schedule.rate(cdk.Duration.minutes(15)),
@@ -1234,6 +1263,23 @@ export class AwsControlPlaneStack extends cdk.Stack {
     rolloutReconciliationDeadLetters.addAlarmAction(
       new cloudwatchActions.SnsAction(securityAlerts),
     );
+    const dynamicGroupReconciliationDeadLetters = new cloudwatch.Alarm(
+      this,
+      "DynamicGroupReconciliationDeadLetters",
+      {
+        metric: dynamicGroupReconciliationDlq.metricApproximateNumberOfMessagesVisible({
+          period: cdk.Duration.minutes(5),
+          statistic: "Maximum",
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        alarmDescription: "Dynamic policy-group reconciliation exhausted bounded retries.",
+      },
+    );
+    dynamicGroupReconciliationDeadLetters.addAlarmAction(
+      new cloudwatchActions.SnsAction(securityAlerts),
+    );
     const evidenceWorkerErrors = new cloudwatch.Alarm(this, "EvidenceWorkerErrors", {
       metric: evidenceWorker.metricErrors({ period: cdk.Duration.minutes(5), statistic: "Sum" }),
       threshold: 1,
@@ -1325,6 +1371,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "EndpointDetectionDlqArn", { value: endpointDetectionDlq.queueArn });
     new cdk.CfnOutput(this, "RolloutReconciliationDlqArn", {
       value: rolloutReconciliationDlq.queueArn,
+    });
+    new cdk.CfnOutput(this, "DynamicGroupReconciliationDlqArn", {
+      value: dynamicGroupReconciliationDlq.queueArn,
     });
     new cdk.CfnOutput(this, "EvidenceReportBucketName", { value: evidenceReports.bucketName });
     new cdk.CfnOutput(this, "EvidenceWorkerDlqArn", { value: evidenceWorkerDlq.queueArn });
