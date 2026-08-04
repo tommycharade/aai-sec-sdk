@@ -11,6 +11,26 @@ the approved secrets manager and provide only the secret resource name.
 
 ## Immediate critical-path inputs
 
+### Current `p1` Regional deployment preflight (2026-08-04)
+
+A read-only AWS inspection found the following state. Resource identifiers are
+intentionally omitted from this public document; the provider remains the
+source of truth.
+
+| Boundary | Observed state | Deployment consequence |
+| --- | --- | --- |
+| Primary control plane | Stable stack exists; termination protection is off; Entra, SCIM and runtime attestation report `not-configured`; the deployed revision predates Regional fault-target outputs | Update only after identity/release authority is real; enable termination protection and independently verify the new template |
+| Recovery storage/signing | Audit replica and staged multi-Region signing replica exist | Foundation only; this does not create a serving recovery cell |
+| Recovery identity | No recovery-Region Cognito pool exists | Passive/active recovery runtime deployment is denied |
+| Regional certificates | No ACM certificate exists in either application Region | Regional ingress deployment is denied |
+| Hosted DNS | One public hosted zone exists, with no stable API/UI or generation-marker records | Owner must approve exact names and exclusive transition authority before ingress/routing |
+| Recovery runtime and ingress | Passive runtime, active target and both Regional ingress stacks are absent | No target can be activated or routed |
+| Third-Region coordination | CDK bootstrap, transition witness, security-alert topic, fault controller and persisted `/aai-sec/` authority are absent | Bootstrap and separately approve the retained witness/alert/controller deployment before any exercise |
+
+This is a blocker report, not permission to create the missing authority.
+Synthetic CI values must not be reused. Repeat the read-only inspection after
+the owner inputs below are supplied and before preparing any mutating command.
+
 ### Microsoft Entra ID pilot
 
 - Microsoft Entra tenant UUID.
@@ -111,14 +131,15 @@ certificate or approval authority.
 
 The primary target adapter, exact source reactivation, failed-cutover rollback
 and symmetric planned failback are implemented and synthetically tested.
-Engineering can continue without owner input on exercise automation and
-target-cell fault controls. Exact evidence packaging, immutable retention and
-the real target load adapter are implemented and synthetically tested. The
-fault authority, exact target identities, single-writer lock, independent
-watchdog creation, code-owned IAM boundaries and expiry-safe cleanup handlers
-are implemented and synthetically tested. Step Functions orchestration and
-real provider probes remain engineering work. Live
-routing cannot continue until the listed domains,
+Exact evidence packaging, immutable retention and the real target load adapter
+are implemented and synthetically tested. The private 18-state Step Functions
+workflow, fault authority, exact target identities, single-writer lock,
+independent watchdog, code-owned IAM boundaries, expiry-safe cleanup, live
+journal/template/runtime/routing preconditions and target-role audit,
+DynamoDB, KMS and queue probes are implemented and synthetically tested.
+Cognito dependency injection remains unsupported because authentication is
+outside the target handler role. Live routing and fault acceptance cannot
+continue until the listed domains,
 certificates, Entra token path, two approvers, retained schema-v4 template
 digests, exact-handler invocation authority and exclusive Route 53 authority
 are supplied and approved.
@@ -234,8 +255,12 @@ Engineering can continue autonomously on:
 - Terraform deployment support;
 - customer-managed key, residency and private-access implementation;
 - UI simplification, accessibility and responsive browser testing; and
-- documentation, threat models, automated tests, pull requests, AWS deployment
-  and synthetic acceptance evidence.
+- documentation, threat models, automated tests, pull requests and synthetic
+  acceptance evidence.
+
+AWS deployment may continue only for stacks whose real owner-approved inputs
+already exist. Synthetic values may be used for synthesis and CI verification,
+never to create production or pilot authority.
 
 Progress and evidence remain tracked in the
 [enterprise P0 and P1 implementation status](p0-p1-implementation-status.md).
