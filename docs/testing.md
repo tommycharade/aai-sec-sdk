@@ -112,6 +112,13 @@ human-readable incident explanation. These are synthetic control-plane
 contracts; they do not prove complete telemetry from a compromised host or
 production SIEM delivery.
 
+Alert-suppression contracts additionally prove exact target matching,
+seven-day maximum expiry, broad/wildcard/unauthorized denial, retained
+suppressed evidence, no delivery or automatic containment, optimistic
+revocation, endpoint reopening and stable behavior grouping across evaluation
+windows. See [Governed alert suppression and
+deduplication](alert-suppression-design.md).
+
 `scripts/test_aws_entra_scim.py` is the live Microsoft Entra provisioning
 acceptance command. It discovers Entra and SCIM status from the selected
 CloudFormation stack, resolves the dedicated bearer directly from Secrets

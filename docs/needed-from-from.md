@@ -11,6 +11,26 @@ the approved secrets manager and provide only the secret resource name.
 
 ## Immediate critical-path inputs
 
+### AWS CDK development-tooling advisory decision (2026-08-04)
+
+The latest published `aws-cdk-lib@2.263.0` bundle contains
+`brace-expansion@5.0.8`. `npm audit` now reports
+`GHSA-rgw5-rvv9-x895` as high severity and requires `5.0.9`. The package is a
+build/deployment-only dependency and is absent from the SDK, UI and Lambda
+runtime, but the previous dated exception covers a different advisory and must
+not be silently widened.
+
+Choose one of these paths:
+
+- wait for AWS CDK to publish a bundle containing `brace-expansion>=5.0.9`,
+  then upgrade the exact pin; or
+- explicitly approve a new dated, owner-assigned development-tooling risk
+  record with compensating controls and an expiry no later than 2026-08-28.
+
+No credential or production input is required. Until one path is chosen, a
+clean full Node development-dependency audit remains blocked; production-only
+dependency audit remains clear.
+
 ### Machine API live acceptance
 
 The scoped service-identity implementation and synthetic adversarial contracts
