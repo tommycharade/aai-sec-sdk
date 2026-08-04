@@ -152,7 +152,7 @@ def test_reference_persistence_is_explicitly_rejected_for_ha_requirements(tmp_pa
     assert store.persistence_capabilities() == {
         "adapter": "sqlite-reference",
         "highAvailability": False,
-        "schemaVersion": 7,
+        "schemaVersion": 8,
     }
     store.close()
     with pytest.raises(FleetConfigurationError):
@@ -428,6 +428,7 @@ def test_migrates_existing_active_policy_into_immutable_version_ledger(tmp_path:
     )
     store._connection.execute("DELETE FROM policy_versions WHERE policy_id=?", ("policy-existing",))
     store._connection.execute("DELETE FROM schema_migrations WHERE version=7")
+    store._connection.execute("DELETE FROM schema_migrations WHERE version=8")
     store._connection.commit()
     store.close()
 
@@ -438,6 +439,9 @@ def test_migrates_existing_active_policy_into_immutable_version_ledger(tmp_path:
     assert version["state"] == "active"
     assert version["author"] == "legacy-author"
     assert version["contentHash"] == hashlib.sha256(canonical.encode()).hexdigest()
+    assert version["composition"]["localConfiguration"] == {"policy": {"denyByDefault": True}}
+    assert version["composition"]["componentRefs"] == []
+    assert len(version["composition"]["graphDigest"]) == 64
 
 
 def test_fleet_validation_and_roles_fail_closed() -> None:
@@ -1953,6 +1957,384 @@ def test_policy_lifecycle_is_immutable_two_person_and_fail_closed(tmp_path: Path
         "fleet_policy_staged",
         "fleet_policy_activated",
     }
+
+
+def test_policy_components_compose_exact_governed_versions_and_explain_authority(
+    tmp_path: Path,
+) -> None:
+    """Reusable versions tighten local intent and retain reviewable provenance."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    author = identity("org-a", subject="author-1")
+    create_active_policy(
+        store,
+        author,
+        policy_id="policy-baseline",
+        name="Enterprise baseline",
+        configuration={
+            "policy": {"denyByDefault": True},
+            "tools": {"allowed": ["read_repository", "run_tests"]},
+            "budgets": {"maxActions": 100},
+        },
+    )
+    component = store.policy_version(author, "policy-baseline", 1)
+    reference = {
+        "policyId": "policy-baseline",
+        "version": 1,
+        "contentHash": component["contentHash"],
+    }
+
+    preview = store.preview_policy_composition(
+        author,
+        policy_id="policy-workload",
+        local_configuration={
+            "tools": {
+                "allowed": ["read_repository", "write_repository"],
+                "denied": ["shell"],
+            },
+            "budgets": {"maxActions": 50},
+        },
+        component_refs=[reference],
+    )
+    assert preview["configuration"] == {
+        "policy": {"denyByDefault": True},
+        "tools": {"allowed": ["read_repository"], "denied": ["shell"]},
+        "budgets": {"maxActions": 50},
+    }
+    allowed = next(step for step in preview["explanation"] if step["field"] == "tools.allowed")
+    assert allowed["rule"] == "allow_intersection"
+    assert allowed["removed"] == ["run_tests", "write_repository"]
+    assert allowed["sources"][-1] == "local"
+
+    created = store.create_policy(
+        author,
+        policy_id="policy-workload",
+        name="Workload",
+        local_configuration={
+            "tools": {
+                "allowed": ["read_repository", "write_repository"],
+                "denied": ["shell"],
+            },
+            "budgets": {"maxActions": 50},
+        },
+        component_refs=[reference],
+    )
+    version = store.policy_version(author, "policy-workload", int(created["latestVersion"]))
+    assert version["configuration"] == preview["configuration"]
+    assert version["composition"]["componentRefs"] == [reference]
+    assert version["composition"]["graphDigest"] == preview["graphDigest"]
+
+    middle = store.create_policy(
+        author,
+        policy_id="policy-engineering-baseline",
+        name="Engineering baseline",
+        local_configuration={
+            "tools": {"allowed": ["read_repository"]},
+            "budgets": {"maxActions": 75},
+        },
+        component_refs=[reference],
+    )
+    middle_version = int(middle["latestVersion"])
+    reviewer = identity("org-a", subject="reviewer-2")
+    store.submit_policy_version(author, "policy-engineering-baseline", middle_version)
+    store.decide_policy_version(
+        reviewer,
+        "policy-engineering-baseline",
+        middle_version,
+        decision="approved",
+        reason="Synthetic nested-component review",
+    )
+    store.stage_policy_version(reviewer, "policy-engineering-baseline", middle_version)
+    store.activate_policy_version(
+        reviewer,
+        "policy-engineering-baseline",
+        middle_version,
+        expected_active_version=0,
+    )
+    middle_record = store.policy_version(author, "policy-engineering-baseline", middle_version)
+    nested_preview = store.preview_policy_composition(
+        author,
+        policy_id="policy-nested-workload",
+        local_configuration={"tools": {"allowed": ["read_repository", "run_tests"]}},
+        component_refs=[
+            {
+                "policyId": "policy-engineering-baseline",
+                "version": middle_version,
+                "contentHash": middle_record["contentHash"],
+            }
+        ],
+    )
+    assert nested_preview["configuration"]["tools"]["allowed"] == ["read_repository"]
+    assert nested_preview["configuration"]["budgets"]["maxActions"] == 75
+
+
+def test_policy_components_fail_closed_on_ungoverned_stale_or_corrupt_authority(
+    tmp_path: Path,
+) -> None:
+    """Component state, hash, tenancy, self-reference, and storage integrity are enforced."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    author = identity("org-a", subject="author-1")
+    reviewer = identity("org-a", subject="reviewer-2")
+    create_active_policy(
+        store,
+        author,
+        policy_id="policy-baseline",
+        name="Baseline",
+        configuration={"tools": {"allowed": ["read_repository"]}},
+    )
+    component = store.policy_version(author, "policy-baseline", 1)
+    valid_ref = {
+        "policyId": "policy-baseline",
+        "version": 1,
+        "contentHash": component["contentHash"],
+    }
+    with pytest.raises(FleetConflictError, match="content hash"):
+        store.preview_policy_composition(
+            author,
+            policy_id="policy-workload",
+            local_configuration={},
+            component_refs=[{**valid_ref, "contentHash": "0" * 64}],
+        )
+    with pytest.raises(FleetConfigurationError, match="own versions"):
+        store.preview_policy_composition(
+            author,
+            policy_id="policy-baseline",
+            local_configuration={},
+            component_refs=[valid_ref],
+        )
+
+    pending = store.create_policy(
+        author,
+        policy_id="policy-pending",
+        name="Pending",
+        configuration={"tools": {"allowed": ["run_tests"]}},
+    )
+    pending_version = store.policy_version(author, "policy-pending", int(pending["latestVersion"]))
+    with pytest.raises(FleetConflictError, match="active or retired"):
+        store.preview_policy_composition(
+            author,
+            policy_id="policy-workload",
+            local_configuration={},
+            component_refs=[
+                {
+                    "policyId": "policy-pending",
+                    "version": 1,
+                    "contentHash": pending_version["contentHash"],
+                }
+            ],
+        )
+
+    created = store.create_policy(
+        author,
+        policy_id="policy-workload",
+        name="Workload",
+        local_configuration={"tools": {"allowed": ["read_repository"]}},
+        component_refs=[valid_ref],
+    )
+    version = int(created["latestVersion"])
+    store.submit_policy_version(author, "policy-workload", version)
+    store.decide_policy_version(
+        reviewer,
+        "policy-workload",
+        version,
+        decision="approved",
+        reason="Synthetic independent review",
+    )
+    store._connection.execute(  # noqa: SLF001 - adversarial persistence-corruption test
+        "UPDATE policy_versions SET configuration=? WHERE policy_id=? AND version=?",
+        ('{"tools":{"allowed":["shell"]}}', "policy-baseline", 1),
+    )
+    store._connection.commit()  # noqa: SLF001 - adversarial persistence-corruption test
+    with pytest.raises(FleetConflictError, match="integrity"):
+        store.stage_policy_version(reviewer, "policy-workload", version)
+
+
+def test_policy_component_boundary_rejects_ambiguous_and_corrupt_graph_metadata(
+    tmp_path: Path,
+) -> None:
+    """Every malformed composition shape and non-reproducible graph fails closed."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    author = identity("org-a", subject="author-1")
+    create_active_policy(
+        store,
+        author,
+        policy_id="policy-baseline",
+        name="Baseline",
+        configuration={"tools": {"allowed": ["read_repository"]}},
+    )
+    component = store.policy_version(author, "policy-baseline", 1)
+    valid_ref = {
+        "policyId": "policy-baseline",
+        "version": 1,
+        "contentHash": component["contentHash"],
+    }
+    compose = store._compose_policy_version  # noqa: SLF001 - adversarial boundary exercise
+    with pytest.raises(FleetConfigurationError, match="not both"):
+        compose(
+            "org-a",
+            "candidate",
+            configuration={},
+            local_configuration={},
+            component_refs=[],
+        )
+    with pytest.raises(FleetConfigurationError, match="explicit localConfiguration"):
+        compose(
+            "org-a",
+            "candidate",
+            configuration={},
+            local_configuration=None,
+            component_refs=[valid_ref],
+        )
+    with pytest.raises(FleetConfigurationError, match="must be an object"):
+        compose(
+            "org-a",
+            "candidate",
+            configuration=None,
+            local_configuration=None,
+            component_refs=[],
+        )
+    with pytest.raises(FleetConfigurationError, match="must be an array"):
+        compose(
+            "org-a",
+            "candidate",
+            configuration=None,
+            local_configuration={},
+            component_refs="invalid",  # type: ignore[arg-type]
+        )
+    with pytest.raises(FleetConfigurationError, match="at most eight"):
+        compose(
+            "org-a",
+            "candidate",
+            configuration=None,
+            local_configuration={},
+            component_refs=[valid_ref] * 9,
+        )
+    with pytest.raises(FleetConfigurationError, match="SHA-256"):
+        compose(
+            "org-a",
+            "candidate",
+            configuration=None,
+            local_configuration={},
+            component_refs=[{**valid_ref, "contentHash": "not-a-digest"}],
+        )
+    with pytest.raises(FleetConfigurationError, match="duplicate or cycle"):
+        compose(
+            "org-a",
+            "candidate",
+            configuration=None,
+            local_configuration={},
+            component_refs=[valid_ref, valid_ref],
+        )
+
+    store._connection.execute(  # noqa: SLF001 - adversarial persistence-corruption test
+        "UPDATE policy_versions SET decided_by=NULL WHERE policy_id=? AND version=?",
+        ("policy-baseline", 1),
+    )
+    store._connection.commit()  # noqa: SLF001 - adversarial persistence-corruption test
+    with pytest.raises(FleetAuthorizationError, match="independent approval"):
+        compose(
+            "org-a",
+            "candidate",
+            configuration=None,
+            local_configuration={},
+            component_refs=[valid_ref],
+        )
+    store._connection.execute(  # noqa: SLF001 - adversarial persistence-corruption test
+        "UPDATE policy_versions SET decided_by=? WHERE policy_id=? AND version=?",
+        ("reviewer-2", "policy-baseline", 1),
+    )
+
+    store._connection.execute(  # noqa: SLF001 - adversarial persistence-corruption test
+        "UPDATE policy_versions SET graph_digest=? WHERE policy_id=? AND version=?",
+        ("0" * 64, "policy-baseline", 1),
+    )
+    store._connection.commit()  # noqa: SLF001 - adversarial persistence-corruption test
+    with pytest.raises(FleetConflictError, match="graph integrity"):
+        compose(
+            "org-a",
+            "candidate",
+            configuration=None,
+            local_configuration={},
+            component_refs=[valid_ref],
+        )
+
+    store._insert_policy_version(  # noqa: SLF001 - legacy migration contract
+        policy_id="policy-baseline",
+        organization_id="org-a",
+        version=99,
+        base_version=1,
+        name="Legacy rejected version",
+        configuration_json="{}",
+        state="rejected",
+        author="legacy-author",
+        created_at=1.0,
+    )
+    legacy = store.policy_version(author, "policy-baseline", 99)
+    assert legacy["composition"]["localConfiguration"] == {}
+    assert len(legacy["composition"]["graphDigest"]) == 64
+
+
+def test_policy_components_reject_cross_tenant_authority(tmp_path: Path) -> None:
+    """An exact valid component from another organization still grants no authority."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    author_b = identity("org-b", subject="author-b")
+    create_active_policy(
+        store,
+        author_b,
+        policy_id="policy-other-tenant",
+        name="Other tenant",
+        configuration={"tools": {"allowed": ["read_repository"]}},
+    )
+    component = store.policy_version(author_b, "policy-other-tenant", 1)
+    with pytest.raises(FleetAuthorizationError, match="same tenant"):
+        store.preview_policy_composition(
+            identity("org-a"),
+            policy_id="policy-candidate",
+            local_configuration={},
+            component_refs=[
+                {
+                    "policyId": "policy-other-tenant",
+                    "version": 1,
+                    "contentHash": component["contentHash"],
+                }
+            ],
+        )
+
+
+def test_policy_composition_preview_http_route_is_schema_validated(tmp_path: Path) -> None:
+    """The UI preview contract returns effective policy and rejects ambiguous input."""
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
+    seed(store)
+    token = "fleet-admin-token-1234"  # noqa: S105 - synthetic test credential
+    operator = identity("org-a")
+    app = EnterpriseFleetApplication(
+        store,
+        authenticator=StaticFleetAuthenticator({token: operator}),
+    )
+    status, preview = call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/composition/preview",
+        {
+            "policyId": "policy-new",
+            "localConfiguration": {"policy": {"denyByDefault": True}},
+            "componentRefs": [],
+        },
+    )
+    assert status.startswith("200")
+    assert preview["configuration"] == {"policy": {"denyByDefault": True}}
+    assert len(preview["graphDigest"]) == 64
+    status, malformed = call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/composition/preview",
+        {"policyId": "policy-new", "localConfiguration": {}, "componentRefs": [{}]},
+    )
+    assert status.startswith("400")
+    assert "policyId, version, and contentHash" in malformed["error"]
 
 
 def test_policy_governance_rejects_invalid_versions_states_and_cross_tenant_access(

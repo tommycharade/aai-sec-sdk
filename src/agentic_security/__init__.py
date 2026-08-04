@@ -172,6 +172,13 @@ from .managed_deployment import (
 )
 from .policies import AllowListPolicy, PolicyDecision, PolicyEngine, PolicyResult
 from .policy_adapters import CedarPolicyEngine, OpaPolicyEngine, PolicyRequest
+from .policy_composition import (
+    PolicyComponent,
+    PolicyCompositionError,
+    PolicyCompositionResult,
+    PolicyCompositionStep,
+    compose_policy,
+)
 from .runtime import GuardedRuntime, RuntimeConfig
 from .runtime_attestation import (
     RuntimeArtifactManifest,
@@ -386,10 +393,15 @@ __all__ = [
     "ReconciliationHandler",
     "OpaPolicyEngine",
     "PolicyDecision",
+    "PolicyComponent",
+    "PolicyCompositionError",
+    "PolicyCompositionResult",
+    "PolicyCompositionStep",
     "PolicyPreparation",
     "PolicyEngine",
     "PolicyResult",
     "PolicyRequest",
+    "compose_policy",
     "Principal",
     "PreExecutionAuthorizer",
     "TerminalRecorder",

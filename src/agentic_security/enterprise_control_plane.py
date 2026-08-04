@@ -30,6 +30,7 @@ from urllib.request import Request, urlopen
 from ._command_patterns import compile_command_patterns
 from .audit import AuditSink
 from .managed_deployment import ManagedDeploymentPackage
+from .policy_composition import PolicyComponent, PolicyCompositionError, compose_policy
 
 _MAX_TEXT = 256
 _MAX_PAGE_SIZE = 200
@@ -829,7 +830,7 @@ class EnterpriseFleetStore:
         return {
             "adapter": self.persistence.name,
             "highAvailability": self.persistence.supports_high_availability,
-            "schemaVersion": 7,
+            "schemaVersion": 8,
         }
 
     def close(self) -> None:
@@ -1241,7 +1242,9 @@ class EnterpriseFleetStore:
         *,
         policy_id: str,
         name: str,
-        configuration: Mapping[str, Any],
+        configuration: Mapping[str, Any] | None = None,
+        local_configuration: Mapping[str, Any] | None = None,
+        component_refs: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
         """Create a tenant-scoped policy and its first non-active draft.
 
@@ -1249,10 +1252,16 @@ class EnterpriseFleetStore:
         approves it and the version completes staging and activation.
         """
         policy_id, name = _text(policy_id, "policyId"), _text(name, "name")
-        configuration_json = self._configuration_json(configuration)
         now = self._now()
         with self._lock:
             self._assert_identity_org(identity, identity.organization_id)
+            composition = self._compose_policy_version(
+                identity.organization_id,
+                policy_id,
+                configuration=configuration,
+                local_configuration=local_configuration,
+                component_refs=component_refs,
+            )
             try:
                 self._connection.execute(
                     "INSERT INTO policies(id,organization_id,name,configuration,version,"
@@ -1274,7 +1283,11 @@ class EnterpriseFleetStore:
                     version=1,
                     base_version=0,
                     name=name,
-                    configuration_json=configuration_json,
+                    configuration_json=composition["configurationJson"],
+                    local_configuration_json=composition["localConfigurationJson"],
+                    component_refs_json=composition["componentRefsJson"],
+                    graph_digest=composition["graphDigest"],
+                    composition_explanation_json=composition["explanationJson"],
                     state="draft",
                     author=identity.subject,
                     created_at=now,
@@ -1298,16 +1311,24 @@ class EnterpriseFleetStore:
         *,
         policy_id: str,
         name: str,
-        configuration: Mapping[str, Any],
+        configuration: Mapping[str, Any] | None = None,
+        local_configuration: Mapping[str, Any] | None = None,
+        component_refs: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
         """Create an immutable-numbered draft from the current active policy."""
         policy_id, name = _text(policy_id, "policyId"), _text(name, "name")
-        configuration_json = self._configuration_json(configuration)
         with self._lock:
             current = self._policy(policy_id)
             if current["organizationId"] != identity.organization_id:
                 raise FleetAuthorizationError("organization scope is not permitted")
             self._assert_identity_org(identity, identity.organization_id)
+            composition = self._compose_policy_version(
+                identity.organization_id,
+                policy_id,
+                configuration=configuration,
+                local_configuration=local_configuration,
+                component_refs=component_refs,
+            )
             pending = self._connection.execute(
                 "SELECT version FROM policy_versions WHERE policy_id=? AND state IN "
                 "('draft','review','approved','staged') ORDER BY version DESC LIMIT 1",
@@ -1326,7 +1347,11 @@ class EnterpriseFleetStore:
                 version=version,
                 base_version=int(current["version"]),
                 name=name,
-                configuration_json=configuration_json,
+                configuration_json=composition["configurationJson"],
+                local_configuration_json=composition["localConfigurationJson"],
+                component_refs_json=composition["componentRefsJson"],
+                graph_digest=composition["graphDigest"],
+                composition_explanation_json=composition["explanationJson"],
                 state="draft",
                 author=identity.subject,
                 created_at=self._now(),
@@ -1369,6 +1394,33 @@ class EnterpriseFleetStore:
             if result["organizationId"] != identity.organization_id:
                 raise FleetAuthorizationError("organization scope is not permitted")
             return result
+
+    def preview_policy_composition(
+        self,
+        identity: FleetIdentity,
+        *,
+        policy_id: str,
+        local_configuration: Mapping[str, Any],
+        component_refs: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Return an explainable effective policy without persisting a draft."""
+        policy_id = _text(policy_id, "policyId")
+        with self._lock:
+            self._assert_identity_org(identity, identity.organization_id)
+            composition = self._compose_policy_version(
+                identity.organization_id,
+                policy_id,
+                configuration=None,
+                local_configuration=local_configuration,
+                component_refs=component_refs,
+            )
+        return {
+            "configuration": json.loads(composition["configurationJson"]),
+            "localConfiguration": json.loads(composition["localConfigurationJson"]),
+            "componentRefs": json.loads(composition["componentRefsJson"]),
+            "graphDigest": composition["graphDigest"],
+            "explanation": json.loads(composition["explanationJson"]),
+        }
 
     def submit_policy_version(
         self, identity: FleetIdentity, policy_id: str, version: int
@@ -1436,6 +1488,7 @@ class EnterpriseFleetStore:
                 raise FleetAuthorizationError("policy version lacks independent approval")
             if current["baseVersion"] != policy["version"]:
                 raise FleetConflictError("policy active version changed before staging")
+            self._assert_policy_composition_integrity(current)
         return self._transition_policy_version(
             identity,
             policy_id,
@@ -1471,6 +1524,7 @@ class EnterpriseFleetStore:
                 raise FleetConflictError("policy version is not staged")
             if candidate["approvedBy"] in {None, candidate["author"]}:
                 raise FleetAuthorizationError("policy version lacks independent approval")
+            self._assert_policy_composition_integrity(candidate)
             if (
                 policy["version"] != expected_active_version
                 or candidate["baseVersion"] != expected_active_version
@@ -2913,6 +2967,10 @@ class EnterpriseFleetStore:
                     organization_id TEXT NOT NULL REFERENCES organizations(id),
                     version INTEGER NOT NULL, base_version INTEGER NOT NULL,
                     name TEXT NOT NULL, configuration TEXT NOT NULL,
+                    local_configuration TEXT NOT NULL DEFAULT '{}',
+                    component_refs TEXT NOT NULL DEFAULT '[]',
+                    graph_digest TEXT NOT NULL DEFAULT '',
+                    composition_explanation TEXT NOT NULL DEFAULT '[]',
                     content_hash TEXT NOT NULL, state TEXT NOT NULL,
                     author TEXT NOT NULL, created_at REAL NOT NULL,
                     submitted_by TEXT, submitted_at REAL,
@@ -3019,6 +3077,29 @@ class EnterpriseFleetStore:
                 self._connection.execute(
                     "ALTER TABLE policies ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'"
                 )
+            policy_version_columns = {
+                row["name"]
+                for row in self._connection.execute("PRAGMA table_info(policy_versions)")
+            }
+            if "local_configuration" not in policy_version_columns:
+                self._connection.execute(
+                    "ALTER TABLE policy_versions ADD COLUMN "
+                    "local_configuration TEXT NOT NULL DEFAULT '{}'"
+                )
+            if "component_refs" not in policy_version_columns:
+                self._connection.execute(
+                    "ALTER TABLE policy_versions ADD COLUMN "
+                    "component_refs TEXT NOT NULL DEFAULT '[]'"
+                )
+            if "graph_digest" not in policy_version_columns:
+                self._connection.execute(
+                    "ALTER TABLE policy_versions ADD COLUMN graph_digest TEXT NOT NULL DEFAULT ''"
+                )
+            if "composition_explanation" not in policy_version_columns:
+                self._connection.execute(
+                    "ALTER TABLE policy_versions ADD COLUMN "
+                    "composition_explanation TEXT NOT NULL DEFAULT '[]'"
+                )
             existing_policies = self._connection.execute(
                 "SELECT id,organization_id,name,configuration,version,created_at,created_by "
                 "FROM policies WHERE version > 0"
@@ -3044,9 +3125,32 @@ class EnterpriseFleetStore:
                         policy["created_at"],
                     ),
                 )
+            legacy_versions = self._connection.execute(
+                "SELECT policy_id,version,configuration FROM policy_versions WHERE graph_digest=''"
+            ).fetchall()
+            for legacy in legacy_versions:
+                local_configuration = json.loads(legacy["configuration"])
+                composition = compose_policy((), local_configuration)
+                self._connection.execute(
+                    "UPDATE policy_versions SET local_configuration=?,component_refs='[]',"
+                    "graph_digest=?,composition_explanation=? "
+                    "WHERE policy_id=? AND version=?",
+                    (
+                        legacy["configuration"],
+                        composition.graph_digest,
+                        json.dumps(
+                            [step.to_dict() for step in composition.explanation],
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                        legacy["policy_id"],
+                        legacy["version"],
+                    ),
+                )
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(2)")
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(3)")
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(4)")
+            self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(8)")
             self._connection.commit()
 
     @staticmethod
@@ -3116,6 +3220,193 @@ class EnterpriseFleetStore:
             "createdAt": row["created_at"],
         }
 
+    def _compose_policy_version(
+        self,
+        organization_id: str,
+        policy_id: str,
+        *,
+        configuration: Mapping[str, Any] | None,
+        local_configuration: Mapping[str, Any] | None,
+        component_refs: Sequence[Mapping[str, Any]],
+    ) -> dict[str, str]:
+        """Resolve exact governed components and produce persistence-ready JSON.
+
+        Resolution happens inside the store lock and never accepts component
+        content from the caller. Only immutable versions loaded from the same
+        tenant can constrain the local policy.
+        """
+        if configuration is not None and local_configuration is not None:
+            raise FleetConfigurationError("provide configuration or localConfiguration, not both")
+        if configuration is not None and component_refs:
+            raise FleetConfigurationError("componentRefs require explicit localConfiguration")
+        local = configuration if configuration is not None else local_configuration
+        if not isinstance(local, Mapping):
+            raise FleetConfigurationError("localConfiguration must be an object")
+        local_json = self._configuration_json(local)
+        normalized_local = json.loads(local_json)
+        if not isinstance(component_refs, Sequence) or isinstance(component_refs, str | bytes):
+            raise FleetConfigurationError("componentRefs must be an array")
+        if len(component_refs) > 8:
+            raise FleetConfigurationError("a policy may reference at most eight components")
+
+        normalized_refs: list[dict[str, Any]] = []
+        components: list[PolicyComponent] = []
+        visited: set[tuple[str, int]] = set()
+
+        def resolve(ref: Mapping[str, Any], *, depth: int, owner_policy_id: str) -> dict[str, Any]:
+            if depth > 4:
+                raise FleetConfigurationError("policy component depth exceeds four levels")
+            if not isinstance(ref, Mapping) or set(ref) != {
+                "policyId",
+                "version",
+                "contentHash",
+            }:
+                raise FleetConfigurationError(
+                    "component references require policyId, version, and contentHash"
+                )
+            component_policy_id = _text(ref.get("policyId"), "component policyId")
+            version = _positive_version(ref.get("version"))
+            content_hash = _text(ref.get("contentHash"), "component contentHash")
+            if not _SHA256_HEX.fullmatch(content_hash):
+                raise FleetConfigurationError("component contentHash must be SHA-256 hex")
+            if hmac.compare_digest(component_policy_id, owner_policy_id):
+                raise FleetConfigurationError("a policy cannot reference its own versions")
+            identity = (component_policy_id, version)
+            if identity in visited:
+                raise FleetConfigurationError(
+                    "policy component graph contains a duplicate or cycle"
+                )
+            visited.add(identity)
+            if len(visited) > 32:
+                raise FleetConfigurationError("policy component graph exceeds 32 versions")
+            record = self._policy_version(component_policy_id, version)
+            if record["organizationId"] != organization_id:
+                raise FleetAuthorizationError("policy components must belong to the same tenant")
+            if record["state"] not in {"active", "retired"}:
+                raise FleetConflictError("policy components must be active or retired")
+            if record["approvedBy"] in {None, record["author"]}:
+                raise FleetAuthorizationError("policy component lacks independent approval")
+            if not hmac.compare_digest(record["contentHash"], content_hash):
+                raise FleetConflictError("policy component content hash does not match")
+            expected_hash = hashlib.sha256(
+                json.dumps(record["configuration"], sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            if not hmac.compare_digest(expected_hash, record["contentHash"]):
+                raise FleetConflictError("policy component content integrity check failed")
+            record_composition = record.get("composition")
+            if not isinstance(record_composition, Mapping):
+                raise FleetConflictError("policy component composition metadata is missing")
+            nested_refs = record_composition.get("componentRefs")
+            record_local = record_composition.get("localConfiguration")
+            record_graph_digest = record_composition.get("graphDigest")
+            if not isinstance(nested_refs, list) or not isinstance(record_local, Mapping):
+                raise FleetConflictError("policy component composition metadata is malformed")
+            nested_components: list[PolicyComponent] = []
+            for nested in nested_refs:
+                if not isinstance(nested, Mapping):
+                    raise FleetConflictError("nested policy component reference is malformed")
+                nested_record = resolve(
+                    nested,
+                    depth=depth + 1,
+                    owner_policy_id=component_policy_id,
+                )
+                nested_components.append(
+                    PolicyComponent(
+                        policy_id=nested_record["policyId"],
+                        version=nested_record["version"],
+                        content_hash=nested_record["contentHash"],
+                        configuration=nested_record["configuration"],
+                        graph_digest=nested_record["composition"]["graphDigest"],
+                    )
+                )
+            try:
+                record_result = compose_policy(nested_components, record_local).to_dict()
+            except PolicyCompositionError as exc:
+                raise FleetConflictError("policy component cannot be reproduced") from exc
+            if record_result["configuration"] != record["configuration"]:
+                raise FleetConflictError("policy component effective configuration is inconsistent")
+            if not isinstance(record_graph_digest, str) or not hmac.compare_digest(
+                record_result["graphDigest"], record_graph_digest
+            ):
+                raise FleetConflictError("policy component graph integrity check failed")
+            return record
+
+        for raw_ref in component_refs:
+            record = resolve(raw_ref, depth=1, owner_policy_id=policy_id)
+            normalized_ref = {
+                "policyId": record["policyId"],
+                "version": record["version"],
+                "contentHash": record["contentHash"],
+            }
+            normalized_refs.append(normalized_ref)
+            components.append(
+                PolicyComponent(
+                    policy_id=record["policyId"],
+                    version=record["version"],
+                    content_hash=record["contentHash"],
+                    configuration=record["configuration"],
+                    graph_digest=record["composition"]["graphDigest"],
+                )
+            )
+        try:
+            result = compose_policy(components, normalized_local)
+        except PolicyCompositionError as exc:
+            raise FleetConfigurationError(str(exc)) from exc
+        result_json = result.to_dict()
+        effective_configuration = result_json["configuration"]
+        if not isinstance(effective_configuration, Mapping):
+            raise FleetConfigurationError("effective policy must be an object")
+        effective_json = self._configuration_json(effective_configuration)
+        return {
+            "configurationJson": effective_json,
+            "localConfigurationJson": local_json,
+            "componentRefsJson": json.dumps(normalized_refs, sort_keys=True, separators=(",", ":")),
+            "graphDigest": result.graph_digest,
+            "explanationJson": json.dumps(
+                [step.to_dict() for step in result.explanation],
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        }
+
+    def _assert_policy_composition_integrity(self, record: Mapping[str, Any]) -> None:
+        """Re-resolve component authority before staging or activation.
+
+        A draft may wait in review while a referenced version is corrupted or
+        removed by an external persistence failure. Lifecycle transitions fail
+        closed unless both the effective configuration and graph provenance
+        still reproduce exactly.
+        """
+        composition = record.get("composition")
+        if not isinstance(composition, Mapping):
+            raise FleetConflictError("policy composition metadata is missing")
+        local_configuration = composition.get("localConfiguration")
+        component_refs = composition.get("componentRefs")
+        if not isinstance(local_configuration, Mapping) or not isinstance(component_refs, list):
+            raise FleetConflictError("policy composition metadata is malformed")
+        normalized_refs: list[Mapping[str, Any]] = []
+        for item in component_refs:
+            if not isinstance(item, Mapping):
+                raise FleetConflictError("policy component references are malformed")
+            normalized_refs.append(item)
+        recomposed = self._compose_policy_version(
+            _text(record.get("organizationId"), "organizationId"),
+            _text(record.get("policyId"), "policyId"),
+            configuration=None,
+            local_configuration=local_configuration,
+            component_refs=normalized_refs,
+        )
+        expected_configuration = json.dumps(
+            record.get("configuration"), sort_keys=True, separators=(",", ":")
+        )
+        if not hmac.compare_digest(recomposed["configurationJson"], expected_configuration):
+            raise FleetConflictError("policy effective configuration no longer reproduces")
+        graph_digest = composition.get("graphDigest")
+        if not isinstance(graph_digest, str) or not hmac.compare_digest(
+            recomposed["graphDigest"], graph_digest
+        ):
+            raise FleetConflictError("policy composition provenance no longer reproduces")
+
     def _insert_policy_version(
         self,
         *,
@@ -3128,13 +3419,31 @@ class EnterpriseFleetStore:
         state: str,
         author: str,
         created_at: float,
+        local_configuration_json: str | None = None,
+        component_refs_json: str | None = None,
+        graph_digest: str | None = None,
+        composition_explanation_json: str | None = None,
     ) -> None:
         """Insert one content-hashed policy ledger entry inside the caller's transaction."""
         if state not in _POLICY_VERSION_STATES:
             raise FleetConfigurationError("policy version state is invalid")
+        if local_configuration_json is None:
+            local_configuration_json = configuration_json
+        if component_refs_json is None:
+            component_refs_json = "[]"
+        if graph_digest is None or composition_explanation_json is None:
+            legacy = compose_policy((), json.loads(local_configuration_json))
+            graph_digest = legacy.graph_digest
+            composition_explanation_json = json.dumps(
+                [step.to_dict() for step in legacy.explanation],
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         self._connection.execute(
             "INSERT INTO policy_versions(policy_id,organization_id,version,base_version,name,"
-            "configuration,content_hash,state,author,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "configuration,local_configuration,component_refs,graph_digest,"
+            "composition_explanation,content_hash,state,author,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 policy_id,
                 organization_id,
@@ -3142,6 +3451,10 @@ class EnterpriseFleetStore:
                 base_version,
                 name,
                 configuration_json,
+                local_configuration_json,
+                component_refs_json,
+                graph_digest,
+                composition_explanation_json,
                 hashlib.sha256(configuration_json.encode()).hexdigest(),
                 state,
                 author,
@@ -3202,6 +3515,7 @@ class EnterpriseFleetStore:
         """Load one immutable-numbered policy ledger entry with safe review metadata."""
         row = self._connection.execute(
             "SELECT policy_id,organization_id,version,base_version,name,configuration,"
+            "local_configuration,component_refs,graph_digest,composition_explanation,"
             "content_hash,state,author,created_at,submitted_by,submitted_at,decided_by,"
             "decided_at,decision_reason,staged_by,staged_at,activated_by,activated_at "
             "FROM policy_versions WHERE policy_id=? AND version=?",
@@ -3249,6 +3563,12 @@ class EnterpriseFleetStore:
             "activatedBy": row["activated_by"],
             "activatedAt": row["activated_at"],
             "changeSummary": {"changedSections": changed_sections},
+            "composition": {
+                "localConfiguration": json.loads(row["local_configuration"]),
+                "componentRefs": json.loads(row["component_refs"]),
+                "graphDigest": row["graph_digest"],
+                "explanation": json.loads(row["composition_explanation"]),
+            },
         }
 
     def _policy(self, policy_id: str) -> dict[str, Any]:
@@ -4129,16 +4449,43 @@ class EnterpriseFleetApplication:
                     ),
                 )
                 return self._respond(start_response, 201, result)
+            if method == "POST" and path == "/api/enterprise/policies/composition/preview":
+                self._authorize(identity, "manage_configuration")
+                local_configuration = body.get("localConfiguration")
+                component_refs = body.get("componentRefs", [])
+                if not isinstance(local_configuration, Mapping):
+                    raise FleetConfigurationError("localConfiguration must be an object")
+                if not isinstance(component_refs, list) or not all(
+                    isinstance(item, Mapping) for item in component_refs
+                ):
+                    raise FleetConfigurationError("componentRefs must be an array of objects")
+                result = self.store.preview_policy_composition(
+                    identity,
+                    policy_id=_text(body.get("policyId"), "policyId"),
+                    local_configuration=local_configuration,
+                    component_refs=component_refs,
+                )
+                return self._respond(start_response, 200, result)
             if method == "POST" and path == "/api/enterprise/policies":
                 self._authorize(identity, "manage_configuration")
                 configuration = body.get("configuration")
-                if not isinstance(configuration, Mapping):
+                local_configuration = body.get("localConfiguration")
+                component_refs = body.get("componentRefs", [])
+                if configuration is not None and not isinstance(configuration, Mapping):
                     raise FleetConfigurationError("configuration must be an object")
+                if local_configuration is not None and not isinstance(local_configuration, Mapping):
+                    raise FleetConfigurationError("localConfiguration must be an object")
+                if not isinstance(component_refs, list) or not all(
+                    isinstance(item, Mapping) for item in component_refs
+                ):
+                    raise FleetConfigurationError("componentRefs must be an array of objects")
                 result = self.store.create_policy(
                     identity,
                     policy_id=_text(body.get("policyId"), "policyId"),
                     name=_text(body.get("name"), "name"),
                     configuration=configuration,
+                    local_configuration=local_configuration,
+                    component_refs=component_refs,
                 )
                 return self._respond(start_response, 201, result)
             if method == "POST" and path == "/api/enterprise/skills":
@@ -4242,14 +4589,24 @@ class EnterpriseFleetApplication:
             ):
                 self._authorize(identity, "manage_configuration")
                 configuration = body.get("configuration")
-                if not isinstance(configuration, Mapping):
+                local_configuration = body.get("localConfiguration")
+                component_refs = body.get("componentRefs", [])
+                if configuration is not None and not isinstance(configuration, Mapping):
                     raise FleetConfigurationError("configuration must be an object")
+                if local_configuration is not None and not isinstance(local_configuration, Mapping):
+                    raise FleetConfigurationError("localConfiguration must be an object")
+                if not isinstance(component_refs, list) or not all(
+                    isinstance(item, Mapping) for item in component_refs
+                ):
+                    raise FleetConfigurationError("componentRefs must be an array of objects")
                 policy_id = path[len(policy_versions_prefix) : -len("/versions")].strip("/")
                 result = self.store.update_policy(
                     identity,
                     policy_id=_text(policy_id, "policyId"),
                     name=_text(body.get("name"), "name"),
                     configuration=configuration,
+                    local_configuration=local_configuration,
+                    component_refs=component_refs,
                 )
                 return self._respond(start_response, 200, result)
             if method == "POST" and path == "/api/enterprise/groups":

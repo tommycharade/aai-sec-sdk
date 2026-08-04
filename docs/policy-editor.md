@@ -134,6 +134,15 @@ base-policy change restores the normal signed policy automatically. The UI
 does not describe an approved draft as applied and does not treat an active
 control-plane exception as endpoint-convergence evidence.
 
+## Reuse, inheritance and Git
+
+Reusable policy components are exact independently approved policy versions,
+never mutable “latest” pointers. The editor shows local intent separately from
+the effective restrictive composition and explains which component produced or
+narrowed every field. Git import creates a draft only; provider-observed review
+and signature evidence cannot replace normal independent control-plane
+approval. See [Policy composition and GitOps](policy-composition-and-gitops-design.md).
+
 ## Out of scope
 
 The editor must not expose switches for security invariants such as dynamic

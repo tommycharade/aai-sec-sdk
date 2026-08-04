@@ -1,5 +1,12 @@
 # Changelog
 
+- Added provider-neutral, deterministic restrictive policy composition and the
+  reference control-plane preview/persistence contract. Drafts can bind exact
+  independently approved active or retired policy versions, retain local intent
+  separately from effective authority, explain every merge decision and
+  reproduce graph and content integrity before staging or activation. Legacy
+  configuration-only callers and stored versions remain compatible.
+
 - Added independently observed Regional fault preconditions. Before any lock,
   Scheduler or IAM mutation, the witness-Region probe now requires exact
   target-active-not-routed journal authority, unchanged processed templates,

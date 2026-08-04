@@ -78,6 +78,7 @@ nav:
   - Endpoint evidence publisher acceptance — 2026-08-01: endpoint-evidence-acceptance-2026-08-01.md
   - Dynamic policy groups: dynamic-groups-design.md
   - Policy editor: policy-editor.md
+  - Policy composition and GitOps: policy-composition-and-gitops-design.md
   - Policy governance design: policy-governance-design.md
   - Policy change assurance: policy-change-assurance-design.md
   - Policy change assurance live acceptance: policy-change-assurance-acceptance-2026-08-01.md
