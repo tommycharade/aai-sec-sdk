@@ -1,5 +1,12 @@
 # Changelog
 
+- Added reviewed policy-as-code import/export to the provider-neutral control
+  plane. Exact Git commits and blobs are schema-validated, independently
+  reviewed and signature-verified before an atomic draft-only import; immutable
+  provenance, content idempotency, signed canonical exports, GitHub provider
+  verification and adversarial API contracts fail closed without granting
+  runtime authority.
+
 - Added AWS control-plane parity for exact-version policy composition. Hosted
   previews and drafts resolve only same-organization, independently approved,
   signed active or retired component versions; staging and activation reproduce

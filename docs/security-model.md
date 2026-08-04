@@ -1033,6 +1033,21 @@ graph digest before staging and activation, and bounds graph depth and size.
 Missing, pending, cross-tenant, self-referential, stale or corrupt components
 therefore deny promotion. See [Policy composition and GitOps](policy-composition-and-gitops-design.md).
 
+Git repositories remain untrusted transport even when their branch is
+protected. Policy import accepts only a server-retrieved exact repository,
+full commit object ID and path. The deployment-owned verifier independently
+checks the immutable blob, verified commit signer, one merged pull request and
+the latest independent approval before parsing a closed bounded JSON schema.
+The browser cannot supply content, review evidence, signer identity or provider
+credentials. An accepted source creates only a draft in one atomic transaction;
+it has no approval, activation, assignment or endpoint authority. Provider
+failure, rewritten coordinates, duplicate keys, malformed content, cross-tenant
+identity, unresolved components and changed idempotency input leave no partial
+policy. Exports bind canonical source and graph digests to a separately signed
+control-plane provenance envelope. A source-control administrator or compromised
+reviewer can still approve malicious intent, so independent control-plane review
+and endpoint verification remain mandatory.
+
 AWS activation resolves the exact effective configuration and signs a
 canonical tenant, policy ID, version, content hash and configuration payload
 with a non-exportable P-256 KMS key. The active version, resolved configuration

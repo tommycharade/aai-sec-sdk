@@ -99,6 +99,34 @@ The example is synthetic and does not connect to a model or external service.
 
 ::: agentic_security.enterprise_control_plane.EnterpriseFleetApplication
 
+## Policy composition and reviewed Git sources
+
+Git is a reviewed transport, never runtime authority. The source verifier
+accepts one exact repository, full commit object ID and path. A successful
+import creates only a normal draft; it cannot submit, approve, activate or
+assign a policy. Export signatures are produced by a deployment-owned KMS/HSM
+adapter over canonical provenance bytes.
+
+::: agentic_security.policy_sources.PolicySourceDocument
+
+::: agentic_security.policy_sources.PolicySourceRequest
+
+::: agentic_security.policy_sources.VerifiedPolicySource
+
+::: agentic_security.policy_sources.PolicySourceVerifier
+
+::: agentic_security.policy_sources.PolicyExportSignature
+
+::: agentic_security.policy_sources.PolicyExportSigner
+
+::: agentic_security.policy_sources.CallbackPolicyExportSigner
+
+::: agentic_security.github_policy_source.GitHubPolicySourceVerifier
+
+::: agentic_security.github_policy_source.GitHubHttpTransport
+
+::: agentic_security.github_policy_source.GitHubHttpResponse
+
 ## Native agent host hooks
 
 ::: agentic_security.claude_code
