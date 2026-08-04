@@ -509,6 +509,40 @@ class FakeSqs:
         return {"MessageId": f"message-{len(self.messages)}"}
 
 
+class FakeSecretsManager:
+    """Retain exact synthetic secret versions without exposing them through views."""
+
+    def __init__(self) -> None:
+        self.secrets: dict[str, dict[str, Any]] = {}
+
+    def create_secret(self, **value: Any) -> dict[str, str]:
+        name = value["Name"]
+        if name in self.secrets:
+            raise ConditionalFailure()
+        arn = f"arn:aws:secretsmanager:eu-west-2:111111111111:secret:{name}-synthetic"
+        self.secrets[name] = {
+            "arn": arn,
+            "versions": {"version-1": value["SecretString"]},
+            "deleted": False,
+        }
+        self.secrets[arn] = self.secrets[name]
+        return {"ARN": arn, "Name": name, "VersionId": "version-1"}
+
+    def put_secret_value(self, **value: Any) -> dict[str, str]:
+        record = self.secrets[value["SecretId"]]
+        version = f"version-{len(record['versions']) + 1}"
+        record["versions"][version] = value["SecretString"]
+        return {"ARN": record["arn"], "VersionId": version}
+
+    def get_secret_value(self, **value: Any) -> dict[str, str]:
+        record = self.secrets[value["SecretId"]]
+        return {"SecretString": record["versions"][value["VersionId"]]}
+
+    def delete_secret(self, **value: Any) -> dict[str, str]:
+        self.secrets[value["SecretId"]]["deleted"] = True
+        return {"ARN": self.secrets[value["SecretId"]]["arn"]}
+
+
 class FakeKms:
     """Capture exact digest signing calls without exposing private key material."""
 
@@ -566,6 +600,7 @@ def _load_handler(monkeypatch: Any) -> Any:
     fake_sns = FakeSns()
     fake_sqs = FakeSqs()
     fake_s3 = FakeS3()
+    fake_secrets = FakeSecretsManager()
     policy_key_id = "arn:aws:kms:eu-west-2:111111111111:key/12345678-1234-1234-1234-123456789abc"
     fake_kms = FakeKms(policy_key_id)
     boto3.client = (  # type: ignore[attr-defined]
@@ -578,6 +613,8 @@ def _load_handler(monkeypatch: Any) -> Any:
             if service == "sns"
             else fake_sqs
             if service == "sqs"
+            else fake_secrets
+            if service == "secretsmanager"
             else fake_s3
         )
     )
@@ -615,6 +652,9 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("RECOVERY_REGION", "eu-west-1")
     monkeypatch.setenv("AWS_REGION", "eu-west-1")
     monkeypatch.setenv("SECURITY_ALERTS_TOPIC_ARN", "arn:aws:sns:eu-west-2:111111111111:test")
+    monkeypatch.setenv("WEBHOOK_QUEUE_URL", "https://sqs.example.invalid/webhooks.fifo")
+    monkeypatch.setenv("WEBHOOK_SECRET_PREFIX", "aai-sec/webhooks/")
+    monkeypatch.setenv("WEBHOOK_SECRET_KMS_KEY_ARN", policy_key_id)
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/handler.py"
     monkeypatch.syspath_prepend(str(path.parent))
     spec = importlib.util.spec_from_file_location("aai_lambda_handler", path)
@@ -625,6 +665,7 @@ def _load_handler(monkeypatch: Any) -> Any:
     cast(Any, module)._fake_s3 = fake_s3
     cast(Any, module)._fake_sns = fake_sns
     cast(Any, module)._fake_sqs = fake_sqs
+    cast(Any, module)._fake_secrets = fake_secrets
     return module, table
 
 
@@ -716,6 +757,236 @@ def _runtime_manifest(host: str = "claude-code") -> dict[str, Any]:
         "hookDigest": "e" * 64,
         "host": host,
     }
+
+
+def test_secure_webhook_lifecycle_is_tenant_scoped_rotatable_and_secret_free(
+    monkeypatch: Any,
+) -> None:
+    """Platform admins get one-time secrets while all later views remain redacted."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-webhook"
+    now = 1_800_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-webhook-admin",
+    }
+    created = _invoke(
+        module,
+        _event(
+            "/api/enterprise/webhooks",
+            "POST",
+            claims=platform,
+            body={
+                "name": "SOC automation",
+                "description": "Signed alerts for the enterprise response gateway",
+                "endpoint": "https://hooks.example.test/aai/events",
+                "eventTypes": ["endpoint.alert.opened", "webhook.test"],
+            },
+        ),
+    )
+    assert created["statusCode"] == 201
+    issued = json.loads(created["body"])
+    destination = issued["destination"]
+    secret = issued["signingSecret"]
+    assert len(secret["secret"]) >= 32
+    assert destination["activeKeyId"] == secret["keyId"]
+    assert destination["revision"] == 1
+    encoded_record = json.dumps(table.items[(f"TENANT#{tenant}", f"WEBHOOK#{destination['id']}")])
+    assert secret["secret"] not in encoded_record
+
+    listed = json.loads(
+        _invoke(
+            module,
+            _event("/api/enterprise/webhooks", "GET", claims=platform),
+        )["body"]
+    )
+    assert listed["items"] == [destination]
+    assert "signingSecret" not in json.dumps(listed)
+    assert "secret_arn" not in json.dumps(listed)
+
+    rotated = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/webhooks/{destination['id']}/rotate",
+            "POST",
+            claims=platform,
+            body={"expectedRevision": 1, "overlapSeconds": 3600},
+        ),
+    )
+    assert rotated["statusCode"] == 201
+    rotation = json.loads(rotated["body"])
+    assert rotation["destination"]["revision"] == 2
+    assert rotation["destination"]["previousKeyId"] == secret["keyId"]
+    assert rotation["destination"]["previousKeyValidUntil"] == now + 3600
+    assert rotation["signingSecret"]["keyId"] != secret["keyId"]
+    assert rotation["signingSecret"]["secret"] != secret["secret"]
+
+    recovery = json.loads(
+        _invoke(
+            module,
+            _event(
+                f"/api/enterprise/webhooks/{destination['id']}/rotate",
+                "POST",
+                claims=platform,
+                body={"expectedRevision": 2, "overlapSeconds": 7200},
+            ),
+        )["body"]
+    )
+    assert recovery["destination"]["revision"] == 3
+    assert recovery["destination"]["previousKeyId"] == secret["keyId"]
+    assert recovery["destination"]["previousKeyValidUntil"] == now + 7200
+    assert recovery["signingSecret"]["keyId"] != rotation["signingSecret"]["keyId"]
+
+    stale = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/webhooks/{destination['id']}/rotate",
+            "POST",
+            claims=platform,
+            body={"expectedRevision": 1, "overlapSeconds": 3600},
+        ),
+    )
+    assert stale["statusCode"] == 409
+
+    tested = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/webhooks/{destination['id']}/test",
+            "POST",
+            claims=platform,
+            body={"expectedRevision": 3},
+        ),
+    )
+    assert tested["statusCode"] == 202
+    delivery = json.loads(tested["body"])
+    assert delivery["eventType"] == "webhook.test"
+    assert module._fake_sqs.messages[-1]["MessageDeduplicationId"] == delivery["id"]
+    stored_delivery = table.items[(f"TENANT#{tenant}", f"WEBHOOK_DELIVERY#{delivery['id']}")]
+    assert stored_delivery["status"] == "queued"
+    assert "webhook_outbox_pk" not in stored_delivery
+    assert "signingSecret" not in json.dumps(stored_delivery)
+
+    table.put_item(
+        Item=module._item_key(tenant, "WEBHOOK_HEALTH", destination["id"])
+        | {
+            "destination_id": destination["id"],
+            "last_delivery_at": now + 1,
+            "last_delivery_status": "delivered",
+        }
+    )
+    posture = json.loads(
+        _invoke(module, _event("/api/enterprise/webhooks", "GET", claims=platform))["body"]
+    )["items"][0]
+    assert posture["lastDeliveryAt"] == now + 1
+    assert posture["lastDeliveryStatus"] == "delivered"
+
+    retired = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/webhooks/{destination['id']}/retire",
+            "POST",
+            claims=platform,
+            body={
+                "expectedRevision": 3,
+                "reason": "Synthetic receiver has been permanently decommissioned.",
+            },
+        ),
+    )
+    assert retired["statusCode"] == 200
+    stored_destination = table.items[(f"TENANT#{tenant}", f"WEBHOOK#{destination['id']}")]
+    assert stored_destination["secret_deletion_requested_at"] == now
+    # Exact retry is recoverable and does not advance authority again.
+    assert (
+        _invoke(
+            module,
+            _event(
+                f"/api/enterprise/webhooks/{destination['id']}/retire",
+                "POST",
+                claims=platform,
+                body={
+                    "expectedRevision": 3,
+                    "reason": "Synthetic receiver has been permanently decommissioned.",
+                },
+            ),
+        )["statusCode"]
+        == 200
+    )
+
+
+def test_secure_webhooks_reject_unsafe_egress_roles_and_cross_tenant_reads(
+    monkeypatch: Any,
+) -> None:
+    """Untrusted destinations and non-platform mutations fail before secret creation."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-webhook-deny"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-author"],
+        "sub": "policy-author-a",
+    }
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+    request = {
+        "name": "Unsafe",
+        "description": "Synthetic rejected destination",
+        "endpoint": "https://127.0.0.1/hook",
+        "eventTypes": ["webhook.test"],
+    }
+    denied = _invoke(
+        module,
+        _event("/api/enterprise/webhooks", "POST", claims=author, body=request),
+    )
+    assert denied["statusCode"] == 403
+    assert json.loads(denied["body"])["requiredCapability"] == "integration_admin"
+    unsafe = _invoke(
+        module,
+        _event("/api/enterprise/webhooks", "POST", claims=platform, body=request),
+    )
+    assert unsafe["statusCode"] == 400
+    assert module._fake_secrets.secrets == {}
+
+    request["endpoint"] = "https://hooks.example.test/path?token=secret"
+    assert (
+        _invoke(
+            module,
+            _event("/api/enterprise/webhooks", "POST", claims=platform, body=request),
+        )["statusCode"]
+        == 400
+    )
+    request["endpoint"] = "https://hooks.example.test/path"
+    created = json.loads(
+        _invoke(
+            module,
+            _event("/api/enterprise/webhooks", "POST", claims=platform, body=request),
+        )["body"]
+    )
+    table.put_item(
+        Item=module._item_key("tenant-other-webhook", "TENANT", "root")
+        | {"id": "tenant-other-webhook"}
+    )
+    other = {
+        "custom:tenant_id": "tenant-other-webhook",
+        "cognito:groups": ["platform-admin"],
+        "sub": "other-platform-admin",
+    }
+    assert (
+        _invoke(
+            module,
+            _event(
+                f"/api/enterprise/webhooks/{created['destination']['id']}",
+                "GET",
+                claims=other,
+            ),
+        )["statusCode"]
+        == 404
+    )
 
 
 def test_enterprise_assurance_reports_are_honest_hashed_and_read_only(

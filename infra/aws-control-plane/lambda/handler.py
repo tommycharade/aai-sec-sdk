@@ -8,6 +8,7 @@ tenant identity; the tenant is derived from the verified Cognito claims.
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import math
 import os
@@ -45,6 +46,7 @@ SNS = boto3.client("sns")
 SQS = boto3.client("sqs")
 KMS = boto3.client("kms")
 LAMBDA = boto3.client("lambda")
+SECRETS_MANAGER = boto3.client("secretsmanager")
 POLICY_SIGNING_KEY_ARN = os.environ.get("POLICY_SIGNING_KEY_ARN", "")
 POLICY_SOURCE_VERIFIER_ARN = os.environ.get("POLICY_SOURCE_VERIFIER_ARN", "")
 
@@ -184,6 +186,7 @@ _ENDPOINT_EVIDENCE_FUTURE_SKEW_SECONDS = 5 * 60
 _ENDPOINT_DETECTION_INDEX = "EndpointDetectionTenants"
 _ENDPOINT_DETECTION_SHARDS = 16
 _ENDPOINT_DETECTION_TENANT_LIMIT = 2_000
+_WEBHOOK_OUTBOX_INDEX = "WebhookOutbox"
 _EVIDENCE_ASSURANCE_INDEX = "EvidenceAssuranceTenants"
 _EVIDENCE_ASSURANCE_SHARDS = 16
 _CASE_STATUSES = frozenset({"open", "investigating", "contained", "resolved", "closed"})
@@ -360,6 +363,16 @@ _BREAK_GLASS_MIN_SECONDS = 5 * 60
 _BREAK_GLASS_MAX_SECONDS = 60 * 60
 _BREAK_GLASS_REQUEST_SECONDS = 15 * 60
 _STRONG_AUTH_MAX_AGE_SECONDS = 10 * 60
+_WEBHOOK_EVENT_TYPES = frozenset(
+    {
+        "endpoint.alert.opened",
+        "endpoint.alert.reopened",
+        "webhook.test",
+    }
+)
+_WEBHOOK_DESTINATION_LIMIT = 20
+_WEBHOOK_ROTATION_MIN_SECONDS = 60 * 60
+_WEBHOOK_ROTATION_MAX_SECONDS = 7 * 24 * 60 * 60
 
 # Machine identities are deliberately narrower than human roles. They can
 # automate bounded operational work but can never approve their own policy,
@@ -1020,6 +1033,12 @@ def _required_mutation_capability(path):
         return "identity_admin"
     if normalized.startswith("/enterprise/evidence"):
         return "evidence_admin"
+    if normalized.startswith("/enterprise/webhooks"):
+        # Outbound destinations and signing keys cross the tenant egress and
+        # credential boundary. Only the platform-administration wildcard owns
+        # this capability; it is intentionally absent from delegated grants,
+        # break glass, and machine credentials.
+        return "integration_admin"
     if normalized.startswith("/enterprise/discovery/sources/"):
         # Population evidence can lower measured coverage and create leaver or
         # orphan findings. Until scoped service identities are implemented,
@@ -2789,6 +2808,541 @@ def _enterprise_integrations():
             ),
         }
     }
+
+
+def _webhook_endpoint(value):
+    """Validate one credential-free public HTTPS destination.
+
+    The dedicated delivery worker repeats this validation and resolves DNS
+    before every request. Deployment egress controls remain the final boundary
+    against DNS rebinding and newly private destinations.
+    """
+    if not isinstance(value, str) or len(value) > 2_048:
+        raise ValueError("webhook endpoint must be a bounded HTTPS URL")
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.port not in {None, 443}
+    ):
+        raise ValueError("webhook endpoint must be credential-free HTTPS on port 443")
+    host = parsed.hostname.rstrip(".").lower()
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        raise ValueError("webhook endpoint must use a public DNS name")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if "." not in host or len(host) > 253:
+            raise ValueError("webhook endpoint must use a public DNS name") from None
+    else:
+        if not address.is_global:
+            raise ValueError("webhook endpoint must not use a private address")
+    return value
+
+
+def _webhook_events(value):
+    """Return a sorted non-empty set of supported content-minimised events."""
+    if (
+        not isinstance(value, list)
+        or not value
+        or len(value) > len(_WEBHOOK_EVENT_TYPES)
+        or any(not isinstance(item, str) for item in value)
+    ):
+        raise ValueError("webhook eventTypes must be a bounded non-empty list")
+    events = frozenset(value)
+    if len(events) != len(value) or not events <= _WEBHOOK_EVENT_TYPES:
+        raise ValueError("webhook eventTypes contain duplicates or unsupported values")
+    return sorted(events)
+
+
+def _webhook_secret_name(tenant, destination_id):
+    """Return the deployment-owned tenant namespace for one signing secret."""
+    prefix = os.environ.get("WEBHOOK_SECRET_PREFIX", "")
+    if not prefix or not prefix.endswith("/") or len(prefix) > 256:
+        raise RuntimeError("webhook secret namespace is not configured")
+    return f"{prefix}{tenant}/{destination_id}"
+
+
+def _webhook_key_material():
+    """Generate a one-time HMAC secret and non-secret key identifier."""
+    return f"key-{uuid.uuid4()}", secrets.token_urlsafe(32)
+
+
+def _webhook_destination_view(item, *, health=None, now=None):
+    """Project one destination without secret names, versions, or key bytes."""
+    current = int(time.time()) if now is None else int(now)
+    posture = health if isinstance(health, dict) else {}
+    previous_until = item.get("previous_key_valid_until")
+    rotating = (
+        item.get("status") == "active"
+        and isinstance(previous_until, int)
+        and previous_until > current
+    )
+    return {
+        "id": item.get("id", ""),
+        "name": item.get("name", ""),
+        "description": item.get("description", ""),
+        "endpoint": item.get("endpoint", ""),
+        "eventTypes": sorted(item.get("event_types", [])),
+        "status": item.get("status", "disabled"),
+        "revision": int(item.get("revision", 0)),
+        "activeKeyId": item.get("active_key_id", ""),
+        "previousKeyId": item.get("previous_key_id") if rotating else None,
+        "previousKeyValidUntil": previous_until if rotating else None,
+        "createdAt": int(item.get("created_at", 0)),
+        "createdBy": item.get("created_by", ""),
+        "updatedAt": int(item.get("updated_at", 0)),
+        "updatedBy": item.get("updated_by", ""),
+        "lastDeliveryAt": posture.get("last_delivery_at"),
+        "lastDeliveryStatus": posture.get("last_delivery_status", "never"),
+    }
+
+
+def _webhook_destination(tenant, destination_id):
+    """Strongly read one tenant-scoped webhook destination."""
+    return TABLE.get_item(
+        Key=_item_key(tenant, "WEBHOOK", _bounded_identifier(destination_id, "webhookId")),
+        ConsistentRead=True,
+    ).get("Item")
+
+
+def _webhook_destination_health(tenant, destination_id):
+    """Strongly read the worker-owned, content-free destination projection."""
+    return TABLE.get_item(
+        Key=_item_key(
+            tenant,
+            "WEBHOOK_HEALTH",
+            _bounded_identifier(destination_id, "webhookId"),
+        ),
+        ConsistentRead=True,
+    ).get("Item")
+
+
+def _create_webhook_destination(tenant, value, actor):
+    """Create a destination and return its signing secret exactly once."""
+    if not isinstance(value, dict) or set(value) != {
+        "name",
+        "description",
+        "endpoint",
+        "eventTypes",
+    }:
+        raise ValueError("webhook destination request has an invalid schema")
+    if len(_list(tenant, "WEBHOOK", consistent_read=True)) >= _WEBHOOK_DESTINATION_LIMIT:
+        raise PolicyConflict("webhook destination limit reached")
+    destination_id = str(uuid.uuid4())
+    name = _bounded_text(value.get("name"), "name", 120)
+    raw_description = value.get("description", "")
+    if (
+        not isinstance(raw_description, str)
+        or len(raw_description.strip()) > 500
+        or any(ord(char) < 32 for char in raw_description.strip())
+    ):
+        raise ValueError("description must be bounded text")
+    description = raw_description.strip()
+    endpoint = _webhook_endpoint(value.get("endpoint"))
+    events = _webhook_events(value.get("eventTypes"))
+    key_id, secret = _webhook_key_material()
+    secret_name = _webhook_secret_name(tenant, destination_id)
+    kms_key = os.environ.get("WEBHOOK_SECRET_KMS_KEY_ARN", "")
+    if not kms_key:
+        raise RuntimeError("webhook secret encryption key is not configured")
+    secret_response = SECRETS_MANAGER.create_secret(
+        Name=secret_name,
+        Description="AAI Security tenant webhook signing key",
+        KmsKeyId=kms_key,
+        SecretString=json.dumps(
+            {"schemaVersion": 1, "keyId": key_id, "secret": secret},
+            separators=(",", ":"),
+        ),
+    )
+    version_id = secret_response.get("VersionId")
+    secret_arn = secret_response.get("ARN")
+    if not isinstance(version_id, str) or not version_id or not isinstance(secret_arn, str):
+        raise RuntimeError("Secrets Manager returned incomplete webhook key evidence")
+    now = int(time.time())
+    record = {
+        **_item_key(tenant, "WEBHOOK", destination_id),
+        "tenant_id": tenant,
+        "id": destination_id,
+        "name": name,
+        "description": description,
+        "endpoint": endpoint,
+        "event_types": events,
+        "status": "active",
+        "revision": 1,
+        "secret_arn": secret_arn,
+        "active_key_id": key_id,
+        "active_secret_version": version_id,
+        "previous_key_id": None,
+        "previous_secret_version": None,
+        "previous_key_valid_until": None,
+        "created_at": now,
+        "created_by": actor,
+        "updated_at": now,
+        "updated_by": actor,
+        "last_delivery_status": "never",
+    }
+    try:
+        TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+    except Exception:
+        # The key has not become authority if its destination record failed.
+        # Recovery-window deletion keeps the cleanup reversible.
+        SECRETS_MANAGER.delete_secret(SecretId=secret_arn, RecoveryWindowInDays=7)
+        raise
+    _audit(
+        tenant,
+        "webhook_destination_created",
+        actor,
+        {
+            "webhook_id": destination_id,
+            "endpoint_host": urlsplit(endpoint).hostname,
+            "event_types": events,
+            "key_id": key_id,
+            "revision": 1,
+        },
+    )
+    return {
+        "destination": _webhook_destination_view(record, now=now),
+        "signingSecret": {"keyId": key_id, "secret": secret},
+    }
+
+
+def _rotate_webhook_destination(tenant, destination_id, value, actor):
+    """Activate a new key while retaining the previous key for bounded overlap."""
+    if not isinstance(value, dict) or set(value) != {"expectedRevision", "overlapSeconds"}:
+        raise ValueError("webhook rotation request has an invalid schema")
+    current = _webhook_destination(tenant, destination_id)
+    if not current or current.get("status") == "retired":
+        raise LookupError("webhook destination not found")
+    expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision", minimum=1)
+    if int(current.get("revision", 0)) != expected:
+        raise PolicyConflict("webhook destination revision is stale")
+    overlap = _discovery_integer(
+        value.get("overlapSeconds"),
+        "overlapSeconds",
+        minimum=_WEBHOOK_ROTATION_MIN_SECONDS,
+        maximum=_WEBHOOK_ROTATION_MAX_SECONDS,
+    )
+    key_id, secret = _webhook_key_material()
+    secret_response = SECRETS_MANAGER.put_secret_value(
+        SecretId=current.get("secret_arn", ""),
+        SecretString=json.dumps(
+            {"schemaVersion": 1, "keyId": key_id, "secret": secret},
+            separators=(",", ":"),
+        ),
+    )
+    version_id = secret_response.get("VersionId")
+    if not isinstance(version_id, str) or not version_id:
+        raise RuntimeError("Secrets Manager returned incomplete webhook rotation evidence")
+    now = int(time.time())
+    overlap_active = (
+        isinstance(current.get("previous_key_valid_until"), int)
+        and current["previous_key_valid_until"] > now
+        and isinstance(current.get("previous_key_id"), str)
+        and isinstance(current.get("previous_secret_version"), str)
+    )
+    # A response can be lost after a new version becomes active. A recovery
+    # rotation during the overlap must keep signing with the original receiver-
+    # known key rather than replacing it with the undisclosed intermediate key.
+    previous_key_id = (
+        current.get("previous_key_id") if overlap_active else current.get("active_key_id")
+    )
+    previous_secret_version = (
+        current.get("previous_secret_version")
+        if overlap_active
+        else current.get("active_secret_version")
+    )
+    previous_valid_until = max(
+        int(current.get("previous_key_valid_until", 0)) if overlap_active else 0,
+        now + overlap,
+    )
+    updated = {
+        **current,
+        "revision": expected + 1,
+        "active_key_id": key_id,
+        "active_secret_version": version_id,
+        "previous_key_id": previous_key_id,
+        "previous_secret_version": previous_secret_version,
+        "previous_key_valid_until": previous_valid_until,
+        "updated_at": now,
+        "updated_by": actor,
+    }
+    try:
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="revision = :expected_revision",
+            ExpressionAttributeValues={":expected_revision": expected},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("webhook destination changed during rotation") from error
+        raise
+    _audit(
+        tenant,
+        "webhook_signing_key_rotated",
+        actor,
+        {
+            "webhook_id": current.get("id"),
+            "key_id": key_id,
+            "previous_key_id": previous_key_id,
+            "previous_key_valid_until": previous_valid_until,
+            "revision": expected + 1,
+        },
+    )
+    return {
+        "destination": _webhook_destination_view(updated, now=now),
+        "signingSecret": {"keyId": key_id, "secret": secret},
+    }
+
+
+def _set_webhook_destination_status(tenant, destination_id, action, value, actor):
+    """Pause, resume, or retire one destination with optimistic concurrency."""
+    if action not in {"pause", "resume", "retire"}:
+        raise ValueError("webhook status action is unsupported")
+    if not isinstance(value, dict) or set(value) != {"expectedRevision", "reason"}:
+        raise ValueError("webhook status request has an invalid schema")
+    current = _webhook_destination(tenant, destination_id)
+    if not current:
+        raise LookupError("webhook destination not found")
+    expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision", minimum=1)
+    reason = _bounded_text(value.get("reason"), "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("webhook status reason must contain at least 20 characters")
+    if (
+        action == "retire"
+        and current.get("status") == "retired"
+        and int(current.get("revision", 0)) == expected + 1
+        and current.get("status_reason") == reason
+    ):
+        # Recover an API failure after retirement authority committed but
+        # before secret cleanup or the response completed.
+        if not current.get("secret_deletion_requested_at"):
+            SECRETS_MANAGER.delete_secret(
+                SecretId=current.get("secret_arn", ""), RecoveryWindowInDays=7
+            )
+            current = {
+                **current,
+                "secret_deletion_requested_at": int(time.time()),
+            }
+            TABLE.put_item(
+                Item=current,
+                ConditionExpression="revision = :expected_revision",
+                ExpressionAttributeValues={":expected_revision": expected + 1},
+            )
+        return _webhook_destination_view(current)
+    if int(current.get("revision", 0)) != expected:
+        raise PolicyConflict("webhook destination revision is stale")
+    target = {"pause": "paused", "resume": "active", "retire": "retired"}[action]
+    if current.get("status") == "retired":
+        raise PolicyConflict("retired webhook destinations cannot be changed")
+    now = int(time.time())
+    updated = {
+        **current,
+        "status": target,
+        "revision": expected + 1,
+        "updated_at": now,
+        "updated_by": actor,
+        "status_reason": reason,
+    }
+    try:
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="revision = :expected_revision",
+            ExpressionAttributeValues={":expected_revision": expected},
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("webhook destination changed during status update") from error
+        raise
+    if target == "retired":
+        SECRETS_MANAGER.delete_secret(
+            SecretId=current.get("secret_arn", ""), RecoveryWindowInDays=7
+        )
+        updated["secret_deletion_requested_at"] = now
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="revision = :expected_revision",
+            ExpressionAttributeValues={":expected_revision": expected + 1},
+        )
+    _audit(
+        tenant,
+        f"webhook_destination_{target}",
+        actor,
+        {"webhook_id": current.get("id"), "reason": reason, "revision": expected + 1},
+    )
+    return _webhook_destination_view(updated, now=now)
+
+
+def _webhook_delivery_view(item):
+    """Project content-free delivery evidence for operators."""
+    return {
+        "id": item.get("id", ""),
+        "destinationId": item.get("destination_id", ""),
+        "eventType": item.get("event_type", ""),
+        "status": item.get("status", "pending"),
+        "attemptCount": int(item.get("attempt_count", 0)),
+        "createdAt": int(item.get("created_at", 0)),
+        "lastAttemptAt": item.get("last_attempt_at"),
+        "deliveredAt": item.get("delivered_at"),
+        "responseStatus": item.get("response_status"),
+        "failureCode": item.get("failure_code"),
+    }
+
+
+def _enqueue_webhook_delivery(
+    tenant, destination, event_type, event_data, *, now=None, delivery_id=None
+):
+    """Persist one outbox record before attempting its SQS dispatch."""
+    if event_type not in _WEBHOOK_EVENT_TYPES or event_type not in destination.get(
+        "event_types", []
+    ):
+        return None
+    current = int(time.time()) if now is None else int(now)
+    delivery_id = (
+        _bounded_identifier(delivery_id, "deliveryId")
+        if delivery_id is not None
+        else str(uuid.uuid4())
+    )
+    payload = {
+        "schemaVersion": 1,
+        "id": delivery_id,
+        "type": event_type,
+        "createdAt": current,
+        "tenantId": tenant,
+        "data": _json(event_data),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    if len(encoded) > 16_384:
+        raise ValueError("webhook event exceeds the content-minimised delivery bound")
+    record = {
+        **_item_key(tenant, "WEBHOOK_DELIVERY", delivery_id),
+        "tenant_id": tenant,
+        "id": delivery_id,
+        "destination_id": destination.get("id"),
+        "event_type": event_type,
+        "payload": encoded.decode(),
+        "status": "pending",
+        "attempt_count": 0,
+        "created_at": current,
+        "webhook_outbox_pk": f"WEBHOOK_OUTBOX#{tenant}",
+        "webhook_outbox_sk": f"{current:010d}#{delivery_id}",
+        "ttl": current + 30 * 24 * 60 * 60,
+    }
+    TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+    _dispatch_webhook_delivery(record)
+    return _webhook_delivery_view(record)
+
+
+def _dispatch_webhook_delivery(record):
+    """Send one persisted outbox identity to the dedicated worker queue."""
+    queue_url = os.environ.get("WEBHOOK_QUEUE_URL", "")
+    if not queue_url:
+        return False
+    try:
+        SQS.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "tenantId": record.get("tenant_id"),
+                    "deliveryId": record.get("id"),
+                },
+                separators=(",", ":"),
+            ),
+            MessageGroupId=str(record.get("tenant_id")),
+            MessageDeduplicationId=str(record.get("id")),
+        )
+        queued = {
+            key: value
+            for key, value in record.items()
+            if key not in {"webhook_outbox_pk", "webhook_outbox_sk"}
+        }
+        queued.update({"status": "queued", "queued_at": int(time.time())})
+        try:
+            TABLE.put_item(
+                Item=queued,
+                ConditionExpression="#status = :pending",
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={":pending": "pending"},
+            )
+        except Exception:
+            # SQS already owns a deduplicated delivery identity. The worker
+            # reloads the outbox and can complete it from either pending or
+            # queued state; the scheduler may safely retry after dedupe expiry.
+            return True
+        return True
+    except Exception:
+        # DynamoDB is the outbox authority. A scheduled dispatcher will retry;
+        # do not leak queue/provider exception text into logs.
+        return False
+
+
+def _test_webhook_destination(tenant, destination_id, value, actor):
+    """Queue a server-owned synthetic event without accepting arbitrary content."""
+    if not isinstance(value, dict) or set(value) != {"expectedRevision"}:
+        raise ValueError("webhook test request has an invalid schema")
+    destination = _webhook_destination(tenant, destination_id)
+    if not destination or destination.get("status") == "retired":
+        raise LookupError("webhook destination not found")
+    expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision", minimum=1)
+    if int(destination.get("revision", 0)) != expected:
+        raise PolicyConflict("webhook destination revision is stale")
+    if destination.get("status") != "active":
+        raise PolicyConflict("webhook destination must be active for testing")
+    delivery = _enqueue_webhook_delivery(
+        tenant,
+        destination,
+        "webhook.test",
+        {"message": "AAI Security webhook verification event"},
+    )
+    if delivery is None:
+        raise PolicyConflict("webhook.test is not enabled for this destination")
+    _audit(
+        tenant,
+        "webhook_test_queued",
+        actor,
+        {"webhook_id": destination_id, "delivery_id": delivery["id"]},
+    )
+    return delivery
+
+
+def _webhook_dispatch_cycle():
+    """Retry bounded persisted outbox records not previously accepted by SQS."""
+    registrations = []
+    for shard in range(_ENDPOINT_DETECTION_SHARDS):
+        result = TABLE.query(
+            IndexName=_ENDPOINT_DETECTION_INDEX,
+            KeyConditionExpression=Key("endpoint_detection_pk").eq(
+                f"ENDPOINT_DETECTION#{shard:02d}"
+            ),
+            Limit=250,
+        )
+        if result.get("LastEvaluatedKey"):
+            raise RuntimeError("webhook tenant shard exceeds its safe bound")
+        registrations.extend(result.get("Items", []))
+        if len(registrations) > _ENDPOINT_DETECTION_TENANT_LIMIT:
+            raise RuntimeError("webhook tenant inventory exceeds its safe bound")
+    dispatched = 0
+    for registration in registrations:
+        tenant = registration.get("endpoint_detection_sk")
+        if not isinstance(tenant, str) or registration.get("pk") != f"TENANT#{tenant}":
+            raise RuntimeError("webhook tenant registration is invalid")
+        result = TABLE.query(
+            IndexName=_WEBHOOK_OUTBOX_INDEX,
+            KeyConditionExpression=Key("webhook_outbox_pk").eq(f"WEBHOOK_OUTBOX#{tenant}"),
+            Limit=101,
+        )
+        pending = result.get("Items", [])
+        if result.get("LastEvaluatedKey") or len(pending) > 100:
+            raise RuntimeError("webhook outbox exceeds its per-tenant dispatch bound")
+        for delivery in pending:
+            if _dispatch_webhook_delivery(delivery):
+                dispatched += 1
+    return {"processedTenants": len(registrations), "dispatchedDeliveries": dispatched}
 
 
 def _body(event):
@@ -11836,9 +12390,51 @@ def _publish_endpoint_alert(tenant, alert):
     return True
 
 
+def _queue_endpoint_alert_webhooks(tenant, alert):
+    """Materialize one deduplicated webhook outbox record per active destination."""
+    event_type = "endpoint.alert.reopened" if alert.get("reopenedAt") else "endpoint.alert.opened"
+    occurrence = int(alert.get("reopenedAt") or alert.get("firstObservedAt") or 0)
+    for destination in _list(tenant, "WEBHOOK", consistent_read=True):
+        if destination.get("status") != "active" or event_type not in destination.get(
+            "event_types", []
+        ):
+            continue
+        delivery_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"aai-webhook:{tenant}:{destination.get('id')}:{alert.get('id')}:{occurrence}",
+            )
+        )
+        if TABLE.get_item(
+            Key=_item_key(tenant, "WEBHOOK_DELIVERY", delivery_id), ConsistentRead=True
+        ).get("Item"):
+            continue
+        try:
+            _enqueue_webhook_delivery(
+                tenant,
+                destination,
+                event_type,
+                {
+                    "alertId": alert.get("id"),
+                    "severity": alert.get("severity"),
+                    "type": alert.get("type"),
+                    "deviceId": alert.get("deviceId"),
+                    "reasonCode": alert.get("reasonCode"),
+                    "observedAt": int(alert.get("lastObservedAt", 0)),
+                },
+                now=occurrence,
+                delivery_id=delivery_id,
+            )
+        except Exception as error:
+            if not _is_conditional_conflict(error):
+                raise
+
+
 def _deliver_pending_endpoint_alerts(tenant):
     """Retry undelivered active alerts without losing their durable record."""
     for alert in _list(tenant, "ALERT", consistent_read=True):
+        if alert.get("source") == "endpoint_evidence" and alert.get("status") != "resolved":
+            _queue_endpoint_alert_webhooks(tenant, alert)
         if (
             alert.get("source") != "endpoint_evidence"
             or alert.get("status") == "resolved"
@@ -15591,6 +16187,10 @@ def handler(event, context):
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("dynamic group reconciliation schedule event is invalid")
         return _dynamic_group_reconciliation_cycle()
+    if isinstance(event, dict) and event.get("source") == "aai.webhook-dispatch":
+        if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
+            raise ValueError("webhook dispatch schedule event is invalid")
+        return _webhook_dispatch_cycle()
     if isinstance(event, dict) and event.get("source") == "aai.evidence-assurance":
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("evidence assurance schedule event is invalid")
@@ -16615,6 +17215,75 @@ def handler(event, context):
                 return _response(200, _identity_access(tenant, event))
             if method == "GET" and parts == ["integrations"]:
                 return _response(200, _enterprise_integrations())
+            if parts and parts[0] == "webhooks":
+                # Secret-free posture is visible to authenticated tenant roles;
+                # all mutations were already restricted to platform authority
+                # by the central capability classifier above.
+                if not _operator_roles(event):
+                    return _response(403, {"error": "webhook posture requires a tenant role"})
+                if method == "GET" and len(parts) == 1:
+                    health_by_destination = {
+                        item.get("destination_id"): item
+                        for item in _list(tenant, "WEBHOOK_HEALTH", consistent_read=True)
+                    }
+                    destinations = [
+                        _webhook_destination_view(
+                            item, health=health_by_destination.get(item.get("id"))
+                        )
+                        for item in _list(tenant, "WEBHOOK", consistent_read=True)
+                    ]
+                    destinations.sort(key=lambda item: (item["name"].lower(), item["id"]))
+                    return _response(
+                        200,
+                        {
+                            "items": destinations,
+                            "supportedEventTypes": sorted(_WEBHOOK_EVENT_TYPES),
+                            "nextCursor": None,
+                        },
+                    )
+                if method == "POST" and len(parts) == 1:
+                    return _response(201, _create_webhook_destination(tenant, _body(event), actor))
+                if method == "GET" and len(parts) == 2:
+                    destination = _webhook_destination(tenant, parts[1])
+                    if not destination:
+                        return _response(404, {"error": "webhook destination not found"})
+                    return _response(
+                        200,
+                        _webhook_destination_view(
+                            destination,
+                            health=_webhook_destination_health(tenant, parts[1]),
+                        ),
+                    )
+                if method == "GET" and len(parts) == 3 and parts[2] == "deliveries":
+                    destination = _webhook_destination(tenant, parts[1])
+                    if not destination:
+                        return _response(404, {"error": "webhook destination not found"})
+                    deliveries = [
+                        _webhook_delivery_view(item)
+                        for item in _list(tenant, "WEBHOOK_DELIVERY", consistent_read=True)
+                        if item.get("destination_id") == destination.get("id")
+                    ]
+                    deliveries.sort(key=lambda item: (item["createdAt"], item["id"]), reverse=True)
+                    return _response(200, {"items": deliveries[:100], "nextCursor": None})
+                if method == "POST" and len(parts) == 3:
+                    if parts[2] == "rotate":
+                        return _response(
+                            201,
+                            _rotate_webhook_destination(tenant, parts[1], _body(event), actor),
+                        )
+                    if parts[2] == "test":
+                        return _response(
+                            202,
+                            _test_webhook_destination(tenant, parts[1], _body(event), actor),
+                        )
+                    if parts[2] in {"pause", "resume", "retire"}:
+                        return _response(
+                            200,
+                            _set_webhook_destination_status(
+                                tenant, parts[1], parts[2], _body(event), actor
+                            ),
+                        )
+                return _response(404, {"error": "webhook route not found"})
             if method == "GET" and parts == ["resilience", "policy-trust"]:
                 if not _operator_roles(event):
                     return _response(403, {"error": "tenant-wide trust posture requires a role"})

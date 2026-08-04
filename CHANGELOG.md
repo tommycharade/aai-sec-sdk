@@ -1,5 +1,12 @@
 # Changelog
 
+- Added tenant-managed secure webhooks with one-time HMAC keys, bounded
+  dual-signature rotation, exact-body receiver verification, durable replay
+  claims, persistent FIFO outbox delivery, isolated no-redirect public-egress
+  worker, bounded retries/DLQ, immutable terminal evidence and a typed private
+  UI. This closes the P1-ADM-10 implementation foundation; live customer
+  receiver acceptance and P0-07 SIEM/SOAR remain open.
+
 - Added the first Terraform provider for repeatable tenant inspection, governed
   policy drafts, groups, Skills and MCP registrations. The provider uses only
   scoped service identities and the versioned machine API, detects concurrent

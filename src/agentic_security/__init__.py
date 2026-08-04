@@ -241,6 +241,13 @@ from .ui_control_plane import (
     StaticBearerAuthenticator,
     validate_configuration,
 )
+from .webhooks import (
+    WebhookReplayStore,
+    WebhookVerification,
+    WebhookVerificationStatus,
+    sign_webhook,
+    verify_webhook,
+)
 
 __all__ = [
     "AgentSessionCredential",
@@ -384,6 +391,11 @@ __all__ = [
     "StaticFleetAuthenticator",
     "validate_fleet_configuration",
     "WebhookFleetAlertSink",
+    "WebhookReplayStore",
+    "WebhookVerification",
+    "WebhookVerificationStatus",
+    "sign_webhook",
+    "verify_webhook",
     "validate_configuration",
     "CedarPolicyEngine",
     "DuplicateToolError",
