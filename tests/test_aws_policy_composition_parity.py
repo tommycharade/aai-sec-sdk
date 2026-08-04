@@ -15,6 +15,7 @@ from agentic_security.policy_composition import (
     PolicyCompositionError,
     compose_policy,
 )
+from agentic_security.policy_sources import PolicySourceDocument
 
 ROOT = Path(__file__).parents[1]
 
@@ -37,6 +38,34 @@ def test_generated_lambda_runtime_is_current() -> None:
     )
     target = ROOT / "infra/aws-control-plane/lambda/policy_composition.py"
     assert target.read_text(encoding="utf-8") == generator.rendered()
+
+
+def test_generated_policy_source_runtimes_are_current_and_semantically_equal() -> None:
+    """AWS source verification cannot drift from the canonical SDK contracts."""
+    generator = load_module(
+        ROOT / "scripts/generate_aws_policy_sources.py",
+        "aws_policy_source_generator",
+    )
+    for source, target in generator.SOURCES.items():
+        assert target.read_text(encoding="utf-8") == generator.rendered(source)
+    runtime = load_module(
+        ROOT / "infra/aws-control-plane/lambda/policy_sources.py",
+        "policy_sources",
+    )
+    source = (
+        b'{"schemaVersion":1,"policyId":"policy-a","organizationId":"org-a",'
+        b'"name":"A","componentRefs":[],"localConfiguration":'
+        b'{"policy":{"denyByDefault":true}}}'
+    )
+    assert (
+        runtime.PolicySourceDocument.from_bytes(source).wire()
+        == PolicySourceDocument.from_bytes(source).wire()
+    )
+    github = load_module(
+        ROOT / "infra/aws-control-plane/lambda/github_policy_source.py",
+        "aws_github_policy_source",
+    )
+    assert github.GitHubPolicySourceVerifier.__name__ == "GitHubPolicySourceVerifier"
 
 
 def test_generated_lambda_runtime_matches_restrictive_sdk_semantics() -> None:

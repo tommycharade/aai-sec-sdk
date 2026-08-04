@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "credentialSecretName": "aai-sec/policy/github-app-installation",
+  "allowedRepositories": [
+    "github.com/example/security-policy"
+  ],
+  "reviewEvidenceRef": "SEC-REVIEW-1234"
+}

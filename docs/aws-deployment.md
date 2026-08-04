@@ -46,6 +46,8 @@ The stack creates:
   bearer resolved only by the SCIM Lambda from AWS Secrets Manager;
 - API Gateway HTTP API with Cognito JWT authorizer;
 - Lambda control-plane handler;
+- optional isolated GitHub policy-source verifier Lambda with no DynamoDB or
+  signing authority;
 - an AWS-managed Entra, Intune and GitHub discovery collector, EventBridge Scheduler invocation
   role, KMS key, connector dead-letter queue and collector alarms;
 - on-demand DynamoDB control and presence tables; the control table expires
@@ -74,6 +76,66 @@ the deployment maps the configured Entra tenant to one provisioned AAI tenant,
 and Cognito-managed groups remain the authorization source. This separation
 prevents a browser-supplied tenant, group, or upstream claim from widening
 authority.
+
+## Reviewed policy GitHub source
+
+The hosted policy import is disabled unless both an exact credential reference
+and an explicit repository allow-list are present at synthesis. Store a
+short-lived, externally rotated GitHub App installation token as an exact JSON
+object in Secrets Manager:
+
+```json
+{"token":"<short-lived-installation-token>"}
+```
+
+The GitHub App installation requires read-only **Contents**, **Metadata** and
+**Pull requests** access only for every allow-listed policy repository. It must
+not receive repository administration, Actions, issue, deployment or write
+permissions. Copy
+`infra/aws-control-plane/policy-github-deployment.example.json` to a protected
+location, set the exact secret name, repositories and an opaque security-review
+evidence reference, then validate and persist the reviewed authority:
+
+```bash
+python3 scripts/deploy_aws_control_plane.py check-policy-github \
+  --config /protected/path/policy-github-deployment.json \
+  --profile p1 --region eu-west-2
+python3 scripts/deploy_aws_control_plane.py configure-policy-github \
+  --config /protected/path/policy-github-deployment.json \
+  --confirm-policy-github-review \
+  --profile p1 --region eu-west-2
+python3 scripts/deploy_aws_control_plane.py deploy \
+  --profile p1 --region eu-west-2
+```
+
+Repository identities are exact `github.com/owner/name` values; wildcards,
+branches and abbreviated commit IDs are rejected. The secret-free manifest is
+stored in an encrypted, stack-specific SSM parameter. Routine deployments erase
+ambient policy-source variables and load only that persisted authority. If a
+configured stack loses its manifest, deployment fails instead of silently
+disabling the verifier. Automatic GitHub App installation-token rotation is
+still required before unattended production use; a manually rotated token is
+suitable only for a controlled pilot.
+
+The dedicated verifier Lambda owns the secret and outbound GitHub calls but has
+no DynamoDB or KMS signing access. The main handler cannot read the token. It
+revalidates the worker response and atomically writes an inactive draft plus
+immutable provenance. Import never submits, approves, stages, activates or
+assigns a policy. Export uses the existing asymmetric policy-signing KMS key.
+
+Hosted routes are:
+
+```text
+POST /enterprise/policies/imports
+GET  /enterprise/policies/imports/{importId}
+POST /enterprise/policies/{policyId}/versions/{version}/export
+```
+
+Before a pilot, prove one successful reviewed import, one disallowed repository,
+one unsigned commit, one dismissed latest review, one cross-tenant document,
+one verifier outage, one replay and one transaction race. Retain the import,
+review, draft, export signature and denial evidence. Synthetic CI proves the
+software contract but is not live GitHub acceptance.
 
 ## Microsoft Entra ID federation
 

@@ -4827,6 +4827,148 @@ def test_aws_policy_composition_preview_route_is_effective_and_side_effect_free(
     assert not any(item.get("id") == "policy-candidate" for item in table.items.values())
 
 
+def _verified_policy_source(module: Any, content: bytes) -> Any:
+    """Build complete synthetic provider evidence for hosted import contracts."""
+    return module.VerifiedPolicySource(
+        provider="github",
+        repository="github.com/example/security-policy",
+        commit_sha="b" * 40,
+        blob_sha="c" * 40,
+        path="policies/engineering.json",
+        content=content,
+        pull_request="github.com/example/security-policy/pull/42",
+        reviewed_by=("github:reviewer-b",),
+        signer_identity="github:author-a",
+        retrieved_at=2_210_000_000,
+    )
+
+
+def test_aws_policy_git_import_export_is_draft_only_idempotent_and_signed(
+    monkeypatch: Any,
+) -> None:
+    """Hosted GitOps creates no authority and exports exact KMS-bound provenance."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-policy-gitops"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(tenant, "ORG", "org-a") | {"id": "org-a"})
+    source = json.dumps(
+        {
+            "schemaVersion": 1,
+            "policyId": "policy-from-git",
+            "organizationId": "org-a",
+            "name": "Reviewed Git policy",
+            "componentRefs": [],
+            "localConfiguration": {
+                "policy": {"denyByDefault": True},
+                "tools": {"allowed": ["read_repository"], "denied": ["shell"]},
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    monkeypatch.setattr(
+        module,
+        "_invoke_policy_source_verifier",
+        lambda _request: _verified_policy_source(module, source),
+    )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-author"],
+        "sub": "author-a",
+    }
+    request = {
+        "importId": "import-42",
+        "repository": "github.com/example/security-policy",
+        "commitSha": "b" * 40,
+        "path": "policies/engineering.json",
+    }
+    response = _invoke(
+        module,
+        _event("/enterprise/policies/imports", "POST", body=request, claims=claims),
+    )
+    assert response["statusCode"] == 201
+    imported = json.loads(response["body"])
+    assert imported["draft"] == {
+        "policyId": "policy-from-git",
+        "version": 1,
+        "state": "draft",
+    }
+    policy = table.items[(f"TENANT#{tenant}", "POLICY#policy-from-git")]
+    version = table.items[
+        (f"TENANT#{tenant}", "POLICY_VERSION#policy-from-git:00000000000000000001")
+    ]
+    assert policy["version"] == 0 and policy["activeVersion"] is None
+    assert version["state"] == "draft" and version["source_provenance"] == imported["provenance"]
+    assert not any(item[1].startswith("GROUP#") for item in table.items)
+
+    replay = _invoke(
+        module,
+        _event("/enterprise/policies/imports", "POST", body=request, claims=claims),
+    )
+    assert replay["statusCode"] == 201 and json.loads(replay["body"]) == imported
+    fetched = _invoke(
+        module,
+        _event("/enterprise/policies/imports/import-42", "GET", claims=claims),
+    )
+    assert fetched["statusCode"] == 200 and json.loads(fetched["body"]) == imported
+
+    exported_response = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/policy-from-git/versions/1/export",
+            "POST",
+            claims=claims,
+        ),
+    )
+    assert exported_response["statusCode"] == 200
+    exported = json.loads(exported_response["body"])
+    assert json.loads(exported["canonicalDocument"]) == exported["document"]
+    assert (
+        exported["sourceSha256"]
+        == hashlib.sha256(exported["canonicalDocument"].encode()).hexdigest()
+    )
+    assert exported["provenance"]["integrity"]["keyId"] == module.POLICY_SIGNING_KEY_ARN
+
+
+def test_aws_policy_git_import_rolls_back_every_record_on_race(
+    monkeypatch: Any,
+) -> None:
+    """A concurrent idempotency claim leaves no policy shell or orphan version."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-policy-import-race"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(tenant, "ORG", "org-a") | {"id": "org-a"})
+    source = (
+        b'{"schemaVersion":1,"policyId":"policy-race","organizationId":"org-a",'
+        b'"name":"Race","componentRefs":[],"localConfiguration":{}}'
+    )
+    monkeypatch.setattr(
+        module,
+        "_invoke_policy_source_verifier",
+        lambda _request: _verified_policy_source(module, source),
+    )
+
+    def claim_import() -> None:
+        table.put_item(
+            Item=module._item_key(tenant, "POLICY_IMPORT", "import-race") | {"id": "import-race"}
+        )
+
+    module.DYNAMODB.before_transaction = claim_import
+    with pytest.raises(module.PolicyConflict):
+        module._import_policy_source(
+            tenant,
+            {
+                "importId": "import-race",
+                "repository": "github.com/example/security-policy",
+                "commitSha": "b" * 40,
+                "path": "policies/engineering.json",
+            },
+            "author-a",
+        )
+    assert (f"TENANT#{tenant}", "POLICY#policy-race") not in table.items
+    assert not any("POLICY_VERSION#policy-race" in key[1] for key in table.items)
+
+
 def test_aws_policy_governance_deployment_grants_transaction_authority() -> None:
     """The Lambda role explicitly permits its same-table atomic activation write."""
     stack = (

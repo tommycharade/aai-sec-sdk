@@ -1,4 +1,4 @@
-"""Safely configure and deploy the AWS control plane with persistent Entra identity.
+"""Safely configure and deploy the AWS control plane from persistent authority.
 
 The deployment manifest contains identifiers and secret *names*, never secret
 values. It is stored as an encrypted SSM parameter so a later routine deploy
@@ -45,6 +45,12 @@ _RECOVERY_MANIFEST_FIELDS = {
     "replicaRegion",
     "recoveryEvidenceRef",
 }
+_POLICY_GITHUB_MANIFEST_FIELDS = {
+    "schemaVersion",
+    "credentialSecretName",
+    "allowedRepositories",
+    "reviewEvidenceRef",
+}
 _AWS_SECRET_NAME = re.compile(r"^[A-Za-z0-9/_+=.@-]{1,512}$")
 _AAI_TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _EVIDENCE_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,511}$")
@@ -59,7 +65,14 @@ _ENTRA_ENVIRONMENT_FIELDS = (
     "ENTRA_STRONG_AUTH_ENFORCED",
 )
 _RECOVERY_ENVIRONMENT_FIELDS = ("AUDIT_REPLICA_BUCKET_ARN", "AUDIT_REPLICA_REGION")
+_POLICY_GITHUB_ENVIRONMENT_FIELDS = (
+    "POLICY_GITHUB_SECRET_NAME",
+    "POLICY_GITHUB_ALLOWED_REPOSITORIES",
+)
 _S3_BUCKET_ARN = re.compile(r"^arn:(aws|aws-us-gov|aws-cn):s3:::[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
+_GITHUB_REPOSITORY = re.compile(
+    r"^github\.com/[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,38})/[A-Za-z0-9_.-]{1,100}$"
+)
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -246,6 +259,80 @@ class AuditRecoveryManifest:
         }
 
 
+@dataclass(frozen=True)
+class PolicyGitHubDeploymentManifest:
+    """Reviewed, secret-free authority for exact-version GitHub policy sources."""
+
+    credential_secret_name: str
+    allowed_repositories: tuple[str, ...]
+    review_evidence_ref: str
+
+    @classmethod
+    def parse(cls, payload: str) -> PolicyGitHubDeploymentManifest:
+        """Parse a closed schema and reject wildcard or duplicate repository authority."""
+        if len(payload.encode("utf-8")) > 16_384:
+            raise DeploymentConfigurationError("policy GitHub manifest exceeds the 16 KiB bound")
+        try:
+            value = json.loads(payload, object_pairs_hook=_strict_object)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise DeploymentConfigurationError(
+                "policy GitHub manifest is not valid JSON"
+            ) from error
+        if not isinstance(value, dict) or set(value) != _POLICY_GITHUB_MANIFEST_FIELDS:
+            raise DeploymentConfigurationError(
+                "policy GitHub manifest fields do not exactly match schema version 1"
+            )
+        if value["schemaVersion"] != 1:
+            raise DeploymentConfigurationError("policy GitHub manifest schemaVersion must be 1")
+        secret_name = _bounded_string(
+            value["credentialSecretName"], "credentialSecretName", maximum=512
+        )
+        if not _AWS_SECRET_NAME.fullmatch(secret_name):
+            raise DeploymentConfigurationError(
+                "credentialSecretName contains unsupported characters"
+            )
+        repositories = value["allowedRepositories"]
+        if (
+            not isinstance(repositories, list)
+            or not 1 <= len(repositories) <= 100
+            or any(not isinstance(repository, str) for repository in repositories)
+        ):
+            raise DeploymentConfigurationError("allowedRepositories must contain 1-100 strings")
+        normalized = tuple(repositories)
+        if len(set(normalized)) != len(normalized) or any(
+            not _GITHUB_REPOSITORY.fullmatch(repository) for repository in normalized
+        ):
+            raise DeploymentConfigurationError(
+                "allowedRepositories must be unique exact github.com/owner/repository identities"
+            )
+        evidence_ref = _bounded_string(value["reviewEvidenceRef"], "reviewEvidenceRef", maximum=512)
+        if not _EVIDENCE_REFERENCE.fullmatch(evidence_ref):
+            raise DeploymentConfigurationError(
+                "reviewEvidenceRef must be an opaque non-secret reference"
+            )
+        return cls(secret_name, normalized, evidence_ref)
+
+    def canonical_json(self) -> str:
+        """Return the deterministic secret-free manifest persisted in Parameter Store."""
+        return json.dumps(
+            {
+                "allowedRepositories": list(self.allowed_repositories),
+                "credentialSecretName": self.credential_secret_name,
+                "reviewEvidenceRef": self.review_evidence_ref,
+                "schemaVersion": 1,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def deployment_environment(self) -> dict[str, str]:
+        """Return exact reviewed repository authority and one credential reference."""
+        return {
+            "POLICY_GITHUB_SECRET_NAME": self.credential_secret_name,
+            "POLICY_GITHUB_ALLOWED_REPOSITORIES": ",".join(self.allowed_repositories),
+        }
+
+
 def _aws(
     arguments: Sequence[str],
     *,
@@ -286,6 +373,13 @@ def recovery_parameter_name(stack_name: str) -> str:
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack_name):
         raise DeploymentConfigurationError("stack name is invalid")
     return f"/aai-sec/{stack_name}/audit-recovery"
+
+
+def policy_github_parameter_name(stack_name: str) -> str:
+    """Return the stack-specific encrypted reviewed GitHub authority path."""
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack_name):
+        raise DeploymentConfigurationError("stack name is invalid")
+    return f"/aai-sec/{stack_name}/policy-github"
 
 
 def stack_outputs(
@@ -397,6 +491,45 @@ def load_persisted_recovery_manifest(
     return AuditRecoveryManifest.parse(payload)
 
 
+def load_persisted_policy_github_manifest(
+    stack_name: str, *, profile: str, region: str, runner: Runner = subprocess.run
+) -> PolicyGitHubDeploymentManifest | None:
+    """Load reviewed GitHub policy authority, returning None only when absent."""
+    result = runner(
+        [
+            "aws",
+            "ssm",
+            "get-parameter",
+            "--name",
+            policy_github_parameter_name(stack_name),
+            "--with-decryption",
+            "--profile",
+            profile,
+            "--region",
+            region,
+            "--output",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        if "ParameterNotFound" in result.stderr:
+            return None
+        raise DeploymentConfigurationError((result.stderr.strip() or "SSM lookup failed")[-500:])
+    try:
+        payload = json.loads(result.stdout)["Parameter"]["Value"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise DeploymentConfigurationError(
+            "persisted policy GitHub manifest is malformed"
+        ) from error
+    if not isinstance(payload, str):
+        raise DeploymentConfigurationError("persisted policy GitHub manifest is not text")
+    return PolicyGitHubDeploymentManifest.parse(payload)
+
+
 def _secret_value(name: str, *, profile: str, region: str, runner: Runner = subprocess.run) -> str:
     """Read a secret only into memory for shape validation and never print it."""
     response = _aws(
@@ -435,6 +568,40 @@ def _scim_token(secret: str) -> str:
             "SCIM bearer must be 32-512 visible non-whitespace ASCII characters"
         )
     return token
+
+
+def verify_policy_github_credential(
+    manifest: PolicyGitHubDeploymentManifest,
+    *,
+    profile: str,
+    region: str,
+    runner: Runner = subprocess.run,
+) -> None:
+    """Verify the exact one-field GitHub credential shape without emitting its value."""
+    secret = _secret_value(
+        manifest.credential_secret_name, profile=profile, region=region, runner=runner
+    )
+    try:
+        value = json.loads(secret, object_pairs_hook=_strict_object)
+    except json.JSONDecodeError as error:
+        raise DeploymentConfigurationError(
+            "policy GitHub secret contains malformed JSON"
+        ) from error
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"token"}
+        or not isinstance(value["token"], str)
+    ):
+        raise DeploymentConfigurationError("policy GitHub secret must contain only token")
+    token = value["token"]
+    if (
+        not 20 <= len(token) <= 512
+        or token != token.strip()
+        or any(ord(character) < 33 or ord(character) > 126 for character in token)
+    ):
+        raise DeploymentConfigurationError(
+            "policy GitHub token must be 20-512 visible non-whitespace ASCII characters"
+        )
 
 
 def verify_oidc_metadata(tenant_id: str, *, opener: UrlOpener = urllib.request.urlopen) -> None:
@@ -630,6 +797,35 @@ def persist_recovery_manifest(
     )
 
 
+def persist_policy_github_manifest(
+    manifest: PolicyGitHubDeploymentManifest,
+    stack_name: str,
+    *,
+    profile: str,
+    region: str,
+    runner: Runner = subprocess.run,
+) -> None:
+    """Persist reviewed GitHub authority without storing its credential value."""
+    _aws(
+        [
+            "ssm",
+            "put-parameter",
+            "--name",
+            policy_github_parameter_name(stack_name),
+            "--type",
+            "SecureString",
+            "--overwrite",
+            "--value",
+            manifest.canonical_json(),
+            "--description",
+            "Persistent AAI Security reviewed GitHub policy-source authority",
+        ],
+        profile=profile,
+        region=region,
+        runner=runner,
+    )
+
+
 def deploy(
     stack_name: str,
     *,
@@ -640,6 +836,9 @@ def deploy(
     """Deploy with persisted identity configuration or refuse destructive omission."""
     manifest = load_persisted_manifest(stack_name, profile=profile, region=region, runner=runner)
     recovery = load_persisted_recovery_manifest(
+        stack_name, profile=profile, region=region, runner=runner
+    )
+    policy_github = load_persisted_policy_github_manifest(
         stack_name, profile=profile, region=region, runner=runner
     )
     outputs = stack_outputs(
@@ -657,10 +856,18 @@ def deploy(
         raise DeploymentConfigurationError(
             "stack has audit replication configured but its persistent recovery manifest is missing"
         )
+    if policy_github is None and outputs.get("PolicyGitHubSourceStatus") == "configured":
+        raise DeploymentConfigurationError(
+            "stack has GitHub policy sources configured but its persistent manifest is missing"
+        )
     environment = os.environ.copy()
     # Ambient shell state is not deployment authority. Remove every legacy
     # identity field before optionally loading the persisted reviewed manifest.
-    for field in (*_ENTRA_ENVIRONMENT_FIELDS, *_RECOVERY_ENVIRONMENT_FIELDS):
+    for field in (
+        *_ENTRA_ENVIRONMENT_FIELDS,
+        *_RECOVERY_ENVIRONMENT_FIELDS,
+        *_POLICY_GITHUB_ENVIRONMENT_FIELDS,
+    ):
         environment.pop(field, None)
     environment.update({"AWS_PROFILE": profile, "AWS_REGION": region})
     if manifest is not None:
@@ -675,6 +882,11 @@ def deploy(
     if recovery is not None:
         verify_recovery_destination(recovery, profile=profile, source_region=region, runner=runner)
         environment.update(recovery.deployment_environment())
+    if policy_github is not None:
+        verify_policy_github_credential(
+            policy_github, profile=profile, region=region, runner=runner
+        )
+        environment.update(policy_github.deployment_environment())
     root = Path(__file__).resolve().parents[1]
     infrastructure = root / "infra" / "aws-control-plane"
     for command in (
@@ -697,6 +909,8 @@ def deploy(
         or not post.get("AuditBatchReplicationRoleArn", "").startswith("arn:")
     ):
         raise DeploymentConfigurationError("deployed audit-recovery posture is incomplete")
+    if policy_github is not None and post.get("PolicyGitHubSourceStatus") != "configured":
+        raise DeploymentConfigurationError("deployed GitHub policy-source posture is incomplete")
     return manifest
 
 
@@ -705,7 +919,16 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("check", "configure", "check-recovery", "configure-recovery", "deploy", "status"),
+        choices=(
+            "check",
+            "configure",
+            "check-recovery",
+            "configure-recovery",
+            "check-policy-github",
+            "configure-policy-github",
+            "deploy",
+            "status",
+        ),
     )
     parser.add_argument("--config", type=Path)
     parser.add_argument("--profile", default=os.environ.get("AWS_PROFILE", "p1"))
@@ -715,6 +938,11 @@ def _parser() -> argparse.ArgumentParser:
         "--confirm-conditional-access",
         action="store_true",
         help="Confirm the evidence reference points to an MFA-enforcing Conditional Access review",
+    )
+    parser.add_argument(
+        "--confirm-policy-github-review",
+        action="store_true",
+        help="Confirm the exact repository allow-list and credential reference were reviewed",
     )
     parser.add_argument(
         "--confirm-recovery-controls",
@@ -780,6 +1008,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"Audit recovery {arguments.command} passed for stack "
                 f"{arguments.stack_name}; destination controls were verified."
             )
+        elif arguments.command in {"check-policy-github", "configure-policy-github"}:
+            if arguments.config is None:
+                raise DeploymentConfigurationError("--config is required")
+            candidate_policy_github = PolicyGitHubDeploymentManifest.parse(
+                arguments.config.read_text(encoding="utf-8")
+            )
+            verify_policy_github_credential(
+                candidate_policy_github,
+                profile=arguments.profile,
+                region=arguments.region,
+            )
+            if arguments.command == "configure-policy-github":
+                if not arguments.confirm_policy_github_review:
+                    raise DeploymentConfigurationError(
+                        "--confirm-policy-github-review is required before persistence"
+                    )
+                persist_policy_github_manifest(
+                    candidate_policy_github,
+                    arguments.stack_name,
+                    profile=arguments.profile,
+                    region=arguments.region,
+                )
+            print(
+                f"GitHub policy-source {arguments.command} passed for stack "
+                f"{arguments.stack_name}; no credential values were emitted."
+            )
         elif arguments.command == "deploy":
             active_manifest = deploy(
                 arguments.stack_name, profile=arguments.profile, region=arguments.region
@@ -791,6 +1045,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.stack_name, profile=arguments.profile, region=arguments.region
             )
             deployed_recovery = load_persisted_recovery_manifest(
+                arguments.stack_name, profile=arguments.profile, region=arguments.region
+            )
+            deployed_policy_github = load_persisted_policy_github_manifest(
                 arguments.stack_name, profile=arguments.profile, region=arguments.region
             )
             outputs = stack_outputs(
@@ -806,12 +1063,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                             "declared-reviewed" if deployed_manifest else "not-configured"
                         ),
                         "auditRecovery": ("configured" if deployed_recovery else "not-configured"),
+                        "policyGitHub": (
+                            "configured" if deployed_policy_github else "not-configured"
+                        ),
                     },
                     sort_keys=True,
                 )
             )
     except (DeploymentConfigurationError, OSError) as error:
-        print(f"Entra deployment FAILED: {error}", file=sys.stderr)
+        print(f"AWS control-plane deployment FAILED: {error}", file=sys.stderr)
         return 1
     return 0
 
