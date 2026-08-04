@@ -158,6 +158,8 @@ jobs:
           aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           --signing-key-arn
           arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef
+          --assurance-signing-key-arn
+          arn:aws:kms:eu-west-1:111111111111:key/mrk-abcdef1234567890abcdef1234567890
           --entra-tenant-id
           12345678-1234-4234-8234-123456789abc
           --aai-tenant-id
