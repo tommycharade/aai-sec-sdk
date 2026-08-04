@@ -1059,6 +1059,21 @@ prevents browser or agent output from selecting authority while preserving a
 manual response path. See [Explainable agent behavior
 detection](behavior-detection-design.md).
 
+Repository and configuration anomaly detection uses a separate alert-only
+integrity boundary. The control plane independently re-hashes complete,
+consecutive source-control inventory generations and compares only the exact
+repository scope that previously contained an enrolled agent. It also compares
+server-owned desired managed configuration with server-derived posture and
+accepts only fixed runtime-attestation mismatch reasons that have already
+quarantined the session. Agent or model output cannot choose tenant, host,
+project scope, expected state, severity or response target. Missing, stale,
+incomplete, non-consecutive or malformed authority produces no finding and
+degrades detector health; it is never interpreted as a clean comparison.
+Alerts retain identifiers and digests, not filesystem paths, repository URLs,
+configuration bytes or credentials. A case may initiate manual SDK quarantine
+only after the current enrolled-agent binding is revalidated. See [Repository
+and configuration anomaly detection](repository-configuration-anomaly-design.md).
+
 Alert suppression is incident-response authority, not presentation state. The
 server requires an exact identity selector, derives operator and time, limits
 duration to seven days, retains the matched alert, withholds outbound delivery,

@@ -9189,7 +9189,7 @@ def test_behavior_baseline_fails_closed_and_rejects_authority_widening(
             "session_revision": 1,
         }
     )
-    configuration = {
+    configuration: dict[str, Any] = {
         "match": {
             "source": "agent_activity",
             "signalTypes": ["denied_action_spike"],
@@ -9235,7 +9235,7 @@ def test_behavior_baseline_fails_closed_and_rejects_authority_widening(
     assert truncated[0]["outcome"] == "baseline_insufficient"
     assert truncated[0]["baselineComplete"] is False
 
-    spike_decisions = [
+    spike_decisions: list[dict[str, Any]] = [
         {
             "id": f"historical-{index}",
             "deployment_id": "dep-a",
@@ -9265,6 +9265,28 @@ def test_behavior_baseline_fails_closed_and_rejects_authority_widening(
     assert spike[0]["outcome"] == "would_alert"
     assert spike[0]["currentCount"] == 3
     assert spike[0]["threshold"] == 3
+    for signal, reason_code in (
+        ("outside_project_spike", "outside_project"),
+        ("configuration_error_spike", "invalid_configuration"),
+    ):
+        scoped_configuration = copy.deepcopy(configuration)
+        scoped_configuration["match"]["signalTypes"] = [signal]
+        scoped = module._behavior_signal_metrics(
+            module._response_rule_configuration(scoped_configuration),
+            signal,
+            "dep-a:agent-a",
+            [
+                {
+                    **item,
+                    "reason_code": reason_code if item["id"].startswith("current") else None,
+                }
+                for item in spike_decisions
+            ],
+            [],
+            now=now,
+        )
+        assert scoped[0]["outcome"] == "would_alert"
+        assert scoped[0]["currentCount"] == 3
     with pytest.raises(ValueError, match="create_alert"):
         module._response_rule_configuration(
             {**configuration, "action": {"type": "quarantine_agent"}}
@@ -9273,6 +9295,441 @@ def test_behavior_baseline_fails_closed_and_rejects_authority_widening(
         invalid_configuration: dict[str, Any] = copy.deepcopy(configuration)
         invalid_configuration["baseline"]["sensitivityMultiplier"] = float("nan")
         module._response_rule_configuration(invalid_configuration)
+
+
+def test_repository_and_configuration_integrity_rules_are_exact_and_explainable(
+    monkeypatch: Any,
+) -> None:
+    """Complete repository and host baselines create retained alert-only findings."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-integrity-detection"
+    now = 2_167_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    agent_key = "deployment-a:agent-a"
+    project_root = "/synthetic/project"
+    project_digest = hashlib.sha256(project_root.encode()).hexdigest()
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-a")
+        | {"id": "policy-a", "version": 4, "configuration": {}}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-a")
+        | {"id": "group-a", "policyId": "policy-a", "agent_keys": [agent_key]}
+    )
+    desired = {
+        "host": "codex-cli",
+        "hostVersion": "1.2.3",
+        "platform": "macos",
+        "bundleHash": "a" * 64,
+        "policyId": "policy-a",
+        "policyVersion": 4,
+    }
+    observed = {
+        **desired,
+        "bundleHash": "b" * 64,
+        "source": "codex-system",
+        "verifiedAt": now - 30,
+        "expiresAt": now + 300,
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "CONFIGURATION", "deployment-a")
+        | {
+            "deploymentId": "deployment-a",
+            "desiredConfiguration": {"managedHost": desired},
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", agent_key)
+        | {
+            "id": "agent-a",
+            "deployment_id": "deployment-a",
+            "host": "codex-cli",
+            "project_root": project_root,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            "session_revision": 1,
+            "managed_configuration_report": observed,
+            "attestation_status": "quarantined",
+            "attestation_reason_codes": ["enrollment_baseline_mismatch"],
+            "attestation_baseline_digest": "c" * 64,
+            "attestation_observed_at": now - 10,
+        }
+    )
+
+    def put_generation(
+        generation: str,
+        expected_revision: int,
+        root_digest: str,
+    ) -> str:
+        observations = [
+            {
+                "kind": "repository",
+                "id": "repository-a",
+                "projectRootDigest": root_digest,
+                "expectedHosts": ["codex-cli"],
+            }
+        ]
+        page_hash = hashlib.sha256(
+            json.dumps(observations, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        content_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "sourceId": "github-a",
+                    "sourceKind": "source_control",
+                    "generation": generation,
+                    "observedAt": now - 60 + expected_revision,
+                    "expiresAt": now + 3_600,
+                    "pageHashes": [page_hash],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        table.put_item(
+            Item=module._item_key(tenant, "DISCOVERY_PAGE", f"github-a:{generation}:00000")
+            | {
+                "sourceId": "github-a",
+                "generation": generation,
+                "pageNumber": 0,
+                "pageHash": page_hash,
+                "observations": observations,
+            }
+        )
+        table.put_item(
+            Item=module._item_key(tenant, "DISCOVERY_GENERATION", f"github-a:{generation}")
+            | {
+                "sourceId": "github-a",
+                "sourceKind": "source_control",
+                "generation": generation,
+                "expectedRevision": expected_revision,
+                "observedAt": now - 60 + expected_revision,
+                "expiresAt": now + 3_600,
+                "pageCount": 1,
+                "state": "committed",
+                "contentHash": content_hash,
+            }
+        )
+        return content_hash
+
+    put_generation("baseline", 0, project_digest)
+    current_hash = put_generation("current", 1, "d" * 64)
+    table.put_item(
+        Item=module._item_key(tenant, "DISCOVERY_SOURCE", "github-a")
+        | {
+            "sourceId": "github-a",
+            "sourceKind": "source_control",
+            "generation": "current",
+            "revision": 2,
+            "complete": True,
+            "observedAt": now - 59,
+            "expiresAt": now + 3_600,
+            "pageCount": 1,
+            "contentHash": current_hash,
+        }
+    )
+    configuration: dict[str, Any] = {
+        "match": {
+            "source": "integrity_evidence",
+            "signalTypes": [
+                "repository_mapping_changed",
+                "managed_configuration_drift",
+                "runtime_attestation_drift",
+            ],
+            "hosts": ["codex"],
+            "severity": "critical",
+        },
+        "action": {"type": "create_alert"},
+        "priority": 20,
+    }
+    normalized = module._response_rule_configuration(configuration)
+    content_hash = module._configuration_hash(normalized)
+    table.put_item(
+        Item=module._item_key(tenant, "RESPONSE_RULE", "integrity-a")
+        | {
+            "id": "integrity-a",
+            "active_version": 1,
+            "enabled": True,
+            "configuration": normalized,
+            "content_hash": content_hash,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "RESPONSE_RULE_VERSION", "integrity-a:v00000001")
+        | {
+            "id": "integrity-a:v00000001",
+            "rule_id": "integrity-a",
+            "version": 1,
+            "state": "active",
+            "configuration": normalized,
+            "content_hash": content_hash,
+        }
+    )
+    responder = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["incident-responder"],
+        "sub": "incident-responder",
+    }
+    suppression = _invoke(
+        module,
+        _event(
+            "/api/enterprise/alert-suppressions",
+            "POST",
+            body={
+                "id": "known-managed-rollout",
+                "name": "Known managed configuration rollout",
+                "reason": (
+                    "Approved exact rollout while retained integrity evidence remains visible."
+                ),
+                "expiresAt": now + 3_600,
+                "match": {
+                    "sources": ["integrity_evidence"],
+                    "severities": ["critical"],
+                    "reasonCodes": ["managed_configuration_drift"],
+                    "deploymentIds": ["deployment-a"],
+                    "agentIds": ["agent-a"],
+                    "deviceIds": [],
+                    "responseRuleIds": ["integrity-a"],
+                },
+            },
+            claims=responder,
+        ),
+    )
+    assert suppression["statusCode"] == 201, suppression
+
+    preview = module._response_rule_preview(tenant, normalized)
+    assert preview["mutated"] is False
+    assert preview["count"] == 3
+    assert preview["baselineInsufficient"] == 0
+    assert {item["reasonCode"] for item in preview["matches"]} == {
+        "repository_mapping_changed",
+        "managed_configuration_drift",
+        "runtime_attestation_drift",
+    }
+    alerts = module._evaluate_integrity_rules(tenant, now=now)
+    assert len(alerts) == 3
+    assert {item["source"] for item in alerts} == {"integrity_evidence"}
+    assert all(item["integrity"]["reportedByAgent"] is False for item in alerts)
+    by_reason = {item["reasonCode"]: item for item in alerts}
+    assert by_reason["managed_configuration_drift"]["status"] == "suppressed"
+    assert by_reason["repository_mapping_changed"]["status"] == "open"
+    assert by_reason["runtime_attestation_drift"]["status"] == "open"
+    assert module._list(tenant, "CONTAINMENT") == []
+    repeated = module._evaluate_integrity_rules(tenant, now=now)
+    assert {item["id"] for item in repeated} == {item["id"] for item in alerts}
+    assert len(module._list(tenant, "ALERT")) == 3
+
+    repository_alert = by_reason["repository_mapping_changed"]
+    case = module._create_case(
+        tenant,
+        {
+            "alertId": repository_alert["id"],
+            "expectedAlertRevision": repository_alert["revision"],
+            "reason": "Investigate the exact repository mapping change before containment.",
+        },
+        "incident-responder",
+    )
+    assert case["alertSource"] == "integrity_evidence"
+    assert case["binding"]["status"] == "bound"
+    assert case["binding"]["host"] == "codex-cli"
+    detail = module._case_view(
+        tenant,
+        module._case_record(tenant, case["id"]),
+        detailed=True,
+    )
+    assert detail["evidence"]["endpointReportDigest"] is None
+    assert (
+        detail["evidence"]["integrityEvidenceDigest"]
+        == repository_alert["integrity"]["evidenceDigest"]
+    )
+    exported = module._case_export(tenant, case["id"], "incident-responder")
+    assert (
+        exported["content"]["evidence"]["integrityEvidenceDigest"]
+        == repository_alert["integrity"]["evidenceDigest"]
+    )
+
+    unchanged_hash = put_generation("current", 1, project_digest)
+    source = table.get_item(
+        Key=module._item_key(tenant, "DISCOVERY_SOURCE", "github-a"),
+        ConsistentRead=True,
+    )["Item"]
+    table.put_item(Item={**source, "contentHash": unchanged_hash})
+    repository_metrics = module._repository_integrity_metrics(
+        tenant,
+        table.get_item(
+            Key=module._item_key(tenant, "AGENT", agent_key),
+            ConsistentRead=True,
+        )["Item"],
+        now=now,
+    )
+    assert not any(item["outcome"] == "would_alert" for item in repository_metrics)
+
+
+def test_integrity_baseline_tamper_and_rule_widening_fail_closed(monkeypatch: Any) -> None:
+    """Malformed history cannot alert and integrity rules cannot gain containment."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-integrity-fail-closed"
+    now = 2_168_000_000
+    agent = {
+        "id": "agent-a",
+        "deployment_id": "deployment-a",
+        "host": "codex-cli",
+        "project_root": "/synthetic/project",
+        "lifecycle_state": "active",
+        "lifecycle_revision": 1,
+        "session_revision": 1,
+    }
+    table.put_item(Item=module._item_key(tenant, "AGENT", "deployment-a:agent-a") | agent)
+    table.put_item(
+        Item=module._item_key(tenant, "DISCOVERY_PAGE", "github-a:baseline:00000")
+        | {
+            "sourceId": "github-a",
+            "generation": "baseline",
+            "pageNumber": 0,
+            "pageHash": "0" * 64,
+            "observations": [],
+        }
+    )
+    for generation, expected_revision in (("baseline", 0), ("current", 1)):
+        table.put_item(
+            Item=module._item_key(
+                tenant,
+                "DISCOVERY_GENERATION",
+                f"github-a:{generation}",
+            )
+            | {
+                "sourceId": "github-a",
+                "sourceKind": "source_control",
+                "generation": generation,
+                "expectedRevision": expected_revision,
+                "observedAt": now - 10,
+                "expiresAt": now + 300,
+                "pageCount": 1,
+                "state": "committed",
+                "contentHash": "1" * 64,
+            }
+        )
+    table.put_item(
+        Item=module._item_key(tenant, "DISCOVERY_SOURCE", "github-a")
+        | {
+            "sourceId": "github-a",
+            "sourceKind": "source_control",
+            "generation": "current",
+            "revision": 2,
+            "complete": True,
+            "observedAt": now - 10,
+            "expiresAt": now + 300,
+            "pageCount": 1,
+            "contentHash": "1" * 64,
+        }
+    )
+    configuration: dict[str, Any] = {
+        "match": {
+            "source": "integrity_evidence",
+            "signalTypes": ["repository_mapping_changed"],
+            "hosts": ["codex"],
+            "severity": "high",
+        },
+        "action": {"type": "create_alert"},
+        "priority": 1,
+    }
+    normalized = module._response_rule_configuration(configuration)
+    content_hash = module._configuration_hash(normalized)
+    table.put_item(
+        Item=module._item_key(tenant, "RESPONSE_RULE", "integrity-fail-closed")
+        | {
+            "id": "integrity-fail-closed",
+            "active_version": 1,
+            "enabled": True,
+            "configuration": normalized,
+            "content_hash": content_hash,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(
+            tenant,
+            "RESPONSE_RULE_VERSION",
+            "integrity-fail-closed:v00000001",
+        )
+        | {
+            "id": "integrity-fail-closed:v00000001",
+            "rule_id": "integrity-fail-closed",
+            "version": 1,
+            "state": "active",
+            "configuration": normalized,
+            "content_hash": content_hash,
+        }
+    )
+    metrics = module._integrity_rule_metrics(tenant, normalized, agent, now=now)
+    assert metrics[0]["outcome"] == "baseline_insufficient"
+    assert metrics[0]["baselineComplete"] is False
+    assert metrics[0]["reasonCodes"] == ["repository_baseline_integrity_failed"]
+    assert module._evaluate_integrity_rules(tenant, now=now) == []
+    assert module._list(tenant, "ALERT") == []
+    health = table.get_item(
+        Key=module._item_key(tenant, "INTEGRITY_HEALTH", "current"),
+        ConsistentRead=True,
+    )["Item"]
+    assert health["status"] == "degraded"
+    malformed_attestation = {
+        **agent,
+        "attestation_status": "quarantined",
+        "attestation_reason_codes": "configurationDigest_invalid",
+        "attestation_baseline_digest": "not-a-digest",
+        "attestation_observed_at": "invalid",
+    }
+    attestation_configuration: dict[str, Any] = {
+        "match": {
+            "source": "integrity_evidence",
+            "signalTypes": ["runtime_attestation_drift"],
+            "hosts": ["codex"],
+            "severity": "high",
+        },
+        "action": {"type": "create_alert"},
+        "priority": 1,
+    }
+    attestation_metrics = module._integrity_rule_metrics(
+        tenant,
+        module._response_rule_configuration(attestation_configuration),
+        malformed_attestation,
+        now=now,
+    )
+    assert attestation_metrics[0]["outcome"] == "baseline_insufficient"
+    assert attestation_metrics[0]["reasonCodes"] == ["runtime_attestation_invalid"]
+    with pytest.raises(ValueError, match="create_alert"):
+        module._response_rule_configuration(
+            {**configuration, "action": {"type": "quarantine_agent"}}
+        )
+    duplicate = copy.deepcopy(configuration)
+    duplicate["match"]["signalTypes"] = [
+        "repository_mapping_changed",
+        "repository_mapping_changed",
+    ]
+    with pytest.raises(ValueError, match="signalTypes"):
+        module._response_rule_configuration(duplicate)
+
+
+def test_codex_cli_matches_the_public_codex_detection_scope(monkeypatch: Any) -> None:
+    """Canonical Codex CLI identities must not be missed by public rule scope."""
+    module, _table = _load_handler(monkeypatch)
+    assert module._response_rule_host_identity("codex-cli") == "codex"
+    assert module._response_rule_matches(
+        {
+            "match": {
+                "source": "endpoint_evidence",
+                "reasonCodes": ["process_not_observed"],
+                "severities": ["high"],
+                "hosts": ["codex"],
+            }
+        },
+        {
+            "source": "endpoint_evidence",
+            "reasonCode": "process_not_observed",
+            "severity": "high",
+        },
+        {"host": "codex-cli"},
+    )
 
 
 def test_automatic_response_reservation_cannot_exceed_limit_under_race(

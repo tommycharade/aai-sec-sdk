@@ -112,6 +112,19 @@ human-readable incident explanation. These are synthetic control-plane
 contracts; they do not prove complete telemetry from a compromised host or
 production SIEM delivery.
 
+Repository/configuration anomaly contracts prove complete consecutive
+generation re-hashing, exact enrolled repository scope, managed desired versus
+observed comparison, fixed attestation reasons, canonical Codex host matching,
+deterministic alert identity, exact suppression, no automatic containment,
+server-revalidated case binding and integrity-bound export. Missing or
+malformed authority produces `baseline_insufficient`, no alert and degraded
+evaluator health. Activity contracts also cover outside-project and fail-closed
+configuration-error spikes. The private UI suite proves typed integrity-rule
+authoring, contextual help, preview-before-save, alert-only copy, exact
+suppression selection and human-readable case evidence. These synthetic
+contracts do not prove the correctness of a customer's source-control,
+endpoint or attestation connector.
+
 Alert-suppression contracts additionally prove exact target matching,
 seven-day maximum expiry, broad/wildcard/unauthorized denial, retained
 suppressed evidence, no delivery or automatic containment, optimistic
