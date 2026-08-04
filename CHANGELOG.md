@@ -1,11 +1,17 @@
 # Changelog
 
+- Added independently observed Regional fault preconditions. Before any lock,
+  Scheduler or IAM mutation, the witness-Region probe now requires exact
+  target-active-not-routed journal authority, unchanged processed templates,
+  a completely fenced source, a target matching its reviewed Lambda/mapping/
+  rule configuration and source-only Route 53 aliases with the exact generation
+  marker. Read-only IAM is action-allowlisted and independently verified.
+
 - Added real target-handler provider canaries for Regional audit, DynamoDB,
   KMS and queue dependency exercises. The independent probe accepts only exact
   AWS access denials during the fault and successful digest-bound operations
   after cleanup; a dedicated canary queue isolates synthetic traffic. Live
-  precondition proof remains fail-closed, so fault injection is still
-  unreachable.
+  Cognito remains unsupported and fails closed before fault injection.
 
 - Added the private coordination-Region Regional fault workflow: an exact
   18-state Standard Step Functions topology, immediate exception compensation,

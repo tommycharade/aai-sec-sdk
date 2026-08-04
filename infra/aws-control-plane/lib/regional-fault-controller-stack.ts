@@ -29,6 +29,7 @@ export interface RegionalFaultControllerProps extends cdk.StackProps {
   readonly journalTableName: string;
   readonly journalTableArn: string;
   readonly securityAlertTopicArn: string;
+  readonly hostedZoneId: string;
 }
 
 const regionPattern = /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/;
@@ -77,8 +78,8 @@ function requireCell(cell: RegionalFaultCellBoundary, label: string): void {
  * Deploy the private, compensated fault-exercise workflow in the witness Region.
  *
  * The workflow has no API, UI route or broad StartExecution grant. Its first
- * task is a code-owned probe gate that currently always fails, so this stack
- * cannot mutate IAM until real target-only provider probes are implemented.
+ * task proves live journal, runtime-template and routing preconditions before
+ * any lock, Scheduler or IAM mutation. Cognito faults remain fail-closed.
  */
 export class RegionalFaultControllerStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: RegionalFaultControllerProps) {
@@ -97,6 +98,9 @@ export class RegionalFaultControllerStack extends cdk.Stack {
     }
     if (!/^[A-Za-z0-9_.-]{3,255}$/.test(props.journalTableName)) {
       throw new Error("fault journal table name is invalid");
+    }
+    if (!/^Z[A-Z0-9]{5,31}$/.test(props.hostedZoneId)) {
+      throw new Error("fault Route 53 hosted-zone ID is invalid");
     }
     const tableArnPattern = new RegExp(
       `^arn:(aws|aws-us-gov|aws-cn):dynamodb:${coordinationRegion}:(\\d{12}):table\\/${props.journalTableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
@@ -144,10 +148,12 @@ export class RegionalFaultControllerStack extends cdk.Stack {
         "scripts/*",
         "!scripts/__init__.py",
         "!scripts/verify_aws_regional_activation.py",
+        "!scripts/manage_aws_transition_journal.py",
         "!scripts/plan_aws_regional_fault_exercise.py",
         "!scripts/regional_fault_controller_lambda.py",
         "!scripts/regional_fault_cleanup_lambda.py",
         "!scripts/regional_fault_probe_lambda.py",
+        "!scripts/regional_fault_preconditions.py",
       ],
     });
     const commonFunction = {
@@ -165,6 +171,7 @@ export class RegionalFaultControllerStack extends cdk.Stack {
       environment: {
         PRIMARY_FAULT_TARGET_FUNCTION_ARN: props.primary.targetFunctionArn,
         RECOVERY_FAULT_TARGET_FUNCTION_ARN: props.recovery.targetFunctionArn,
+        FAULT_ROUTE53_HOSTED_ZONE_ID: props.hostedZoneId,
       },
     });
     const cleanupFunction = new lambda.Function(this, "FaultCleanup", {
@@ -242,6 +249,23 @@ export class RegionalFaultControllerStack extends cdk.Stack {
     probeFunction.addToRolePolicy(new iam.PolicyStatement({
       actions: ["lambda:InvokeFunction"],
       resources: [props.primary.targetFunctionArn, props.recovery.targetFunctionArn],
+    }));
+    probeFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["dynamodb:GetItem"],
+      resources: [props.journalTableArn],
+    }));
+    // These provider inventory APIs are read-only and several do not support
+    // resource-level IAM. Runtime code still binds every result to the exact
+    // account, Regions, stack names and hosted zone in reviewed authority.
+    probeFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        "cloudformation:DescribeStacks", "cloudformation:GetTemplate",
+        "cloudformation:ListStackResources", "events:DescribeRule",
+        "lambda:GetEventSourceMapping", "lambda:GetFunctionConcurrency",
+        "lambda:GetFunctionConfiguration", "route53:GetHostedZone",
+        "route53:ListResourceRecordSets",
+      ],
+      resources: ["*"],
     }));
     cleanupFunction.addToRolePolicy(new iam.PolicyStatement({
       actions: ["iam:DeleteRolePolicy"],
@@ -397,7 +421,7 @@ export class RegionalFaultControllerStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, "RegionalFaultControllerStateMachineArn", { value: stateMachine.attrArn });
     new cdk.CfnOutput(this, "RegionalFaultControllerStatus", {
-      value: "probes-disabled-no-fault-authority",
+      value: "manual-noncognito-probes-enabled-not-live-accepted",
     });
     new cdk.CfnOutput(this, "RegionalFaultWatchdogDlqArn", { value: watchdogDlq.queueArn });
   }

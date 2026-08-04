@@ -239,6 +239,7 @@ def _function(handler: str, *, environment: bool) -> dict[str, Any]:
                 "RECOVERY_FAULT_TARGET_FUNCTION_ARN": _environment()[
                     "RECOVERY_FAULT_TARGET_FUNCTION_ARN"
                 ],
+                "FAULT_ROUTE53_HOSTED_ZONE_ID": "Z1234567890ABC",
             }
         }
     return {"Type": "AWS::Lambda::Function", "Properties": props}
@@ -295,7 +296,27 @@ def _template() -> dict[str, Any]:
                                 _environment()["PRIMARY_FAULT_TARGET_FUNCTION_ARN"],
                                 _environment()["RECOVERY_FAULT_TARGET_FUNCTION_ARN"],
                             ],
-                        }
+                        },
+                        {
+                            "Action": "dynamodb:GetItem",
+                            "Effect": "Allow",
+                            "Resource": JOURNAL_ARN,
+                        },
+                        {
+                            "Action": [
+                                "cloudformation:DescribeStacks",
+                                "cloudformation:GetTemplate",
+                                "cloudformation:ListStackResources",
+                                "events:DescribeRule",
+                                "lambda:GetEventSourceMapping",
+                                "lambda:GetFunctionConcurrency",
+                                "lambda:GetFunctionConfiguration",
+                                "route53:GetHostedZone",
+                                "route53:ListResourceRecordSets",
+                            ],
+                            "Effect": "Allow",
+                            "Resource": "*",
+                        },
                     ]
                 },
             },
@@ -430,7 +451,9 @@ def _template() -> dict[str, Any]:
     return {
         "Resources": resources,
         "Outputs": {
-            "RegionalFaultControllerStatus": {"Value": "probes-disabled-no-fault-authority"}
+            "RegionalFaultControllerStatus": {
+                "Value": "manual-noncognito-probes-enabled-not-live-accepted"
+            }
         },
     }
 
@@ -449,15 +472,15 @@ def _verify(module: Any, template: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def test_exact_disabled_compensated_stack_is_verified() -> None:
+def test_exact_probe_bound_compensated_stack_is_verified() -> None:
     module = _load()
     assert _verify(module, _template()) == {
-        "status": "verified-probes-disabled",
+        "status": "verified-manual-noncognito-probes",
         "stateCount": 18,
         "compensatedStateCount": 7,
         "publicExecutionGrantCount": 0,
         "alarmCount": 5,
-        "assetFileCount": 6,
+        "assetFileCount": 8,
     }
 
 
@@ -512,7 +535,7 @@ def test_exact_disabled_compensated_stack_is_verified() -> None:
             lambda value: value["Outputs"]["RegionalFaultControllerStatus"].update(
                 {"Value": "ready"}
             ),
-            "disabled probes",
+            "probe readiness disclosure",
         ),
     ],
 )

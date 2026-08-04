@@ -1,11 +1,8 @@
-"""Fail-closed probe boundary for the Regional dependency-fault workflow.
+"""Independent probe boundary for the Regional dependency-fault workflow.
 
-The Step Functions workflow invokes this handler before any lock, watchdog or
-IAM mutation and again around the bounded fault. Real provider probes are a
-separate implementation tranche. Until those probes exist, this module always
-rejects execution after validating the complete authority. This deliberate
-gate makes the orchestration deployable without making synthetic flags or
-operator assertions equivalent to dependency evidence.
+The witness-Region Lambda verifies live journal, templates, execution paths and
+routing before mutation. Later phases directly invoke a code-owned canary in
+the exact target handler role. Cognito remains unsupported and fails closed.
 """
 
 from __future__ import annotations
@@ -13,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from typing import Any
 
 try:
@@ -20,6 +18,7 @@ try:
 except ImportError:  # pragma: no cover - AWS Lambda provides boto3.
     boto3 = None
 
+from scripts import regional_fault_preconditions as preconditions
 from scripts.regional_fault_controller_lambda import (
     RegionalFaultControllerError,
     _parse_event,
@@ -40,13 +39,7 @@ _PHASES = {
 
 
 def probe(event: object, *, now: int | None = None) -> dict[str, Any]:
-    """Validate exact workflow authority and refuse synthetic probe evidence.
-
-    This function has no provider clients and no environment-controlled bypass.
-    A future implementation must replace each phase with independently observed
-    AWS evidence and dedicated adversarial contract tests before returning a
-    successful structured result.
-    """
+    """Validate authority and return only independently observed AWS evidence."""
     if (
         not isinstance(event, dict)
         or set(event) != _FIELDS
@@ -55,7 +48,7 @@ def probe(event: object, *, now: int | None = None) -> dict[str, Any]:
     ):
         raise RegionalFaultProbeError("fault probe event schema is invalid")
     try:
-        _, _, authority = _parse_event(
+        _, manifest, authority = _parse_event(
             {
                 "schemaVersion": 1,
                 "operation": "acquire",
@@ -66,16 +59,32 @@ def probe(event: object, *, now: int | None = None) -> dict[str, Any]:
         )
     except RegionalFaultControllerError as error:
         raise RegionalFaultProbeError("fault probe authority is invalid") from error
-    if event["phase"] == "preconditions":
-        raise RegionalFaultProbeError("live Regional precondition proof is not implemented")
-    if authority.dependency == "cognito":
-        raise RegionalFaultProbeError("Cognito has no safe target-role probe boundary")
     prefix = "PRIMARY" if authority.target_cell_role == "primary" else "RECOVERY"
     function_arn = os.environ.get(f"{prefix}_FAULT_TARGET_FUNCTION_ARN", "").strip()
     if not function_arn:
         raise RegionalFaultProbeError("target probe function authority is unavailable")
     if boto3 is None:
         raise RegionalFaultProbeError("AWS provider is unavailable")
+    if event["phase"] == "preconditions":
+        hosted_zone_id = os.environ.get("FAULT_ROUTE53_HOSTED_ZONE_ID", "").strip()
+
+        def provider(service: str, region: str) -> Any:
+            """Create a region-bound read-only client for live preconditions."""
+            return boto3.client(service, region_name=region)
+
+        try:
+            return preconditions.verify(
+                manifest,
+                authority,
+                target_function_arn=function_arn,
+                hosted_zone_id=hosted_zone_id,
+                client=provider,
+                now=now if now is not None else int(time.time()),
+            )
+        except preconditions.RegionalFaultPreconditionError as error:
+            raise RegionalFaultProbeError("live Regional preconditions failed") from error
+    if authority.dependency == "cognito":
+        raise RegionalFaultProbeError("Cognito has no safe target-role probe boundary")
     request = {
         "source": "aai.regional-fault-target-probe",
         "schemaVersion": 1,
@@ -153,5 +162,5 @@ def probe(event: object, *, now: int | None = None) -> dict[str, Any]:
 
 
 def handler(event: object, _context: object) -> dict[str, Any]:
-    """AWS Lambda entry point that cannot currently authorize fault mutation."""
+    """Run one exact live precondition, denial or recovery probe phase."""
     return probe(event)

@@ -8,14 +8,15 @@ acceptable: process termination, network loss or operator interruption could
 leave the target cell unavailable indefinitely.
 
 `scripts/plan_aws_regional_fault_exercise.py` implements the read-only authority
-boundary. `RegionalFaultControllerStack` now packages the private Lambda,
-Scheduler and Step Functions runtime in the independent coordination Region.
-The deployed workflow still has no usable fault authority: its first task is a
-code-owned probe Lambda whose live precondition phase deliberately fails. Real
-target-role probes now exist for S3 audit writes, four consistent DynamoDB
-reads, KMS public-key/sign operations and a dedicated SQS canary queue, but no
-IAM mutation is reachable until live source-fence, target-runtime and routing
-preconditions are independently proved.
+boundary. `RegionalFaultControllerStack` packages the private Lambda, Scheduler
+and Step Functions runtime in the independent coordination Region. Its first
+task independently reads the witness journal, both live processed templates,
+every stack-owned Lambda/mapping/rule and the complete bounded Route 53 zone.
+It proceeds only while the source is fenced, the target exactly matches its
+reviewed active template, routing remains exclusively on the source and the
+generation marker matches the witness. Target-role probes cover S3 audit
+writes, four consistent DynamoDB reads, KMS public-key/sign operations and a
+dedicated SQS canary queue. Cognito remains deliberately unsupported.
 
 ## Authority contract
 
@@ -160,13 +161,12 @@ role. A missing, substituted, worker or literal role identity fails synthesis
 verification. This is deployment-owned discovery input; it is not fault
 execution authority by itself.
 
-The final provider implementation must define a real safe probe for each
-dependency:
+The provider boundaries are:
 
 | Dependency | Target-only failure boundary | Recovery proof |
 | --- | --- | --- |
-| Audit | Exact target audit write path | Content-free canary is durably written and read back |
-| Cognito | Exact target identity dependency, never source/customer identity | Target canary authentication succeeds after restoration |
+| Audit | Exact target audit write path | Content-free canary write succeeds after restoration |
+| Cognito | Unsupported: authentication is outside the handler role | Unsupported: fails before mutation |
 | DynamoDB | Exact target handler access to four authoritative tables | Consistent canary reads and governed agent heartbeat recover |
 | KMS | Exact target signing/verification key calls | Target policy signing and enrolled verification recover |
 | Queue | Exact target evidence/retention queue operations | Revision-bound synthetic job dispatch and zero-conflict check recover |
@@ -217,24 +217,27 @@ confirmation or execute flag because this tranche is read-only.
 The dedicated `regional-fault-controller-iac` CI job installs the pinned CDK
 lock, synthesizes the stack and runs
 `scripts/verify_regional_fault_controller_stack.py`. The verifier requires the
-exact 18-state order, all compensation edges, bounded retries, disabled probe
-status, three isolated Lambda identities, one schedule group, one encrypted
-DLQ, five alarms, the exact six-file Lambda asset, exact journal/role IAM and
-zero public execution grants.
+exact 18-state order, all compensation edges, bounded retries, explicit manual
+non-Cognito readiness status, three isolated Lambda identities, one schedule
+group, one encrypted DLQ, five alarms, the exact eight-file Lambda asset,
+exact journal/role/probe IAM and zero public execution grants.
 Adversarial tests reject a precondition bypass, missing compensation, broad IAM,
-ambient probe enablement, authority-bearing API resource, unsafe log capture,
-weakened DLQ and falsely ready status.
+ambient probe authority, authority-bearing API resource, unsafe log capture,
+weakened DLQ, changed templates, runtime drift, partial source fencing, early
+routing and falsely ready status.
 
 ## Current non-guarantees
 
-The authority parser, exact target-handler discovery, code-owned IAM boundaries,
-single-writer lock, Scheduler creation, expiry-safe cleanup handlers and private
-compensated Step Functions topology are implemented and synthetically tested.
-They are not deployed. Target-role audit, DynamoDB, KMS and queue denial and
-recovery probes are implemented and contract tested. The precondition phase
-still deliberately returns an error, so the synthesized stack cannot reach the
-lock or IAM mutation. Live target/source/routing preconditions are not yet
-implemented. Cognito remains unsupported rather than simulated. No live fault
-has been injected.
+The authority parser, exact target-handler discovery, live precondition reader,
+code-owned IAM boundaries, single-writer lock, Scheduler creation, expiry-safe
+cleanup handlers, target-role canaries and private compensated Step Functions
+topology are implemented and synthetically tested. They are not deployed. The
+stack deliberately creates no API/UI route or `states:StartExecution` grant;
+production execution authority must be separately restricted to the reviewed
+operator workflow. The precondition reader uses narrowly enumerated read-only
+AWS APIs, several of which require `Resource: *`; runtime validation binds every
+observation to the approved account, Regions, stack names, processed-template
+digests, hosted zone and journal state. Cognito remains unsupported rather than
+simulated. No live fault has been injected and no recovery SLO is claimed.
 The generic AWS exercise adapter therefore continues to reject dependency and
 consistency evidence, and P0-11 remains **Partial**.

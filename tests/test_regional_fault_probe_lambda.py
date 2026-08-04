@@ -42,9 +42,51 @@ def _event(phase: str = "preconditions") -> dict[str, Any]:
     }
 
 
-def test_preconditions_remain_fail_closed_until_live_proof_exists() -> None:
+def test_live_preconditions_are_required_and_return_independent_evidence(
+    monkeypatch: Any,
+) -> None:
     module = _load()
-    with pytest.raises(module.RegionalFaultProbeError, match="precondition"):
+
+    class Boto:
+        @staticmethod
+        def client(service: str, *, region_name: str) -> tuple[str, str]:
+            return service, region_name
+
+    expected = {
+        "schemaVersion": 1,
+        "status": "verified-live-preconditions",
+        "evidenceSha256": "b" * 64,
+        "journalRevision": 4,
+    }
+    observed: dict[str, Any] = {}
+
+    def verify(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        observed.update(kwargs)
+        assert kwargs["client"]("route53", "eu-west-2") == ("route53", "eu-west-2")
+        return expected
+
+    monkeypatch.setattr(module, "boto3", Boto())
+    monkeypatch.setattr(module.preconditions, "verify", verify)
+    monkeypatch.setenv(
+        "RECOVERY_FAULT_TARGET_FUNCTION_ARN",
+        "arn:aws:lambda:eu-west-1:111111111111:function:AaiRecoveryHandler",
+    )
+    monkeypatch.setenv("FAULT_ROUTE53_HOSTED_ZONE_ID", "Z1234567890ABC")
+    assert module.probe(_event(), now=1000) == expected
+    assert observed["hosted_zone_id"] == "Z1234567890ABC"
+
+
+def test_failed_live_preconditions_are_normalized(monkeypatch: Any) -> None:
+    module = _load()
+    monkeypatch.setattr(module, "boto3", object())
+    monkeypatch.setenv("RECOVERY_FAULT_TARGET_FUNCTION_ARN", "synthetic-function")
+    monkeypatch.setenv("FAULT_ROUTE53_HOSTED_ZONE_ID", "Z1234567890ABC")
+
+    def reject(*_args: Any, **_kwargs: Any) -> None:
+        raise module.preconditions.RegionalFaultPreconditionError("provider detail")
+
+    monkeypatch.setattr(module.preconditions, "verify", reject)
+    with pytest.raises(module.RegionalFaultProbeError, match="preconditions failed"):
         module.probe(_event(), now=1000)
 
 

@@ -255,6 +255,7 @@ jobs:
           TRANSITION_JOURNAL_TABLE_NAME: AaiSecRegionalTransitionJournal
           TRANSITION_JOURNAL_TABLE_ARN: arn:aws:dynamodb:eu-central-1:111111111111:table/AaiSecRegionalTransitionJournal
           FAULT_SECURITY_ALERT_TOPIC_ARN: arn:aws:sns:eu-central-1:111111111111:aai-sec-security-alerts
+          FAULT_ROUTE53_HOSTED_ZONE_ID: Z1234567890ABC
           PRIMARY_FAULT_REGION: eu-west-2
           PRIMARY_FAULT_TARGET_ROLE_ARN: arn:aws:iam::111111111111:role/AaiPrimaryHandler
           PRIMARY_FAULT_TARGET_FUNCTION_ARN: arn:aws:lambda:eu-west-2:111111111111:function:AaiPrimaryHandler
@@ -270,7 +271,7 @@ jobs:
           RECOVERY_FAULT_SIGNING_KEY_ARN: arn:aws:kms:eu-west-1:111111111111:key/mrk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           RECOVERY_FAULT_QUEUE_ARNS: '["arn:aws:sqs:eu-west-1:111111111111:aai-recovery-evidence"]'
         run: npm run synth:fault-controller -- --quiet
-      - name: Verify disabled probe gate, compensation, alerts and least privilege
+      - name: Verify live probe gate, compensation, alerts and least privilege
         run: >-
           python scripts/verify_regional_fault_controller_stack.py
           infra/aws-control-plane/cdk.out/AaiSecRegionalFaultController.template.json
