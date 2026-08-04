@@ -265,6 +265,16 @@ uncertain records.
 
 ::: agentic_security.policy_adapters.CedarPolicyEngine
 
+::: agentic_security.policy_composition.PolicyComponent
+
+::: agentic_security.policy_composition.PolicyCompositionResult
+
+::: agentic_security.policy_composition.PolicyCompositionStep
+
+::: agentic_security.policy_composition.PolicyCompositionError
+
+::: agentic_security.policy_composition.compose_policy
+
 `PolicyResult` may carry an external policy version and provenance label. The
 runtime preserves both in execution audit evidence so operators can identify
 which policy decision point authorized an action.

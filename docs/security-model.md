@@ -1022,6 +1022,17 @@ authority. A compromised database, proxy, browser, project repository or model
 could otherwise replace policy bytes, replay another tenant's policy, or alter
 a registered Skill or MCP server after review.
 
+Reusable policy composition cannot delegate this authority to a mutable parent.
+Each component edge binds one same-tenant, independently approved active or
+retired policy version by ID, version, effective-content hash and component
+graph digest. Code-owned merge rules intersect allow-lists, union denials and
+approval requirements, minimize limits, preserve required safeguards and reject
+ambiguous exact fields. The control plane stores local intent separately from
+the effective configuration, reproduces both the effective hash and complete
+graph digest before staging and activation, and bounds graph depth and size.
+Missing, pending, cross-tenant, self-referential, stale or corrupt components
+therefore deny promotion. See [Policy composition and GitOps](policy-composition-and-gitops-design.md).
+
 AWS activation resolves the exact effective configuration and signs a
 canonical tenant, policy ID, version, content hash and configuration payload
 with a non-exportable P-256 KMS key. The active version, resolved configuration
