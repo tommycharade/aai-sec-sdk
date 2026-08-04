@@ -1478,6 +1478,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scheduled-reconciliation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduled reconciliation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#security-invariants" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2868,6 +2879,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scheduled-reconciliation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduled reconciliation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#security-invariants" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2913,8 +2935,9 @@ operator confirms it.</p>
 <li>Resolve any overlap with another policy group.</li>
 <li>Apply the exact preview. The group becomes rule-managed and manual add or
    remove operations are disabled.</li>
-<li>Select <strong>Review rule</strong> after trusted inventory changes to preview and apply
-   deterministic reevaluation.</li>
+<li>After the first reviewed apply, the control plane reevaluates the approved
+   rule every five minutes. Select <strong>Review rule</strong> at any time to preview the
+   current effect or replace the rule.</li>
 </ol>
 <p>No JSON or expression language is required. The supported server-owned fields
 are agent host, project ID, deployment ID, deployment team, environment,
@@ -2935,6 +2958,26 @@ stores the materialized membership, canonical rule, next membership revision,
 request-bound idempotency result and immutable primary audit record. Reusing a
 request ID with different semantics fails closed. The S3 audit export is a
 best-effort secondary copy after the DynamoDB transaction.</p>
+<h2 id="scheduled-reconciliation">Scheduled reconciliation</h2>
+<p>Only a rule that an operator has already previewed and applied is eligible for
+automatic reconciliation. A fixed five-minute EventBridge rule invokes an
+internal schema-versioned service contract that cannot be reached through API
+Gateway. The service strongly reloads the group, its canonical rule, every
+candidate agent and deployment, then deterministically derives membership.</p>
+<p>When membership changes, one DynamoDB transaction compares the exact current
+revision, replaces the materialized membership, advances the revision, records
+the latest reconciliation state and commits immutable primary audit evidence.
+A no-change evaluation updates only the bounded status record. An overlap,
+malformed rule, incomplete lineage or concurrent revision change preserves the
+last-known policy authority and records a failed reconciliation state. The
+Lambda invocation then fails so EventBridge performs bounded retries and sends
+exhausted work to a monitored dead-letter queue.</p>
+<p>The service is bounded to 2,000 registered tenants, 5,000 dynamic groups per
+cycle and 500 candidate agents per group. It never accepts candidate members,
+rules, actors or tenant identifiers from a browser or agent event. The fleet
+response exposes only operational status: last attempt, last success, outcome,
+counts and a fixed error code. It does not expose scheduler coordinates or
+membership lists through the status record.</p>
 <h2 id="security-invariants">Security invariants</h2>
 <ul>
 <li>An agent can belong to at most one policy group.</li>
@@ -2948,11 +2991,12 @@ best-effort secondary copy after the DynamoDB transaction.</p>
   and apply; optimistic concurrency rejects races.</li>
 <li>Audit payloads contain counts, identifiers and hashes, not prompts, tool
   arguments, credentials or full membership lists.</li>
+<li>Scheduled reconciliation can materialize only the last operator-approved
+  canonical rule; it cannot author or broaden that rule.</li>
+<li>A failed automatic evaluation never clears or partially rewrites the current
+  membership. The last-known policy authority remains in force while operators
+  receive a durable visible failure and monitored dead-letter alert.</li>
 </ul>
-<p>This first contract intentionally requires an operator to apply reevaluation.
-Scheduled automatic reevaluation will require a separate service identity,
-failure policy, change notification and rollout design before it can safely
-change policy authority without a human confirmation.</p>
 
 
 
