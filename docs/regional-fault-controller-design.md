@@ -7,10 +7,12 @@ workflow. A local script that attaches an IAM deny and later removes it is not
 acceptable: process termination, network loss or operator interruption could
 leave the target cell unavailable indefinitely.
 
-`scripts/plan_aws_regional_fault_exercise.py` implements the first read-only
-authority boundary. It validates one exact request and emits the mandatory
-workflow order. It has no IAM, Lambda, Scheduler, Step Functions, DNS or traffic
-mutation operation.
+`scripts/plan_aws_regional_fault_exercise.py` implements the read-only authority
+boundary. `RegionalFaultControllerStack` now packages the private Lambda,
+Scheduler and Step Functions runtime in the independent coordination Region.
+The deployed workflow still has no usable fault authority: its first task is a
+code-owned probe Lambda that validates the complete request and always fails
+until real target-only AWS probes replace it.
 
 ## Authority contract
 
@@ -49,8 +51,8 @@ The planner emits this order and no alternate order:
 8. remove the watchdog; and
 9. seal content-free fault evidence.
 
-The implementation phase will use a Step Functions workflow for normal and
-exception compensation plus an EventBridge Scheduler one-time watchdog. The
+The implementation uses a Step Functions workflow for normal and exception
+compensation plus an EventBridge Scheduler one-time watchdog. The
 watchdog must be armed before the deny is applied and must invoke cleanup even
 if the workflow, caller or network disappears. Normal cleanup can remove the
 watchdog only after independently proving the deny no longer exists.
@@ -67,13 +69,17 @@ remain possible after approval expiry.
 
 The implemented sequence enforces these invariants:
 
-- a conditional third-Region journal write permits one active fault per target;
-- a retry with the same authority digest is idempotent, while a different fault
-  is rejected;
+- one third-Region transaction proves the fault UUID has no retained evidence
+  while acquiring the single active lock for its target;
+- a lost acquire response is retryable only while the same digest remains in
+  `LOCKED`; a completed authority or duplicate workflow that observes an
+  advanced state is rejected;
 - the Scheduler watchdog is created before the lock becomes
   `WATCHDOG_ARMED`;
 - `apply-deny` performs a strongly consistent lock read and refuses IAM
   mutation unless that exact digest is armed;
+- a complete, non-truncated live inline-policy inventory rejects an out-of-band
+  or stranded Regional fault deny before another can be attached;
 - policy and role names are derived from the reviewed UUID and deployment-owned
   cell outputs;
 - primary and recovery have separate immutable resource maps, so failback
@@ -86,6 +92,54 @@ The implemented sequence enforces these invariants:
 Authority must cover the requested fault duration plus a 30-second normal
 cleanup margin. The independently scheduled cleanup runs 60 seconds after the
 maximum fault duration and deliberately does not require live approval.
+
+## Implemented private orchestration
+
+`infra/aws-control-plane/lib/regional-fault-controller-stack.ts` synthesizes a
+private Standard Step Functions workflow with this exact normal path:
+
+```text
+probe preconditions -> acquire lock -> arm watchdog -> apply deny
+-> prove dependency unavailable -> prove execution denied/no bypass
+-> remove deny -> prove dependency and target recovery
+-> disarm watchdog -> seal evidence
+```
+
+The precondition probe runs before the lock, Scheduler or IAM operations. An
+acquire failure attempts exact unarmed-lock release. Every failure from
+watchdog arming through watchdog disarming invokes the independent cleanup
+Lambda immediately; cleanup failure leaves the separately scheduled watchdog
+armed and raises both Lambda and workflow alarms. Provider-service retries are
+bounded to three attempts. Application failures are not blindly retried.
+
+The state machine has no API Gateway, UI route, model-facing operation or
+`states:StartExecution` grant. Error logs exclude execution data so the
+activation manifest and fault authority do not enter CloudWatch. Controller,
+cleanup, probe, Scheduler and workflow roles are separate. Only the controller
+can attach a policy, and only to the two deployment-owned target handler roles.
+Cleanup can only delete the UUID-derived policy. Watchdog delivery failures go
+to a 14-day encrypted, retained SQS DLQ. The retained workflow stack enables
+CloudFormation termination protection. Controller, cleanup, probe,
+workflow-failure and DLQ alarms use the deployment-owned security SNS topic.
+
+CloudWatch Logs delivery APIs do not support resource-level IAM permissions.
+The workflow role therefore has `Resource: *` only for the exact documented
+log-delivery control-plane actions; it has no log-content read, other wildcard
+action or public execution authority. The independent verifier rejects any
+broader wildcard.
+
+The stack requires exact, same-account deployment inputs for both cells:
+
+- target Region and real handler role ARN;
+- audit bucket ARN;
+- exactly four DynamoDB table ARNs;
+- signing KMS key ARN;
+- one to four queue ARNs;
+- third-Region journal table name and ARN; and
+- third-Region security alert topic ARN.
+
+Partition and account come from the exact journal ARN, never ambient CDK
+credentials. Primary and recovery resource maps cannot alias each other.
 
 ## Code-owned dependency boundaries
 
@@ -151,13 +205,28 @@ Exit code `0` prints `faultExecuted: false`, a canonical authority digest and
 the compensated plan. Exit code `2` prints the first blocker. There is no
 confirmation or execute flag because this tranche is read-only.
 
+## Synthesis and verification
+
+The dedicated `regional-fault-controller-iac` CI job installs the pinned CDK
+lock, synthesizes the stack and runs
+`scripts/verify_regional_fault_controller_stack.py`. The verifier requires the
+exact 18-state order, all compensation edges, bounded retries, disabled probe
+status, three isolated Lambda identities, one schedule group, one encrypted
+DLQ, five alarms, the exact six-file Lambda asset, exact journal/role IAM and
+zero public execution grants.
+Adversarial tests reject a precondition bypass, missing compensation, broad IAM,
+ambient probe enablement, authority-bearing API resource, unsafe log capture,
+weakened DLQ and falsely ready status.
+
 ## Current non-guarantees
 
 The authority parser, exact target-handler discovery, code-owned IAM boundaries,
-single-writer lock, Scheduler creation and expiry-safe cleanup handlers are
-implemented and synthetically tested. They are not deployed. The Step Functions
-orchestration, live target/source preconditions and real dependency/recovery
-probes are not yet implemented. Cognito remains unsupported rather than
-simulated. No live fault has been injected.
+single-writer lock, Scheduler creation, expiry-safe cleanup handlers and private
+compensated Step Functions topology are implemented and synthetically tested.
+They are not deployed. The probe Lambda deliberately returns an error for every
+phase; therefore the synthesized stack cannot reach the lock or IAM mutation.
+Live target/source preconditions and real dependency/recovery probes are not yet
+implemented. Cognito remains unsupported rather than simulated. No live fault
+has been injected.
 The generic AWS exercise adapter therefore continues to reject dependency and
 consistency evidence, and P0-11 remains **Partial**.

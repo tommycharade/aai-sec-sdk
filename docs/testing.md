@@ -15,6 +15,16 @@ evidence. The browser smoke path for the live
 reference server is documented in the enterprise fleet runbook and is used
 before release evidence is accepted.
 
+The `regional-fault-controller-iac` job synthesizes the coordination-Region
+Step Functions, Lambda and Scheduler stack from synthetic exact resource maps.
+`scripts/verify_regional_fault_controller_stack.py` independently rejects
+public execution grants, precondition bypass, reordered or uncompensated
+mutations, unbounded retries, broad IAM, execution-data logging, weakened
+watchdog DLQ posture and a falsely ready probe status. The probe handler tests
+prove every phase validates complete short-lived authority and then fails
+closed. These are infrastructure and protocol contracts; they are not live AWS
+dependency-failure evidence.
+
 The optional live PostgreSQL path is exercised by the `postgres-integration`
 GitHub Actions job. Locally, install `.[postgres]`, set
 `AAI_SEC_POSTGRES_DSN`, and run:

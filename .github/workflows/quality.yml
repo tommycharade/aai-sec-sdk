@@ -232,6 +232,52 @@ jobs:
           --canary-api-domain api-recovery.security.example.com
           --canary-ui-domain recovery.security.example.com
 
+  regional-fault-controller-iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262b # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: infra/aws-control-plane/package-lock.json
+      - name: Install pinned AWS infrastructure dependencies
+        working-directory: infra/aws-control-plane
+        run: npm ci
+      - name: Synthesize private compensated Regional fault controller
+        working-directory: infra/aws-control-plane
+        env:
+          CDK_DEFAULT_ACCOUNT: "111111111111"
+          TRANSITION_COORDINATION_REGION: eu-central-1
+          TRANSITION_JOURNAL_TABLE_NAME: AaiSecRegionalTransitionJournal
+          TRANSITION_JOURNAL_TABLE_ARN: arn:aws:dynamodb:eu-central-1:111111111111:table/AaiSecRegionalTransitionJournal
+          FAULT_SECURITY_ALERT_TOPIC_ARN: arn:aws:sns:eu-central-1:111111111111:aai-sec-security-alerts
+          PRIMARY_FAULT_REGION: eu-west-2
+          PRIMARY_FAULT_TARGET_ROLE_ARN: arn:aws:iam::111111111111:role/AaiPrimaryHandler
+          PRIMARY_FAULT_AUDIT_BUCKET_ARN: arn:aws:s3:::aai-primary-audit-111111
+          PRIMARY_FAULT_DYNAMODB_TABLE_ARNS: '["arn:aws:dynamodb:eu-west-2:111111111111:table/AaiControl","arn:aws:dynamodb:eu-west-2:111111111111:table/AaiPresence","arn:aws:dynamodb:eu-west-2:111111111111:table/AaiIdempotency","arn:aws:dynamodb:eu-west-2:111111111111:table/AaiScim"]'
+          PRIMARY_FAULT_SIGNING_KEY_ARN: arn:aws:kms:eu-west-2:111111111111:key/mrk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          PRIMARY_FAULT_QUEUE_ARNS: '["arn:aws:sqs:eu-west-2:111111111111:aai-primary-evidence"]'
+          RECOVERY_FAULT_REGION: eu-west-1
+          RECOVERY_FAULT_TARGET_ROLE_ARN: arn:aws:iam::111111111111:role/AaiRecoveryHandler
+          RECOVERY_FAULT_AUDIT_BUCKET_ARN: arn:aws:s3:::aai-recovery-audit-111111
+          RECOVERY_FAULT_DYNAMODB_TABLE_ARNS: '["arn:aws:dynamodb:eu-west-1:111111111111:table/AaiControl","arn:aws:dynamodb:eu-west-1:111111111111:table/AaiPresence","arn:aws:dynamodb:eu-west-1:111111111111:table/AaiIdempotency","arn:aws:dynamodb:eu-west-1:111111111111:table/AaiScim"]'
+          RECOVERY_FAULT_SIGNING_KEY_ARN: arn:aws:kms:eu-west-1:111111111111:key/mrk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          RECOVERY_FAULT_QUEUE_ARNS: '["arn:aws:sqs:eu-west-1:111111111111:aai-recovery-evidence"]'
+        run: npm run synth:fault-controller -- --quiet
+      - name: Verify disabled probe gate, compensation, alerts and least privilege
+        run: >-
+          python scripts/verify_regional_fault_controller_stack.py
+          infra/aws-control-plane/cdk.out/AaiSecRegionalFaultController.template.json
+          --journal-table-name AaiSecRegionalTransitionJournal
+          --journal-table-arn arn:aws:dynamodb:eu-central-1:111111111111:table/AaiSecRegionalTransitionJournal
+          --primary-role-arn arn:aws:iam::111111111111:role/AaiPrimaryHandler
+          --recovery-role-arn arn:aws:iam::111111111111:role/AaiRecoveryHandler
+          --alert-topic-arn arn:aws:sns:eu-central-1:111111111111:aai-sec-security-alerts
+
   evidence-continuity-iac:
     runs-on: ubuntu-latest
     steps:

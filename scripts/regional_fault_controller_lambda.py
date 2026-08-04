@@ -99,6 +99,7 @@ class ControllerConfig:
     schedule_group_name: str
     scheduler_role_arn: str
     cleanup_function_arn: str
+    watchdog_dlq_arn: str
 
     @staticmethod
     def _cell(prefix: str) -> CellBoundary:
@@ -129,13 +130,14 @@ class ControllerConfig:
         group = _required("FAULT_WATCHDOG_SCHEDULE_GROUP")
         scheduler_role = _required("FAULT_WATCHDOG_ROLE_ARN")
         cleanup = _required("FAULT_CLEANUP_FUNCTION_ARN")
+        watchdog_dlq = _required("FAULT_WATCHDOG_DLQ_ARN")
         if not _NAME.fullmatch(table) or not _NAME.fullmatch(group):
             raise RegionalFaultControllerError("journal or schedule group name is invalid")
         if not _ROLE_ARN.fullmatch(scheduler_role):
             raise RegionalFaultControllerError("watchdog role ARN is invalid")
-        if not _RESOURCE_ARN.fullmatch(cleanup):
-            raise RegionalFaultControllerError("fault cleanup function ARN is invalid")
-        return cls(primary, recovery, table, group, scheduler_role, cleanup)
+        if not _RESOURCE_ARN.fullmatch(cleanup) or not _RESOURCE_ARN.fullmatch(watchdog_dlq):
+            raise RegionalFaultControllerError("fault cleanup or dead-letter ARN is invalid")
+        return cls(primary, recovery, table, group, scheduler_role, cleanup, watchdog_dlq)
 
     def target(self, cell_role: str) -> CellBoundary:
         """Resolve one reviewed cell map without accepting caller resources."""
@@ -274,6 +276,22 @@ def _missing_entity(error: BaseException) -> bool:
     return _aws_error_code(error) == "NoSuchEntity"
 
 
+def _assert_no_other_fault_policy(iam: Any, role_name: str, policy_name: str) -> None:
+    """Fail closed if an untracked Regional deny already exists on the target role."""
+    response = iam.list_role_policies(RoleName=role_name, MaxItems=100)
+    names = response.get("PolicyNames") if isinstance(response, dict) else None
+    if (
+        not isinstance(names, list)
+        or response.get("IsTruncated") is not False
+        or len(names) > 100
+        or len(set(names)) != len(names)
+        or any(not isinstance(name, str) for name in names)
+    ):
+        raise RegionalFaultControllerError("target inline policy inventory is incomplete")
+    if any(name.startswith("AaiSecRegionalFault-") and name != policy_name for name in names):
+        raise RegionalFaultControllerError("another Regional fault policy is present")
+
+
 def execute(
     event: object,
     *,
@@ -295,17 +313,40 @@ def execute(
 
     if operation == "acquire":
         try:
-            dynamodb.put_item(
-                TableName=config.journal_table_name,
-                Item={
-                    "pk": {"S": key["pk"]},
-                    "sk": {"S": key["sk"]},
-                    "faultId": {"S": authority.fault_id},
-                    "authoritySha256": {"S": digest},
-                    "state": {"S": "LOCKED"},
-                    "expiresAt": {"N": str(authority.expires_at)},
-                },
-                ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)",
+            # Acquiring and proving this UUID has no retained evidence must be
+            # atomic. Otherwise an unexpired authority could be replayed after
+            # successful completion and leave a new lock behind.
+            dynamodb.transact_write_items(
+                TransactItems=[
+                    {
+                        "ConditionCheck": {
+                            "TableName": config.journal_table_name,
+                            "Key": {
+                                "pk": {"S": "REGIONAL_FAULT_EVIDENCE"},
+                                "sk": {"S": f"FAULT#{authority.fault_id}"},
+                            },
+                            "ConditionExpression": (
+                                "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+                            ),
+                        }
+                    },
+                    {
+                        "Put": {
+                            "TableName": config.journal_table_name,
+                            "Item": {
+                                "pk": {"S": key["pk"]},
+                                "sk": {"S": key["sk"]},
+                                "faultId": {"S": authority.fault_id},
+                                "authoritySha256": {"S": digest},
+                                "state": {"S": "LOCKED"},
+                                "expiresAt": {"N": str(authority.expires_at)},
+                            },
+                            "ConditionExpression": (
+                                "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+                            ),
+                        }
+                    },
+                ]
             )
         except Exception as error:
             if _condition_failure(error):
@@ -314,20 +355,16 @@ def execute(
                     Key={"pk": {"S": key["pk"]}, "sk": {"S": key["sk"]}},
                     ConsistentRead=True,
                 ).get("Item")
-                if not isinstance(existing, dict) or existing.get("authoritySha256") != {
-                    "S": digest
-                }:
+                if (
+                    not isinstance(existing, dict)
+                    or existing.get("authoritySha256") != {"S": digest}
+                    or existing.get("state") != {"S": "LOCKED"}
+                ):
                     raise RegionalFaultControllerError(
-                        "another target-cell fault is active"
+                        "another target-cell fault is active or authority was consumed"
                     ) from error
                 # A lost response followed by a Step Functions retry must not
                 # turn the same authority into a conflicting second fault.
-                if existing.get("state") not in (
-                    {"S": "LOCKED"},
-                    {"S": "WATCHDOG_ARMED"},
-                    {"S": "DENY_APPLIED"},
-                ):
-                    raise RegionalFaultControllerError("fault lock is not retryable") from error
                 return {
                     "schemaVersion": 1,
                     "operation": operation,
@@ -360,6 +397,7 @@ def execute(
             Target={
                 "Arn": config.cleanup_function_arn,
                 "RoleArn": config.scheduler_role_arn,
+                "DeadLetterConfig": {"Arn": config.watchdog_dlq_arn},
                 "Input": json.dumps(
                     _cleanup_payload(authority), sort_keys=True, separators=(",", ":")
                 ),
@@ -392,12 +430,14 @@ def execute(
             or lock.get("state") != {"S": "WATCHDOG_ARMED"}
         ):
             raise RegionalFaultControllerError("independent cleanup watchdog is not armed")
+        policy_document = _boundary(authority, config)
+        # The journal serializes this controller, while the live role inventory
+        # detects an out-of-band or stranded deny before another one is added.
+        _assert_no_other_fault_policy(iam, role_name, policy_name)
         iam.put_role_policy(
             RoleName=role_name,
             PolicyName=policy_name,
-            PolicyDocument=json.dumps(
-                _boundary(authority, config), sort_keys=True, separators=(",", ":")
-            ),
+            PolicyDocument=json.dumps(policy_document, sort_keys=True, separators=(",", ":")),
         )
         dynamodb.update_item(
             TableName=config.journal_table_name,
