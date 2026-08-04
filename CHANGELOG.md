@@ -1,5 +1,16 @@
 # Changelog
 
+- Added independently derived repository and configuration anomaly detection
+  for Claude Code and Codex. Governed alert-only rules compare complete,
+  re-hashed consecutive repository generations, server-owned desired managed
+  configuration and fixed runtime-attestation mismatch state. Missing or
+  malformed authority fails closed with degraded detector health; alerts retain
+  only bounded identifiers and digests, support exact suppression, durable
+  delivery, cases and verified export, and can never trigger automatic
+  containment. Agent activity detection also adds outside-project and
+  configuration-error spikes. The private UI provides typed authoring,
+  preview, trust-boundary help and human-readable integrity evidence.
+
 - Added governed, expiring alert suppression and stable deduplication for
   endpoint and agent-behavior detections. Exact-scope suppressions retain the
   alert and audit evidence while withholding outbound delivery and automatic

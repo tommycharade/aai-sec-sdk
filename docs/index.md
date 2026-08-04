@@ -10,6 +10,7 @@ The SDK is built around one boundary:
 
 - [Getting started](getting-started.md)
 - [Security model](security-model.md)
+- [Repository and configuration anomaly detection](repository-configuration-anomaly-design.md)
 - [Architecture](architecture.md)
 - [End-to-end example](end-to-end-example.md)
 - [Production readiness](production-readiness.md)
