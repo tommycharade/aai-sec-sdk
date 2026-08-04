@@ -32,6 +32,8 @@ export interface PassiveRegionalCellProps extends cdk.StackProps {
   readonly scimTableName: string;
   readonly auditReplicaBucketName: string;
   readonly policySigningReplicaKeyArn: string;
+  readonly assuranceReportSigningReplicaKeyArn: string;
+  readonly assuranceReportHistoricalVerificationKeyArns: string[];
   readonly recoveryUserPoolId: string;
   readonly recoveryUserPoolClientId: string;
   readonly entraTenantId?: string;
@@ -120,6 +122,25 @@ export class PassiveRegionalCellStack extends cdk.Stack {
     if (!expectedReplicaArn.test(props.policySigningReplicaKeyArn)) {
       throw new Error("policy signing replica must be an exact recovery-Region MRK ARN");
     }
+    if (!expectedReplicaArn.test(props.assuranceReportSigningReplicaKeyArn)) {
+      throw new Error("assurance signing replica must be an exact recovery-Region MRK ARN");
+    }
+    if (props.assuranceReportSigningReplicaKeyArn === props.policySigningReplicaKeyArn) {
+      throw new Error("assurance and executable-policy signing authority must be distinct");
+    }
+    if (
+      props.assuranceReportHistoricalVerificationKeyArns.length > 8
+      || new Set(props.assuranceReportHistoricalVerificationKeyArns).size
+        !== props.assuranceReportHistoricalVerificationKeyArns.length
+      || props.assuranceReportHistoricalVerificationKeyArns.some(
+        (value) =>
+          !expectedReplicaArn.test(value)
+          || value === props.assuranceReportSigningReplicaKeyArn
+          || value === props.policySigningReplicaKeyArn,
+      )
+    ) {
+      throw new Error("historical assurance verification replicas are invalid");
+    }
 
     const control = dynamodb.Table.fromTableName(
       this,
@@ -151,6 +172,15 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       "PolicySigningReplica",
       props.policySigningReplicaKeyArn,
     );
+    const assuranceReportSigningReplica = kms.Key.fromKeyArn(
+      this,
+      "AssuranceReportSigningReplica",
+      props.assuranceReportSigningReplicaKeyArn,
+    );
+    const historicalAssuranceVerificationKeys =
+      props.assuranceReportHistoricalVerificationKeyArns.map((keyArn, index) =>
+        kms.Key.fromKeyArn(this, `HistoricalAssuranceVerificationKey${index}`, keyArn)
+      );
 
     const alertsDlq = new sqs.Queue(this, "SecurityAlertsDlq", {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
@@ -201,6 +231,17 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       visibilityTimeout: cdk.Duration.minutes(6),
       deadLetterQueue: { queue: retentionDlq, maxReceiveCount: 5 },
     });
+    const assuranceReportDlq = new sqs.Queue(this, "AssuranceReportWorkerDlq", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+      retentionPeriod: cdk.Duration.days(14),
+    });
+    const assuranceReportQueue = new sqs.Queue(this, "AssuranceReportWorkerQueue", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+      visibilityTimeout: cdk.Duration.minutes(2),
+      deadLetterQueue: { queue: assuranceReportDlq, maxReceiveCount: 3 },
+    });
     const regionalFaultCanaryQueue = new sqs.Queue(this, "RegionalFaultCanaryQueue", {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       enforceSSL: true,
@@ -232,6 +273,11 @@ export class PassiveRegionalCellStack extends cdk.Stack {
         enforceSSL: true,
         retentionPeriod: cdk.Duration.days(14),
       }),
+      reports: new sqs.Queue(this, "AssuranceReportScheduleDlq", {
+        encryption: sqs.QueueEncryption.SQS_MANAGED,
+        enforceSSL: true,
+        retentionPeriod: cdk.Duration.days(14),
+      }),
     };
 
     const evidenceReports = active
@@ -259,6 +305,7 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       AUDIT_BUCKET: auditReplica.bucketName,
       EVIDENCE_QUEUE_URL: evidenceQueue.queueUrl,
       EVIDENCE_RETENTION_QUEUE_URL: retentionQueue.queueUrl,
+      ASSURANCE_REPORT_QUEUE_URL: assuranceReportQueue.queueUrl,
       REGIONAL_FAULT_CANARY_QUEUE_URL: regionalFaultCanaryQueue.queueUrl,
       SECURITY_ALERTS_TOPIC_ARN: alerts.topicArn,
       EVIDENCE_REPORT_BUCKET: evidenceReports?.bucketName ?? "",
@@ -272,6 +319,13 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       // identity is staged separately and the role receives no KMS grant.
       POLICY_SIGNING_KEY_ARN: active ? props.policySigningReplicaKeyArn : "",
       REGIONAL_POLICY_SIGNING_KEY_ARN: props.policySigningReplicaKeyArn,
+      ASSURANCE_REPORT_SIGNING_KEY_ARN: active
+        ? props.assuranceReportSigningReplicaKeyArn
+        : "",
+      ASSURANCE_REPORT_VERIFICATION_KEY_ARNS: JSON.stringify([
+        props.assuranceReportSigningReplicaKeyArn,
+        ...props.assuranceReportHistoricalVerificationKeyArns,
+      ]),
       ACTIVATION_EVIDENCE_SHA256: props.activationEvidenceSha256 ?? "",
       ENTRA_PROVIDER_ENABLED: active ? "true" : "false",
       ENTRA_TENANT_ID: active ? (props.entraTenantId ?? "") : "",
@@ -292,7 +346,8 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       architecture: lambda.Architecture.ARM_64,
       handler: "handler.handler",
       code,
-      timeout: cdk.Duration.seconds(15),
+      // Match primary dispatcher headroom for one bounded due-schedule page.
+      timeout: cdk.Duration.seconds(60),
       memorySize: 512,
       reservedConcurrentExecutions: active ? 100 : 0,
       environment,
@@ -322,6 +377,23 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       environment,
       tracing: lambda.Tracing.PASS_THROUGH,
     });
+    const assuranceReportWorker = new lambda.Function(this, "PassiveAssuranceReportWorker", {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: lambda.Architecture.ARM_64,
+      handler: "assurance_report_worker.handler",
+      code,
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 1024,
+      reservedConcurrentExecutions: active ? 20 : 0,
+      environment: {
+        ...environment,
+        // Keep executable-policy signer identity out of the dedicated report
+        // process as well as out of its IAM role.
+        POLICY_SIGNING_KEY_ARN: "",
+        REGIONAL_POLICY_SIGNING_KEY_ARN: "",
+      },
+      tracing: lambda.Tracing.PASS_THROUGH,
+    });
 
     // Standby roles can inspect replicated posture but cannot mutate tables,
     // write audit, send jobs/alerts or sign policy before activation approval.
@@ -343,6 +415,9 @@ export class PassiveRegionalCellStack extends cdk.Stack {
         }),
       );
     }
+    // Report generation derives posture from the control table only. It does
+    // not need presence, idempotency, SCIM, or unrestricted audit-bucket read.
+    control.grantReadData(assuranceReportWorker);
     if (active && evidenceReports) {
       control.grantReadWriteData(handler);
       presence.grantReadWriteData(handler);
@@ -368,6 +443,39 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       regionalFaultCanaryQueue.grantSendMessages(handler);
       alerts.grantPublish(handler);
       policySigningReplica.grant(handler, "kms:Sign", "kms:Verify", "kms:GetPublicKey");
+      assuranceReportSigningReplica.grant(handler, "kms:Sign", "kms:Verify");
+      for (const historicalKey of historicalAssuranceVerificationKeys) {
+        historicalKey.grant(handler, "kms:Verify");
+      }
+      assuranceReportQueue.grantSendMessages(handler);
+
+      assuranceReportWorker.addToRolePolicy(new iam.PolicyStatement({
+        actions: ["dynamodb:PutItem"],
+        resources: [control.tableArn],
+        conditions: {
+          "ForAllValues:StringLike": { "dynamodb:LeadingKeys": ["ASSURANCE#*"] },
+        },
+      }));
+      assuranceReportWorker.addToRolePolicy(new iam.PolicyStatement({
+        actions: ["s3:GetObject", "s3:GetObjectVersion"],
+        resources: [
+          auditReplica.arnForObjects("tenant=*/assurance-snapshots/*"),
+          auditReplica.arnForObjects("tenant=*/year=*/month=*/idempotent-*"),
+        ],
+      }));
+      // Match primary write authority exactly: retained snapshots plus their
+      // deterministic audit receipts, with no delete or unrelated write path.
+      assuranceReportWorker.addToRolePolicy(new iam.PolicyStatement({
+        actions: ["s3:PutObject", "s3:PutObjectRetention"],
+        resources: [
+          auditReplica.arnForObjects("tenant=*/assurance-snapshots/*"),
+          auditReplica.arnForObjects("tenant=*/year=*/month=*/idempotent-*"),
+        ],
+      }));
+      assuranceReportSigningReplica.grant(assuranceReportWorker, "kms:Sign", "kms:Verify");
+      for (const historicalKey of historicalAssuranceVerificationKeys) {
+        historicalKey.grant(assuranceReportWorker, "kms:Verify");
+      }
 
       control.grantReadWriteData(evidenceWorker);
       auditReplica.grantRead(evidenceWorker);
@@ -404,6 +512,13 @@ export class PassiveRegionalCellStack extends cdk.Stack {
     );
     retentionWorker.addEventSource(
       new lambdaEventSources.SqsEventSource(retentionQueue, {
+        batchSize: 1,
+        enabled: active,
+        reportBatchItemFailures: false,
+      }),
+    );
+    assuranceReportWorker.addEventSource(
+      new lambdaEventSources.SqsEventSource(assuranceReportQueue, {
         batchSize: 1,
         enabled: active,
         reportBatchItemFailures: false,
@@ -493,6 +608,19 @@ export class PassiveRegionalCellStack extends cdk.Stack {
         }),
       );
     }
+    for (let shard = 0; shard < 16; shard += 1) {
+      const assuranceReportRule = new events.Rule(this, `AssuranceReportSchedule${shard}`, {
+        schedule: events.Schedule.rate(cdk.Duration.minutes(15)),
+        enabled: active,
+        description: `Recovery signed assurance dispatch shard ${shard}`,
+      });
+      assuranceReportRule.addTarget(new eventTargets.LambdaFunction(handler, {
+        event: events.RuleTargetInput.fromObject({ source: "aai.assurance-reports", schemaVersion: 1, shard }),
+        deadLetterQueue: scheduleDlqs.reports,
+        maxEventAge: cdk.Duration.hours(1),
+        retryAttempts: 2,
+      }));
+    }
 
     const uiOrigin = new s3.Bucket(this, "PassiveUiOrigin", {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -507,9 +635,11 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       ["HandlerErrors", handler.metricErrors()],
       ["EvidenceWorkerErrors", evidenceWorker.metricErrors()],
       ["RetentionWorkerErrors", retentionWorker.metricErrors()],
+      ["AssuranceReportWorkerErrors", assuranceReportWorker.metricErrors()],
       ["AlertDlqMessages", alertsDlq.metricApproximateNumberOfMessagesVisible()],
       ["EvidenceDlqMessages", evidenceDlq.metricApproximateNumberOfMessagesVisible()],
       ["RetentionDlqMessages", retentionDlq.metricApproximateNumberOfMessagesVisible()],
+      ["AssuranceReportDlqMessages", assuranceReportDlq.metricApproximateNumberOfMessagesVisible()],
     ] as Array<[string, cloudwatch.IMetric]>) {
       const alarm = new cloudwatch.Alarm(this, identifier, {
         metric,

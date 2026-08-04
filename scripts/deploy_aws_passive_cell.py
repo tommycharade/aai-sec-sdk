@@ -408,6 +408,8 @@ def _deployment_environment(
         "RECOVERY_SCIM_TABLE",
         "RECOVERY_AUDIT_BUCKET",
         "RECOVERY_POLICY_SIGNING_KEY_ARN",
+        "RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN",
+        "RECOVERY_ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS",
         "RECOVERY_USER_POOL_ID",
         "RECOVERY_USER_POOL_CLIENT_ID",
         "RECOVERY_CELL_MODE",
@@ -436,6 +438,12 @@ def _deployment_environment(
             "RECOVERY_SCIM_TABLE": outputs["ScimLifecycleTableName"],
             "RECOVERY_AUDIT_BUCKET": audit_arn.removeprefix("arn:aws:s3:::"),
             "RECOVERY_POLICY_SIGNING_KEY_ARN": trust_outputs["RegionalPolicySigningReplicaKeyArn"],
+            "RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN": trust_outputs[
+                "AssuranceReportSigningReplicaKeyArn"
+            ],
+            "RECOVERY_ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS": trust_outputs[
+                "AssuranceReportHistoricalVerificationReplicaKeyArns"
+            ],
             "RECOVERY_USER_POOL_ID": manifest.user_pool_id,
             "RECOVERY_USER_POOL_CLIENT_ID": manifest.user_pool_client_id,
             "RECOVERY_CELL_MODE": "standby",
@@ -474,6 +482,31 @@ def prepare_synth(
             profile=profile,
             runner=runner,
         )
+        recovery.verify_signing_replica(
+            outputs["AssuranceReportSigningKeyArn"],
+            trust_outputs["AssuranceReportSigningReplicaKeyArn"],
+            regional_manifest,
+            profile=profile,
+            runner=runner,
+        )
+        primary_history = recovery._key_arn_list(
+            outputs["AssuranceReportHistoricalVerificationKeyArns"],
+            "primary historical assurance key registry",
+        )
+        recovery_history = recovery._key_arn_list(
+            trust_outputs["AssuranceReportHistoricalVerificationReplicaKeyArns"],
+            "recovery historical assurance key registry",
+        )
+        if len(primary_history) != len(recovery_history):
+            raise PassiveCellDeploymentError("historical assurance replica count differs")
+        for primary_key, replica_key in zip(primary_history, recovery_history, strict=True):
+            recovery.verify_signing_replica(
+                primary_key,
+                replica_key,
+                regional_manifest,
+                profile=profile,
+                runner=runner,
+            )
     except recovery.RecoveryConfigurationError as error:
         raise PassiveCellDeploymentError(str(error)) from error
     identity = verify_recovery_identity(

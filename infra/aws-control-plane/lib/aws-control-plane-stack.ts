@@ -171,6 +171,51 @@ export class AwsControlPlaneStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    let historicalAssuranceKeyArns: string[];
+    try {
+      const parsed = JSON.parse(
+        process.env.ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS ?? "[]",
+      ) as unknown;
+      if (
+        !Array.isArray(parsed)
+        || parsed.length > 8
+        || !parsed.every((value) => typeof value === "string")
+        || new Set(parsed).size !== parsed.length
+      ) {
+        throw new Error("invalid historical assurance key registry");
+      }
+      historicalAssuranceKeyArns = parsed;
+    } catch {
+      throw new Error(
+        "ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS must be a JSON array of at most eight unique ARNs",
+      );
+    }
+    if (historicalAssuranceKeyArns.some((value) => {
+      const match = /^arn:(?:aws|aws-us-gov|aws-cn):kms:([a-z0-9-]+):(\d{12}):key\/mrk-[0-9a-f]{32}$/.exec(
+        value,
+      );
+      return !match;
+    })) {
+      throw new Error("historical assurance verification keys must be exact MRK ARNs");
+    }
+    const configuredAssuranceSigningKeyArn =
+      process.env.ASSURANCE_REPORT_SIGNING_KEY_ARN?.trim() ?? "";
+    if (
+      configuredAssuranceSigningKeyArn
+      && !/^arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:key\/mrk-[0-9a-f]{32}$/.test(
+        configuredAssuranceSigningKeyArn,
+      )
+    ) {
+      throw new Error("ASSURANCE_REPORT_SIGNING_KEY_ARN must be one exact MRK ARN");
+    }
+    const configuredKeyIdentity = configuredAssuranceSigningKeyArn.split("/").at(-1);
+    if (
+      configuredKeyIdentity
+      && historicalAssuranceKeyArns.some((value) => value.endsWith(`/${configuredKeyIdentity}`))
+    ) {
+      throw new Error("current assurance signer cannot also be historical");
+    }
+
     const entraTenantId = process.env.ENTRA_TENANT_ID?.trim();
     const entraClientId = process.env.ENTRA_CLIENT_ID?.trim();
     const entraClientSecretName = process.env.ENTRA_CLIENT_SECRET_NAME?.trim();
@@ -298,6 +343,14 @@ export class AwsControlPlaneStack extends cdk.Stack {
       // Scheduling needs only the tenant root key; evidence/job content never
       // crosses tenants through this index.
       projectionType: dynamodb.ProjectionType.KEYS_ONLY,
+    });
+    table.addGlobalSecondaryIndex({
+      indexName: "AssuranceReportSchedules",
+      partitionKey: { name: "assurance_report_pk", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "assurance_report_sk", type: dynamodb.AttributeType.STRING },
+      // The dispatcher reads only due schedule authority. Report bodies and
+      // signatures remain in the tenant partition and immutable S3 versions.
+      projectionType: dynamodb.ProjectionType.ALL,
     });
     table.addGlobalSecondaryIndex({
       indexName: "WebhookOutbox",
@@ -575,6 +628,18 @@ export class AwsControlPlaneStack extends cdk.Stack {
       deadLetterQueue: { queue: evidenceWorkerDlq, maxReceiveCount: 3 },
       enforceSSL: true,
     });
+    const assuranceReportWorkerDlq = new sqs.Queue(this, "AssuranceReportWorkerDlq", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const assuranceReportWorkerQueue = new sqs.Queue(this, "AssuranceReportWorkerQueue", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      visibilityTimeout: cdk.Duration.seconds(120),
+      retentionPeriod: cdk.Duration.days(4),
+      deadLetterQueue: { queue: assuranceReportWorkerDlq, maxReceiveCount: 3 },
+      enforceSSL: true,
+    });
     const evidenceRetentionWorkerDlq = new sqs.Queue(this, "EvidenceRetentionWorkerDlq", {
       fifo: true,
       encryption: sqs.QueueEncryption.SQS_MANAGED,
@@ -598,6 +663,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
       retentionPeriod: cdk.Duration.days(1),
     });
     const evidenceScheduleDlq = new sqs.Queue(this, "EvidenceScheduleDlq", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const assuranceReportScheduleDlq = new sqs.Queue(this, "AssuranceReportScheduleDlq", {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
@@ -697,6 +767,26 @@ export class AwsControlPlaneStack extends cdk.Stack {
       multiRegion: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
+    // Rotation promotes a separately staged MRK through explicit deployment
+    // authority. The bootstrap key remains retained when an imported signer is
+    // selected, so snapshots never lose their historical verifier.
+    const assuranceReportSigningKey: kms.IKey = configuredAssuranceSigningKeyArn
+      ? kms.Key.fromKeyArn(
+        this,
+        "ConfiguredAssuranceReportSigningKey",
+        configuredAssuranceSigningKeyArn,
+      )
+      : new kms.Key(this, "AssuranceReportSigningKey", {
+        description: "Dedicated multi-Region signer for retained assurance report snapshots",
+        keySpec: kms.KeySpec.ECC_NIST_P256,
+        keyUsage: kms.KeyUsage.SIGN_VERIFY,
+        multiRegion: true,
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
+        pendingWindow: cdk.Duration.days(30),
+      });
+    const historicalAssuranceKeys = historicalAssuranceKeyArns.map((keyArn, index) =>
+      kms.Key.fromKeyArn(this, `HistoricalAssuranceReportKey${index}`, keyArn)
+    );
     const trialOnboarding = new lambda.Function(this, "TrialOnboarding", {
       runtime: lambda.Runtime.PYTHON_3_13,
       architecture: lambda.Architecture.ARM_64,
@@ -817,6 +907,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       AUDIT_BUCKET: audit.bucketName,
       EVIDENCE_REPORT_BUCKET: evidenceReports.bucketName,
       EVIDENCE_QUEUE_URL: evidenceWorkerQueue.queueUrl,
+      ASSURANCE_REPORT_QUEUE_URL: assuranceReportWorkerQueue.queueUrl,
       EVIDENCE_RETENTION_QUEUE_URL: evidenceRetentionWorkerQueue.queueUrl,
       ENTRA_PROVIDER_ENABLED: entraProvider ? "true" : "false",
       ENTRA_TENANT_ID: entraTenantId ?? "",
@@ -837,6 +928,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
       RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
       RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
       POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
+      ASSURANCE_REPORT_SIGNING_KEY_ARN: assuranceReportSigningKey.keyArn,
+      ASSURANCE_REPORT_VERIFICATION_KEY_ARNS: cdk.Fn.join("", [
+        '["',
+        cdk.Fn.join('\",\"', [
+          assuranceReportSigningKey.keyArn,
+          ...historicalAssuranceKeyArns,
+        ]),
+        '"]',
+      ]),
       REGIONAL_FAULT_CANARY_QUEUE_URL: regionalFaultCanaryQueue.queueUrl,
     };
     const handler = new lambda.Function(this, "ControlPlaneHandler", {
@@ -844,7 +944,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
       architecture: lambda.Architecture.ARM_64,
       handler: "handler.handler",
       code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
-      timeout: cdk.Duration.seconds(15),
+      // Scheduled assurance dispatch can perform one bounded 250-record page;
+      // API Gateway still enforces its own shorter synchronous response bound.
+      timeout: cdk.Duration.seconds(60),
       memorySize: 512,
       reservedConcurrentExecutions: 100,
       environment: {
@@ -856,6 +958,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
     });
     table.grantReadWriteData(handler);
     policySigningKey.grant(handler, "kms:Sign", "kms:Verify", "kms:GetPublicKey");
+    assuranceReportSigningKey.grant(handler, "kms:Sign", "kms:Verify");
+    for (const historicalKey of historicalAssuranceKeys) {
+      historicalKey.grant(handler, "kms:Verify");
+    }
     // CDK's read/write convenience grant excludes TransactWriteItems. Policy
     // activation uses one same-table transaction so active authority, the
     // immutable candidate, and the retired predecessor cannot diverge.
@@ -959,6 +1065,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       resources: [discoveryPages.arnForObjects("tenant=*")],
     }));
     evidenceWorkerQueue.grantSendMessages(handler);
+    assuranceReportWorkerQueue.grantSendMessages(handler);
     evidenceRetentionWorkerQueue.grantSendMessages(handler);
     regionalFaultCanaryQueue.grantSendMessages(handler);
     handler.addToRolePolicy(new iam.PolicyStatement({ actions: ["sts:AssumeRole"], resources: [scopedToolRole.roleArn] }));
@@ -994,6 +1101,58 @@ export class AwsControlPlaneStack extends cdk.Stack {
       batchSize: 1,
       reportBatchItemFailures: false,
     }));
+
+    const assuranceReportWorker = new lambda.Function(this, "AssuranceReportWorker", {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: lambda.Architecture.ARM_64,
+      handler: "assurance_report_worker.handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 1024,
+      reservedConcurrentExecutions: 20,
+      environment: {
+        ...controlPlaneEnvironment,
+        // The report worker has neither executable-policy signing authority
+        // nor a policy-key identifier in its process environment.
+        POLICY_SIGNING_KEY_ARN: "",
+        REGIONAL_POLICY_SIGNING_KEY_ARN: "",
+      },
+      tracing: lambda.Tracing.PASS_THROUGH,
+    });
+    table.grantReadData(assuranceReportWorker);
+    assuranceReportWorker.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["dynamodb:PutItem"],
+      resources: [table.tableArn],
+      conditions: {
+        "ForAllValues:StringLike": { "dynamodb:LeadingKeys": ["ASSURANCE#*"] },
+      },
+    }));
+    assuranceReportWorker.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["s3:GetObject", "s3:GetObjectVersion"],
+      resources: [
+        audit.arnForObjects("tenant=*/assurance-snapshots/*"),
+        audit.arnForObjects("tenant=*/year=*/month=*/idempotent-*"),
+      ],
+    }));
+    // The worker writes only immutable report snapshots and their deterministic
+    // audit receipts. It cannot delete, tag or alter unrelated evidence.
+    assuranceReportWorker.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["s3:PutObject", "s3:PutObjectRetention"],
+      resources: [
+        audit.arnForObjects("tenant=*/assurance-snapshots/*"),
+        audit.arnForObjects("tenant=*/year=*/month=*/idempotent-*"),
+      ],
+    }));
+    assuranceReportSigningKey.grant(assuranceReportWorker, "kms:Sign", "kms:Verify");
+    for (const historicalKey of historicalAssuranceKeys) {
+      historicalKey.grant(assuranceReportWorker, "kms:Verify");
+    }
+    assuranceReportWorker.addEventSource(
+      new lambdaEventSources.SqsEventSource(assuranceReportWorkerQueue, {
+        batchSize: 1,
+        reportBatchItemFailures: false,
+      }),
+    );
 
     const webhookWorker = new lambda.Function(this, "WebhookDeliveryWorker", {
       runtime: lambda.Runtime.PYTHON_3_13,
@@ -1142,6 +1301,25 @@ export class AwsControlPlaneStack extends cdk.Stack {
         retryAttempts: 2,
       }),
     );
+    for (let shard = 0; shard < 16; shard += 1) {
+      const assuranceReportRule = new events.Rule(this, `AssuranceReportSchedule${shard}`, {
+        description: `Dispatch due signed assurance report schedule shard ${shard}`,
+        schedule: events.Schedule.rate(cdk.Duration.minutes(15)),
+        enabled: true,
+      });
+      assuranceReportRule.addTarget(
+        new eventTargets.LambdaFunction(handler, {
+          event: events.RuleTargetInput.fromObject({
+            source: "aai.assurance-reports",
+            schemaVersion: 1,
+            shard,
+          }),
+          deadLetterQueue: assuranceReportScheduleDlq,
+          maxEventAge: cdk.Duration.hours(1),
+          retryAttempts: 2,
+        }),
+      );
+    }
     const evidenceRetentionRule = new events.Rule(this, "EvidenceRetentionSchedule", {
       description: "Dispatch due asynchronous evidence-retention backfills",
       schedule: events.Schedule.rate(cdk.Duration.minutes(1)),
@@ -1453,6 +1631,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
     for (const [id, queue, description] of [
       ["EvidenceWorkerDeadLetters", evidenceWorkerDlq, "Evidence verification exhausted bounded retries."],
       ["EvidenceScheduleDeadLetters", evidenceScheduleDlq, "Scheduled evidence assurance exhausted bounded retries."],
+      ["AssuranceReportScheduleDeadLetters", assuranceReportScheduleDlq, "Scheduled signed assurance report generation exhausted bounded retries."],
+      ["AssuranceReportWorkerDeadLetters", assuranceReportWorkerDlq, "A revision-bound signed assurance report job exhausted bounded retries."],
       ["EvidenceRetentionWorkerDeadLetters", evidenceRetentionWorkerDlq, "Evidence retention exhausted bounded retries."],
       ["EvidenceRetentionScheduleDeadLetters", evidenceRetentionScheduleDlq, "Scheduled evidence-retention dispatch exhausted bounded retries."],
       ["WebhookDeliveryDeadLetters", webhookDeliveryDlq, "Signed webhook delivery exhausted bounded retries."],
@@ -1531,6 +1711,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, "EvidenceWorkerDlqArn", { value: evidenceWorkerDlq.queueArn });
     new cdk.CfnOutput(this, "EvidenceScheduleDlqArn", { value: evidenceScheduleDlq.queueArn });
+    new cdk.CfnOutput(this, "AssuranceReportScheduleDlqArn", {
+      value: assuranceReportScheduleDlq.queueArn,
+    });
+    new cdk.CfnOutput(this, "AssuranceReportWorkerQueueArn", {
+      value: assuranceReportWorkerQueue.queueArn,
+    });
+    new cdk.CfnOutput(this, "AssuranceReportWorkerDlqArn", {
+      value: assuranceReportWorkerDlq.queueArn,
+    });
     new cdk.CfnOutput(this, "EvidenceRetentionWorkerDlqArn", {
       value: evidenceRetentionWorkerDlq.queueArn,
     });
@@ -1543,6 +1732,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "WebhookSecretKmsKeyArn", { value: webhookSecretKey.keyArn });
     new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });
     new cdk.CfnOutput(this, "PolicySigningKeyArn", { value: policySigningKey.keyArn });
+    new cdk.CfnOutput(this, "AssuranceReportSigningKeyArn", {
+      value: assuranceReportSigningKey.keyArn,
+    });
+    new cdk.CfnOutput(this, "AssuranceReportHistoricalVerificationKeyArns", {
+      value: JSON.stringify(historicalAssuranceKeyArns),
+    });
+    new cdk.CfnOutput(this, "AssuranceReportSignerAuthorityStatus", {
+      value: configuredAssuranceSigningKeyArn ? "persisted-rotation" : "bootstrap",
+    });
     new cdk.CfnOutput(this, "RegionalPolicySigningKeyArn", {
       value: regionalPolicySigningKey.keyArn,
     });

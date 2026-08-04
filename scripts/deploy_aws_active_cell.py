@@ -62,6 +62,22 @@ _KMS_MRK_ARN = re.compile(
 )
 
 
+def _mrk_arn_list(raw: str, label: str) -> list[str]:
+    """Return one bounded unique JSON list of exact multi-Region key ARNs."""
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ActiveCellDeploymentError(f"{label} is malformed") from error
+    if (
+        not isinstance(values, list)
+        or len(values) > 8
+        or not all(isinstance(value, str) and _KMS_MRK_ARN.fullmatch(value) for value in values)
+        or len(set(values)) != len(values)
+    ):
+        raise ActiveCellDeploymentError(f"{label} is malformed")
+    return values
+
+
 @dataclass(frozen=True)
 class SourceResources:
     """Exact provider-discovered source resources covered by one fence step."""
@@ -177,9 +193,9 @@ class TargetResources:
     """Exact provider-discovered recovery runtime used for readiness checks."""
 
     handler: str
-    workers: tuple[str, str]
-    event_source_mappings: tuple[str, str]
-    event_rules: tuple[str, str, str, str]
+    workers: tuple[str, ...]
+    event_source_mappings: tuple[str, ...]
+    event_rules: tuple[str, ...]
 
     def canonical_json(self) -> str:
         """Return the deterministic target resource identity set."""
@@ -364,6 +380,8 @@ def discover_target_resources(
                     role = "evidence-worker"
                 elif logical.startswith("PassiveRetentionWorker"):
                     role = "retention-worker"
+                elif logical.startswith("PassiveAssuranceReportWorker"):
+                    role = "assurance-report-worker"
                 else:
                     raise ActiveCellDeploymentError("target contains an unknown Lambda function")
                 if role in functions:
@@ -382,20 +400,25 @@ def discover_target_resources(
     else:
         raise ActiveCellDeploymentError("target resource discovery exceeded 10 pages")
     if (
-        set(functions) != {"handler", "evidence-worker", "retention-worker"}
-        or len(mappings) != 2
-        or len(set(mappings)) != 2
-        or len(rules) != 5
-        or len(set(rules)) != 5
+        set(functions)
+        != {"handler", "evidence-worker", "retention-worker", "assurance-report-worker"}
+        or len(mappings) != 3
+        or len(set(mappings)) != 3
+        or len(rules) != 21
+        or len(set(rules)) != 21
     ):
         raise ActiveCellDeploymentError("target runtime resource set is incomplete or ambiguous")
     ordered_mappings = sorted(mappings)
     ordered_rules = sorted(rules)
     return TargetResources(
         functions["handler"],
-        (functions["evidence-worker"], functions["retention-worker"]),
-        (ordered_mappings[0], ordered_mappings[1]),
-        (ordered_rules[0], ordered_rules[1], ordered_rules[2], ordered_rules[3]),
+        (
+            functions["evidence-worker"],
+            functions["retention-worker"],
+            functions["assurance-report-worker"],
+        ),
+        tuple(ordered_mappings),
+        tuple(ordered_rules),
     )
 
 
@@ -473,6 +496,8 @@ def discover_primary_target_resources(
                     role = "evidence-worker"
                 elif logical.startswith("EvidenceRetentionWorker"):
                     role = "retention-worker"
+                elif logical.startswith("AssuranceReportWorker"):
+                    role = "assurance-report-worker"
                 else:
                     continue
                 if role in functions:
@@ -491,20 +516,25 @@ def discover_primary_target_resources(
     else:
         raise ActiveCellDeploymentError("primary target discovery exceeded 10 pages")
     if (
-        set(functions) != {"handler", "evidence-worker", "retention-worker"}
-        or len(mappings) != 2
-        or len(set(mappings)) != 2
-        or len(rules) != 5
-        or len(set(rules)) != 5
+        set(functions)
+        != {"handler", "evidence-worker", "retention-worker", "assurance-report-worker"}
+        or len(mappings) != 3
+        or len(set(mappings)) != 3
+        or len(rules) != 22
+        or len(set(rules)) != 22
     ):
         raise ActiveCellDeploymentError("primary target runtime is incomplete or ambiguous")
     ordered_mappings = sorted(mappings)
     ordered_rules = sorted(rules)
     return TargetResources(
         functions["handler"],
-        (functions["evidence-worker"], functions["retention-worker"]),
-        (ordered_mappings[0], ordered_mappings[1]),
-        (ordered_rules[0], ordered_rules[1], ordered_rules[2], ordered_rules[3]),
+        (
+            functions["evidence-worker"],
+            functions["retention-worker"],
+            functions["assurance-report-worker"],
+        ),
+        tuple(ordered_mappings),
+        tuple(ordered_rules),
     )
 
 
@@ -799,8 +829,21 @@ def verify_target_runtime(
     """Independently prove live target compute matches reviewed active authority."""
     required_environment = {
         "ACTIVATION_EVIDENCE_SHA256": expected_environment["RECOVERY_ACTIVATION_EVIDENCE_SHA256"],
-        "POLICY_SIGNING_KEY_ARN": expected_environment["RECOVERY_POLICY_SIGNING_KEY_ARN"],
-        "REGIONAL_POLICY_SIGNING_KEY_ARN": expected_environment["RECOVERY_POLICY_SIGNING_KEY_ARN"],
+        "ASSURANCE_REPORT_SIGNING_KEY_ARN": expected_environment[
+            "RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN"
+        ],
+        "ASSURANCE_REPORT_VERIFICATION_KEY_ARNS": json.dumps(
+            [
+                expected_environment["RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN"],
+                *_mrk_arn_list(
+                    expected_environment[
+                        "RECOVERY_ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS"
+                    ],
+                    "recovery historical assurance key registry",
+                ),
+            ],
+            separators=(",", ":"),
+        ),
         "ENTRA_TENANT_ID": expected_environment["ENTRA_TENANT_ID"],
         "ENTRA_AAI_TENANT_ID": expected_environment["ENTRA_AAI_TENANT_ID"],
         **{
@@ -815,12 +858,19 @@ def verify_target_runtime(
     if required_environment["ACTIVATION_EVIDENCE_SHA256"] != manifest.evidence.sha256:
         raise ActiveCellDeploymentError("target environment names different activation evidence")
     expected_functions = {
-        resources.handler: (100, "handler.handler", 512, 15),
-        resources.workers[0]: (5, "evidence_worker.handler", 1024, 60),
-        resources.workers[1]: (5, "retention_worker.handler", 1024, 60),
+        resources.handler: (100, "handler.handler", 512, 60, True),
+        resources.workers[0]: (5, "evidence_worker.handler", 1024, 60, True),
+        resources.workers[1]: (5, "retention_worker.handler", 1024, 60, True),
+        resources.workers[2]: (20, "assurance_report_worker.handler", 1024, 60, False),
     }
     function_evidence: dict[str, dict[str, str]] = {}
-    for function, (concurrency, handler, memory, timeout) in expected_functions.items():
+    for function, (
+        concurrency,
+        handler,
+        memory,
+        timeout,
+        uses_policy_signer,
+    ) in expected_functions.items():
         response = _aws(
             ["lambda", "get-function-configuration", "--function-name", function],
             profile=profile,
@@ -830,6 +880,16 @@ def verify_target_runtime(
         variables = response.get("Environment", {}).get("Variables")
         code_sha256 = response.get("CodeSha256")
         revision_id = response.get("RevisionId")
+        required = dict(required_environment)
+        policy_key = (
+            expected_environment["RECOVERY_POLICY_SIGNING_KEY_ARN"] if uses_policy_signer else ""
+        )
+        required.update(
+            {
+                "POLICY_SIGNING_KEY_ARN": policy_key,
+                "REGIONAL_POLICY_SIGNING_KEY_ARN": policy_key,
+            }
+        )
         if (
             response.get("FunctionName") != function
             or response.get("State") != "Active"
@@ -847,7 +907,7 @@ def verify_target_runtime(
             or not isinstance(revision_id, str)
             or not _REVISION_ID.fullmatch(revision_id)
             or not isinstance(variables, dict)
-            or any(variables.get(key) != value for key, value in required_environment.items())
+            or any(variables.get(key) != value for key, value in required.items())
         ):
             raise ActiveCellDeploymentError(f"target Lambda authority is not live: {function}")
         function_evidence[function] = {
@@ -875,9 +935,9 @@ def verify_target_runtime(
         if response.get("Name") != rule or response.get("State") != "ENABLED":
             raise ActiveCellDeploymentError(f"target EventBridge rule is not enabled: {rule}")
     return {
-        "eventRuleCount": 4,
-        "eventSourceMappingCount": 2,
-        "functionCount": 3,
+        "eventRuleCount": len(resources.event_rules),
+        "eventSourceMappingCount": len(resources.event_source_mappings),
+        "functionCount": len(expected_functions),
         "functions": function_evidence,
         "resourceSetSha256": resources.sha256(),
         "status": "target-runtime-live-not-routed",
@@ -906,13 +966,19 @@ def primary_target_environment(
         raise ActiveCellDeploymentError("persisted Microsoft Entra authority is unavailable")
     signing_key = outputs.get("PolicySigningKeyArn")
     regional_key = outputs.get("RegionalPolicySigningKeyArn")
+    assurance_key = outputs.get("AssuranceReportSigningKeyArn")
+    historical_assurance_keys = outputs.get("AssuranceReportHistoricalVerificationKeyArns")
     if (
         verified.get("entraTenantId") != entra.entra_tenant_id
         or verified.get("targetSigningKeyArn") != regional_key
         or not isinstance(signing_key, str)
         or not isinstance(regional_key, str)
+        or not isinstance(assurance_key, str)
+        or not isinstance(historical_assurance_keys, str)
         or not _KMS_KEY_ARN.fullmatch(signing_key)
         or not _KMS_MRK_ARN.fullmatch(regional_key)
+        or not _KMS_MRK_ARN.fullmatch(assurance_key)
+        or assurance_key == regional_key
     ):
         raise ActiveCellDeploymentError("primary target identity or signing authority differs")
     return {
@@ -920,6 +986,17 @@ def primary_target_environment(
         "ENTRA_TENANT_ID": entra.entra_tenant_id,
         "POLICY_SIGNING_KEY_ARN": signing_key,
         "REGIONAL_POLICY_SIGNING_KEY_ARN": regional_key,
+        "ASSURANCE_REPORT_SIGNING_KEY_ARN": assurance_key,
+        "ASSURANCE_REPORT_VERIFICATION_KEY_ARNS": json.dumps(
+            [
+                assurance_key,
+                *_mrk_arn_list(
+                    historical_assurance_keys,
+                    "primary historical assurance key registry",
+                ),
+            ],
+            separators=(",", ":"),
+        ),
     }
 
 
@@ -940,14 +1017,27 @@ def verify_primary_target_runtime(
         "ENTRA_AAI_TENANT_ID": expected_environment["ENTRA_AAI_TENANT_ID"],
         "ENTRA_STRONG_AUTH_ENFORCED": "true",
         "SCIM_ENABLED": "true",
-        "POLICY_SIGNING_KEY_ARN": expected_environment["POLICY_SIGNING_KEY_ARN"],
+        "ASSURANCE_REPORT_SIGNING_KEY_ARN": expected_environment[
+            "ASSURANCE_REPORT_SIGNING_KEY_ARN"
+        ],
+        "ASSURANCE_REPORT_VERIFICATION_KEY_ARNS": expected_environment[
+            "ASSURANCE_REPORT_VERIFICATION_KEY_ARNS"
+        ],
         "REGIONAL_CELL_ROLE": "primary",
         "REGIONAL_JOB_RECONCILIATION_ENABLED": "true",
     }
     expected_functions = {
-        resources.handler: (100, "handler.handler", 512, 15, True),
-        resources.workers[0]: (5, "evidence_worker.handler", 1024, 60, False),
-        resources.workers[1]: (5, "retention_worker.handler", 1024, 60, False),
+        resources.handler: (100, "handler.handler", 512, 60, True, True),
+        resources.workers[0]: (5, "evidence_worker.handler", 1024, 60, False, True),
+        resources.workers[1]: (5, "retention_worker.handler", 1024, 60, False, True),
+        resources.workers[2]: (
+            20,
+            "assurance_report_worker.handler",
+            1024,
+            60,
+            False,
+            False,
+        ),
     }
     function_evidence: dict[str, dict[str, str]] = {}
     for function, (
@@ -956,6 +1046,7 @@ def verify_primary_target_runtime(
         memory,
         timeout,
         needs_regional_key,
+        uses_policy_signer,
     ) in expected_functions.items():
         response = _aws(
             ["lambda", "get-function-configuration", "--function-name", function],
@@ -967,10 +1058,15 @@ def verify_primary_target_runtime(
         code_sha256 = response.get("CodeSha256")
         revision_id = response.get("RevisionId")
         required = dict(common_environment)
+        required["POLICY_SIGNING_KEY_ARN"] = (
+            expected_environment["POLICY_SIGNING_KEY_ARN"] if uses_policy_signer else ""
+        )
         if needs_regional_key:
             required["REGIONAL_POLICY_SIGNING_KEY_ARN"] = expected_environment[
                 "REGIONAL_POLICY_SIGNING_KEY_ARN"
             ]
+        elif not uses_policy_signer:
+            required["REGIONAL_POLICY_SIGNING_KEY_ARN"] = ""
         if (
             response.get("FunctionName") != function
             or response.get("State") != "Active"
@@ -1317,10 +1413,17 @@ def active_environment(
     if entra is None:
         raise ActiveCellDeploymentError("persisted Microsoft Entra authority is unavailable")
     key_arn = trust.get("RegionalPolicySigningReplicaKeyArn")
+    assurance_key_arn = trust.get("AssuranceReportSigningReplicaKeyArn")
     if verified.get("entraTenantId") != entra.entra_tenant_id:
         raise ActiveCellDeploymentError("retained Entra tenant differs from persisted authority")
     if verified.get("targetSigningKeyArn") != key_arn:
         raise ActiveCellDeploymentError("retained signing key differs from provider authority")
+    if (
+        not isinstance(assurance_key_arn, str)
+        or not _KMS_MRK_ARN.fullmatch(assurance_key_arn)
+        or assurance_key_arn == key_arn
+    ):
+        raise ActiveCellDeploymentError("retained assurance signing authority differs")
     environment = passive._deployment_environment(passive_cell, regional, outputs, trust, account)
     environment.update(
         {
@@ -1369,6 +1472,11 @@ def prepare_active_template(
             json.loads(payload),
             activation_evidence_sha256=environment["RECOVERY_ACTIVATION_EVIDENCE_SHA256"],
             signing_key_arn=environment["RECOVERY_POLICY_SIGNING_KEY_ARN"],
+            assurance_signing_key_arn=environment["RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN"],
+            historical_assurance_key_arns=_mrk_arn_list(
+                environment["RECOVERY_ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS"],
+                "recovery historical assurance key registry",
+            ),
             entra_tenant_id=environment["ENTRA_TENANT_ID"],
             aai_tenant_id=environment["ENTRA_AAI_TENANT_ID"],
             stable_ui_origin=environment["RECOVERY_STABLE_UI_ORIGIN"],

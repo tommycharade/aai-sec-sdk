@@ -190,8 +190,8 @@ def verify(template: dict[str, Any]) -> dict[str, int | str]:
         raise PassiveCellVerificationError("passive cell contains a traffic-serving resource")
 
     functions = _resources(template, "AWS::Lambda::Function")
-    if len(functions) != 3:
-        raise PassiveCellVerificationError("passive cell must contain exactly three Lambdas")
+    if len(functions) != 4:
+        raise PassiveCellVerificationError("passive cell must contain exactly four Lambdas")
     for function in functions:
         properties = _object(function.get("Properties"), "Lambda properties")
         variables = _object(
@@ -205,6 +205,8 @@ def verify(template: dict[str, Any]) -> dict[str, int | str]:
             or variables.get("REGIONAL_CELL_ROLE") != "recovery"
             or variables.get("REGIONAL_JOB_RECONCILIATION_ENABLED") != "false"
             or variables.get("POLICY_SIGNING_KEY_ARN") != ""
+            or variables.get("ASSURANCE_REPORT_SIGNING_KEY_ARN") != ""
+            or not isinstance(variables.get("ASSURANCE_REPORT_VERIFICATION_KEY_ARNS"), str)
         ):
             raise PassiveCellVerificationError("Lambda executable authority is not disabled")
 
@@ -223,13 +225,13 @@ def verify(template: dict[str, Any]) -> dict[str, int | str]:
         raise PassiveCellVerificationError("passive cell must not attach a custom API domain")
 
     rules = _resources(template, "AWS::Events::Rule")
-    if len(rules) != 5 or any(
+    if len(rules) != 21 or any(
         _object(rule.get("Properties"), "EventBridge properties").get("State") != "DISABLED"
         for rule in rules
     ):
         raise PassiveCellVerificationError("every passive schedule must be disabled")
     mappings = _resources(template, "AWS::Lambda::EventSourceMapping")
-    if len(mappings) != 2 or any(
+    if len(mappings) != 3 or any(
         _object(mapping.get("Properties"), "event mapping properties").get("Enabled") is not False
         for mapping in mappings
     ):

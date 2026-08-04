@@ -112,6 +112,18 @@ def _resources(template: dict[str, Any], resource_type: str) -> list[dict[str, A
     ]
 
 
+def _resource_items(
+    template: dict[str, Any], resource_type: str
+) -> list[tuple[str, dict[str, Any]]]:
+    """Return logical IDs with exact resources of one CloudFormation type."""
+    resources = _object(template.get("Resources"), "template Resources")
+    return [
+        (logical_id, _object(resource, "CloudFormation resource"))
+        for logical_id, resource in resources.items()
+        if isinstance(resource, dict) and resource.get("Type") == resource_type
+    ]
+
+
 def _fault_target_role(template: dict[str, Any], outputs: dict[str, Any]) -> str:
     """Require one output bound to the exact active recovery handler role."""
     if "RegionalFaultTargetExecutionRoleArn" not in outputs:
@@ -179,7 +191,12 @@ def _policy_statements(template: dict[str, Any]) -> list[dict[str, Any]]:
     return statements
 
 
-def _verify_iam(template: dict[str, Any], signing_key_arn: str) -> set[str]:
+def _verify_iam(
+    template: dict[str, Any],
+    signing_key_arn: str,
+    assurance_signing_key_arn: str,
+    historical_assurance_key_arns: list[str],
+) -> set[str]:
     """Require the runtime service envelope and reject administrative authority."""
     observed: set[str] = set()
     for statement in _policy_statements(template):
@@ -213,8 +230,18 @@ def _verify_iam(template: dict[str, Any], signing_key_arn: str) -> set[str]:
                 raise ActiveCellVerificationError("active runtime can mutate or assume authority")
         if actions.intersection({"kms:Sign", "kms:Verify", "kms:GetPublicKey"}):
             resource = statement.get("Resource")
-            if resource != signing_key_arn:
+            if resource not in {
+                signing_key_arn,
+                assurance_signing_key_arn,
+                *historical_assurance_key_arns,
+            }:
                 raise ActiveCellVerificationError("KMS signing authority names a different key")
+            if resource == assurance_signing_key_arn and actions != {"kms:Sign", "kms:Verify"}:
+                raise ActiveCellVerificationError(
+                    "assurance signer contains executable-policy key authority"
+                )
+            if resource in historical_assurance_key_arns and actions != {"kms:Verify"}:
+                raise ActiveCellVerificationError("historical assurance key can sign new evidence")
         if statement.get("Resource") == "*" and actions != {
             "xray:PutTelemetryRecords",
             "xray:PutTraceSegments",
@@ -226,6 +253,103 @@ def _verify_iam(template: dict[str, Any], signing_key_arn: str) -> set[str]:
             f"active runtime is missing required authority: {sorted(missing)[0]}"
         )
     return observed
+
+
+def _verify_assurance_worker_authority(
+    template: dict[str, Any],
+    assurance_signing_key_arn: str,
+    historical_assurance_key_arns: list[str],
+) -> None:
+    """Require the dedicated report worker's exact write and signing envelope."""
+    matches = [
+        (logical_id, resource)
+        for logical_id, resource in _resource_items(template, "AWS::Lambda::Function")
+        if _object(resource.get("Properties"), "Lambda properties").get("Handler")
+        == "assurance_report_worker.handler"
+    ]
+    if len(matches) != 1:
+        raise ActiveCellVerificationError("active cell assurance worker identity is ambiguous")
+    _, worker = matches[0]
+    properties = _object(worker.get("Properties"), "assurance worker properties")
+    role = properties.get("Role")
+    if (
+        not isinstance(role, dict)
+        or not isinstance(role.get("Fn::GetAtt"), list)
+        or len(role["Fn::GetAtt"]) != 2
+        or role["Fn::GetAtt"][1] != "Arn"
+    ):
+        raise ActiveCellVerificationError("assurance worker role binding is malformed")
+    role_id = role["Fn::GetAtt"][0]
+    policies = []
+    for policy in _resources(template, "AWS::IAM::Policy"):
+        policy_properties = _object(policy.get("Properties"), "IAM policy properties")
+        if {"Ref": role_id} in policy_properties.get("Roles", []):
+            policies.append(policy_properties)
+    if len(policies) != 1:
+        raise ActiveCellVerificationError("assurance worker policy binding is ambiguous")
+    document = _object(policies[0].get("PolicyDocument"), "assurance worker policy")
+    statements = document.get("Statement")
+    if not isinstance(statements, list) or not statements:
+        raise ActiveCellVerificationError("assurance worker policy is empty")
+    variables = _object(
+        _object(properties.get("Environment"), "assurance worker environment").get("Variables"),
+        "assurance worker variables",
+    )
+    control_binding = variables.get("CONTROL_TABLE")
+    saw_scoped_write = False
+    saw_assurance_signer = False
+    observed_historical_keys: set[str] = set()
+    for raw in statements:
+        statement = _object(raw, "assurance worker IAM statement")
+        if statement.get("Effect") != "Allow":
+            continue
+        actions = _actions(statement.get("Action"))
+        resource_text = json.dumps(statement.get("Resource"), sort_keys=True)
+        if any(action.startswith("dynamodb:") for action in actions):
+            if json.dumps(control_binding, sort_keys=True).strip('"') not in resource_text:
+                raise ActiveCellVerificationError("assurance worker can read an unrelated table")
+            writes = actions.intersection(
+                {
+                    "dynamodb:BatchWriteItem",
+                    "dynamodb:DeleteItem",
+                    "dynamodb:PutItem",
+                    "dynamodb:TransactWriteItems",
+                    "dynamodb:UpdateItem",
+                }
+            )
+            if writes:
+                if writes != {"dynamodb:PutItem"} or statement.get("Condition") != {
+                    "ForAllValues:StringLike": {"dynamodb:LeadingKeys": ["ASSURANCE#*"]}
+                }:
+                    raise ActiveCellVerificationError(
+                        "assurance worker table write is not partition-confined"
+                    )
+                saw_scoped_write = True
+        if any(action.startswith("s3:") for action in actions):
+            allowed_prefixes = (
+                "tenant=*/assurance-snapshots/*",
+                "tenant=*/year=*/month=*/idempotent-*",
+            )
+            if not all(prefix in resource_text for prefix in allowed_prefixes):
+                raise ActiveCellVerificationError(
+                    "assurance worker S3 authority is not prefix-bound"
+                )
+            if any(action.startswith("s3:Delete") for action in actions):
+                raise ActiveCellVerificationError("assurance worker can delete retained evidence")
+        if any(action.startswith("kms:") for action in actions):
+            resource = statement.get("Resource")
+            if resource == assurance_signing_key_arn and actions == {"kms:Sign", "kms:Verify"}:
+                saw_assurance_signer = True
+            elif resource in historical_assurance_key_arns and actions == {"kms:Verify"}:
+                observed_historical_keys.add(resource)
+            else:
+                raise ActiveCellVerificationError("assurance worker KMS authority is not dedicated")
+    if (
+        not saw_scoped_write
+        or not saw_assurance_signer
+        or observed_historical_keys != set(historical_assurance_key_arns)
+    ):
+        raise ActiveCellVerificationError("assurance worker authority is incomplete")
 
 
 def _verify_private_buckets(template: dict[str, Any]) -> int:
@@ -287,6 +411,8 @@ def verify(
     *,
     activation_evidence_sha256: str,
     signing_key_arn: str,
+    assurance_signing_key_arn: str,
+    historical_assurance_key_arns: list[str],
     entra_tenant_id: str,
     aai_tenant_id: str,
     stable_ui_origin: str,
@@ -296,6 +422,20 @@ def verify(
         raise ActiveCellVerificationError("expected activation evidence SHA-256 is invalid")
     if not _MRK_ARN.fullmatch(signing_key_arn):
         raise ActiveCellVerificationError("expected recovery signing-key ARN is invalid")
+    if (
+        not _MRK_ARN.fullmatch(assurance_signing_key_arn)
+        or assurance_signing_key_arn == signing_key_arn
+    ):
+        raise ActiveCellVerificationError("expected assurance signing-key ARN is invalid")
+    if (
+        len(historical_assurance_key_arns) > 8
+        or len(set(historical_assurance_key_arns)) != len(historical_assurance_key_arns)
+        or any(
+            not _MRK_ARN.fullmatch(value) or value in {signing_key_arn, assurance_signing_key_arn}
+            for value in historical_assurance_key_arns
+        )
+    ):
+        raise ActiveCellVerificationError("historical assurance verification registry is invalid")
     resources = _object(template.get("Resources"), "template Resources")
     for resource in resources.values():
         item = _object(resource, "CloudFormation resource")
@@ -319,11 +459,14 @@ def verify(
         )
 
     functions = _resources(template, "AWS::Lambda::Function")
-    if len(functions) != 3:
-        raise ActiveCellVerificationError("active cell must contain exactly three functions")
+    if len(functions) != 4:
+        raise ActiveCellVerificationError("active cell must contain exactly four functions")
     concurrency: list[int] = []
+    assurance_workers = 0
     for function in functions:
         properties = _object(function.get("Properties"), "Lambda properties")
+        assurance_worker = properties.get("Handler") == "assurance_report_worker.handler"
+        assurance_workers += int(assurance_worker)
         current = properties.get("ReservedConcurrentExecutions")
         if isinstance(current, bool) or not isinstance(current, int) or not 1 <= current <= 100:
             raise ActiveCellVerificationError("active Lambda concurrency is missing or unbounded")
@@ -338,35 +481,54 @@ def verify(
             or variables.get("REGIONAL_CELL_ROLE") != "recovery"
             or variables.get("REGIONAL_JOB_RECONCILIATION_ENABLED") != "true"
             or variables.get("ACTIVATION_EVIDENCE_SHA256") != activation_evidence_sha256
-            or variables.get("POLICY_SIGNING_KEY_ARN") != signing_key_arn
-            or variables.get("REGIONAL_POLICY_SIGNING_KEY_ARN") != signing_key_arn
+            or variables.get("POLICY_SIGNING_KEY_ARN")
+            != ("" if assurance_worker else signing_key_arn)
+            or variables.get("REGIONAL_POLICY_SIGNING_KEY_ARN")
+            != ("" if assurance_worker else signing_key_arn)
+            or variables.get("ASSURANCE_REPORT_SIGNING_KEY_ARN") != assurance_signing_key_arn
+            or variables.get("ASSURANCE_REPORT_VERIFICATION_KEY_ARNS")
+            != json.dumps(
+                [assurance_signing_key_arn, *historical_assurance_key_arns],
+                separators=(",", ":"),
+            )
             or variables.get("ENTRA_PROVIDER_ENABLED") != "true"
             or variables.get("ENTRA_TENANT_ID") != entra_tenant_id
             or variables.get("ENTRA_AAI_TENANT_ID") != aai_tenant_id
             or variables.get("ENTRA_STRONG_AUTH_ENFORCED") != "true"
             or variables.get("SCIM_ENABLED") != "false"
             or not isinstance(variables.get("EVIDENCE_REPORT_BUCKET"), dict)
+            or not isinstance(variables.get("ASSURANCE_REPORT_QUEUE_URL"), dict)
             or not _SHA256.fullmatch(str(variables.get("RUNTIME_ATTESTATION_MANIFESTS_SHA256", "")))
             or not _SHA256.fullmatch(str(variables.get("RUNTIME_ATTESTATION_APPROVALS_SHA256", "")))
         ):
             raise ActiveCellVerificationError("active Lambda authority binding is incomplete")
-    if sorted(concurrency) != [5, 5, 100]:
+    if assurance_workers != 1:
+        raise ActiveCellVerificationError("active cell assurance worker identity is ambiguous")
+    if sorted(concurrency) != [5, 5, 20, 100]:
         raise ActiveCellVerificationError("active Lambda concurrency differs from reviewed bounds")
 
     mappings = _resources(template, "AWS::Lambda::EventSourceMapping")
     rules = _resources(template, "AWS::Events::Rule")
-    if len(mappings) != 2 or any(
+    if len(mappings) != 3 or any(
         _object(item.get("Properties"), "event mapping").get("Enabled") is not True
         for item in mappings
     ):
         raise ActiveCellVerificationError("active queue mappings are incomplete")
-    if len(rules) != 5 or any(
+    if len(rules) != 21 or any(
         _object(item.get("Properties"), "schedule").get("State") != "ENABLED" for item in rules
     ):
         raise ActiveCellVerificationError("active schedules are incomplete")
 
     bucket_count = _verify_private_buckets(template)
-    observed_actions = _verify_iam(template, signing_key_arn)
+    observed_actions = _verify_iam(
+        template,
+        signing_key_arn,
+        assurance_signing_key_arn,
+        historical_assurance_key_arns,
+    )
+    _verify_assurance_worker_authority(
+        template, assurance_signing_key_arn, historical_assurance_key_arns
+    )
     outputs = _object(template.get("Outputs"), "template Outputs")
     status = _object(outputs.get("PassiveCellStatus"), "PassiveCellStatus output")
     if status.get("Value") != "active-not-routed" or any(
@@ -395,6 +557,8 @@ def main() -> int:
     parser.add_argument("template", type=Path)
     parser.add_argument("--activation-evidence-sha256", required=True)
     parser.add_argument("--signing-key-arn", required=True)
+    parser.add_argument("--assurance-signing-key-arn", required=True)
+    parser.add_argument("--historical-assurance-key-arns", default="[]")
     parser.add_argument("--entra-tenant-id", required=True)
     parser.add_argument("--aai-tenant-id", required=True)
     parser.add_argument("--stable-ui-origin", required=True)
@@ -403,14 +567,21 @@ def main() -> int:
         raise ActiveCellVerificationError("CloudFormation template exceeds 5 MiB")
     try:
         value = json.loads(arguments.template.read_text(encoding="utf-8"))
+        historical_assurance_key_arns = json.loads(arguments.historical_assurance_key_arns)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ActiveCellVerificationError("active template is unreadable") from error
+    if not isinstance(historical_assurance_key_arns, list) or not all(
+        isinstance(item, str) for item in historical_assurance_key_arns
+    ):
+        raise ActiveCellVerificationError("historical assurance key registry is malformed")
     print(
         json.dumps(
             verify(
                 _object(value, "CloudFormation template"),
                 activation_evidence_sha256=arguments.activation_evidence_sha256,
                 signing_key_arn=arguments.signing_key_arn,
+                assurance_signing_key_arn=arguments.assurance_signing_key_arn,
+                historical_assurance_key_arns=historical_assurance_key_arns,
                 entra_tenant_id=arguments.entra_tenant_id,
                 aai_tenant_id=arguments.aai_tenant_id,
                 stable_ui_origin=arguments.stable_ui_origin,

@@ -102,6 +102,10 @@ def test_stack_outputs_require_every_recovery_identity() -> None:
         "RegionalPolicySigningKeyArn": (
             "arn:aws:kms:eu-west-2:111122223333:key/mrk-1234567890abcdef"
         ),
+        "AssuranceReportSigningKeyArn": (
+            "arn:aws:kms:eu-west-2:111122223333:key/mrk-abcdefabcdefabcdefabcdefabcdefab"
+        ),
+        "AssuranceReportHistoricalVerificationKeyArns": "[]",
         "PolicySigningKeyArn": (
             "arn:aws:kms:eu-west-2:111122223333:key/12345678-1234-1234-1234-123456789abc"
         ),
@@ -361,6 +365,12 @@ def test_trust_deployer_strips_ambient_authority(monkeypatch: Any) -> None:
     module = _load()
     manifest = module.RegionalRecoveryManifest.parse(json.dumps(_manifest()))
     key_arn = "arn:aws:kms:eu-west-2:111122223333:key/mrk-1234567890abcdef1234567890abcdef"
+    assurance_key_arn = (
+        "arn:aws:kms:eu-west-2:111122223333:key/mrk-abcdefabcdefabcdefabcdefabcdefab"
+    )
+    historical_key_arn = (
+        "arn:aws:kms:eu-west-2:111122223333:key/mrk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    )
     monkeypatch.setenv("REGIONAL_POLICY_SIGNING_KEY_ARN", "unsafe-ambient")
     calls: list[tuple[list[str], dict[str, str]]] = []
 
@@ -368,10 +378,26 @@ def test_trust_deployer_strips_ambient_authority(monkeypatch: Any) -> None:
         calls.append((command, kwargs["env"]))
         return _completed()
 
-    module.deploy_signing_replica(key_arn, manifest, profile="synthetic", runner=runner)
+    module.deploy_signing_replica(
+        key_arn,
+        assurance_key_arn,
+        json.dumps([historical_key_arn]),
+        manifest,
+        profile="synthetic",
+        runner=runner,
+    )
     assert [call[0][:2] for call in calls] == [["npm", "run"], ["npx", "cdk"]]
     assert all(
         environment["REGIONAL_POLICY_SIGNING_KEY_ARN"] == key_arn for _, environment in calls
+    )
+    assert all(
+        environment["ASSURANCE_REPORT_SIGNING_KEY_ARN"] == assurance_key_arn
+        for _, environment in calls
+    )
+    assert all(
+        environment["ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS"]
+        == json.dumps([historical_key_arn], separators=(",", ":"))
+        for _, environment in calls
     )
     assert all(environment["CDK_DEFAULT_REGION"] == "eu-west-1" for _, environment in calls)
 

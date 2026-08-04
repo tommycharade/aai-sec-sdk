@@ -61,6 +61,9 @@ The stack creates:
   reverse-chronological dashboard reads;
 - a retained, point-in-time-recoverable DynamoDB idempotency table with TTL;
 - an S3 Object Lock audit bucket;
+- a due-time assurance-schedule index, sixteen bounded EventBridge dispatcher
+  shards, a dedicated signed-report worker queue and DLQ, and a reserved-
+  concurrency report worker;
 - a retained private, encrypted and versioned integrity-baseline bucket whose
   exact object versions are digest-bound to committed source-control generations;
 - a separate retained private, encrypted and versioned discovery-page bucket;
@@ -772,6 +775,103 @@ a failed job leaves the longer future policy active and requires reconciliation,
 not rollback. Follow [Asynchronous tenant retention](asynchronous-retention-design.md)
 and retain separate live cross-region count/order/hash/retention recovery
 evidence.
+
+The **Assurance** workspace can create and schedule executive or auditor signed
+snapshots. Snapshot JSON and its deterministic creation audit are written to
+the same tenant-prefixed Object Lock bucket, not the 30-day derived-report
+bucket. DynamoDB records the exact S3 version and all reads are version-pinned.
+Amazon S3 replication retains source version IDs, so the activated recovery
+cell can resolve the same immutable version after replication completes. During
+replication lag the API returns `503`; it never serves a different latest
+version. See [Amazon S3 replication](https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication.html)
+and [Enterprise assurance reports](enterprise-assurance-reports-design.md).
+
+`AssuranceReportSigningKeyArn` is a dedicated retained multi-Region ECDSA P-256
+key, separate from executable-policy signing. The recovery stack creates
+`AssuranceReportSigningReplicaKeyArn`, and active-cell verification requires
+that exact replica. `ASSURANCE_REPORT_VERIFICATION_KEY_ARNS` lists current and
+historical local-Region replicas by stable MRK identity. During rotation,
+deploy and register the new local replica before signing with it. Retain every
+historical key and registry entry until all snapshots it signed exceed their
+longest Object Lock retention. CDK uses `RETAIN` and a 30-day pending-deletion
+window, but snapshot retention is the stricter deletion boundary.
+
+Use the guarded two-phase workflow rather than changing key environment
+variables manually. Before preparation, retain one real pre-rotation snapshot
+verification fixture containing only its 32-byte identity-envelope digest and
+KMS signature; it need not contain report content.
+
+```bash
+python3 scripts/rotate_aws_assurance_signer.py prepare \
+  --state .local/assurance-signer-rotation.json \
+  --regional-recovery-config .local/regional-recovery.json \
+  --fixture .local/pre-rotation-signature.json \
+  --approval-evidence-ref change/ASSURANCE-ROTATION-42 \
+  --profile p1 --confirm-two-phase-cutover
+
+python3 scripts/rotate_aws_assurance_signer.py promote \
+  --state .local/assurance-signer-rotation.json \
+  --regional-recovery-config .local/regional-recovery.json \
+  --passive-config .local/passive-cell.json \
+  --profile p1 --confirm-two-phase-cutover
+
+python3 scripts/rotate_aws_assurance_signer.py verify \
+  --state .local/assurance-signer-rotation.json \
+  --regional-recovery-config .local/regional-recovery.json \
+  --fixture .local/pre-rotation-signature.json --profile p1
+```
+
+`prepare` checkpoints the candidate primary MRK before replication, discovers
+an already-created replica after interruption, deploys passive trust with the
+old current replica as historical, then verifies shared identity and a
+pre-rotation signature in both Regions. It does not change active signing
+authority.
+`promote` advances through `authority_persisted`, `primary_promoted` and
+`passive_converged` checkpoints. Each phase re-reads live state, so interruption
+after SSM, primary CloudFormation or passive CloudFormation safely resumes.
+Every future routine deployment reloads persisted authority and refuses a
+missing or stale manifest outside this guarded transition. Preflight compares
+the complete ordered deployed history: removal, reordering, substitution or
+truncation fails before CDK executes. `verify` repeats
+pre-rotation verification and records `verified`. Synthesized IAM verification
+requires old keys to have `kms:Verify` only and the new current key to be the
+sole report signer.
+
+The fixture is bounded to 16 KiB and contains exactly one Base64-encoded
+32-byte SHA-256 digest plus a 1–1,024-byte signature. Verification requires KMS
+to return `SignatureValid: true`, the exact requested key ARN and
+`ECDSA_SHA_256`; malformed Base64, wrong key, wrong algorithm and oversized
+content fail closed.
+
+The history remains bounded to eight keys. Synthesis, runtime startup, trust
+preparation and active-cell verification reject malformed, duplicate,
+foreign, overlapping or reordered authority. Do not remove an entry while any
+retained snapshot still names its MRK identity.
+
+Report state is isolated under `ASSURANCE#{tenant}`. The worker may read the
+control table to derive posture, but can write only `PutItem` constrained by
+`dynamodb:LeadingKeys` to that partition. It has no policy-signing key ARN or
+grant, no presence/SCIM/idempotency-table access, and only the snapshot and
+deterministic-audit S3 prefixes. Guarded active-cell verification rejects
+broader writes, unrelated-table reads, unscoped S3 access or key substitution.
+
+Monitor `AssuranceReportWorkerErrors`, `AssuranceReportWorkerDlqNotEmpty` and
+`AssuranceReportScheduleDlqNotEmpty`. A worker DLQ entry is a revision-bound
+job, while a schedule-DLQ entry is a failed shard dispatch. Do not manually
+construct a replacement snapshot. Resolve the dependency, confirm the stored
+schedule claim still matches, redrive the worker message, and verify the exact
+snapshot through the API. A stale claim may be replaced only through a
+revision-guarded schedule update after its 15-minute recovery window.
+Malformed due records are quarantined out of the schedule GSI and emit a
+security alert with counts only. Repair the retained schedule record through a
+reviewed schedule save before re-enabling it; never copy its malformed index
+fields back directly. Transient claim or quarantine provider failures fail the
+dispatcher invocation and preserve the due index for retry.
+
+The recovery stack stages the same queue, worker and sixteen dispatcher rules.
+In standby, all report event mappings/rules are disabled, worker concurrency is
+zero and signing authority is absent. The guarded active-cell transition must
+establish those authorities before the recovery endpoint can create reports.
 
 ### Secure-webhook operations
 

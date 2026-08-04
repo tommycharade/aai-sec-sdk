@@ -192,7 +192,13 @@ def test_deployment_environment_ignores_ambient_authority(monkeypatch: Any) -> N
     trust = {
         "RegionalPolicySigningReplicaKeyArn": (
             "arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
-        )
+        ),
+        "AssuranceReportSigningReplicaKeyArn": (
+            "arn:aws:kms:eu-west-1:111111111111:key/mrk-abcdefabcdefabcdefabcdefabcdefab"
+        ),
+        "AssuranceReportHistoricalVerificationReplicaKeyArns": json.dumps(
+            ["arn:aws:kms:eu-west-1:111111111111:key/mrk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+        ),
     }
     environment = module._deployment_environment(manifest, regional, outputs, trust, "111111111111")
     assert environment["RECOVERY_CONTROL_TABLE"] == "control"
@@ -200,6 +206,14 @@ def test_deployment_environment_ignores_ambient_authority(monkeypatch: Any) -> N
     assert (
         environment["RECOVERY_POLICY_SIGNING_KEY_ARN"]
         == trust["RegionalPolicySigningReplicaKeyArn"]
+    )
+    assert (
+        environment["RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN"]
+        == trust["AssuranceReportSigningReplicaKeyArn"]
+    )
+    assert (
+        environment["RECOVERY_ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS"]
+        == trust["AssuranceReportHistoricalVerificationReplicaKeyArns"]
     )
     assert "CDK_DEFAULT_ACCOUNT" not in environment
     assert environment["RECOVERY_CELL_MODE"] == "standby"
@@ -276,11 +290,19 @@ def test_prepare_synth_derives_provider_state_and_runs_independent_verifier(
         "RegionalPolicySigningKeyArn": (
             "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
         ),
+        "AssuranceReportSigningKeyArn": (
+            "arn:aws:kms:eu-west-2:111111111111:key/mrk-abcdefabcdefabcdefabcdefabcdefab"
+        ),
+        "AssuranceReportHistoricalVerificationKeyArns": "[]",
     }
     trust = {
         "RegionalPolicySigningReplicaKeyArn": (
             "arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
-        )
+        ),
+        "AssuranceReportSigningReplicaKeyArn": (
+            "arn:aws:kms:eu-west-1:111111111111:key/mrk-abcdefabcdefabcdefabcdefabcdefab"
+        ),
+        "AssuranceReportHistoricalVerificationReplicaKeyArns": "[]",
     }
     posture: list[str] = []
     monkeypatch.setattr(module.recovery, "load_persisted_manifest", lambda *_args, **_kw: regional)

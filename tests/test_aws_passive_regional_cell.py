@@ -42,6 +42,10 @@ def _template() -> dict[str, Any]:
             "Type": "AWS::Lambda::EventSourceMapping",
             "Properties": {"Enabled": False},
         },
+        "MappingC": {
+            "Type": "AWS::Lambda::EventSourceMapping",
+            "Properties": {"Enabled": False},
+        },
         "Ui": {
             "Type": "AWS::S3::Bucket",
             "Properties": {
@@ -100,7 +104,12 @@ def _template() -> dict[str, Any]:
             },
         },
     }
-    for index in range(3):
+    for index in range(5, 21):
+        resources[f"Rule{index}"] = {
+            "Type": "AWS::Events::Rule",
+            "Properties": {"State": "DISABLED"},
+        }
+    for index in range(4):
         resources[f"Function{index}"] = {
             "Type": "AWS::Lambda::Function",
             "Properties": {
@@ -113,6 +122,8 @@ def _template() -> dict[str, Any]:
                         "REGIONAL_CELL_ROLE": "recovery",
                         "REGIONAL_JOB_RECONCILIATION_ENABLED": "false",
                         "POLICY_SIGNING_KEY_ARN": "",
+                        "ASSURANCE_REPORT_SIGNING_KEY_ARN": "",
+                        "ASSURANCE_REPORT_VERIFICATION_KEY_ARNS": "[]",
                     }
                 },
             },
@@ -133,9 +144,9 @@ def test_passive_template_requires_every_independent_disable_control() -> None:
     evidence = module.verify(_template())
     assert evidence == {
         "status": "verified-not-serving",
-        "lambdaCount": 3,
-        "disabledScheduleCount": 5,
-        "disabledEventSourceCount": 2,
+        "lambdaCount": 4,
+        "disabledScheduleCount": 21,
+        "disabledEventSourceCount": 3,
         "faultTargetRoleLogicalId": "RuntimeRole",
     }
 
@@ -251,14 +262,20 @@ def test_passive_stack_source_has_no_activation_or_routing_construct() -> None:
     assert "disableExecuteApiEndpoint: true" in stack
     assert "reservedConcurrentExecutions: active ? 100 : 0" in stack
     assert stack.count("reservedConcurrentExecutions: active ? 5 : 0") == 2
-    # Two queue mappings plus one schedule-loop declaration synthesize to seven
-    # separately verified disabled resources.
-    assert stack.count("enabled: active") == 3
+    # Three queue mappings, the established schedule loop and sixteen
+    # independently disabled report-shard rules preserve standby non-authority.
+    assert stack.count("enabled: active") == 5
     assert 'POLICY_SIGNING_KEY_ARN: active ? props.policySigningReplicaKeyArn : ""' in stack
     assert 'RECOVERY_JOB_RECONCILIATION_ENABLED: active ? "true" : "false"' in stack
     assert 'REGIONAL_JOB_RECONCILIATION_ENABLED: active ? "true" : "false"' in stack
     assert ".grantReadData(target)" in stack
     assert 'actions: ["s3:GetObject", "s3:GetObjectVersion"]' in stack
+    assert 'actions: ["s3:PutObject", "s3:PutObjectRetention"]' in stack
+    assert 'auditReplica.arnForObjects("tenant=*/assurance-snapshots/*")' in stack
+    assert 'auditReplica.arnForObjects("tenant=*/year=*/month=*/idempotent-*")' in stack
+    assert "for (const target of [handler, evidenceWorker, retentionWorker])" in stack
+    assert "control.grantReadData(assuranceReportWorker)" in stack
+    assert "[handler, evidenceWorker, retentionWorker, assuranceReportWorker]" not in stack
     assert "if (active && evidenceReports)" in stack
     assert "cloudfront" not in stack.lower()
     assert "route53" not in stack.lower()

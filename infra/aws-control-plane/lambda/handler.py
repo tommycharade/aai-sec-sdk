@@ -48,6 +48,49 @@ KMS = boto3.client("kms")
 LAMBDA = boto3.client("lambda")
 SECRETS_MANAGER = boto3.client("secretsmanager")
 POLICY_SIGNING_KEY_ARN = os.environ.get("POLICY_SIGNING_KEY_ARN", "")
+ASSURANCE_REPORT_SIGNING_KEY_ARN = os.environ.get("ASSURANCE_REPORT_SIGNING_KEY_ARN", "")
+
+
+def _parse_assurance_key_registry(raw, region, signing_key, policy_keys):
+    """Validate local, unique, dedicated MRK authority before serving requests."""
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("assurance verification-key registry is malformed") from error
+    pattern = re.compile(
+        r"arn:(?:aws|aws-us-gov|aws-cn):kms:([a-z0-9-]+):\d{12}:key/(mrk-[0-9a-f]{32})"
+    )
+    if (
+        not isinstance(values, list)
+        or not values
+        or not all(isinstance(value, str) for value in values)
+    ):
+        raise RuntimeError("assurance verification-key registry is malformed")
+    matches = [pattern.fullmatch(value) for value in values]
+    if any(match is None for match in matches):
+        raise RuntimeError("assurance verification-key registry is malformed")
+    identities = [match.group(2) for match in matches if match is not None]
+    if len(set(identities)) != len(identities):
+        raise RuntimeError("assurance verification-key registry contains duplicate authority")
+    if region and any(match.group(1) != region for match in matches if match is not None):
+        raise RuntimeError("assurance verification-key registry is not local to this cell")
+    if signing_key:
+        signing_match = pattern.fullmatch(signing_key)
+        if signing_match is None or signing_match.group(2) not in identities:
+            raise RuntimeError("assurance signing key is absent from its verification registry")
+        for policy_key in policy_keys:
+            policy_match = pattern.fullmatch(policy_key)
+            if policy_match is not None and policy_match.group(2) == signing_match.group(2):
+                raise RuntimeError("assurance and executable-policy signing authority overlap")
+    return tuple(values)
+
+
+ASSURANCE_REPORT_VERIFICATION_KEY_ARNS = _parse_assurance_key_registry(
+    os.environ.get("ASSURANCE_REPORT_VERIFICATION_KEY_ARNS", "[]"),
+    os.environ.get("AWS_REGION", ""),
+    ASSURANCE_REPORT_SIGNING_KEY_ARN,
+    (POLICY_SIGNING_KEY_ARN, os.environ.get("REGIONAL_POLICY_SIGNING_KEY_ARN", "")),
+)
 POLICY_SOURCE_VERIFIER_ARN = os.environ.get("POLICY_SOURCE_VERIFIER_ARN", "")
 
 # Tenant list reads are deliberately finite. Callers that require complete
@@ -195,6 +238,15 @@ _ENDPOINT_DETECTION_TENANT_LIMIT = 2_000
 _WEBHOOK_OUTBOX_INDEX = "WebhookOutbox"
 _EVIDENCE_ASSURANCE_INDEX = "EvidenceAssuranceTenants"
 _EVIDENCE_ASSURANCE_SHARDS = 16
+_ASSURANCE_REPORT_PROFILES = frozenset({"executive", "auditor"})
+_ASSURANCE_REPORT_CADENCES = frozenset({"daily", "weekly"})
+_ASSURANCE_REPORT_HISTORY_LIMIT = 100
+_ASSURANCE_REPORT_MAX_BYTES = 1_000_000
+_ASSURANCE_REPORT_INDEX = "AssuranceReportSchedules"
+_ASSURANCE_REPORT_SHARDS = 16
+_ASSURANCE_REPORT_SHARD_LIMIT = 250
+_ASSURANCE_REPORT_PENDING_STALE_SECONDS = 15 * 60
+_ASSURANCE_REPORT_MAX_REVISION = 2_147_483_647
 _CASE_STATUSES = frozenset({"open", "investigating", "contained", "resolved", "closed"})
 _CASE_EXPORT_ROLES = frozenset(
     {"platform-admin", "security-operator", "incident-responder", "auditor"}
@@ -459,6 +511,10 @@ _POLICY_SECRET_KEYS = frozenset(
 
 class PolicyConflict(RuntimeError):
     """Raised when governed policy state no longer matches a requested transition."""
+
+
+class AssuranceSnapshotUnavailable(RuntimeError):
+    """Raised when retained assurance evidence cannot be safely served."""
 
 
 def _runtime_manifests():
@@ -1070,6 +1126,12 @@ def _required_mutation_capability(path):
     if normalized.startswith("/enterprise/identity/delegated-grants"):
         return "identity_admin"
     if normalized.startswith("/enterprise/evidence"):
+        return "evidence_admin"
+    if re.fullmatch(r"/enterprise/reports/snapshots/[^/]+/verify", normalized):
+        return "evidence_read"
+    if normalized.startswith("/enterprise/reports"):
+        # Report schedules create signed tenant evidence and are governed with
+        # evidence administration, not the broad fleet-write fallback.
         return "evidence_admin"
     if normalized.startswith("/enterprise/webhooks"):
         # Outbound destinations and signing keys cross the tenant egress and
@@ -4810,6 +4872,11 @@ def _key(kind, identifier):
 
 def _item_key(tenant, kind, identifier):
     return {"pk": f"TENANT#{tenant}", "sk": f"{kind}#{identifier}"}
+
+
+def _assurance_item_key(tenant, kind, identifier):
+    """Return an IAM-distinct partition for report state that cannot grant runtime authority."""
+    return {"pk": f"ASSURANCE#{tenant}", "sk": f"{kind}#{identifier}"}
 
 
 def _configuration_hash(configuration):
@@ -8923,6 +8990,19 @@ def _list(tenant, kind, *, consistent_read=False):
             raise RuntimeError("Tenant list exceeds the bounded page limit")
 
 
+def _assurance_list_page(tenant, kind, *, consistent_read=False):
+    """Return one bounded report-state page and an explicit truncation marker."""
+    condition = Key("pk").eq(f"ASSURANCE#{tenant}") & Key("sk").begins_with(f"{kind}#")
+    arguments = {"KeyConditionExpression": condition, "Limit": _ASSURANCE_REPORT_HISTORY_LIMIT + 1}
+    if consistent_read:
+        arguments["ConsistentRead"] = True
+    result = TABLE.query(**arguments)
+    items = result.get("Items", [])
+    return items[:_ASSURANCE_REPORT_HISTORY_LIMIT], bool(
+        result.get("LastEvaluatedKey") or len(items) > _ASSURANCE_REPORT_HISTORY_LIMIT
+    )
+
+
 def _decision_window(tenant):
     """Return bounded recent decision evidence and whether older data exists.
 
@@ -9164,11 +9244,11 @@ def _evidence_policy(tenant):
     }
 
 
-def _evidence_body_bytes(response):
+def _evidence_body_bytes(response, maximum=1_048_576):
     """Read one bounded S3 body into bytes for integrity verification."""
     body = response.get("Body")
-    value = body.read() if hasattr(body, "read") else body
-    if not isinstance(value, bytes) or len(value) > 1_048_576:
+    value = body.read(maximum + 1) if hasattr(body, "read") else body
+    if not isinstance(value, bytes) or len(value) > maximum:
         raise RuntimeError("retained evidence body is missing or exceeds the verification bound")
     return value
 
@@ -9950,7 +10030,7 @@ def _evidence_job_page(tenant, job_id, page_number):
         Bucket=os.environ["EVIDENCE_REPORT_BUCKET"],
         Key=_evidence_report_page_key(tenant, job_id, page),
     )
-    body = _evidence_body_bytes(response)
+    body = _evidence_body_bytes(response, _ASSURANCE_REPORT_MAX_BYTES)
     try:
         value = json.loads(body)
     except json.JSONDecodeError as error:
@@ -10935,6 +11015,64 @@ def _audit(tenant, event_type, actor, payload):
         "occurred_at": redacted["occurred_at"],
         "payload_hash": digest,
     }
+
+
+def _audit_once(tenant, event_id, event_type, actor, payload, *, occurred_at):
+    """Persist one deterministic Object-Lock audit event exactly once.
+
+    This helper is used before a corresponding control-state commit. A retry
+    validates the already retained bytes, so every successful mutation has an
+    audit authority record even if Lambda failed between S3 and DynamoDB.
+    """
+    event_id = _bounded_identifier(event_id, "auditEventId")
+    redacted = {
+        "event_type": event_type,
+        "actor": actor,
+        "tenant_id": tenant,
+        "occurred_at": int(occurred_at),
+        "payload": payload,
+    }
+    redacted["payload_hash"] = hashlib.sha256(
+        json.dumps(redacted, sort_keys=True).encode()
+    ).hexdigest()
+    instant = datetime.fromtimestamp(int(occurred_at), UTC)
+    key = (
+        f"tenant={tenant}/year={instant.year}/month={instant.month:02d}/idempotent-{event_id}.json"
+    )
+    body = json.dumps(redacted, sort_keys=True, separators=(",", ":")).encode()
+    try:
+        response = S3.put_object(
+            Bucket=os.environ["AUDIT_BUCKET"],
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+            IfNoneMatch="*",
+            Metadata={
+                "content-sha256": hashlib.sha256(body).hexdigest(),
+                "schema-version": "1",
+            },
+            ObjectLockMode="COMPLIANCE",
+            ObjectLockRetainUntilDate=datetime.now(UTC)
+            + timedelta(days=_evidence_policy(tenant)["retentionDays"]),
+        )
+    except Exception as error:
+        if getattr(error, "response", {}).get("Error", {}).get("Code") != "PreconditionFailed":
+            raise
+        head = S3.head_object(Bucket=os.environ["AUDIT_BUCKET"], Key=key)
+        version_id = head.get("VersionId")
+        if not isinstance(version_id, str):
+            raise RuntimeError("idempotent audit event has no exact version") from error
+        existing = _evidence_body_bytes(
+            S3.get_object(Bucket=os.environ["AUDIT_BUCKET"], Key=key, VersionId=version_id)
+        )
+        if not secrets.compare_digest(
+            hashlib.sha256(existing).digest(), hashlib.sha256(body).digest()
+        ):
+            raise PolicyConflict("idempotent audit identity contains different evidence") from error
+        response = {"VersionId": version_id}
+    if not isinstance(response.get("VersionId"), str):
+        raise RuntimeError("idempotent audit event has no exact version")
+    return {"key": key, "versionId": response["VersionId"], "payloadHash": redacted["payload_hash"]}
 
 
 def _positive_membership_revision(value):
@@ -17431,6 +17569,1052 @@ def _assurance_report(tenant, profile, *, now=None):
     return {**report, "contentHash": _canonical_sha256(report)}
 
 
+def _assurance_report_schedule_view(item):
+    """Project tenant-owned scheduling state without mutation rationale text."""
+    if not item:
+        return {
+            "enabled": False,
+            "profile": "executive",
+            "cadence": "weekly",
+            "hourUtc": 8,
+            "dayOfWeek": 1,
+            "revision": 0,
+            "nextRunAt": None,
+            "lastRunAt": None,
+            "lastSnapshotId": None,
+            "updatedAt": None,
+            "updatedBy": None,
+            "generationStatus": "idle",
+            "quarantinedAt": None,
+            "quarantineReason": None,
+        }
+    try:
+        revision = _discovery_integer(
+            item.get("revision"),
+            "revision",
+            minimum=1,
+            maximum=_ASSURANCE_REPORT_MAX_REVISION,
+        )
+        malformed_revision = False
+    except ValueError:
+        # Zero is an opaque repair revision, not the malformed stored value.
+        # The PUT path conditionally binds that exact raw value or its absence.
+        revision = 0
+        malformed_revision = True
+    quarantined = item.get("assurance_report_quarantined_at") is not None or malformed_revision
+    return {
+        "enabled": item.get("enabled") is True,
+        "profile": item.get("profile"),
+        "cadence": item.get("cadence"),
+        "hourUtc": int(item.get("hour_utc", 0)),
+        "dayOfWeek": item.get("day_of_week"),
+        "revision": revision,
+        "nextRunAt": item.get("next_run_at"),
+        "lastRunAt": item.get("last_run_at"),
+        "lastSnapshotId": item.get("last_snapshot_id"),
+        "updatedAt": item.get("updated_at"),
+        "updatedBy": item.get("updated_by"),
+        "generationStatus": (
+            "quarantined" if quarantined else "queued" if item.get("pending_occurrence") else "idle"
+        ),
+        "quarantinedAt": item.get("assurance_report_quarantined_at"),
+        "quarantineReason": (
+            item.get("assurance_report_quarantine_reason")
+            or ("malformed_schedule_record" if malformed_revision else None)
+        ),
+    }
+
+
+def _next_assurance_report_run(cadence, hour_utc, day_of_week, *, now=None):
+    """Return the next strict UTC schedule boundary after ``now``."""
+    current = int(time.time()) if now is None else int(now)
+    instant = datetime.fromtimestamp(current, UTC)
+    candidate = instant.replace(hour=hour_utc, minute=0, second=0, microsecond=0)
+    if cadence == "daily":
+        if candidate.timestamp() <= current:
+            candidate += timedelta(days=1)
+        return int(candidate.timestamp())
+    delta = (day_of_week - candidate.weekday()) % 7
+    candidate += timedelta(days=delta)
+    if candidate.timestamp() <= current:
+        candidate += timedelta(days=7)
+    return int(candidate.timestamp())
+
+
+def _assurance_report_index(tenant, due_at):
+    """Return a deterministic due-time index position for one tenant schedule."""
+    shard = hashlib.sha256(tenant.encode()).digest()[2] % _ASSURANCE_REPORT_SHARDS
+    return f"ASSURANCE_REPORT#{shard:02d}", f"{int(due_at):012d}#{tenant}"
+
+
+def _set_assurance_report_schedule(tenant, value, actor, *, now=None):
+    """Conditionally replace one bounded tenant assurance-report schedule."""
+    if not isinstance(value, dict) or set(value) != {
+        "expectedRevision",
+        "enabled",
+        "profile",
+        "cadence",
+        "hourUtc",
+        "dayOfWeek",
+        "rationale",
+    }:
+        raise ValueError("assurance report schedule request has an invalid schema")
+    expected = _discovery_integer(
+        value.get("expectedRevision"),
+        "expectedRevision",
+        maximum=_ASSURANCE_REPORT_MAX_REVISION - 1,
+    )
+    if not isinstance(value.get("enabled"), bool):
+        raise ValueError("enabled must be a boolean")
+    profile = value.get("profile")
+    cadence = value.get("cadence")
+    if profile not in _ASSURANCE_REPORT_PROFILES:
+        raise ValueError("assurance report profile is unsupported")
+    if cadence not in _ASSURANCE_REPORT_CADENCES:
+        raise ValueError("assurance report cadence is unsupported")
+    hour_utc = _discovery_integer(value.get("hourUtc"), "hourUtc", maximum=23)
+    day_of_week = value.get("dayOfWeek")
+    if cadence == "daily":
+        if day_of_week is not None:
+            raise ValueError("daily assurance schedules require a null dayOfWeek")
+    else:
+        day_of_week = _discovery_integer(day_of_week, "dayOfWeek", maximum=6)
+    rationale = _bounded_text(value.get("rationale"), "rationale", maximum=500)
+    if len(rationale) < 20:
+        raise ValueError("rationale must be at least 20 characters")
+    current_time = int(time.time()) if now is None else int(now)
+    key = _assurance_item_key(tenant, "REPORT_SCHEDULE", "current")
+    current = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    raw_revision = current.get("revision") if current else None
+    try:
+        current_revision = (
+            _discovery_integer(
+                raw_revision,
+                "revision",
+                minimum=1,
+                maximum=_ASSURANCE_REPORT_MAX_REVISION,
+            )
+            if current
+            else 0
+        )
+    except ValueError:
+        current_revision = 0
+    if current_revision != expected:
+        raise PolicyConflict("assurance report schedule revision changed")
+    if current and isinstance(current.get("pending_occurrence"), dict):
+        claimed_at = int(current["pending_occurrence"].get("claimedAt", 0))
+        if current_time - claimed_at <= _ASSURANCE_REPORT_PENDING_STALE_SECONDS:
+            raise PolicyConflict("assurance report generation is already in progress")
+    item = {
+        **key,
+        "tenant_id": tenant,
+        "enabled": value["enabled"],
+        "profile": profile,
+        "cadence": cadence,
+        "hour_utc": hour_utc,
+        "day_of_week": day_of_week,
+        "revision": expected + 1,
+        "next_run_at": (
+            _next_assurance_report_run(cadence, hour_utc, day_of_week, now=current_time)
+            if value["enabled"]
+            else None
+        ),
+        "last_run_at": current.get("last_run_at") if current else None,
+        "last_snapshot_id": current.get("last_snapshot_id") if current else None,
+        "updated_at": current_time,
+        "updated_by": actor,
+        "rationale_sha256": hashlib.sha256(rationale.encode()).hexdigest(),
+    }
+    if item["next_run_at"] is not None:
+        index_pk, index_sk = _assurance_report_index(tenant, item["next_run_at"])
+        item["assurance_report_pk"] = index_pk
+        item["assurance_report_sk"] = index_sk
+    schedule_digest = _canonical_sha256(
+        {
+            "enabled": value["enabled"],
+            "profile": profile,
+            "cadence": cadence,
+            "hourUtc": hour_utc,
+            "dayOfWeek": day_of_week,
+            "revision": expected + 1,
+            "rationaleSha256": item["rationale_sha256"],
+        }
+    )
+    _audit_once(
+        tenant,
+        f"report-schedule-{expected + 1}-{schedule_digest[:16]}",
+        "assurance_report_schedule_change_authorized",
+        actor,
+        {
+            "schedule_sha256": schedule_digest,
+            "revision": expected + 1,
+        },
+        occurred_at=current_time,
+    )
+    arguments = {"Item": item}
+    if current:
+        if current_revision > 0:
+            arguments.update(
+                {
+                    "ConditionExpression": "revision = :revision",
+                    "ExpressionAttributeValues": {":revision": expected},
+                }
+            )
+        elif "revision" in current:
+            arguments.update(
+                {
+                    "ConditionExpression": "#revision = :malformed_revision",
+                    "ExpressionAttributeNames": {"#revision": "revision"},
+                    "ExpressionAttributeValues": {":malformed_revision": raw_revision},
+                }
+            )
+        else:
+            arguments.update(
+                {
+                    "ConditionExpression": "attribute_not_exists(#revision)",
+                    "ExpressionAttributeNames": {"#revision": "revision"},
+                }
+            )
+    else:
+        arguments["ConditionExpression"] = "attribute_not_exists(pk)"
+    try:
+        TABLE.put_item(**arguments)
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("assurance report schedule revision changed") from error
+        raise
+    return _assurance_report_schedule_view(item)
+
+
+def _assurance_snapshot_key(tenant, snapshot_id):
+    """Return a tenant-confined object key for one signed report snapshot."""
+    return f"tenant={tenant}/assurance-snapshots/{snapshot_id}.json"
+
+
+def _assurance_key_identity(key_arn):
+    """Return the Region-stable identity of one dedicated multi-Region assurance key."""
+    match = re.fullmatch(
+        r"arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:key/(mrk-[0-9a-f]{32})",
+        str(key_arn),
+    )
+    if not match:
+        raise RuntimeError("assurance report key authority is invalid")
+    return match.group(1)
+
+
+def _assurance_verification_key_arn(key_identity):
+    """Resolve retained key identity only through the deployment-owned verification registry."""
+    matches = [
+        arn
+        for arn in ASSURANCE_REPORT_VERIFICATION_KEY_ARNS
+        if _assurance_key_identity(arn) == key_identity
+    ]
+    if len(matches) != 1:
+        raise AssuranceSnapshotUnavailable("assurance snapshot verification key is unavailable")
+    return matches[0]
+
+
+def _assurance_signature_payload(
+    tenant, snapshot_id, profile, source, generated_at, report_sha256, schedule_revision
+):
+    """Return the domain-separated identity envelope authenticated by KMS."""
+    return {
+        "domain": "aai-sec-assurance-snapshot-v1",
+        "schemaVersion": 1,
+        "tenantId": tenant,
+        "snapshotId": snapshot_id,
+        "profile": profile,
+        "source": source,
+        "generatedAt": generated_at,
+        "signedAt": generated_at,
+        "reportSha256": report_sha256,
+        "scheduleRevision": schedule_revision,
+    }
+
+
+def _assurance_snapshot_view(item):
+    """Project content-minimised signed snapshot metadata."""
+    return {
+        "id": item.get("id"),
+        "profile": item.get("profile"),
+        "source": item.get("source"),
+        "generatedAt": int(item.get("generated_at", 0)),
+        "contentSha256": item.get("content_sha256"),
+        "posture": item.get("posture"),
+        "objectVersionId": item.get("object_version_id"),
+        "signingKeyId": item.get("signing_key_id"),
+        "signingAlgorithm": item.get("signing_algorithm"),
+    }
+
+
+def _assurance_snapshot_record(tenant, snapshot_id):
+    """Strongly load one tenant-owned snapshot metadata record."""
+    snapshot_id = _bounded_identifier(snapshot_id, "snapshotId")
+    item = TABLE.get_item(
+        Key=_assurance_item_key(tenant, "REPORT_SNAPSHOT", snapshot_id), ConsistentRead=True
+    ).get("Item")
+    if not item or item.get("tenant_id") != tenant:
+        raise LookupError("assurance report snapshot not found")
+    return item
+
+
+def _assurance_snapshot_bytes(tenant, item):
+    """Read and integrity-check the exact retained object version."""
+    expected_key = _assurance_snapshot_key(tenant, item["id"])
+    if item.get("object_key") != expected_key or not isinstance(item.get("object_version_id"), str):
+        raise RuntimeError("assurance snapshot object authority is invalid")
+    try:
+        response = S3.get_object(
+            Bucket=os.environ["AUDIT_BUCKET"],
+            Key=expected_key,
+            VersionId=item["object_version_id"],
+        )
+    except Exception as error:
+        # Metadata is never allowed to silently fall back to the latest object.
+        # Replication lag, deletion or an unavailable exact version is therefore
+        # an explicit service-unavailable condition, not a generic server fault.
+        raise AssuranceSnapshotUnavailable(
+            "assurance snapshot is temporarily unavailable"
+        ) from error
+    body = _evidence_body_bytes(response, _ASSURANCE_REPORT_MAX_BYTES)
+    if len(body) > _ASSURANCE_REPORT_MAX_BYTES:
+        raise RuntimeError("assurance snapshot exceeds its safe bound")
+    if not secrets.compare_digest(hashlib.sha256(body).hexdigest(), item["object_sha256"]):
+        raise RuntimeError("assurance snapshot object integrity verification failed")
+    return body
+
+
+def _assurance_snapshot_document(tenant, item):
+    """Return one closed-schema snapshot after exact-version verification."""
+    try:
+        document = json.loads(_assurance_snapshot_bytes(tenant, item))
+    except json.JSONDecodeError as error:
+        raise RuntimeError("assurance snapshot is malformed") from error
+    if not isinstance(document, dict) or set(document) != {
+        "schemaVersion",
+        "tenantId",
+        "snapshotId",
+        "profile",
+        "source",
+        "scheduleRevision",
+        "generatedAt",
+        "report",
+        "integrity",
+    }:
+        raise RuntimeError("assurance snapshot schema is invalid")
+    integrity = document.get("integrity")
+    report = document.get("report")
+    if (
+        document.get("schemaVersion") != 1
+        or document.get("tenantId") != tenant
+        or document.get("snapshotId") != item.get("id")
+        or document.get("profile") != item.get("profile")
+        or document.get("source") != item.get("source")
+        or document.get("scheduleRevision") != item.get("schedule_revision")
+        or not isinstance(report, dict)
+        or not isinstance(integrity, dict)
+        or set(integrity)
+        != {
+            "domain",
+            "reportSha256",
+            "envelopeSha256",
+            "keyId",
+            "algorithm",
+            "signature",
+            "signedAt",
+        }
+        or integrity.get("domain") != "aai-sec-assurance-snapshot-v1"
+        or integrity.get("keyId") != item.get("signing_key_id")
+        or integrity.get("algorithm") != "ECDSA_SHA_256"
+        or integrity.get("signature") != item.get("signature")
+    ):
+        raise RuntimeError("assurance snapshot identity verification failed")
+    report_bytes = json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
+    report_sha256 = hashlib.sha256(report_bytes).hexdigest()
+    payload = _assurance_signature_payload(
+        tenant,
+        item["id"],
+        item["profile"],
+        item["source"],
+        int(document.get("generatedAt", 0)),
+        report_sha256,
+        item.get("schedule_revision"),
+    )
+    envelope_sha256 = _canonical_sha256(payload)
+    if (
+        not secrets.compare_digest(report_sha256, item["content_sha256"])
+        or integrity.get("reportSha256") != report_sha256
+        or integrity.get("envelopeSha256") != envelope_sha256
+        or integrity.get("signedAt") != document.get("generatedAt")
+        or item.get("envelope_sha256") != envelope_sha256
+    ):
+        raise RuntimeError("assurance snapshot content verification failed")
+    return document
+
+
+def _create_assurance_snapshot(
+    tenant,
+    profile,
+    actor,
+    *,
+    source,
+    snapshot_id=None,
+    now=None,
+    schedule_revision=None,
+    request_digest=None,
+):
+    """Generate, sign and retain one idempotent tenant assurance snapshot."""
+    if profile not in _ASSURANCE_REPORT_PROFILES:
+        raise ValueError("assurance report profile is unsupported")
+    if source not in {"operator", "schedule"}:
+        raise ValueError("assurance report snapshot source is unsupported")
+    generated_at = int(time.time()) if now is None else int(now)
+    snapshot_id = snapshot_id or str(uuid.uuid4())
+    snapshot_id = _bounded_identifier(snapshot_id, "snapshotId")
+    if source == "operator":
+        if not isinstance(request_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", request_digest):
+            raise ValueError("operator assurance request digest is invalid")
+        request_key = _assurance_item_key(tenant, "REPORT_REQUEST", snapshot_id)
+        try:
+            TABLE.put_item(
+                Item={
+                    **request_key,
+                    "tenant_id": tenant,
+                    "snapshot_id": snapshot_id,
+                    "request_digest": request_digest,
+                    "created_at": generated_at,
+                },
+                ConditionExpression="attribute_not_exists(pk)",
+            )
+        except Exception as error:
+            if not _is_conditional_conflict(error):
+                raise
+            claim = TABLE.get_item(Key=request_key, ConsistentRead=True).get("Item")
+            if not claim or not secrets.compare_digest(
+                str(claim.get("request_digest", "")), request_digest
+            ):
+                raise PolicyConflict(
+                    "assurance snapshot request identity was already used"
+                ) from error
+    key = _assurance_item_key(tenant, "REPORT_SNAPSHOT", snapshot_id)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if existing:
+        if (
+            existing.get("profile") != profile
+            or existing.get("source") != source
+            or existing.get("schedule_revision") != schedule_revision
+            or existing.get("request_digest") != request_digest
+        ):
+            raise PolicyConflict("assurance snapshot identity was already used")
+        _assurance_snapshot_document(tenant, existing)
+        _audit_once(
+            tenant,
+            f"assurance-{hashlib.sha256(f'{tenant}:{snapshot_id}'.encode()).hexdigest()[:32]}",
+            "assurance_report_snapshot_created",
+            existing.get("created_by", actor),
+            {
+                "snapshot_id": snapshot_id,
+                "profile": profile,
+                "source": source,
+                "schedule_revision": schedule_revision,
+                "content_sha256": existing["content_sha256"],
+                "object_version_id": existing["object_version_id"],
+            },
+            occurred_at=int(existing["generated_at"]),
+        )
+        return _assurance_snapshot_view(existing)
+    if not ASSURANCE_REPORT_SIGNING_KEY_ARN:
+        raise RuntimeError("assurance report signing is not configured")
+    signing_key_id = _assurance_key_identity(ASSURANCE_REPORT_SIGNING_KEY_ARN)
+    report = _assurance_report(tenant, profile, now=generated_at)
+    report_bytes = json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
+    content_sha256 = hashlib.sha256(report_bytes).hexdigest()
+    signature_payload = _assurance_signature_payload(
+        tenant,
+        snapshot_id,
+        profile,
+        source,
+        generated_at,
+        content_sha256,
+        schedule_revision,
+    )
+    envelope_sha256 = _canonical_sha256(signature_payload)
+    signed = KMS.sign(
+        KeyId=ASSURANCE_REPORT_SIGNING_KEY_ARN,
+        Message=bytes.fromhex(envelope_sha256),
+        MessageType="DIGEST",
+        SigningAlgorithm="ECDSA_SHA_256",
+    )
+    if (
+        _assurance_key_identity(signed.get("KeyId")) != signing_key_id
+        or signed.get("SigningAlgorithm") != "ECDSA_SHA_256"
+        or not isinstance(signed.get("Signature"), bytes)
+    ):
+        raise RuntimeError("assurance report signer returned invalid evidence")
+    signature = base64.b64encode(signed["Signature"]).decode()
+    document = {
+        "schemaVersion": 1,
+        "tenantId": tenant,
+        "snapshotId": snapshot_id,
+        "profile": profile,
+        "source": source,
+        "scheduleRevision": schedule_revision,
+        "generatedAt": generated_at,
+        "report": report,
+        "integrity": {
+            "domain": "aai-sec-assurance-snapshot-v1",
+            "reportSha256": content_sha256,
+            "envelopeSha256": envelope_sha256,
+            "keyId": signing_key_id,
+            "algorithm": "ECDSA_SHA_256",
+            "signature": signature,
+            "signedAt": generated_at,
+        },
+    }
+    body = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    if len(body) > _ASSURANCE_REPORT_MAX_BYTES:
+        raise RuntimeError("assurance snapshot exceeds its safe bound")
+    object_key = _assurance_snapshot_key(tenant, snapshot_id)
+    try:
+        response = S3.put_object(
+            Bucket=os.environ["AUDIT_BUCKET"],
+            Key=object_key,
+            Body=body,
+            ContentType="application/json",
+            ServerSideEncryption="AES256",
+            IfNoneMatch="*",
+            Metadata={"content-sha256": hashlib.sha256(body).hexdigest(), "schema-version": "1"},
+            ObjectLockMode="COMPLIANCE",
+            ObjectLockRetainUntilDate=datetime.now(UTC)
+            + timedelta(days=_evidence_policy(tenant)["retentionDays"]),
+        )
+    except Exception as error:
+        if getattr(error, "response", {}).get("Error", {}).get("Code") != "PreconditionFailed":
+            raise
+        # A retry may follow a successful object write but precede the metadata
+        # commit. Never overwrite that retained evidence with newly derived facts
+        # or assume ECDSA will emit the same signature twice.
+        head = S3.head_object(Bucket=os.environ["AUDIT_BUCKET"], Key=object_key)
+        response = {"VersionId": head.get("VersionId")}
+        existing_body = _evidence_body_bytes(
+            S3.get_object(
+                Bucket=os.environ["AUDIT_BUCKET"],
+                Key=object_key,
+                VersionId=response["VersionId"],
+            ),
+            _ASSURANCE_REPORT_MAX_BYTES,
+        )
+        if len(existing_body) > _ASSURANCE_REPORT_MAX_BYTES:
+            raise RuntimeError("assurance snapshot exceeds its safe bound") from error
+        try:
+            existing_document = json.loads(existing_body)
+        except json.JSONDecodeError as decode_error:
+            raise RuntimeError("existing assurance snapshot is malformed") from decode_error
+        if (
+            not isinstance(existing_document, dict)
+            or set(existing_document)
+            != {
+                "schemaVersion",
+                "tenantId",
+                "snapshotId",
+                "profile",
+                "source",
+                "scheduleRevision",
+                "generatedAt",
+                "report",
+                "integrity",
+            }
+            or existing_document.get("schemaVersion") != 1
+            or existing_document.get("tenantId") != tenant
+            or existing_document.get("snapshotId") != snapshot_id
+            or existing_document.get("profile") != profile
+            or existing_document.get("source") != source
+            or existing_document.get("scheduleRevision") != schedule_revision
+            or not isinstance(existing_document.get("report"), dict)
+            or not isinstance(existing_document.get("integrity"), dict)
+        ):
+            raise PolicyConflict("assurance snapshot object identity is invalid") from error
+        existing_integrity = existing_document["integrity"]
+        existing_report_bytes = json.dumps(
+            existing_document["report"], sort_keys=True, separators=(",", ":")
+        ).encode()
+        existing_digest = hashlib.sha256(existing_report_bytes).hexdigest()
+        try:
+            existing_signature = base64.b64decode(
+                existing_integrity.get("signature", ""), validate=True
+            )
+        except (ValueError, TypeError) as decode_error:
+            raise RuntimeError(
+                "existing assurance snapshot signature is malformed"
+            ) from decode_error
+        verification_key_arn = _assurance_verification_key_arn(existing_integrity.get("keyId"))
+        verified = KMS.verify(
+            KeyId=verification_key_arn,
+            Message=bytes.fromhex(
+                _canonical_sha256(
+                    _assurance_signature_payload(
+                        tenant,
+                        snapshot_id,
+                        profile,
+                        source,
+                        int(existing_document.get("generatedAt", 0)),
+                        existing_digest,
+                        schedule_revision,
+                    )
+                )
+            ),
+            MessageType="DIGEST",
+            Signature=existing_signature,
+            SigningAlgorithm="ECDSA_SHA_256",
+        )
+        if (
+            set(existing_integrity)
+            != {
+                "domain",
+                "reportSha256",
+                "envelopeSha256",
+                "keyId",
+                "algorithm",
+                "signature",
+                "signedAt",
+            }
+            or existing_integrity.get("domain") != "aai-sec-assurance-snapshot-v1"
+            or existing_integrity.get("reportSha256") != existing_digest
+            or existing_integrity.get("envelopeSha256")
+            != _canonical_sha256(
+                _assurance_signature_payload(
+                    tenant,
+                    snapshot_id,
+                    profile,
+                    source,
+                    int(existing_document.get("generatedAt", 0)),
+                    existing_digest,
+                    schedule_revision,
+                )
+            )
+            or not isinstance(existing_integrity.get("keyId"), str)
+            or existing_integrity.get("algorithm") != "ECDSA_SHA_256"
+            or _assurance_key_identity(verified.get("KeyId")) != existing_integrity.get("keyId")
+            or verified.get("SigningAlgorithm") != "ECDSA_SHA_256"
+            or verified.get("SignatureValid") is not True
+        ):
+            raise RuntimeError("existing assurance snapshot signature is invalid") from error
+        document = existing_document
+        report = document["report"]
+        generated_at = _discovery_integer(document.get("generatedAt"), "generatedAt")
+        content_sha256 = existing_digest
+        envelope_sha256 = existing_integrity["envelopeSha256"]
+        signature = existing_integrity["signature"]
+        signing_key_id = existing_integrity["keyId"]
+        body = existing_body
+    version_id = response.get("VersionId")
+    if not isinstance(version_id, str):
+        raise RuntimeError("assurance snapshot has no exact object version")
+    item = {
+        **key,
+        "tenant_id": tenant,
+        "id": snapshot_id,
+        "profile": profile,
+        "source": source,
+        "schedule_revision": schedule_revision,
+        "request_digest": request_digest,
+        "created_by": actor,
+        "generated_at": generated_at,
+        "content_sha256": content_sha256,
+        "envelope_sha256": envelope_sha256,
+        "object_sha256": hashlib.sha256(body).hexdigest(),
+        "object_key": object_key,
+        "object_version_id": version_id,
+        "posture": report["posture"],
+        "signing_key_id": signing_key_id,
+        "signing_algorithm": "ECDSA_SHA_256",
+        "signature": signature,
+    }
+    audit_ref = _audit_once(
+        tenant,
+        f"assurance-{hashlib.sha256(f'{tenant}:{snapshot_id}'.encode()).hexdigest()[:32]}",
+        "assurance_report_snapshot_created",
+        actor,
+        {
+            "snapshot_id": snapshot_id,
+            "profile": profile,
+            "source": source,
+            "schedule_revision": schedule_revision,
+            "content_sha256": content_sha256,
+            "object_version_id": version_id,
+        },
+        occurred_at=generated_at,
+    )
+    item["audit_key"] = audit_ref["key"]
+    item["audit_version_id"] = audit_ref["versionId"]
+    item["audit_payload_hash"] = audit_ref["payloadHash"]
+    try:
+        TABLE.put_item(Item=item, ConditionExpression="attribute_not_exists(pk)")
+    except Exception as error:
+        if not _is_conditional_conflict(error):
+            raise
+        item = _assurance_snapshot_record(tenant, snapshot_id)
+        if item.get("object_sha256") != hashlib.sha256(body).hexdigest():
+            raise PolicyConflict("assurance snapshot metadata changed") from error
+    return _assurance_snapshot_view(item)
+
+
+def _verify_assurance_snapshot(tenant, snapshot_id):
+    """Revalidate exact bytes and their KMS signature without mutating state."""
+    item = _assurance_snapshot_record(tenant, snapshot_id)
+    document = _assurance_snapshot_document(tenant, item)
+    try:
+        signature = base64.b64decode(document["integrity"]["signature"], validate=True)
+    except (ValueError, TypeError) as error:
+        raise RuntimeError("assurance snapshot signature is malformed") from error
+    verification_key_arn = _assurance_verification_key_arn(item["signing_key_id"])
+    verified = KMS.verify(
+        KeyId=verification_key_arn,
+        Message=bytes.fromhex(item["envelope_sha256"]),
+        MessageType="DIGEST",
+        Signature=signature,
+        SigningAlgorithm="ECDSA_SHA_256",
+    )
+    if (
+        verified.get("SignatureValid") is not True
+        or _assurance_key_identity(verified.get("KeyId")) != item["signing_key_id"]
+        or verified.get("SigningAlgorithm") != "ECDSA_SHA_256"
+    ):
+        raise RuntimeError("assurance snapshot signature verification failed")
+    return {
+        "snapshotId": item["id"],
+        "verified": True,
+        "contentSha256": item["content_sha256"],
+        "objectVersionId": item["object_version_id"],
+        "signingKeyId": item["signing_key_id"],
+        "signingAlgorithm": "ECDSA_SHA_256",
+        "verifiedAt": int(time.time()),
+    }
+
+
+def _assurance_report_schedule_message(tenant, occurrence):
+    """Return one closed worker message bound to a claimed schedule revision."""
+    return {
+        "schemaVersion": 1,
+        "tenantId": tenant,
+        "snapshotId": occurrence["snapshotId"],
+        "profile": occurrence["profile"],
+        "dueAt": int(occurrence["dueAt"]),
+        "scheduleRevision": int(occurrence["scheduleRevision"]),
+    }
+
+
+def _dispatch_assurance_report_messages(messages):
+    """Send bounded batches and return accepted indexes without hiding partial failure."""
+    queue_url = os.environ.get("ASSURANCE_REPORT_QUEUE_URL", "")
+    if not queue_url:
+        raise RuntimeError("assurance report worker queue is not configured")
+    accepted = set()
+    failed = False
+    for start in range(0, len(messages), 10):
+        entries = []
+        for offset, message in enumerate(messages[start : start + 10]):
+            entries.append(
+                {
+                    "Id": f"report-{start + offset}",
+                    "MessageBody": json.dumps(message, sort_keys=True, separators=(",", ":")),
+                }
+            )
+        response = SQS.send_message_batch(QueueUrl=queue_url, Entries=entries)
+        expected_ids = {entry["Id"] for entry in entries}
+        successful_items = response.get("Successful")
+        failed_items = response.get("Failed")
+        if not isinstance(successful_items, list) or not isinstance(failed_items, list):
+            raise RuntimeError("assurance report queue returned a malformed batch response")
+        successful_ids = [
+            item.get("Id") if isinstance(item, dict) else None for item in successful_items
+        ]
+        failed_ids = [item.get("Id") if isinstance(item, dict) else None for item in failed_items]
+        returned_ids = successful_ids + failed_ids
+        if (
+            any(not isinstance(item_id, str) for item_id in returned_ids)
+            or len(returned_ids) != len(expected_ids)
+            or len(set(returned_ids)) != len(returned_ids)
+            or set(returned_ids) != expected_ids
+        ):
+            raise RuntimeError("assurance report queue returned a malformed batch response")
+        accepted.update(int(item_id.removeprefix("report-")) for item_id in successful_ids)
+        failed = failed or bool(failed_ids)
+    return accepted, failed
+
+
+def _validated_assurance_schedule_candidate(candidate, shard, now):
+    """Return validated schedule fields or raise one deterministic record error."""
+    try:
+        tenant = _bounded_identifier(candidate.get("tenant_id"), "tenantId")
+        if (
+            candidate.get("pk") != f"ASSURANCE#{tenant}"
+            or candidate.get("sk") != "REPORT_SCHEDULE#current"
+            or candidate.get("enabled") is not True
+            or candidate.get("profile") not in _ASSURANCE_REPORT_PROFILES
+            or candidate.get("cadence") not in _ASSURANCE_REPORT_CADENCES
+        ):
+            raise ValueError("assurance report schedule identity is malformed")
+        due_at = _discovery_integer(candidate.get("next_run_at"), "nextRunAt", minimum=1)
+        revision = _discovery_integer(
+            candidate.get("revision"),
+            "revision",
+            minimum=1,
+            maximum=_ASSURANCE_REPORT_MAX_REVISION,
+        )
+        _discovery_integer(candidate.get("hour_utc"), "hourUtc", maximum=23)
+        day_of_week = candidate.get("day_of_week")
+        if candidate["cadence"] == "daily" and day_of_week is not None:
+            raise ValueError("daily assurance report schedule has a weekday")
+        if candidate["cadence"] == "weekly":
+            _discovery_integer(day_of_week, "dayOfWeek", maximum=6)
+        expected_pk, expected_sk = _assurance_report_index(tenant, due_at)
+        if (
+            expected_pk != f"ASSURANCE_REPORT#{shard:02d}"
+            or due_at > now
+            or candidate.get("assurance_report_pk") != expected_pk
+            or candidate.get("assurance_report_sk") != expected_sk
+        ):
+            raise ValueError("assurance report schedule index is malformed")
+        occurrence = candidate.get("pending_occurrence")
+        if occurrence is not None and (
+            not isinstance(occurrence, dict)
+            or set(occurrence)
+            != {"snapshotId", "profile", "dueAt", "scheduleRevision", "claimedAt"}
+            or occurrence.get("profile") != candidate["profile"]
+            or int(occurrence.get("dueAt", 0)) != due_at
+            or int(occurrence.get("scheduleRevision", 0)) != revision
+        ):
+            raise ValueError("assurance report occurrence claim is malformed")
+        return tenant, due_at, revision, occurrence
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("assurance report schedule record is malformed") from error
+
+
+def _quarantine_assurance_schedule_candidate(candidate, now):
+    """Remove exactly one observed malformed record from the due index."""
+    condition = "assurance_report_pk = :report_pk AND assurance_report_sk = :report_sk"
+    values = {
+        ":report_pk": candidate.get("assurance_report_pk"),
+        ":report_sk": candidate.get("assurance_report_sk"),
+        ":quarantined_at": now,
+        ":quarantine_reason": "malformed_schedule_record",
+    }
+    if "revision" in candidate:
+        condition += " AND #revision = :candidate_revision"
+        values[":candidate_revision"] = candidate["revision"]
+    else:
+        condition += " AND attribute_not_exists(#revision)"
+    try:
+        # Remove only the stale index projection observed by this query. The
+        # revision predicate prevents a concurrent repair from being replaced.
+        TABLE.update_item(
+            Key={"pk": candidate["pk"], "sk": candidate["sk"]},
+            UpdateExpression=(
+                "REMOVE assurance_report_pk, assurance_report_sk "
+                "SET assurance_report_quarantined_at = :quarantined_at, "
+                "assurance_report_quarantine_reason = :quarantine_reason"
+            ),
+            ConditionExpression=condition,
+            ExpressionAttributeNames={"#revision": "revision"},
+            ExpressionAttributeValues=values,
+        )
+        return True
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            return False
+        # Provider failure is not evidence of record corruption. Failing the
+        # shard leaves the record indexed for the scheduled retry.
+        raise
+
+
+def _assurance_report_schedule_cycle(shard):
+    """Claim and enqueue one bounded due-schedule shard; never build reports."""
+    shard = _discovery_integer(shard, "shard", maximum=_ASSURANCE_REPORT_SHARDS - 1)
+    now = int(time.time())
+    result = TABLE.query(
+        IndexName=_ASSURANCE_REPORT_INDEX,
+        KeyConditionExpression=Key("assurance_report_pk").eq(f"ASSURANCE_REPORT#{shard:02d}")
+        & Key("assurance_report_sk").lte(f"{now:012d}#~"),
+        Limit=_ASSURANCE_REPORT_SHARD_LIMIT,
+    )
+    messages = []
+    claims = []
+    corrupt = []
+    for candidate in result.get("Items", []):
+        try:
+            tenant, due_at, revision, occurrence = _validated_assurance_schedule_candidate(
+                candidate, shard, now
+            )
+        except ValueError:
+            corrupt.append(str(candidate.get("tenant_id", "unknown")))
+            _quarantine_assurance_schedule_candidate(candidate, now)
+            continue
+        if occurrence is None:
+            occurrence = {
+                "snapshotId": f"scheduled-{due_at}-{candidate['profile']}",
+                "profile": candidate["profile"],
+                "dueAt": due_at,
+                "scheduleRevision": revision + 1,
+                "claimedAt": now,
+            }
+            claimed = {
+                **candidate,
+                "pending_occurrence": occurrence,
+                "revision": revision + 1,
+                "updated_at": now,
+                "updated_by": "system:assurance-report-dispatcher",
+            }
+            try:
+                TABLE.put_item(
+                    Item=claimed,
+                    ConditionExpression="revision = :revision AND next_run_at = :next_run_at",
+                    ExpressionAttributeValues={
+                        ":revision": revision,
+                        ":next_run_at": due_at,
+                    },
+                )
+            except Exception as error:
+                if _is_conditional_conflict(error):
+                    continue
+                # A provider failure cannot be reclassified as corrupt. Fail
+                # this shard invocation and preserve the live due index.
+                raise
+        messages.append(_assurance_report_schedule_message(tenant, occurrence))
+        claims.append(claimed if candidate.get("pending_occurrence") is None else candidate)
+    accepted, partial_failure = _dispatch_assurance_report_messages(messages)
+    for index in accepted:
+        claimed = dict(claims[index])
+        claimed.pop("assurance_report_pk", None)
+        claimed.pop("assurance_report_sk", None)
+        try:
+            TABLE.put_item(
+                Item=claimed,
+                ConditionExpression="revision = :revision",
+                ExpressionAttributeValues={":revision": int(claimed["revision"])},
+            )
+        except Exception as error:
+            # A very fast worker may already have advanced the schedule. Its
+            # newer next-run index wins; the dispatcher must never overwrite it.
+            if not _is_conditional_conflict(error):
+                raise
+    if corrupt and os.environ.get("SECURITY_ALERTS_TOPIC_ARN"):
+        SNS.publish(
+            TopicArn=os.environ["SECURITY_ALERTS_TOPIC_ARN"],
+            Subject="AAI assurance report schedule alert",
+            Message=json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "source": "assurance_report_scheduler",
+                    "reasonCode": "corrupt_schedule_record",
+                    "affectedTenantCount": len(corrupt),
+                    "quarantineFailureCount": 0,
+                    "observedAt": now,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+    summary = {
+        "shard": shard,
+        "dueSchedules": len(result.get("Items", [])),
+        "queuedJobs": len(accepted),
+        "corruptSchedules": len(corrupt),
+        "quarantineFailures": 0,
+        "moreDueSchedules": bool(result.get("LastEvaluatedKey")),
+    }
+    if partial_failure:
+        raise RuntimeError("assurance report queue rejected one or more jobs")
+    return summary
+
+
+def _process_assurance_report_job(message):
+    """Generate one report only under a live revision-bound occurrence claim."""
+    if not isinstance(message, dict) or set(message) != {
+        "schemaVersion",
+        "tenantId",
+        "snapshotId",
+        "profile",
+        "dueAt",
+        "scheduleRevision",
+    }:
+        raise ValueError("assurance report worker message schema is invalid")
+    if message.get("schemaVersion") != 1:
+        raise ValueError("assurance report worker schema version is unsupported")
+    tenant = _bounded_identifier(message.get("tenantId"), "tenantId")
+    snapshot_id = _bounded_identifier(message.get("snapshotId"), "snapshotId")
+    profile = message.get("profile")
+    due_at = _discovery_integer(message.get("dueAt"), "dueAt", minimum=1)
+    revision = _discovery_integer(message.get("scheduleRevision"), "scheduleRevision", minimum=1)
+    key = _assurance_item_key(tenant, "REPORT_SCHEDULE", "current")
+    schedule = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    occurrence = schedule.get("pending_occurrence") if schedule else None
+    expected = {
+        "snapshotId": snapshot_id,
+        "profile": profile,
+        "dueAt": due_at,
+        "scheduleRevision": revision,
+        "claimedAt": occurrence.get("claimedAt") if isinstance(occurrence, dict) else None,
+    }
+    if (
+        not schedule
+        or schedule.get("enabled") is not True
+        or int(schedule.get("revision", 0)) != revision
+        or occurrence != expected
+    ):
+        return {"status": "stale_claim"}
+    snapshot = _create_assurance_snapshot(
+        tenant,
+        profile,
+        "system:assurance-report-worker",
+        source="schedule",
+        snapshot_id=snapshot_id,
+        now=due_at,
+        schedule_revision=revision,
+    )
+    now = int(time.time())
+    next_run = _next_assurance_report_run(
+        schedule["cadence"],
+        int(schedule["hour_utc"]),
+        schedule.get("day_of_week"),
+        now=now,
+    )
+    index_pk, index_sk = _assurance_report_index(tenant, next_run)
+    completed = {
+        **schedule,
+        "revision": revision + 1,
+        "last_run_at": due_at,
+        "last_snapshot_id": snapshot_id,
+        "next_run_at": next_run,
+        "assurance_report_pk": index_pk,
+        "assurance_report_sk": index_sk,
+        "updated_at": now,
+        "updated_by": "system:assurance-report-worker",
+    }
+    completed.pop("pending_occurrence", None)
+    TABLE.put_item(
+        Item=completed,
+        ConditionExpression="revision = :revision",
+        ExpressionAttributeValues={":revision": revision},
+    )
+    return {"status": "completed", "snapshotId": snapshot["id"]}
+
+
+def process_assurance_report_queue_event(event):
+    """Process one dedicated report-worker SQS record with server-owned authority."""
+    records = event.get("Records") if isinstance(event, dict) else None
+    if not isinstance(records, list) or len(records) != 1:
+        raise ValueError("assurance report worker requires exactly one SQS record")
+    record = records[0]
+    if record.get("eventSource") not in {"aws:sqs", None}:
+        raise ValueError("assurance report worker event source is invalid")
+    try:
+        body = json.loads(record.get("body", ""))
+    except (TypeError, json.JSONDecodeError) as error:
+        raise ValueError("assurance report worker message is invalid") from error
+    return _process_assurance_report_job(body)
+
+
 def _fleet(tenant):
     agents = _all_agents(tenant)
     groups = []
@@ -18387,6 +19571,10 @@ def handler(event, context):
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("evidence assurance schedule event is invalid")
         return _evidence_schedule_cycle()
+    if isinstance(event, dict) and event.get("source") == "aai.assurance-reports":
+        if set(event) != {"source", "schemaVersion", "shard"} or event.get("schemaVersion") != 1:
+            raise ValueError("assurance report schedule event is invalid")
+        return _assurance_report_schedule_cycle(event.get("shard"))
     if isinstance(event, dict) and event.get("source") == "aai.evidence-retention":
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("evidence retention schedule event is invalid")
@@ -18878,6 +20066,123 @@ def handler(event, context):
                         {"error": "auditor assurance requires evidence-read authority"},
                     )
                 return _response(200, _assurance_report(tenant, parts[1]))
+            if parts == ["reports", "schedule"]:
+                if method == "GET":
+                    if not _operator_authorized(event, "evidence_read", tenant):
+                        return _response(
+                            403,
+                            {"error": "assurance report schedule requires evidence-read authority"},
+                        )
+                    schedule = TABLE.get_item(
+                        Key=_assurance_item_key(tenant, "REPORT_SCHEDULE", "current"),
+                        ConsistentRead=True,
+                    ).get("Item")
+                    return _response(200, _assurance_report_schedule_view(schedule))
+                if method == "PUT":
+                    return _response(
+                        200,
+                        _set_assurance_report_schedule(tenant, _body(event), actor),
+                    )
+            if parts == ["reports", "snapshots"]:
+                if method == "GET":
+                    if not _operator_authorized(event, "evidence_read", tenant):
+                        return _response(
+                            403,
+                            {
+                                "error": (
+                                    "assurance snapshot history requires evidence-read authority"
+                                )
+                            },
+                        )
+                    history, truncated = _assurance_list_page(
+                        tenant, "REPORT_SNAPSHOT", consistent_read=True
+                    )
+                    items = [_assurance_snapshot_view(item) for item in history]
+                    items.sort(key=lambda item: (item["generatedAt"], item["id"]), reverse=True)
+                    return _response(
+                        200,
+                        {
+                            "items": items,
+                            "truncated": truncated,
+                        },
+                    )
+                if method == "POST":
+                    value = _body(event)
+                    if not isinstance(value, dict) or set(value) != {
+                        "requestId",
+                        "profile",
+                        "rationale",
+                    }:
+                        raise ValueError("assurance snapshot request has an invalid schema")
+                    rationale = _bounded_text(value.get("rationale"), "rationale", maximum=500)
+                    if len(rationale) < 20:
+                        raise ValueError("rationale must be at least 20 characters")
+                    request_id = _bounded_identifier(value.get("requestId"), "requestId")
+                    request_digest = _canonical_sha256(
+                        {
+                            "requestId": request_id,
+                            "profile": value.get("profile"),
+                            "rationaleSha256": hashlib.sha256(rationale.encode()).hexdigest(),
+                            "actor": actor,
+                        }
+                    )
+                    snapshot = _create_assurance_snapshot(
+                        tenant,
+                        value.get("profile"),
+                        actor,
+                        source="operator",
+                        snapshot_id=f"operator-{request_id}",
+                        request_digest=request_digest,
+                    )
+                    return _response(201, snapshot)
+            if len(parts) == 3 and parts[:2] == ["reports", "snapshots"]:
+                item = _assurance_snapshot_record(tenant, parts[2])
+                if not (_operator_roles(event) or _service_capabilities(event)):
+                    return _response(
+                        403,
+                        {"error": "assurance snapshot requires a tenant role"},
+                    )
+                if item.get("profile") == "auditor" and not _operator_authorized(
+                    event, "evidence_read", tenant
+                ):
+                    return _response(
+                        403,
+                        {"error": "auditor assurance requires evidence-read authority"},
+                    )
+                if method == "GET":
+                    try:
+                        document = _assurance_snapshot_document(tenant, item)
+                    except RuntimeError as error:
+                        raise AssuranceSnapshotUnavailable(
+                            "assurance snapshot is temporarily unavailable"
+                        ) from error
+                    return _response(200, document)
+            if (
+                method == "POST"
+                and len(parts) == 4
+                and parts[:2] == ["reports", "snapshots"]
+                and parts[3] == "verify"
+            ):
+                item = _assurance_snapshot_record(tenant, parts[2])
+                if not (_operator_roles(event) or _service_capabilities(event)):
+                    return _response(
+                        403,
+                        {"error": "assurance snapshot verification requires a tenant role"},
+                    )
+                if item.get("profile") == "auditor" and not _operator_authorized(
+                    event, "evidence_read", tenant
+                ):
+                    return _response(
+                        403,
+                        {"error": "auditor assurance requires evidence-read authority"},
+                    )
+                try:
+                    verification = _verify_assurance_snapshot(tenant, parts[2])
+                except RuntimeError as error:
+                    raise AssuranceSnapshotUnavailable(
+                        "assurance snapshot is temporarily unavailable"
+                    ) from error
+                return _response(200, verification)
             if method == "GET" and parts in (["evidence"], ["evidence", "export"]):
                 if not _operator_authorized(event, "evidence_read", tenant):
                     return _response(
@@ -20646,6 +21951,8 @@ def handler(event, context):
         return _response(403, {"error": str(exc)})
     except LookupError as exc:
         return _response(404, {"error": str(exc)})
+    except AssuranceSnapshotUnavailable as exc:
+        return _response(503, {"error": str(exc)})
     except PolicyConflict as exc:
         return _response(409, {"error": str(exc)})
     except ManagedPackageConflict as exc:

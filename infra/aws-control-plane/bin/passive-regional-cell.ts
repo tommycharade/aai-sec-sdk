@@ -16,6 +16,20 @@ const cellMode = process.env.RECOVERY_CELL_MODE ?? "standby";
 if (cellMode !== "standby" && cellMode !== "active") {
   throw new Error("RECOVERY_CELL_MODE must be standby or active");
 }
+let historicalAssuranceVerificationKeyArns: string[];
+try {
+  const value = JSON.parse(
+    process.env.RECOVERY_ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS ?? "[]",
+  ) as unknown;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new Error("invalid historical assurance keys");
+  }
+  historicalAssuranceVerificationKeyArns = value;
+} catch {
+  throw new Error(
+    "RECOVERY_ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS must be a JSON string array",
+  );
+}
 new PassiveRegionalCellStack(app, "AaiSecPassiveRegionalCell", {
   env: {
     account: required("RECOVERY_AWS_ACCOUNT_ID"),
@@ -32,6 +46,10 @@ new PassiveRegionalCellStack(app, "AaiSecPassiveRegionalCell", {
   scimTableName: required("RECOVERY_SCIM_TABLE"),
   auditReplicaBucketName: required("RECOVERY_AUDIT_BUCKET"),
   policySigningReplicaKeyArn: required("RECOVERY_POLICY_SIGNING_KEY_ARN"),
+  assuranceReportSigningReplicaKeyArn: required(
+    "RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN",
+  ),
+  assuranceReportHistoricalVerificationKeyArns: historicalAssuranceVerificationKeyArns,
   recoveryUserPoolId: required("RECOVERY_USER_POOL_ID"),
   recoveryUserPoolClientId: required("RECOVERY_USER_POOL_CLIENT_ID"),
   entraTenantId: process.env.ENTRA_TENANT_ID,

@@ -1,5 +1,27 @@
 # Changelog
 
+- Added operator-created and daily/weekly scheduled enterprise assurance
+  snapshots. Domain-separated KMS signatures bind tenant, snapshot identity,
+  profile, source, timestamps, schedule revision and canonical report digest.
+  Exact versions live in the replicated S3 Object Lock audit namespace; a
+  revision-bound sharded dispatcher and dedicated SQS worker provide bounded,
+  paginated, duplicate-safe generation with partial-batch recovery, DLQ
+  monitoring and active-recovery parity. A separate retained multi-Region KMS
+  key, historical local-replica registry, isolated report-state partition and
+  synthesized least-privilege IAM verification keep report generation outside
+  executable-policy authority. Corrupt due records are quarantined so a full
+  malformed page cannot starve later tenants; historical replicas are
+  deployable, recovery-verified and verify-only. A guarded two-phase signer
+  rotation command stages passive trust before cutover, persists authority for
+  future deployments and verifies pre-rotation signatures in both Regions.
+  Routine deployment exact-matches the ordered historical registry before CDK
+  and rotation evidence binds bounded digest/signature bytes to KMS's returned
+  key and algorithm.
+  Quarantine is revision-bound and operator-visible; transient provider
+  failures remain retryable and can never masquerade as corrupt tenant state.
+  New least-privilege APIs expose schedule, history, verification and download;
+  email/SIEM delivery remains explicitly unavailable and Splunk remains a stub.
+
 - Added private, versioned object-backed discovery pages. New generations store
   normalized payloads outside DynamoDB, bind exact S3 versions and SHA-256
   digests into tenant-derived page records, and independently verify bytes,

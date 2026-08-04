@@ -104,6 +104,10 @@ def _active_environment() -> dict[str, str]:
         "RECOVERY_POLICY_SIGNING_KEY_ARN": (
             "arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
         ),
+        "RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN": (
+            "arn:aws:kms:eu-west-1:111111111111:key/mrk-abcdef1234567890abcdef1234567890"
+        ),
+        "RECOVERY_ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS": "[]",
         "ENTRA_TENANT_ID": "12345678-1234-4234-8234-123456789abc",
         "ENTRA_AAI_TENANT_ID": "synthetic-enterprise",
     }
@@ -420,6 +424,7 @@ def test_active_environment_uses_persisted_identity_and_rejects_substitution(
         },
     )()
     key = "arn:aws:kms:eu-west-1:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
+    assurance_key = "arn:aws:kms:eu-west-1:111111111111:key/mrk-abcdef1234567890abcdef1234567890"
     entra = module.control_plane.EntraDeploymentManifest.parse(
         json.dumps(
             {
@@ -438,7 +443,10 @@ def test_active_environment_uses_persisted_identity_and_rejects_substitution(
     monkeypatch.setattr(
         module.recovery,
         "recovery_stack_outputs",
-        lambda *_args, **_kw: {"RegionalPolicySigningReplicaKeyArn": key},
+        lambda *_args, **_kw: {
+            "RegionalPolicySigningReplicaKeyArn": key,
+            "AssuranceReportSigningReplicaKeyArn": assurance_key,
+        },
     )
     monkeypatch.setattr(
         module.control_plane, "load_persisted_manifest", lambda *_args, **_kw: entra
@@ -446,7 +454,10 @@ def test_active_environment_uses_persisted_identity_and_rejects_substitution(
     monkeypatch.setattr(
         module.passive,
         "_deployment_environment",
-        lambda *_args, **_kw: {"RECOVERY_POLICY_SIGNING_KEY_ARN": key},
+        lambda *_args, **_kw: {
+            "RECOVERY_POLICY_SIGNING_KEY_ARN": key,
+            "RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN": assurance_key,
+        },
     )
     monkeypatch.setattr(module, "_aws", lambda *_args, **_kw: {"Account": "111111111111"})
     verified = {"entraTenantId": entra.entra_tenant_id, "targetSigningKeyArn": key}
@@ -537,15 +548,24 @@ def test_target_discovery_and_live_runtime_are_exact_and_provider_verified() -> 
         ("PassiveControlPlaneHandlerABC", "AWS::Lambda::Function", "handler-fn"),
         ("PassiveEvidenceWorkerABC", "AWS::Lambda::Function", "evidence-fn"),
         ("PassiveRetentionWorkerABC", "AWS::Lambda::Function", "retention-fn"),
+        ("PassiveAssuranceReportWorkerABC", "AWS::Lambda::Function", "report-fn"),
         ("EvidenceMapping", "AWS::Lambda::EventSourceMapping", "map-a"),
         ("RetentionMapping", "AWS::Lambda::EventSourceMapping", "map-b"),
-        *[(f"Schedule{index}", "AWS::Events::Rule", f"rule-{index}") for index in range(5)],
+        ("ReportMapping", "AWS::Lambda::EventSourceMapping", "map-c"),
+        *[(f"Schedule{index}", "AWS::Events::Rule", f"rule-{index}") for index in range(21)],
     ]
     expected_environment = _active_environment()
     actual_environment = {
         "ACTIVATION_EVIDENCE_SHA256": expected_environment["RECOVERY_ACTIVATION_EVIDENCE_SHA256"],
         "POLICY_SIGNING_KEY_ARN": expected_environment["RECOVERY_POLICY_SIGNING_KEY_ARN"],
         "REGIONAL_POLICY_SIGNING_KEY_ARN": expected_environment["RECOVERY_POLICY_SIGNING_KEY_ARN"],
+        "ASSURANCE_REPORT_SIGNING_KEY_ARN": expected_environment[
+            "RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN"
+        ],
+        "ASSURANCE_REPORT_VERIFICATION_KEY_ARNS": json.dumps(
+            [expected_environment["RECOVERY_ASSURANCE_REPORT_SIGNING_KEY_ARN"]],
+            separators=(",", ":"),
+        ),
         "ENTRA_TENANT_ID": expected_environment["ENTRA_TENANT_ID"],
         "ENTRA_AAI_TENANT_ID": expected_environment["ENTRA_AAI_TENANT_ID"],
         "PASSIVE_CELL_MODE": "active",
@@ -589,11 +609,16 @@ def test_target_discovery_and_live_runtime_are_exact_and_provider_verified() -> 
         if "get-function-configuration" in command:
             name = command[command.index("--function-name") + 1]
             handlers = {
-                "handler-fn": ("handler.handler", 512, 15),
+                "handler-fn": ("handler.handler", 512, 60),
                 "evidence-fn": ("evidence_worker.handler", 1024, 60),
                 "retention-fn": ("retention_worker.handler", 1024, 60),
+                "report-fn": ("assurance_report_worker.handler", 1024, 60),
             }
             handler, memory, timeout = handlers[name]
+            variables = dict(actual_environment)
+            if name == "report-fn":
+                variables["POLICY_SIGNING_KEY_ARN"] = ""
+                variables["REGIONAL_POLICY_SIGNING_KEY_ARN"] = ""
             return _completed(
                 {
                     "FunctionName": name,
@@ -608,8 +633,12 @@ def test_target_discovery_and_live_runtime_are_exact_and_provider_verified() -> 
                     "TracingConfig": {"Mode": "PassThrough"},
                     "CodeSha256": "A" * 43 + "=",
                     "RevisionId": "42345678-1234-4234-8234-123456789abc",
-                    "ReservedConcurrentExecutions": 100 if name == "handler-fn" else 5,
-                    "Environment": {"Variables": actual_environment},
+                    "ReservedConcurrentExecutions": 100
+                    if name == "handler-fn"
+                    else 20
+                    if name == "report-fn"
+                    else 5,
+                    "Environment": {"Variables": variables},
                 }
             )
         if "get-event-source-mapping" in command:
@@ -652,10 +681,15 @@ def test_primary_failback_target_discovery_and_runtime_are_exact() -> None:
         ("ControlPlaneHandlerABC", "AWS::Lambda::Function", "primary-handler"),
         ("EvidenceWorkerABC", "AWS::Lambda::Function", "primary-evidence"),
         ("EvidenceRetentionWorkerABC", "AWS::Lambda::Function", "primary-retention"),
+        ("AssuranceReportWorkerABC", "AWS::Lambda::Function", "primary-report"),
         ("DiscoveryCollectorABC", "AWS::Lambda::Function", "ignored-discovery"),
         ("EvidenceMapping", "AWS::Lambda::EventSourceMapping", "primary-map-a"),
         ("RetentionMapping", "AWS::Lambda::EventSourceMapping", "primary-map-b"),
-        *[(f"Schedule{index}", "AWS::Events::Rule", f"primary-rule-{index}") for index in range(5)],
+        ("ReportMapping", "AWS::Lambda::EventSourceMapping", "primary-map-c"),
+        *[
+            (f"Schedule{index}", "AWS::Events::Rule", f"primary-rule-{index}")
+            for index in range(22)
+        ],
     ]
     expected = {
         "ENTRA_TENANT_ID": "12345678-1234-1234-1234-123456789abc",
@@ -666,6 +700,13 @@ def test_primary_failback_target_discovery_and_runtime_are_exact() -> None:
         "REGIONAL_POLICY_SIGNING_KEY_ARN": (
             "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
         ),
+        "ASSURANCE_REPORT_SIGNING_KEY_ARN": (
+            "arn:aws:kms:eu-west-2:111111111111:key/mrk-abcdef1234567890abcdef1234567890"
+        ),
+        "ASSURANCE_REPORT_VERIFICATION_KEY_ARNS": json.dumps(
+            ["arn:aws:kms:eu-west-2:111111111111:key/mrk-abcdef1234567890abcdef1234567890"],
+            separators=(",", ":"),
+        ),
     }
     common = {
         "ENTRA_PROVIDER_ENABLED": "true",
@@ -674,6 +715,10 @@ def test_primary_failback_target_discovery_and_runtime_are_exact() -> None:
         "ENTRA_STRONG_AUTH_ENFORCED": "true",
         "SCIM_ENABLED": "true",
         "POLICY_SIGNING_KEY_ARN": expected["POLICY_SIGNING_KEY_ARN"],
+        "ASSURANCE_REPORT_SIGNING_KEY_ARN": expected["ASSURANCE_REPORT_SIGNING_KEY_ARN"],
+        "ASSURANCE_REPORT_VERIFICATION_KEY_ARNS": expected[
+            "ASSURANCE_REPORT_VERIFICATION_KEY_ARNS"
+        ],
         "REGIONAL_CELL_ROLE": "primary",
         "REGIONAL_JOB_RECONCILIATION_ENABLED": "true",
     }
@@ -712,9 +757,10 @@ def test_primary_failback_target_discovery_and_runtime_are_exact() -> None:
         if "get-function-configuration" in command:
             name = command[command.index("--function-name") + 1]
             contracts = {
-                "primary-handler": ("handler.handler", 512, 15, 100),
+                "primary-handler": ("handler.handler", 512, 60, 100),
                 "primary-evidence": ("evidence_worker.handler", 1024, 60, 5),
                 "primary-retention": ("retention_worker.handler", 1024, 60, 5),
+                "primary-report": ("assurance_report_worker.handler", 1024, 60, 20),
             }
             handler, memory, timeout, concurrency = contracts[name]
             variables = dict(common)
@@ -722,6 +768,9 @@ def test_primary_failback_target_discovery_and_runtime_are_exact() -> None:
                 variables["REGIONAL_POLICY_SIGNING_KEY_ARN"] = expected[
                     "REGIONAL_POLICY_SIGNING_KEY_ARN"
                 ]
+            elif name == "primary-report":
+                variables["POLICY_SIGNING_KEY_ARN"] = ""
+                variables["REGIONAL_POLICY_SIGNING_KEY_ARN"] = ""
             return _completed(
                 {
                     "FunctionName": name,
@@ -760,7 +809,7 @@ def test_primary_failback_target_discovery_and_runtime_are_exact() -> None:
         runner=runner,
     )
     assert evidence["status"] == "primary-target-runtime-live-not-routed"
-    assert evidence["functionCount"] == 3
+    assert evidence["functionCount"] == 4
 
     common["REGIONAL_CELL_ROLE"] = "recovery"
     with pytest.raises(module.ActiveCellDeploymentError, match="primary target Lambda"):
@@ -786,6 +835,10 @@ def test_primary_target_environment_binds_persisted_entra_and_live_signer(
         "RegionalPolicySigningKeyArn": (
             "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef"
         ),
+        "AssuranceReportSigningKeyArn": (
+            "arn:aws:kms:eu-west-2:111111111111:key/mrk-abcdef1234567890abcdef1234567890"
+        ),
+        "AssuranceReportHistoricalVerificationKeyArns": "[]",
     }
     entra = SimpleNamespace(
         entra_tenant_id="12345678-1234-1234-1234-123456789abc",
@@ -801,6 +854,9 @@ def test_primary_target_environment_binds_persisted_entra_and_live_signer(
         manifest, regional, verified, profile="synthetic"
     )
     assert environment["POLICY_SIGNING_KEY_ARN"] == outputs["PolicySigningKeyArn"]
+    assert (
+        environment["ASSURANCE_REPORT_SIGNING_KEY_ARN"] == outputs["AssuranceReportSigningKeyArn"]
+    )
     with pytest.raises(module.ActiveCellDeploymentError, match="signing authority"):
         module.primary_target_environment(
             manifest,
