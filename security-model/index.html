@@ -3401,7 +3401,26 @@ actions and resources are code/deployment-owned; unknown dependencies and
 Cognito's out-of-role authentication path fail before IAM mutation. Cleanup is
 authorized by the exact retained lock digest rather than a still-live approval,
 so expiry cannot strand the deny. Completion transactionally releases the lock
-and retains content-free evidence.</p>
+and retains content-free evidence.
+Acquisition transactionally checks that the fault UUID has no retained evidence
+before writing its target lock, preventing replay after completion. Only a lost
+response in the initial <code>LOCKED</code> state is retryable; an advanced duplicate
+workflow is rejected. Before attach, a complete live inline-policy inventory
+also rejects an out-of-band or stranded Regional deny. Production deployment
+must still make this controller the exclusive writer of the reserved inline
+policy namespace because IAM does not offer a compare-and-swap attach API.
+The private Standard Step Functions topology now encodes the complete normal
+order, bounded provider retries, immediate exception cleanup and independent
+Scheduler fallback. It has no API/UI or <code>StartExecution</code> grant and excludes
+execution data from error logs. Its first task is a probe Lambda with no AWS
+authority or configuration bypass; that task always fails after validating the
+complete authority until real target-only provider probes are implemented, so
+the synthesized stack cannot currently acquire the lock or mutate IAM. A
+14-day encrypted DLQ and five security-topic alarms make workflow and watchdog
+delivery failure observable. The workflow role's sole wildcard resource is the
+exact CloudWatch Logs delivery control-plane action set required because those
+APIs do not support resource-level permissions; an independent verifier rejects
+any wildcard action, content read or broader resource use.</p>
 <p>Bidirectional evidence continuity is independently constrained in each S3
 direction. Both Object Lock buckets enable replica-modification sync while
 excluding delete markers, and synthesized CloudFormation is rejected unless
