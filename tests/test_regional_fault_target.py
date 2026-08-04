@@ -121,3 +121,10 @@ def test_untrusted_or_unsupported_events_fail_before_provider_access(
 def test_non_access_provider_failure_escapes_fail_closed() -> None:
     with pytest.raises(RuntimeError, match="synthetic outage"):
         module.run(event("queue"), clients={"sqs": Client(RuntimeError("synthetic outage"))})
+
+
+def test_missing_aws_runtime_fails_closed(monkeypatch: Any) -> None:
+    """Local environments cannot silently replace an unavailable AWS provider."""
+    monkeypatch.setattr(module, "boto3", None)
+    with pytest.raises(module.RegionalFaultTargetError, match="provider is unavailable"):
+        module.run(event("audit"))

@@ -11,7 +11,10 @@ import json
 import os
 import re
 
-import boto3
+try:
+    import boto3
+except ImportError:  # pragma: no cover - AWS Lambda provides boto3.
+    boto3 = None
 
 
 class RegionalFaultTargetError(RuntimeError):
@@ -38,6 +41,13 @@ def _required(name):
     if not value:
         raise RegionalFaultTargetError(f"{name} is required")
     return value
+
+
+def _aws_client(service):
+    """Create one AWS client or fail closed outside the Lambda runtime."""
+    if boto3 is None:
+        raise RegionalFaultTargetError("AWS provider is unavailable")
+    return boto3.client(service)
 
 
 def _evidence(event, status, operation_count, *, error_code=None):
@@ -92,7 +102,7 @@ def run(event, *, clients=None):
     operation_count = 0
     try:
         if dependency == "audit":
-            client = factory.get("s3") or boto3.client("s3")
+            client = factory.get("s3") or _aws_client("s3")
             body = json.dumps(
                 {"faultId": event["faultId"], "synthetic": True},
                 sort_keys=True,
@@ -107,7 +117,7 @@ def run(event, *, clients=None):
             )
             operation_count = 1
         elif dependency == "dynamodb":
-            client = factory.get("dynamodb") or boto3.client("dynamodb")
+            client = factory.get("dynamodb") or _aws_client("dynamodb")
             names = [
                 _required("CONTROL_TABLE"),
                 _required("PRESENCE_TABLE"),
@@ -122,7 +132,7 @@ def run(event, *, clients=None):
                 )
                 operation_count += 1
         elif dependency == "kms":
-            client = factory.get("kms") or boto3.client("kms")
+            client = factory.get("kms") or _aws_client("kms")
             digest = hashlib.sha256(
                 f"{event['faultId']}:{event['authoritySha256']}:{event['phase']}".encode()
             ).digest()
@@ -137,7 +147,7 @@ def run(event, *, clients=None):
             )
             operation_count += 1
         else:
-            client = factory.get("sqs") or boto3.client("sqs")
+            client = factory.get("sqs") or _aws_client("sqs")
             client.send_message(
                 QueueUrl=_required("REGIONAL_FAULT_CANARY_QUEUE_URL"),
                 MessageBody=json.dumps(
