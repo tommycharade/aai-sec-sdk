@@ -119,7 +119,7 @@ bodies and credential-shaped rationale fail closed.
 
 ## Approved automatic response
 
-The **Incidents → Response rules** workspace can establish narrowly bounded
+The **Incidents → Detection rules** workspace can establish narrowly bounded
 automatic containment for these server-derived detections. A typed rule fixes
 the reason codes, severities, Claude Code/Codex host scope, hourly action limit,
 per-agent cooldown and priority. Its only action is SDK quarantine of the exact
@@ -141,5 +141,7 @@ This tranche provides detections, durable local delivery, revisioned incident
 cases, authoritative endpoint-to-agent binding and approved automatic SDK
 quarantine. It does not provide MDM/EDR device isolation, process termination,
 network isolation, automatic third-party credential revocation, maintenance
-windows, anomaly baselines or a production SIEM adapter. Those remain explicit
-P1 work.
+windows, repository/configuration anomaly baselines or a production SIEM
+adapter. Alert-only tool, MCP, decision-volume and approval-volume behavior
+detection is specified separately in
+[Explainable agent behavior detection](behavior-detection-design.md).

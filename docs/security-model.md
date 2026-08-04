@@ -1046,6 +1046,19 @@ can select only an independently approved superseded version. Response records
 contain hashes and identifiers, not tool content or credentials. See
 [Approved automatic response rules](automatic-response-rules-design.md).
 
+Agent behavior detection has a deliberately weaker authority boundary.
+Decision and approval reports are authenticated, content-minimised
+observations; they can create an explainable alert but can never invoke an
+automatic quarantine rule. The server derives tenant, agent, host, policy and
+receipt time, bounds the retained history, refuses truncated or insufficient
+baselines and records count/threshold/digest evidence without raw activity.
+New tool and MCP identities remain untrusted dimensions. If a responder later
+opens a case, every consequential action revalidates the current enrolled-agent
+lifecycle, deployment, sole group, active policy and project-root digest. This
+prevents browser or agent output from selecting authority while preserving a
+manual response path. See [Explainable agent behavior
+detection](behavior-detection-design.md).
+
 Policy simulation is not execution and does not grant authority. The control
 plane evaluates only a pending immutable version against a bounded tenant- and
 policy-scoped window of redacted decision evidence. It reports missing command

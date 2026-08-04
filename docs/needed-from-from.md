@@ -276,7 +276,8 @@ Engineering can continue autonomously on:
 - managed SDK, gateway and hook upgrades with approved drift remediation;
 - live customer acceptance of implemented expiring exceptions, policy
   composition, scheduled rollout and signed bundles;
-- credential-revocation workflows and broader tool/MCP anomaly response;
+- credential-revocation workflows, repository/configuration anomaly response
+  and fleet-scale behavior baseline storage;
 - signed and scheduled assurance-report distribution and reviewed framework
   mappings;
 - Terraform Registry namespace/repository authority, release-signing identity
