@@ -640,6 +640,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../object-backed-discovery-ingestion-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Object-backed discovery ingestion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../scheduled-discovery-connectors-design/" class="md-nav__link">
         
   
@@ -3189,10 +3216,9 @@ immutable evidence by version instead of treating a mutable object name as
 authority.</p>
 <p>This tranche removes repeated page reads from the per-agent detector path and
 keeps repository observations out of alert, case and telemetry payloads. The
-existing bounded discovery upload remains the ingestion limit: at most 20 pages
-of 100 normalized observations (2,000 observations) per source generation.
-Larger discovery ingestion remains a separate scaling requirement and is not
-claimed as complete here.</p>
+object-backed discovery upload remains bounded at 20 pages of 1,000 normalized
+observations (20,000 observations) per source generation. See
+<a href="../object-backed-discovery-ingestion-design/">Object-backed discovery ingestion</a>.</p>
 <h2 id="trust-boundary">Trust boundary</h2>
 <ul>
 <li>Cognito claims provide tenant identity; request bodies never choose an S3

@@ -640,6 +640,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../object-backed-discovery-ingestion-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Object-backed discovery ingestion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../scheduled-discovery-connectors-design/" class="md-nav__link">
         
   
@@ -3398,8 +3425,8 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.</p>
 <td>P0-04</td>
 <td>Complete agent discovery</td>
 <td>Partial</td>
-<td>Source-scoped revocable connector credentials; redacted operator source directory; UI-first registration, rotation/revocation and separate credential/evidence posture; immutable paginated generations with atomic commit and a 2,000-record bound; fail-closed complete-source denominator; unmanaged, duplicate, leaver and orphan reconciliation; Entra/endpoint/GitHub reference collectors; AWS-managed Entra, Intune and GitHub scheduling; administrator-run exact binary/process sensor; hosted per-device credential lifecycle, HMAC ingestion, replay/tamper denial and server-derived freshness UI; Intune device evidence alone cannot satisfy installation evidence; adversarial contracts for forged credentials, replay, altered hashes, unsafe files, stale/revoked/cross-device reports, incompleteness and expiry</td>
-<td>Package and deploy the sensor through a real customer MDM, move very large pages to dedicated object storage, complete successful real Entra, Intune and GitHub collections, independently prove provider/device credential scope, and prove at least 95% real pilot discovery coverage</td>
+<td>Source-scoped revocable connector credentials; redacted operator source directory; UI-first registration, rotation/revocation and separate credential/evidence posture; private exact-version S3 pages with digest-bound atomic commit and a 20,000-record bound; fail-closed complete-source denominator; unmanaged, duplicate, leaver and orphan reconciliation; Entra/endpoint/GitHub reference collectors; AWS-managed Entra, Intune and GitHub scheduling; administrator-run exact binary/process sensor; hosted per-device credential lifecycle, HMAC ingestion, replay/tamper denial and server-derived freshness UI; Intune device evidence alone cannot satisfy installation evidence; adversarial contracts for forged credentials, replay, altered hashes, cross-tenant object pointers, unsafe files, stale/revoked/cross-device reports, incompleteness and expiry</td>
+<td>Package and deploy the sensor through a real customer MDM, complete successful real Entra, Intune and GitHub collections, independently prove provider/device credential scope, prove at least 95% real pilot discovery coverage, and load-test the customer's target above the 20,000-record synchronous envelope if required</td>
 </tr>
 <tr>
 <td>P0-05</td>
@@ -3531,8 +3558,8 @@ installation and convergence are deliberately not claimed.</p>
 <tr>
 <td>Security operations</td>
 <td>Partial</td>
-<td>Approvals, audit timeline, independent scoped emergency stops, scheduled server-derived endpoint detections, independently reviewed alert-only tool/MCP/denial/approval/decision-volume/outside-project/configuration-error behavior rules with complete-history gates and explainable thresholds, independently re-hashed repository mapping and managed-configuration/runtime-attestation integrity rules with explicit blind spots and no automatic containment, private exact-version S3 integrity baselines with digest binding and invocation-local verified caching, stable evidence-preserving deduplication groups, exact maximum-seven-day suppressions with audited expiry/revocation, audited acknowledgement, durable SNS/SQS and signed-webhook delivery, revisioned cases, source-specific server-revalidated agent binding, evidence-preserving agent quarantine, independently approved endpoint-response rules with preview, action limits, cooldown, idempotent evidence, disable and rollback, session revocation, recovery-gated release and integrity-verifiable content-minimised case export</td>
-<td>Credential-broker response, discovery ingestion beyond the documented 2,000-observation generation bound, MDM/EDR isolation and external workflow integrations</td>
+<td>Approvals, audit timeline, independent scoped emergency stops, scheduled server-derived endpoint detections, independently reviewed alert-only tool/MCP/denial/approval/decision-volume/outside-project/configuration-error behavior rules with complete-history gates and explainable thresholds, independently re-hashed repository mapping and managed-configuration/runtime-attestation integrity rules with explicit blind spots and no automatic containment, private exact-version S3 integrity baselines and discovery pages with digest binding, stable evidence-preserving deduplication groups, exact maximum-seven-day suppressions with audited expiry/revocation, audited acknowledgement, durable SNS/SQS and signed-webhook delivery, revisioned cases, source-specific server-revalidated agent binding, evidence-preserving agent quarantine, independently approved endpoint-response rules with preview, action limits, cooldown, idempotent evidence, disable and rollback, session revocation, recovery-gated release and integrity-verifiable content-minimised case export</td>
+<td>Credential-broker response, customer-specific capacity proof beyond the documented 20,000-observation synchronous bound, MDM/EDR isolation and external workflow integrations</td>
 </tr>
 <tr>
 <td>Reporting and administration</td>

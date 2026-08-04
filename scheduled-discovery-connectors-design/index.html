@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/scheduled-discovery-connectors-design/">
       
       
-        <link rel="prev" href="../agent-discovery-design/">
+        <link rel="prev" href="../object-backed-discovery-ingestion-design/">
       
       
         <link rel="next" href="../endpoint-evidence-publisher-design/">
@@ -621,6 +621,33 @@
     
   
     Agent population discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../object-backed-discovery-ingestion-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Object-backed discovery ingestion
   
 
     
@@ -3499,10 +3526,10 @@ collection, and the deployment-owned ingestion origin.</p>
 <code>/orgs/{organization}/repos</code> endpoint and the same deployment-owned ingestion
 origin. The service supplies the API version, sort order, pagination and page
 size; browser input cannot change a hostname, path or query.</p>
-<p>Collection is bounded to 20 pages and 2,000 observations, applies independent request
+<p>Collection is bounded to 20 object-backed pages and 20,000 observations, applies independent request
 timeouts, rejects duplicate or malformed identities, and retains only opaque
 object ID, active state, and optional department. GitHub collection has the
-same 20-page and 2,000-observation limits. It rejects duplicate or malformed
+same 20-page and 20,000-observation limits. It rejects duplicate or malformed
 repository IDs and requires every visible active repository to have exactly one
 deployment-owned mapping and every configured repository to be visible.
 Archived, unmapped repositories are ignored. Only the numeric repository ID,

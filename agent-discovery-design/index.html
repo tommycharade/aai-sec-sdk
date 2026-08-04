@@ -16,7 +16,7 @@
         <link rel="prev" href="../enterprise-fleet/">
       
       
-        <link rel="next" href="../scheduled-discovery-connectors-design/">
+        <link rel="next" href="../object-backed-discovery-ingestion-design/">
       
       
         
@@ -764,6 +764,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../object-backed-discovery-ingestion-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Object-backed discovery ingestion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -3330,7 +3357,7 @@ evidence records only source metadata, count, revision, and hash.</p>
    generation, its expected source revision, observation/expiry times and a
    page count from 1 to 20.</li>
 <li><code>PUT /discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/pages/{pageNumber}</code>
-   uploads one immutable page containing 1 to 100 normalized observations. The
+   uploads one immutable page containing 1 to 1,000 normalized observations. The
    response returns the canonical page hash.</li>
 <li><code>POST /discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/commit</code>
    supplies the ordered hash of every declared page. The control plane strongly
@@ -3340,7 +3367,10 @@ evidence records only source metadata, count, revision, and hash.</p>
 <p>Until commit succeeds, a generation has no effect on coverage. Missing pages,
 hash mismatches, duplicate observations, credential revocation, replay, or a
 concurrent source revision all fail closed. A committed generation supports up
-to 2,000 observations while retaining bounded Lambda and DynamoDB work.
+to 20,000 observations while retaining a fixed maximum of 20 exact-version
+object reads. DynamoDB stores page identity, count and immutable S3 references,
+not new page payloads. See
+<a href="../object-backed-discovery-ingestion-design/">Object-backed discovery ingestion</a>.
 For source-control generations, commit additionally writes a normalized,
 content-minimised baseline to a private versioned S3 bucket and atomically binds
 its exact version and SHA-256 digest into the generation metadata. Integrity
@@ -3369,9 +3399,10 @@ constructs the correct path from the API Gateway origin.</p>
 canonical <code>contentHash</code> for evidence handling.</p>
 <h2 id="deployment-constraints-and-next-acceptance-work">Deployment constraints and next acceptance work</h2>
 <p>The legacy snapshot route remains for small pilots and compatibility. Connector
-generations remove its 100-record ceiling and are suitable for a bounded pilot;
-very large estates should move immutable pages to dedicated object storage and
-retain the same atomic current-generation pointer. AWS deployments can use the
+generations remove its 100-record ceiling and use dedicated object storage for
+up to 20,000 observations. This is a bounded synchronous operating envelope,
+not unlimited fleet scale; larger estates require partitioned asynchronous
+reconciliation. AWS deployments can use the
 <a href="../scheduled-discovery-connectors-design/">managed Entra, Intune and GitHub collectors</a>,
 which deliver credentials through KMS-encrypted Secrets Manager values and run
 bounded EventBridge schedules. Their application bearers are still revocable

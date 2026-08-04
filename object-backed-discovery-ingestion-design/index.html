@@ -10,29 +10,31 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/object-backed-discovery-ingestion-design/">
       
       
+        <link rel="prev" href="../agent-discovery-design/">
       
-        <link rel="next" href="getting-started/">
+      
+        <link rel="next" href="../scheduled-discovery-connectors-design/">
       
       
         
       
       
-      <link rel="icon" href="assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>Agentic AI Security SDK</title>
+        <title>Object-backed discovery ingestion - Agentic AI Security SDK</title>
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -51,9 +53,9 @@
       
     
     
-      <link rel="stylesheet" href="assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
     
-    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -78,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#agentic-ai-security-sdk" class="md-skip">
+        <a href="#object-backed-discovery-ingestion" class="md-skip">
           Skip to content
         </a>
       
@@ -94,7 +96,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="." title="Agentic AI Security SDK" class="md-header__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+    <a href=".." title="Agentic AI Security SDK" class="md-header__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -114,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Home
+              Object-backed discovery ingestion
             
           </span>
         </div>
@@ -230,7 +232,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="." title="Agentic AI Security SDK" class="md-nav__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
+    <a href=".." title="Agentic AI Security SDK" class="md-nav__button md-logo" aria-label="Agentic AI Security SDK" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -257,37 +259,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Home
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="." class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -303,37 +278,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#explore-the-project" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Explore the project
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -345,7 +289,7 @@
   
   
     <li class="md-nav__item">
-      <a href="getting-started/" class="md-nav__link">
+      <a href="../getting-started/" class="md-nav__link">
         
   
   
@@ -372,7 +316,7 @@
   
   
     <li class="md-nav__item">
-      <a href="security-model/" class="md-nav__link">
+      <a href="../security-model/" class="md-nav__link">
         
   
   
@@ -399,7 +343,7 @@
   
   
     <li class="md-nav__item">
-      <a href="risk-acceptance-cdk-brace-expansion-2026-07-29/" class="md-nav__link">
+      <a href="../risk-acceptance-cdk-brace-expansion-2026-07-29/" class="md-nav__link">
         
   
   
@@ -426,7 +370,7 @@
   
   
     <li class="md-nav__item">
-      <a href="runbooks/" class="md-nav__link">
+      <a href="../runbooks/" class="md-nav__link">
         
   
   
@@ -453,7 +397,7 @@
   
   
     <li class="md-nav__item">
-      <a href="testing/" class="md-nav__link">
+      <a href="../testing/" class="md-nav__link">
         
   
   
@@ -480,7 +424,7 @@
   
   
     <li class="md-nav__item">
-      <a href="production-readiness/" class="md-nav__link">
+      <a href="../production-readiness/" class="md-nav__link">
         
   
   
@@ -507,7 +451,7 @@
   
   
     <li class="md-nav__item">
-      <a href="architecture/" class="md-nav__link">
+      <a href="../architecture/" class="md-nav__link">
         
   
   
@@ -534,7 +478,7 @@
   
   
     <li class="md-nav__item">
-      <a href="integrations/" class="md-nav__link">
+      <a href="../integrations/" class="md-nav__link">
         
   
   
@@ -561,7 +505,7 @@
   
   
     <li class="md-nav__item">
-      <a href="claude-code/" class="md-nav__link">
+      <a href="../claude-code/" class="md-nav__link">
         
   
   
@@ -588,7 +532,7 @@
   
   
     <li class="md-nav__item">
-      <a href="codex-cli/" class="md-nav__link">
+      <a href="../codex-cli/" class="md-nav__link">
         
   
   
@@ -615,7 +559,7 @@
   
   
     <li class="md-nav__item">
-      <a href="ui/" class="md-nav__link">
+      <a href="../ui/" class="md-nav__link">
         
   
   
@@ -642,7 +586,7 @@
   
   
     <li class="md-nav__item">
-      <a href="enterprise-fleet/" class="md-nav__link">
+      <a href="../enterprise-fleet/" class="md-nav__link">
         
   
   
@@ -669,7 +613,7 @@
   
   
     <li class="md-nav__item">
-      <a href="agent-discovery-design/" class="md-nav__link">
+      <a href="../agent-discovery-design/" class="md-nav__link">
         
   
   
@@ -693,10 +637,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="object-backed-discovery-ingestion-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Object-backed discovery ingestion
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -712,6 +683,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#outcome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outcome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundary-and-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundary and invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#storage-and-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage and compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operations-retention-and-cost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operations, retention and cost
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acceptance-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -723,7 +769,7 @@
   
   
     <li class="md-nav__item">
-      <a href="scheduled-discovery-connectors-design/" class="md-nav__link">
+      <a href="../scheduled-discovery-connectors-design/" class="md-nav__link">
         
   
   
@@ -750,7 +796,7 @@
   
   
     <li class="md-nav__item">
-      <a href="endpoint-evidence-publisher-design/" class="md-nav__link">
+      <a href="../endpoint-evidence-publisher-design/" class="md-nav__link">
         
   
   
@@ -777,7 +823,7 @@
   
   
     <li class="md-nav__item">
-      <a href="hosted-endpoint-evidence/" class="md-nav__link">
+      <a href="../hosted-endpoint-evidence/" class="md-nav__link">
         
   
   
@@ -804,7 +850,7 @@
   
   
     <li class="md-nav__item">
-      <a href="endpoint-detection-response/" class="md-nav__link">
+      <a href="../endpoint-detection-response/" class="md-nav__link">
         
   
   
@@ -831,7 +877,7 @@
   
   
     <li class="md-nav__item">
-      <a href="incident-case-containment-design/" class="md-nav__link">
+      <a href="../incident-case-containment-design/" class="md-nav__link">
         
   
   
@@ -858,7 +904,7 @@
   
   
     <li class="md-nav__item">
-      <a href="incident-case-export-design/" class="md-nav__link">
+      <a href="../incident-case-export-design/" class="md-nav__link">
         
   
   
@@ -885,7 +931,7 @@
   
   
     <li class="md-nav__item">
-      <a href="durable-evidence-governance-design/" class="md-nav__link">
+      <a href="../durable-evidence-governance-design/" class="md-nav__link">
         
   
   
@@ -912,7 +958,7 @@
   
   
     <li class="md-nav__item">
-      <a href="audit-recovery-deployment-guard-design/" class="md-nav__link">
+      <a href="../audit-recovery-deployment-guard-design/" class="md-nav__link">
         
   
   
@@ -939,7 +985,7 @@
   
   
     <li class="md-nav__item">
-      <a href="cross-region-audit-recovery-acceptance-2026-08-01/" class="md-nav__link">
+      <a href="../cross-region-audit-recovery-acceptance-2026-08-01/" class="md-nav__link">
         
   
   
@@ -966,7 +1012,7 @@
   
   
     <li class="md-nav__item">
-      <a href="regional-control-plane-recovery-design/" class="md-nav__link">
+      <a href="../regional-control-plane-recovery-design/" class="md-nav__link">
         
   
   
@@ -993,7 +1039,7 @@
   
   
     <li class="md-nav__item">
-      <a href="regional-recovery-storage-runbook/" class="md-nav__link">
+      <a href="../regional-recovery-storage-runbook/" class="md-nav__link">
         
   
   
@@ -1020,7 +1066,7 @@
   
   
     <li class="md-nav__item">
-      <a href="regional-recovery-storage-acceptance-2026-08-02/" class="md-nav__link">
+      <a href="../regional-recovery-storage-acceptance-2026-08-02/" class="md-nav__link">
         
   
   
@@ -1047,7 +1093,7 @@
   
   
     <li class="md-nav__item">
-      <a href="passive-regional-cell-design/" class="md-nav__link">
+      <a href="../passive-regional-cell-design/" class="md-nav__link">
         
   
   
@@ -1074,7 +1120,7 @@
   
   
     <li class="md-nav__item">
-      <a href="regional-activation-and-exercise-design/" class="md-nav__link">
+      <a href="../regional-activation-and-exercise-design/" class="md-nav__link">
         
   
   
@@ -1101,7 +1147,7 @@
   
   
     <li class="md-nav__item">
-      <a href="aws-regional-exercise-provider-design/" class="md-nav__link">
+      <a href="../aws-regional-exercise-provider-design/" class="md-nav__link">
         
   
   
@@ -1128,7 +1174,7 @@
   
   
     <li class="md-nav__item">
-      <a href="regional-fault-controller-design/" class="md-nav__link">
+      <a href="../regional-fault-controller-design/" class="md-nav__link">
         
   
   
@@ -1155,7 +1201,7 @@
   
   
     <li class="md-nav__item">
-      <a href="regional-transition-executor-design/" class="md-nav__link">
+      <a href="../regional-transition-executor-design/" class="md-nav__link">
         
   
   
@@ -1182,7 +1228,7 @@
   
   
     <li class="md-nav__item">
-      <a href="regional-transition-journal-design/" class="md-nav__link">
+      <a href="../regional-transition-journal-design/" class="md-nav__link">
         
   
   
@@ -1209,7 +1255,7 @@
   
   
     <li class="md-nav__item">
-      <a href="regional-target-readiness-and-stable-ingress-design/" class="md-nav__link">
+      <a href="../regional-target-readiness-and-stable-ingress-design/" class="md-nav__link">
         
   
   
@@ -1236,7 +1282,7 @@
   
   
     <li class="md-nav__item">
-      <a href="evidence-continuity-and-job-reconciliation-design/" class="md-nav__link">
+      <a href="../evidence-continuity-and-job-reconciliation-design/" class="md-nav__link">
         
   
   
@@ -1263,7 +1309,7 @@
   
   
     <li class="md-nav__item">
-      <a href="evidence-continuity-acceptance-2026-08-02/" class="md-nav__link">
+      <a href="../evidence-continuity-acceptance-2026-08-02/" class="md-nav__link">
         
   
   
@@ -1290,7 +1336,7 @@
   
   
     <li class="md-nav__item">
-      <a href="policy-trust-convergence-design/" class="md-nav__link">
+      <a href="../policy-trust-convergence-design/" class="md-nav__link">
         
   
   
@@ -1317,7 +1363,7 @@
   
   
     <li class="md-nav__item">
-      <a href="policy-trust-convergence-acceptance-2026-08-02/" class="md-nav__link">
+      <a href="../policy-trust-convergence-acceptance-2026-08-02/" class="md-nav__link">
         
   
   
@@ -1344,7 +1390,7 @@
   
   
     <li class="md-nav__item">
-      <a href="asynchronous-retention-design/" class="md-nav__link">
+      <a href="../asynchronous-retention-design/" class="md-nav__link">
         
   
   
@@ -1371,7 +1417,7 @@
   
   
     <li class="md-nav__item">
-      <a href="async-retention-acceptance-2026-08-01/" class="md-nav__link">
+      <a href="../async-retention-acceptance-2026-08-01/" class="md-nav__link">
         
   
   
@@ -1398,7 +1444,7 @@
   
   
     <li class="md-nav__item">
-      <a href="async-evidence-acceptance-2026-08-01/" class="md-nav__link">
+      <a href="../async-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
   
@@ -1425,7 +1471,7 @@
   
   
     <li class="md-nav__item">
-      <a href="automatic-response-rules-design/" class="md-nav__link">
+      <a href="../automatic-response-rules-design/" class="md-nav__link">
         
   
   
@@ -1452,7 +1498,7 @@
   
   
     <li class="md-nav__item">
-      <a href="behavior-detection-design/" class="md-nav__link">
+      <a href="../behavior-detection-design/" class="md-nav__link">
         
   
   
@@ -1479,7 +1525,7 @@
   
   
     <li class="md-nav__item">
-      <a href="alert-suppression-design/" class="md-nav__link">
+      <a href="../alert-suppression-design/" class="md-nav__link">
         
   
   
@@ -1506,7 +1552,7 @@
   
   
     <li class="md-nav__item">
-      <a href="repository-configuration-anomaly-design/" class="md-nav__link">
+      <a href="../repository-configuration-anomaly-design/" class="md-nav__link">
         
   
   
@@ -1533,7 +1579,7 @@
   
   
     <li class="md-nav__item">
-      <a href="fleet-integrity-baseline-storage-design/" class="md-nav__link">
+      <a href="../fleet-integrity-baseline-storage-design/" class="md-nav__link">
         
   
   
@@ -1560,7 +1606,7 @@
   
   
     <li class="md-nav__item">
-      <a href="endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
+      <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
   
@@ -1587,7 +1633,7 @@
   
   
     <li class="md-nav__item">
-      <a href="dynamic-groups-design/" class="md-nav__link">
+      <a href="../dynamic-groups-design/" class="md-nav__link">
         
   
   
@@ -1614,7 +1660,7 @@
   
   
     <li class="md-nav__item">
-      <a href="policy-editor/" class="md-nav__link">
+      <a href="../policy-editor/" class="md-nav__link">
         
   
   
@@ -1641,7 +1687,7 @@
   
   
     <li class="md-nav__item">
-      <a href="policy-composition-and-gitops-design/" class="md-nav__link">
+      <a href="../policy-composition-and-gitops-design/" class="md-nav__link">
         
   
   
@@ -1668,7 +1714,7 @@
   
   
     <li class="md-nav__item">
-      <a href="github-app-policy-source-auth-design/" class="md-nav__link">
+      <a href="../github-app-policy-source-auth-design/" class="md-nav__link">
         
   
   
@@ -1695,7 +1741,7 @@
   
   
     <li class="md-nav__item">
-      <a href="policy-governance-design/" class="md-nav__link">
+      <a href="../policy-governance-design/" class="md-nav__link">
         
   
   
@@ -1722,7 +1768,7 @@
   
   
     <li class="md-nav__item">
-      <a href="policy-change-assurance-design/" class="md-nav__link">
+      <a href="../policy-change-assurance-design/" class="md-nav__link">
         
   
   
@@ -1749,7 +1795,7 @@
   
   
     <li class="md-nav__item">
-      <a href="policy-change-assurance-acceptance-2026-08-01/" class="md-nav__link">
+      <a href="../policy-change-assurance-acceptance-2026-08-01/" class="md-nav__link">
         
   
   
@@ -1776,7 +1822,7 @@
   
   
     <li class="md-nav__item">
-      <a href="time-limited-policy-exceptions-design/" class="md-nav__link">
+      <a href="../time-limited-policy-exceptions-design/" class="md-nav__link">
         
   
   
@@ -1803,7 +1849,7 @@
   
   
     <li class="md-nav__item">
-      <a href="time-limited-policy-exception-acceptance-2026-08-01/" class="md-nav__link">
+      <a href="../time-limited-policy-exception-acceptance-2026-08-01/" class="md-nav__link">
         
   
   
@@ -1830,7 +1876,7 @@
   
   
     <li class="md-nav__item">
-      <a href="signed-policy-bundles-design/" class="md-nav__link">
+      <a href="../signed-policy-bundles-design/" class="md-nav__link">
         
   
   
@@ -1857,7 +1903,7 @@
   
   
     <li class="md-nav__item">
-      <a href="signed-policy-acceptance-2026-08-01/" class="md-nav__link">
+      <a href="../signed-policy-acceptance-2026-08-01/" class="md-nav__link">
         
   
   
@@ -1884,7 +1930,7 @@
   
   
     <li class="md-nav__item">
-      <a href="claude-managed-resources/" class="md-nav__link">
+      <a href="../claude-managed-resources/" class="md-nav__link">
         
   
   
@@ -1911,7 +1957,7 @@
   
   
     <li class="md-nav__item">
-      <a href="enterprise-ui/" class="md-nav__link">
+      <a href="../enterprise-ui/" class="md-nav__link">
         
   
   
@@ -1938,7 +1984,7 @@
   
   
     <li class="md-nav__item">
-      <a href="enterprise-assurance-reports-design/" class="md-nav__link">
+      <a href="../enterprise-assurance-reports-design/" class="md-nav__link">
         
   
   
@@ -1965,7 +2011,7 @@
   
   
     <li class="md-nav__item">
-      <a href="service-identities-design/" class="md-nav__link">
+      <a href="../service-identities-design/" class="md-nav__link">
         
   
   
@@ -1992,7 +2038,7 @@
   
   
     <li class="md-nav__item">
-      <a href="terraform-provider-design/" class="md-nav__link">
+      <a href="../terraform-provider-design/" class="md-nav__link">
         
   
   
@@ -2019,7 +2065,7 @@
   
   
     <li class="md-nav__item">
-      <a href="secure-webhooks-design/" class="md-nav__link">
+      <a href="../secure-webhooks-design/" class="md-nav__link">
         
   
   
@@ -2046,7 +2092,7 @@
   
   
     <li class="md-nav__item">
-      <a href="enterprise-integration-design/" class="md-nav__link">
+      <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
   
@@ -2073,7 +2119,7 @@
   
   
     <li class="md-nav__item">
-      <a href="runtime-attestation-design/" class="md-nav__link">
+      <a href="../runtime-attestation-design/" class="md-nav__link">
         
   
   
@@ -2100,7 +2146,7 @@
   
   
     <li class="md-nav__item">
-      <a href="managed-host-configuration/" class="md-nav__link">
+      <a href="../managed-host-configuration/" class="md-nav__link">
         
   
   
@@ -2127,7 +2173,7 @@
   
   
     <li class="md-nav__item">
-      <a href="managed-endpoint-deployment-design/" class="md-nav__link">
+      <a href="../managed-endpoint-deployment-design/" class="md-nav__link">
         
   
   
@@ -2154,7 +2200,7 @@
   
   
     <li class="md-nav__item">
-      <a href="managed-package-distribution-design/" class="md-nav__link">
+      <a href="../managed-package-distribution-design/" class="md-nav__link">
         
   
   
@@ -2181,7 +2227,7 @@
   
   
     <li class="md-nav__item">
-      <a href="measured-managed-rollout-design/" class="md-nav__link">
+      <a href="../measured-managed-rollout-design/" class="md-nav__link">
         
   
   
@@ -2208,7 +2254,7 @@
   
   
     <li class="md-nav__item">
-      <a href="measured-managed-rollout-acceptance-2026-08-01/" class="md-nav__link">
+      <a href="../measured-managed-rollout-acceptance-2026-08-01/" class="md-nav__link">
         
   
   
@@ -2235,7 +2281,7 @@
   
   
     <li class="md-nav__item">
-      <a href="enterprise-user-journeys/" class="md-nav__link">
+      <a href="../enterprise-user-journeys/" class="md-nav__link">
         
   
   
@@ -2262,7 +2308,7 @@
   
   
     <li class="md-nav__item">
-      <a href="enterprise-rollout-p0-p1-requirements/" class="md-nav__link">
+      <a href="../enterprise-rollout-p0-p1-requirements/" class="md-nav__link">
         
   
   
@@ -2289,7 +2335,7 @@
   
   
     <li class="md-nav__item">
-      <a href="p0-p1-implementation-status/" class="md-nav__link">
+      <a href="../p0-p1-implementation-status/" class="md-nav__link">
         
   
   
@@ -2316,7 +2362,7 @@
   
   
     <li class="md-nav__item">
-      <a href="needed-from-from/" class="md-nav__link">
+      <a href="../needed-from-from/" class="md-nav__link">
         
   
   
@@ -2343,7 +2389,7 @@
   
   
     <li class="md-nav__item">
-      <a href="aws-pilot-acceptance-2026-07-29/" class="md-nav__link">
+      <a href="../aws-pilot-acceptance-2026-07-29/" class="md-nav__link">
         
   
   
@@ -2370,7 +2416,7 @@
   
   
     <li class="md-nav__item">
-      <a href="discovery-source-management-acceptance-2026-07-30/" class="md-nav__link">
+      <a href="../discovery-source-management-acceptance-2026-07-30/" class="md-nav__link">
         
   
   
@@ -2397,7 +2443,7 @@
   
   
     <li class="md-nav__item">
-      <a href="managed-discovery-acceptance-2026-07-30/" class="md-nav__link">
+      <a href="../managed-discovery-acceptance-2026-07-30/" class="md-nav__link">
         
   
   
@@ -2424,7 +2470,7 @@
   
   
     <li class="md-nav__item">
-      <a href="managed-github-discovery-acceptance-2026-07-30/" class="md-nav__link">
+      <a href="../managed-github-discovery-acceptance-2026-07-30/" class="md-nav__link">
         
   
   
@@ -2451,7 +2497,7 @@
   
   
     <li class="md-nav__item">
-      <a href="managed-intune-discovery-acceptance-2026-08-01/" class="md-nav__link">
+      <a href="../managed-intune-discovery-acceptance-2026-08-01/" class="md-nav__link">
         
   
   
@@ -2478,7 +2524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="entra-scim-runbook/" class="md-nav__link">
+      <a href="../entra-scim-runbook/" class="md-nav__link">
         
   
   
@@ -2505,7 +2551,7 @@
   
   
     <li class="md-nav__item">
-      <a href="entra-deployment-guard-design/" class="md-nav__link">
+      <a href="../entra-deployment-guard-design/" class="md-nav__link">
         
   
   
@@ -2532,7 +2578,7 @@
   
   
     <li class="md-nav__item">
-      <a href="access-governance-runbook/" class="md-nav__link">
+      <a href="../access-governance-runbook/" class="md-nav__link">
         
   
   
@@ -2559,7 +2605,7 @@
   
   
     <li class="md-nav__item">
-      <a href="delegated-administration/" class="md-nav__link">
+      <a href="../delegated-administration/" class="md-nav__link">
         
   
   
@@ -2586,7 +2632,7 @@
   
   
     <li class="md-nav__item">
-      <a href="enterprise-operations-readiness/" class="md-nav__link">
+      <a href="../enterprise-operations-readiness/" class="md-nav__link">
         
   
   
@@ -2613,7 +2659,7 @@
   
   
     <li class="md-nav__item">
-      <a href="product-owner-enterprise-claude-rollout-review-2026-07-27/" class="md-nav__link">
+      <a href="../product-owner-enterprise-claude-rollout-review-2026-07-27/" class="md-nav__link">
         
   
   
@@ -2640,7 +2686,7 @@
   
   
     <li class="md-nav__item">
-      <a href="enterprise-claude-rollout-plan/" class="md-nav__link">
+      <a href="../enterprise-claude-rollout-plan/" class="md-nav__link">
         
   
   
@@ -2667,7 +2713,7 @@
   
   
     <li class="md-nav__item">
-      <a href="real-claude-code-acceptance-evidence-2026-07-27/" class="md-nav__link">
+      <a href="../real-claude-code-acceptance-evidence-2026-07-27/" class="md-nav__link">
         
   
   
@@ -2694,7 +2740,7 @@
   
   
     <li class="md-nav__item">
-      <a href="aws-deployment/" class="md-nav__link">
+      <a href="../aws-deployment/" class="md-nav__link">
         
   
   
@@ -2721,7 +2767,7 @@
   
   
     <li class="md-nav__item">
-      <a href="code-owned-controls/" class="md-nav__link">
+      <a href="../code-owned-controls/" class="md-nav__link">
         
   
   
@@ -2748,7 +2794,7 @@
   
   
     <li class="md-nav__item">
-      <a href="end-to-end-example/" class="md-nav__link">
+      <a href="../end-to-end-example/" class="md-nav__link">
         
   
   
@@ -2775,7 +2821,7 @@
   
   
     <li class="md-nav__item">
-      <a href="api/" class="md-nav__link">
+      <a href="../api/" class="md-nav__link">
         
   
   
@@ -2802,7 +2848,7 @@
   
   
     <li class="md-nav__item">
-      <a href="guardrails/" class="md-nav__link">
+      <a href="../guardrails/" class="md-nav__link">
         
   
   
@@ -2829,7 +2875,7 @@
   
   
     <li class="md-nav__item">
-      <a href="license/" class="md-nav__link">
+      <a href="../license/" class="md-nav__link">
         
   
   
@@ -2856,7 +2902,7 @@
   
   
     <li class="md-nav__item">
-      <a href="contributing/" class="md-nav__link">
+      <a href="../contributing/" class="md-nav__link">
         
   
   
@@ -2883,7 +2929,7 @@
   
   
     <li class="md-nav__item">
-      <a href="releasing/" class="md-nav__link">
+      <a href="../releasing/" class="md-nav__link">
         
   
   
@@ -2910,7 +2956,7 @@
   
   
     <li class="md-nav__item">
-      <a href="deployment-evidence/" class="md-nav__link">
+      <a href="../deployment-evidence/" class="md-nav__link">
         
   
   
@@ -2937,7 +2983,7 @@
   
   
     <li class="md-nav__item">
-      <a href="p1-p2-closure-evidence-2026-07-27/" class="md-nav__link">
+      <a href="../p1-p2-closure-evidence-2026-07-27/" class="md-nav__link">
         
   
   
@@ -2964,7 +3010,7 @@
   
   
     <li class="md-nav__item">
-      <a href="release-evidence-v1.0.1/" class="md-nav__link">
+      <a href="../release-evidence-v1.0.1/" class="md-nav__link">
         
   
   
@@ -2991,7 +3037,7 @@
   
   
     <li class="md-nav__item">
-      <a href="critical-adopter-review-2026-07-25/" class="md-nav__link">
+      <a href="../critical-adopter-review-2026-07-25/" class="md-nav__link">
         
   
   
@@ -3018,7 +3064,7 @@
   
   
     <li class="md-nav__item">
-      <a href="critical-adopter-review-2026-07-26/" class="md-nav__link">
+      <a href="../critical-adopter-review-2026-07-26/" class="md-nav__link">
         
   
   
@@ -3065,10 +3111,54 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#explore-the-project" class="md-nav__link">
+  <a href="#outcome" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Explore the project
+        Outcome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundary-and-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundary and invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#storage-and-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage and compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#operations-retention-and-cost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operations, retention and cost
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acceptance-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance evidence
       
     </span>
   </a>
@@ -3095,30 +3185,84 @@
   
 
 
-<h1 id="agentic-ai-security-sdk">Agentic AI Security SDK</h1>
-<p>An open-source execution-security runtime for agentic AI systems.</p>
-<p>The SDK is built around one boundary:</p>
-<blockquote>
-<p>The model proposes; the host validates, authorizes, approves, executes, records, and can stop.</p>
-</blockquote>
-<h2 id="explore-the-project">Explore the project</h2>
+<h1 id="object-backed-discovery-ingestion">Object-backed discovery ingestion</h1>
+<h2 id="outcome">Outcome</h2>
+<p>Enterprise discovery generations accept up to 20 immutable pages of 1,000
+normalized observations: 20,000 observations per source generation. Page
+payloads live in a dedicated private, versioned S3 bucket instead of DynamoDB.
+The control table contains only the page identity, count, canonical hash and
+exact object key, version and SHA-256 digest.</p>
+<p>The fixed 20-page fan-out is intentional. This change increases useful fleet
+capacity by ten times without turning an operator request into an unbounded S3
+scan. It is an initial enterprise operating envelope, not a claim of unlimited
+scale. Endpoint inventory normally emits both a device and an installation
+observation, so one generation can describe at most 10,000 fully represented
+devices. Estates above this envelope require a partitioned asynchronous
+reconciler and measured capacity evidence.</p>
+<h2 id="trust-boundary-and-invariants">Trust boundary and invariants</h2>
 <ul>
-<li><a href="getting-started/">Getting started</a></li>
-<li><a href="security-model/">Security model</a></li>
-<li><a href="repository-configuration-anomaly-design/">Repository and configuration anomaly detection</a></li>
-<li><a href="architecture/">Architecture</a></li>
-<li><a href="end-to-end-example/">End-to-end example</a></li>
-<li><a href="production-readiness/">Production readiness</a></li>
-<li><a href="api/">API design</a></li>
-<li><a href="guardrails/">Engineering guardrails</a></li>
-<li><a href="license/">Licensing</a></li>
-<li><a href="contributing/">Contributing</a></li>
-<li><a href="https://github.com/tommycharade/aai-sec-sdk/blob/main/GOVERNANCE.md">Governance</a></li>
-<li><a href="releasing/">Releasing</a></li>
-<li><a href="https://tommycharade.github.io/aai-sec-sdk/">Online documentation</a></li>
+<li>The connector credential remains bound to one tenant, source ID and source
+  kind. Request content never chooses a bucket or object prefix.</li>
+<li>The service hashes the authenticated tenant ID and derives every object key
+  from that digest plus validated source, generation and page identifiers.</li>
+<li>Pages contain only schema-normalized discovery observations. Credentials,
+  connector tokens, prompts, tool arguments, outputs and raw project roots are
+  rejected before storage.</li>
+<li>S3 Block Public Access, TLS-only access, server-side encryption, versioning
+  and stack-retained storage are mandatory deployment controls.</li>
+<li>Each upload uses create-only object semantics. A retry may reuse a prior
+  object only when its bytes have the same SHA-256 digest; a collision with
+  different bytes fails closed.</li>
+<li>DynamoDB records the exact S3 version and object digest. Commit and later
+  reconciliation fetch that exact version, apply a 2 MB page bound, verify the
+  digest before JSON parsing, enforce a closed schema, normalize every
+  observation again and independently recompute the page hash.</li>
+<li>A missing, malformed, oversized, altered, partial or cross-tenant reference
+  cannot become current authority. During reporting, unavailable committed
+  evidence lowers discovery assurance and produces an unavailable coverage
+  result rather than trusting metadata alone.</li>
+<li>Commit still rejects missing pages, caller-supplied hash mismatches and
+  duplicate identities across pages before atomically advancing the source
+  revision.</li>
 </ul>
-<p>The core runtime and a complete synthetic reference application are available;
-provider-specific integrations remain separate adapter work.</p>
+<h2 id="storage-and-compatibility">Storage and compatibility</h2>
+<p>New generation declarations require <code>DISCOVERY_PAGE_BUCKET</code>; there is no silent
+DynamoDB fallback. Pages written before this format remain readable from their
+legacy immutable DynamoDB records. Source-control commits continue to create a
+separate compact exact-version integrity baseline for anomaly detection, so
+detectors do not repeatedly load all discovery pages.</p>
+<p>The reference publisher defaults to 1,000 observations per page and rejects
+more than 20,000 observations locally before sending inventory. The AWS-managed
+collector uses the same ingestion page size and observation bound. Provider
+APIs may retain narrower provider-specific mapping or pagination constraints;
+the UI and documentation must not imply that object storage removes those
+provider limits.</p>
+<h2 id="operations-retention-and-cost">Operations, retention and cost</h2>
+<p>The discovery-page bucket is retained if the stack is removed. Operators must
+include it in backup, access review, data-residency, deletion and recovery
+procedures. Object versions referenced by retained committed generations must
+not be expired by a generic lifecycle rule. A future retention controller may
+remove unreferenced failed-upload objects only after proving that no live or
+retained generation points to them.</p>
+<p>At the maximum generation size, one commit performs 20 exact-version S3 reads
+and processes at most 20,000 normalized observations. Coverage reads have the
+same object-read bound. Production rollout must measure latency and memory with
+the customer's observation shapes; the current 15-second, 512 MB control-plane
+Lambda remains the hard synchronous envelope.</p>
+<h2 id="acceptance-evidence">Acceptance evidence</h2>
+<ul>
+<li>positive contract coverage for object upload, exact-version read, commit and
+  legacy DynamoDB compatibility;</li>
+<li>adversarial rejection of altered bytes, malformed or partial references,
+  cross-tenant keys, stale revisions, duplicate identities and oversized
+  generations;</li>
+<li>publisher and managed-collector tests for 1,000-record pages and the 20,000
+  observation ceiling;</li>
+<li>infrastructure assertions for private access, TLS, encryption, versioning,
+  retention and least-privilege object actions; and</li>
+<li>deployed evidence binding an exact object version and digest to a committed
+  generation before the capability is called operationally complete.</li>
+</ul>
 
 
 
@@ -3168,10 +3312,10 @@ provider-specific integrations remain separate adapter work.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
