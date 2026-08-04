@@ -10,8 +10,35 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+
+SYNTHETIC_RSA_PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----
+MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQCn/CqjSUfACxgL
+MC5UjgOHaIK36bFt/t4pqYN8bZSRNwcbXbw5BKjEN82xCh0P2JCe6IOcbbFxxFNA
+Bjs4KHNWsCwIBx0rdGdYUQGHjtys79lDkfq2BZVPioxyKczPjdOrUmX928IwWlEU
+XmR2QdYHlydPBgre7otZAafJbsEVBe4SOs/qJs6OwsdACh8GwYEWgq9ntP4sE8j6
+N+3UPGJbIexvJl84wvOx1RaFFIhureNyd3id+P/Gn/DTqeR9lRMKdzEpMLIjlYD1
+LqIfdHoAJzwvTPZR30XSUQME0kaj+aW/MImLSUrXrQFgJrDOaKa+UMsLydkaROuB
+g3JWYhTVAgMBAAECggEAELlBk2z9uChClgaPbjqPLmFgtieNUvqPKo2mOfJ82nIk
+gnxz+yc0GAjIMQplN0kjqLZUN/QRuNZHRXX5Wk9ooCY80/XFWSinCztRUCoQXSUp
+t5jmYU2v/jG4ZrszmSww+PrkjX/d1st/C+yTytQmFy5cqvjahzQvakaIajzc+xcp
+F5mtKuAHfDwIFpwfYydSwqUTszhPL/rnINiLXPY94CBYOhKekZRj6tL4k3yiNMiu
+KvGPA/rZfVEd4cTNDK/xeEZgJAG2HWbVq0ZaRH1jgd2om8/0e8PTFTDKaTOdN1j0
+S1E0RY5V5nYbMpRVSYrNS2v0oJ/tecjAxUrZSYgXcQKBgQDibjU2OnFUMfaPKeBm
+sqp8expSyAKC9vpwJplJ5ZFnZ/y7OSB4mSIEvhT43lkzoBBvoWi0SGhtIuwp3vkZ
+O1mqYVNGge3ybejMdFi4RKW7iJUP2vF8Im2TLOE5Wtnd5R5MJQNqbVP9hEJ81XeO
+PS2Uoxjc/Bgluwwppsj+dbz3TQKBgQC97BHP4867dyoFfDqhlHgX0I9oj0u+WYba
+ODdDVMwGIy6YXhwBVgCmyZNKslty4qFWt725nwBmD10Yb3SDjddtcGP0SmSqC+s+
+4wtVJ1oxAjoggDOt/SFs7AdL3w6ArnL+j/mKmIePBB5QVHo1vUU9TBP3sNZS/424
+4xTAujKfqQKBgQDUWfMBdnHOOkU3IljXN3v33iNjuzvPwvw/rZNY4DkrNzSoCP1Q
+3Jwwwms8spoJdnWzmzZszPNSVswQwJHwfd6rkTbeCwAyuaz4Aa0qswaTB5Z0Fise
+9dK5kf9vIKruFPADDTtU1k9MlHseQ7wp42oZ2ZN5u9qRmAfiEA6zxYuAiQKBgQCj
+qfd/ivTwH7SanX95FpSXESdEF5hSJJxNGPymjUB0WYUh0JeZnx9Ym4TObfzYd+xI
+6nYYq6iQStUS5ZkmdOkcain4rtMoprTGsKlnbE4QxbaJo3DlkqlnT87J1yKMScjX
+DgMhKGhJGmd1GhdmkABG3nSmkkFfrNHYbffITayqYQKBgQCjOKgswf12bdBTIFJx
+0BT19B2TcGbxmCrQcTeolmoPeUznPcqcpQ8YlM72Z/Y1B98AAbG8oJ9zjOmhXfIW
+xdDYeIvjpzZdleHANkUGyl3JfIuh/H0SSAiHbpWoogDwkPeXC5nm07JX1at9x9lT
+IFT5RXGbSTMKq3SgJ0w86JChMQ==
+-----END PRIVATE KEY-----"""  # noqa: S105 - synthetic test-only key
 
 
 def _load() -> Any:
@@ -675,15 +702,11 @@ def test_policy_github_app_private_key_is_rsa_and_secret_value_never_returned() 
     manifest = module.PolicyGitHubDeploymentManifest.parse(
         json.dumps(_policy_github_app_manifest())
     )
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    pem = key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption(),
-    ).decode()
 
     def valid(_command: list[str], **_: Any) -> Any:
-        return _completed(json.dumps({"SecretString": json.dumps({"privateKeyPem": pem})}))
+        return _completed(
+            json.dumps({"SecretString": json.dumps({"privateKeyPem": SYNTHETIC_RSA_PRIVATE_KEY})})
+        )
 
     assert (
         module.verify_policy_github_credential(
