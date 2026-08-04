@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/policy-composition-and-gitops-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/secure-webhooks-design/">
       
       
-        <link rel="prev" href="../policy-editor/">
+        <link rel="prev" href="../terraform-provider-design/">
       
       
-        <link rel="next" href="../github-app-policy-source-auth-design/">
+        <link rel="next" href="../enterprise-integration-design/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Policy composition and GitOps - Agentic AI Security SDK</title>
+        <title>Secure webhooks - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#policy-composition-and-gitops" class="md-skip">
+        <a href="#secure-webhooks" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Policy composition and GitOps
+              Secure webhooks
             
           </span>
         </div>
@@ -1447,37 +1447,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Policy composition and GitOps
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../policy-composition-and-gitops-design/" class="md-nav__link">
         
   
   
@@ -1493,136 +1466,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decision
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#why-policy-versions-are-components" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why policy versions are components
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#deterministic-restrictive-composition" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deterministic restrictive composition
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#graph-and-tenant-constraints" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Graph and tenant constraints
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#effective-policy-explanation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Effective-policy explanation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#git-source-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Git source contract
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#import-and-export-lifecycle" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Import and export lifecycle
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#api-surface" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        API surface
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#threats-and-controls" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Threats and controls
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required evidence
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1982,10 +1825,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../secure-webhooks-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secure webhooks
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -2001,6 +1871,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#operator-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundaries-and-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries and data flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#signing-and-receiver-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing and receiver contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delivery-and-failure-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery and failure semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#supported-events-and-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported events and limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acceptance-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -3031,10 +2998,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
+  <a href="#operator-journey" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Decision
+        Operator journey
       
     </span>
   </a>
@@ -3042,10 +3009,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#why-policy-versions-are-components" class="md-nav__link">
+  <a href="#trust-boundaries-and-data-flow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why policy versions are components
+        Trust boundaries and data flow
       
     </span>
   </a>
@@ -3053,10 +3020,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#deterministic-restrictive-composition" class="md-nav__link">
+  <a href="#signing-and-receiver-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Deterministic restrictive composition
+        Signing and receiver contract
       
     </span>
   </a>
@@ -3064,10 +3031,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#graph-and-tenant-constraints" class="md-nav__link">
+  <a href="#delivery-and-failure-semantics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Graph and tenant constraints
+        Delivery and failure semantics
       
     </span>
   </a>
@@ -3075,10 +3042,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#effective-policy-explanation" class="md-nav__link">
+  <a href="#key-lifecycle" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Effective-policy explanation
+        Key lifecycle
       
     </span>
   </a>
@@ -3086,10 +3053,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#git-source-contract" class="md-nav__link">
+  <a href="#supported-events-and-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Git source contract
+        Supported events and limits
       
     </span>
   </a>
@@ -3097,43 +3064,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#import-and-export-lifecycle" class="md-nav__link">
+  <a href="#acceptance-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Import and export lifecycle
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#api-surface" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        API surface
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#threats-and-controls" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Threats and controls
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#required-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Required evidence
+        Acceptance boundary
       
     </span>
   </a>
@@ -3160,314 +3094,140 @@
   
 
 
-<h1 id="policy-composition-and-gitops">Policy composition and GitOps</h1>
-<p>This design covers P1-POL-07 and P1-POL-09. It adds reusable, version-bound
-policy components and a Git import/export workflow without allowing Git, a
-browser, or a mutable parent policy to become runtime authority.</p>
-<h2 id="decision">Decision</h2>
-<p>An independently approved policy version is the reusable component. A draft
-may reference up to eight exact versions from other policies in the same
-organization. Each reference binds the component policy ID, version and
-content SHA-256. References never mean “latest” or “active”, so a later change
-to a component cannot silently alter an already reviewed child.</p>
-<p>A policy version stores three distinct objects:</p>
-<ul>
-<li><code>localConfiguration</code>: fields authored specifically for this policy;</li>
-<li><code>componentRefs</code>: ordered, exact immutable component identities; and</li>
-<li><code>configuration</code>: the fully composed effective policy evaluated by the
-  existing review, simulation, signing and runtime paths.</li>
-</ul>
-<p>The effective configuration and a bounded field-level explanation are
-computed by the control plane before the draft is stored. The browser may
-preview the same operation for usability, but server output is authoritative.
-Activation continues to copy only the effective configuration into the active
-policy snapshot. Existing policies migrate as versions with empty component
-references and a local configuration equal to their current configuration.</p>
-<h2 id="why-policy-versions-are-components">Why policy versions are components</h2>
-<p>Creating a second component lifecycle would duplicate draft, independent
-approval, immutable versioning, signing and audit behavior. Reusing governed
-policy versions means a component has already crossed those boundaries. A
-component may be referenced only while its version is <code>active</code> or <code>retired</code>,
-has an independent approver and has an exact content hash. <code>draft</code>, <code>review</code>,
-<code>approved</code>, <code>staged</code>, rejected or missing versions fail closed. Providers that
-support signed bundles, including AWS, additionally require valid stored
-integrity evidence. The SQLite reference provider is not presented as signed
-or highly available production authority.</p>
-<p>The AWS Lambda uses a checked-in standalone runtime generated mechanically from
-the canonical SDK composition module. CI verifies source freshness and semantic
-parity. This keeps the deployable Lambda self-contained without creating a
-second editable set of merge rules.</p>
-<p>Retired versions remain valid immutable inputs for an existing or new draft;
-retirement removes active fleet assignment, not retained reviewed evidence.
-Deletion of referenced policy versions is prohibited.</p>
-<h2 id="deterministic-restrictive-composition">Deterministic restrictive composition</h2>
-<p>Composition starts with no opinion. Components are applied in their declared
-order, followed by local policy intent. Ordering is retained for explanation,
-but it cannot be used to overwrite a conflict or widen earlier authority.</p>
+<h1 id="secure-webhooks">Secure webhooks</h1>
+<p>Secure webhooks provide a tenant-scoped, signed automation boundary for
+redacted AAI Security events. They satisfy the implementation foundation of
+P1-ADM-10. They do <strong>not</strong> by themselves satisfy P0-07: a customer SIEM still
+needs a supported event schema, searchable ingestion, operational monitoring
+and live interruption/replay acceptance.</p>
+<h2 id="operator-journey">Operator journey</h2>
+<ol>
+<li>A platform administrator opens <strong>Administration → Webhooks</strong> and registers
+   a credential-free public HTTPS receiver.</li>
+<li>The control plane creates a 256-bit HMAC secret in AWS Secrets Manager and
+   displays the secret to the administrator exactly once.</li>
+<li>The receiver stores the secret in its own approved secret manager and uses
+   <code>verify_webhook</code> against the exact raw request body.</li>
+<li>The administrator sends a server-owned verification event and confirms the
+   delivery evidence in the destination detail view.</li>
+<li>During rotation, the worker sends signatures from both the new and previous
+   keys for the selected one-hour to seven-day overlap. The receiver accepts
+   both key IDs until the displayed deadline and then removes the old key.</li>
+<li>Operators can pause, resume or retire a destination using revision-bound
+   changes and a retained rationale.</li>
+</ol>
+<h2 id="trust-boundaries-and-data-flow">Trust boundaries and data flow</h2>
+<pre><code class="language-mermaid">flowchart LR
+    UI[&quot;Authenticated web UI&quot;] --&gt;|typed configuration; no key reads| API[&quot;Control-plane Lambda&quot;]
+    API --&gt;|exact key version| SM[&quot;Secrets Manager + dedicated KMS key&quot;]
+    API --&gt;|content-minimised outbox first| DB[&quot;Tenant-scoped DynamoDB&quot;]
+    API --&gt;|tenant and delivery IDs only| Q[&quot;FIFO queue + DLQ&quot;]
+    Q --&gt; W[&quot;Dedicated delivery worker&quot;]
+    W --&gt;|reload live destination and exact key versions| DB
+    W --&gt; SM
+    W --&gt;|signed exact bytes; no redirects| R[&quot;Public HTTPS receiver&quot;]
+    W --&gt;|terminal content-free evidence| S3[&quot;Object Lock audit bucket&quot;]
+</code></pre>
+<p>The browser never receives a secret after creation or rotation. Queue messages
+contain only tenant and delivery identifiers, so they cannot replace the
+endpoint, payload or key authority. The worker reloads all authority for every
+attempt. It runs separately from the API Lambda and has only the table, audit,
+queue and webhook-secret permissions needed for delivery.</p>
+<h2 id="signing-and-receiver-contract">Signing and receiver contract</h2>
+<p>Version 1 signs these exact bytes:</p>
+<pre><code class="language-text">&lt;unix timestamp&gt;.&lt;delivery ID&gt;.&lt;raw HTTP request body&gt;
+</code></pre>
+<p>with HMAC-SHA256. The primary headers are:</p>
 <table>
 <thead>
 <tr>
-<th>Field class</th>
-<th>Composition rule</th>
-<th>Examples</th>
+<th>Header</th>
+<th>Meaning</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Allow-list</td>
-<td>Set intersection after the first opinion</td>
-<td>tools, principals, built-ins, Skills, MCP servers, command allow patterns, credential scopes</td>
+<td><code>AAI-Webhook-Version</code></td>
+<td>Signing contract version, currently <code>1</code>.</td>
 </tr>
 <tr>
-<td>Deny-list</td>
-<td>Set union</td>
-<td>denied tools and denied command patterns</td>
+<td><code>AAI-Webhook-Id</code></td>
+<td>Stable delivery identity used for atomic replay claims.</td>
 </tr>
 <tr>
-<td>Approval requirement</td>
-<td>Set union; minimum TTL</td>
-<td>required tools/risk classes/commands and approval expiry</td>
+<td><code>AAI-Webhook-Timestamp</code></td>
+<td>Unix timestamp covered by the signature.</td>
 </tr>
 <tr>
-<td>Maximum budget or lifetime</td>
-<td>Numeric minimum</td>
-<td>actions, concurrency, fan-out, cost, rate, delegation, timeout and credential/idempotency TTL</td>
+<td><code>AAI-Webhook-Key-Id</code></td>
+<td>Current non-secret key identifier.</td>
 </tr>
 <tr>
-<td>Required safeguard</td>
-<td>Boolean OR</td>
-<td>deny-by-default, high-risk isolation, credentials when a component requires them, redaction</td>
-</tr>
-<tr>
-<td>Optional capture or egress</td>
-<td>Boolean AND after the first opinion</td>
-<td>tool-content capture and telemetry enablement</td>
-</tr>
-<tr>
-<td>Provider or deployment reference</td>
-<td>Exact equality</td>
-<td>policy, approval, audit, broker, isolation and telemetry provider references</td>
-</tr>
-<tr>
-<td>Closed enum</td>
-<td>Exact equality unless a field-specific restrictive order exists</td>
-<td>credential/isolation modes and managed-host identity</td>
-</tr>
-<tr>
-<td>Unknown legacy field</td>
-<td>Exact equality</td>
-<td>migration extensions cannot gain undocumented merge semantics</td>
+<td><code>AAI-Webhook-Signature</code></td>
+<td><code>v1=&lt;lowercase SHA-256 hex&gt;</code>.</td>
 </tr>
 </tbody>
 </table>
-<p>Lists are canonicalized as unique, sorted JSON values. Duplicate values,
-booleans masquerading as numbers, non-finite numbers, unknown typed fields,
-unsafe command patterns and secrets are rejected by the normal policy schema
-before composition. An empty allow-list is valid and means no authority.</p>
-<p>A differing provider, host identity, bundle digest, or unknown legacy value is
-a conflict, not “last writer wins”. The operator must resolve it explicitly in
-the source components before review. Components cannot set
-<code>denyByDefault: false</code>, disable mandatory redaction or weaken immutable SDK
-safeguards.</p>
-<h2 id="graph-and-tenant-constraints">Graph and tenant constraints</h2>
-<p>References are resolved by strongly consistent reads. The control plane:</p>
-<ul>
-<li>rejects self-reference and cross-organization references;</li>
-<li>rejects repeated references and changed content hashes;</li>
-<li>traverses the complete component graph with a maximum depth of four and a
-  maximum of 32 unique versions;</li>
-<li>rejects cycles, missing links and ambiguous duplicate policy identities;</li>
-<li>stores a separate graph digest binding local intent, ordered exact references
-  (including each component graph digest), and the effective result; and</li>
-<li>repeats graph validation at staging and activation so a corrupted provider
-  record cannot be promoted.</li>
-</ul>
-<p><code>contentHash</code> remains the effective-configuration SHA-256 for compatibility
-with runtime drift and signed-bundle verification. <code>graphDigest</code> proves how
-that result was derived. Lifecycle transitions reproduce and compare both.
-Because every edge names an immutable version, composition is reproducible
-without consulting mutable active-policy pointers.</p>
-<h2 id="effective-policy-explanation">Effective-policy explanation</h2>
-<p>Every draft and version detail returns <code>composition</code> with:</p>
-<ul>
-<li>the graph digest and ordered component identities;</li>
-<li>each effective field, merge rule and winning/restricting sources;</li>
-<li>removed allow-list values and added deny/approval values;</li>
-<li>the local policy contribution;</li>
-<li>conflicts, if preview is requested before draft creation; and</li>
-<li>explicit <code>no-op</code> contributions where a component added no authority change.</li>
-</ul>
-<p>The UI leads with the effective result. It shows reusable components as a
-stack, lets an operator expand “why is this value effective?”, and keeps local
-intent visually separate from inherited restrictions. JSON remains an expert
-view. The UI never describes a component update as applied to a child whose
-exact reference did not change.</p>
-<h2 id="git-source-contract">Git source contract</h2>
-<p>Git is a reviewed source and transport, not an authorization system. A
-deployment-owned <code>PolicySourceVerifier</code> adapter retrieves one exact commit and
-path from an allow-listed repository and returns server-observed facts:</p>
-<ul>
-<li>provider and canonical repository identity;</li>
-<li>full commit SHA and immutable blob SHA;</li>
-<li>path and content digest;</li>
-<li>branch-protection/review result and reviewed pull-request reference;</li>
-<li>signer identity and signature-verification result; and</li>
-<li>retrieval time and provider evidence digest.</li>
-</ul>
-<p>The first provider adapter targets GitHub. Its installation credential is a
-deployment-owned secret reference with read-only Contents, Metadata and Pull
-Requests access. The browser supplies no token, review status, signer result or
-policy content. Provider calls use bounded timeouts and pagination and fail
-closed on rate limits, partial review data, changed commits, redirects or an
-unavailable verifier.</p>
-<p>The canonical schema-v1 policy source document contains exactly:</p>
-<pre><code class="language-json">{
-  &quot;schemaVersion&quot;: 1,
-  &quot;policyId&quot;: &quot;policy-engineering&quot;,
-  &quot;organizationId&quot;: &quot;org-example&quot;,
-  &quot;name&quot;: &quot;Engineering agents&quot;,
-  &quot;componentRefs&quot;: [
-    {
-      &quot;policyId&quot;: &quot;policy-enterprise-baseline&quot;,
-      &quot;version&quot;: 4,
-      &quot;contentHash&quot;: &quot;&lt;64 lowercase hex characters&gt;&quot;
-    }
-  ],
-  &quot;localConfiguration&quot;: {}
-}
-</code></pre>
-<p>Unknown fields, duplicate JSON keys, YAML aliases/tags, non-UTF-8 content and
-documents over 1 MiB are rejected. JSON is canonical. YAML may be accepted as
-an authoring format only through a safe parser and is normalized to the same
-canonical JSON before hashing; the initial implementation may ship JSON first
-rather than introducing an unsafe parser.</p>
-<h2 id="import-and-export-lifecycle">Import and export lifecycle</h2>
-<p>Export returns canonical source bytes plus a control-plane provenance envelope
-that binds tenant, policy/version/content hash, component graph digest,
-exporting subject/time and signing key. The envelope is signed by the existing
-policy-signing adapter. It contains no credentials or provider token.</p>
-<p>Import accepts an idempotency identity plus repository, full commit SHA and
-path. The server retrieves
-and verifies the document, checks tenant/policy scope, resolves components and
-creates a normal draft. It records immutable Git and control-plane provenance
-on that draft. Import never submits, approves, stages, activates or assigns a
-policy. A second authenticated subject still performs approval in the normal
-control-plane lifecycle.</p>
-<p>Re-importing the same provider evidence and canonical content is idempotent.
-The same request identity with different content, a rewritten commit, changed
-review state, missing signature or another tenant is rejected and audited.</p>
-<h2 id="api-surface">API surface</h2>
-<pre><code class="language-text">POST /api/enterprise/policies/composition/preview
-POST /api/enterprise/policies/{policyId}/versions/{version}/export
-POST /api/enterprise/policies/imports
-GET  /api/enterprise/policies/imports/{importId}
-</code></pre>
-<p>The reference implementation is available through <code>EnterpriseFleetStore</code>.
-Inject a deployment-owned <code>PolicySourceVerifier</code> and <code>PolicyExportSigner</code> when
-constructing the store. If either adapter is absent, its operation fails
-closed. <code>GitHubPolicySourceVerifier</code> supplies the GitHub evidence contract but
-deliberately receives the credential callback and bounded HTTP transport from
-the deployment; it neither discovers ambient credentials nor performs work in
-its constructor.</p>
-<pre><code class="language-python">from agentic_security import EnterpriseFleetStore, GitHubPolicySourceVerifier
+<p>During rotation, <code>AAI-Webhook-Previous-Key-Id</code> and
+<code>AAI-Webhook-Previous-Signature</code> are also present. Receivers should select a
+key by ID, compare the HMAC in constant time, enforce a short timestamp
+tolerance and atomically claim the delivery ID before processing. The replay
+store must be shared and durable for a horizontally scaled receiver. A replay
+store outage fails closed.</p>
+<pre><code class="language-python">from agentic_security import WebhookVerificationStatus, verify_webhook
 
-verifier = GitHubPolicySourceVerifier(
-    token_provider=resolve_read_only_github_app_token,  # deployment-owned
-    transport=bounded_no_redirect_transport,
-    now=clock,
+verification = verify_webhook(
+    raw_request_body,
+    request_headers,
+    keys={&quot;key-current&quot;: secret_from_your_secret_manager},
+    replay_store=durable_atomic_replay_store,
 )
-store = EnterpriseFleetStore(
-    &quot;fleet.sqlite&quot;,
-    policy_source_verifier=verifier,
-    policy_export_signer=kms_policy_export_signer,
-)
+if verification.status is not WebhookVerificationStatus.VERIFIED:
+    reject_request()
+process_once(raw_request_body)
 </code></pre>
-<p>The names in this abbreviated integration example are application adapters,
-not SDK globals. Production deployments should use PostgreSQL and a KMS/HSM
-signer; SQLite remains the local reference persistence adapter.</p>
-<p>The AWS-hosted implementation keeps provider access in a dedicated verifier
-Lambda. That worker can read one configured Secrets Manager secret and call
-only the fixed GitHub API origin; it has no DynamoDB, fleet mutation or KMS
-signing permission. The control-plane Lambda can invoke only that exact worker,
-reconstructs <code>VerifiedPolicySource</code> from its bounded response and compares the
-request and evidence digests before writing anything. Policy shell, immutable
-draft and import record commit in one DynamoDB transaction. KMS signs export
-provenance in the control plane. Missing configuration, verifier errors,
-malformed evidence and transaction races fail without a partial policy.</p>
-<p>Normal create/update requests gain <code>componentRefs</code> and
-<code>localConfiguration</code>. Legacy <code>configuration</code> remains accepted only when
-<code>componentRefs</code> is absent; it maps to local configuration. Sending both forms
-is ambiguous and fails closed.</p>
-<h2 id="threats-and-controls">Threats and controls</h2>
-<table>
-<thead>
-<tr>
-<th>Threat</th>
-<th>Control</th>
-<th>Failure posture</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Mutable parent silently widens children</td>
-<td>Exact policy version and content hash</td>
-<td>Existing child is unchanged</td>
-</tr>
-<tr>
-<td>Component order hides an overwrite</td>
-<td>Restrictive field-specific algebra; conflicts reject</td>
-<td>Draft is not created</td>
-</tr>
-<tr>
-<td>Cross-tenant component reference</td>
-<td>Authenticated organization plus consistent component read</td>
-<td>Request denied</td>
-</tr>
-<tr>
-<td>Cycle or graph bomb</td>
-<td>Depth, unique-node and reference-count bounds</td>
-<td>Composition denied</td>
-</tr>
-<tr>
-<td>Browser forges Git approval</td>
-<td>Server-owned source-verifier adapter</td>
-<td>Import denied</td>
-</tr>
-<tr>
-<td>Git content changes after review</td>
-<td>Exact commit, blob and content digests</td>
-<td>Import denied</td>
-</tr>
-<tr>
-<td>Imported file activates authority</td>
-<td>Import creates only an ordinary draft</td>
-<td>No fleet change</td>
-</tr>
-<tr>
-<td>Unknown field gains merge behavior</td>
-<td>Closed typed schema or exact-equality legacy rule</td>
-<td>Conflict/rejection</td>
-</tr>
-<tr>
-<td>Explanation differs from runtime</td>
-<td>Effective configuration stored once and used by review/sign/runtime</td>
-<td>Promotion denied on digest mismatch</td>
-</tr>
-</tbody>
-</table>
-<h2 id="required-evidence">Required evidence</h2>
-<p>Unit and adversarial tests must prove every merge operator, deterministic
-canonicalization, changed-order behavior, empty intersections, provider
-conflicts, graph bounds, cycles, stale hashes, cross-tenant denial and legacy
-migration. Control-plane and AWS contracts must prove immutable references,
-strongly consistent reads, activation revalidation, audit/provenance retention,
-idempotent import and no side effect on preview/provider failure. UI tests must
-prove effective-first explanation, local-versus-inherited clarity, conflict
-resolution, no silent activation and accessible keyboard/screen-reader flows.</p>
-<p>Live acceptance requires an organization-owned GitHub repository with branch
-protection, two independent identities, a read-only GitHub App installation
-and retained export/import/approval/activation evidence. Synthetic provider
-tests do not satisfy that deployment acceptance.</p>
+<p>Do not parse and re-serialize the body before verification. Do not use an
+in-process set as the production replay store.</p>
+<h2 id="delivery-and-failure-semantics">Delivery and failure semantics</h2>
+<ul>
+<li>The outbox record is persisted before its identity is submitted to a FIFO
+  queue. A one-minute dispatcher retries records not accepted by SQS.</li>
+<li>Delivery is at least once. The stable delivery ID and receiver replay claim
+  provide idempotent processing.</li>
+<li>Each HTTP attempt has a five-second timeout. Redirects are rejected and
+  response bodies are discarded after a 4 KiB bounded read.</li>
+<li>Five failed receives move the identity to a DLQ. Terminal evidence records
+  only status, attempt count, HTTP status and a coarse failure code.</li>
+<li>The list page reads a separate worker-owned health projection, preventing a
+  delivery worker from overwriting concurrent destination configuration.
+  Delivery records and immutable audit—not the projection—remain authoritative.</li>
+<li>Destinations are limited to credential-free HTTPS on port 443. Private IP
+  literals, local names and DNS answers containing non-public addresses fail.
+  Deployment-owned egress filtering remains required to remove the residual
+  DNS-rebinding interval.</li>
+</ul>
+<h2 id="key-lifecycle">Key lifecycle</h2>
+<p>Secrets use a dedicated rotating KMS key and a tenant/destination Secrets
+Manager path. DynamoDB stores only the exact active and previous secret version
+IDs and non-secret key IDs. Rotation changes the active authority using an
+optimistic destination revision. Retirement stops delivery and schedules
+recoverable secret deletion after seven days; retained configuration and
+delivery evidence remain visible.</p>
+<h2 id="supported-events-and-limits">Supported events and limits</h2>
+<p>The initial allow-list is <code>webhook.test</code>, <code>endpoint.alert.opened</code> and
+<code>endpoint.alert.reopened</code>. Test delivery content is generated by the server;
+operators cannot submit arbitrary payloads. Encoded events are limited to
+16 KiB, destinations to 50 per tenant, recent UI delivery history to 100 per
+destination, and persisted delivery records to 30 days. Event schemas will be
+versioned before expanding this surface.</p>
+<h2 id="acceptance-boundary">Acceptance boundary</h2>
+<p>Automated contracts prove exact-byte verification, tamper/expiry/replay denial,
+dual-key overlap, cross-tenant and role denial, unsafe endpoint rejection,
+outbox queueing, bounded worker delivery, terminal immutable audit, DLQ/IAM/KMS
+infrastructure synthesis and health repair without redelivery. Customer
+acceptance still requires a real public receiver, customer-owned durable replay
+store, egress policy, secret-manager rotation exercise, interruption/DLQ replay
+exercise and retained customer evidence.</p>
 
 
 

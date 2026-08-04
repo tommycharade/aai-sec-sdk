@@ -1828,6 +1828,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../secure-webhooks-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secure webhooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
@@ -2191,6 +2218,17 @@
     <span class="md-ellipsis">
       
         P1-ADM-09 implementation evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p1-adm-10-implementation-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1-ADM-10 implementation evidence
       
     </span>
   </a>
@@ -3099,6 +3137,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#p1-adm-10-implementation-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P1-ADM-10 implementation evidence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#p1-flt-01-acceptance-evidence" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3380,8 +3429,8 @@ installation and convergence are deliberately not claimed.</p>
 <tr>
 <td>Reporting and administration</td>
 <td>Partial</td>
-<td>Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; content-hashed export; purpose-specific executive and evidence-reader assurance reports with explicit blind spots, non-guarantees and content-addressed traceability; scoped expiring service identities with one-time credentials, exact machine-route capabilities, rotation, revocation and usage evidence; versioned Terraform provider for tenant inspection, governed drafts, groups, Skills and MCP servers with import and revision-guarded drift handling</td>
-<td>Customer-validated framework mappings and signed/scheduled report distribution, real-workload machine-API and Terraform acceptance, provider Registry release/signing, CMK/residency and private access</td>
+<td>Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; content-hashed export; purpose-specific executive and evidence-reader assurance reports with explicit blind spots, non-guarantees and content-addressed traceability; scoped expiring service identities with one-time credentials, exact machine-route capabilities, rotation, revocation and usage evidence; versioned Terraform provider for tenant inspection, governed drafts, groups, Skills and MCP servers with import and revision-guarded drift handling; tenant-managed signed webhooks with one-time HMAC keys, dual-key rotation, durable outbox/DLQ delivery, replay-verification helper and secret-free posture</td>
+<td>Customer-validated framework mappings and signed/scheduled report distribution, real-workload machine-API and Terraform acceptance, provider Registry release/signing, live customer webhook interruption/replay acceptance, CMK/residency and private access</td>
 </tr>
 </tbody>
 </table>
@@ -3427,6 +3476,31 @@ vets and tests the provider and formats its HCL example. Registry publication,
 release signing and a deployed real-workload Terraform apply remain external
 acceptance work; see <a href="../terraform-provider-design/">Terraform provider and declarative
 management</a>.</p>
+<h3 id="p1-adm-10-implementation-evidence">P1-ADM-10 implementation evidence</h3>
+<p>The hosted control plane now creates tenant-scoped public-HTTPS webhook
+destinations under platform-administrator authority. A 256-bit HMAC key is
+generated server-side, encrypted with a dedicated rotating KMS key, selected by
+exact Secrets Manager version and returned only at creation or rotation. A
+bounded one-hour to seven-day overlap causes the isolated worker to send both
+current and previous signatures without exposing either secret to the queue,
+database views or ordinary browser reads.</p>
+<p>Events enter a persistent DynamoDB outbox before their tenant/delivery identity
+is submitted to a FIFO queue. The worker reloads live authority, rejects
+redirects and private DNS answers, bounds timeout and response bytes, retries
+five times, uses a DLQ and writes content-minimised terminal evidence to Object
+Lock. A separate health projection cannot overwrite destination configuration.
+The public <code>verify_webhook</code> helper validates exact bytes, timestamp and key ID,
+uses constant-time comparison and fails closed when its caller-provided atomic
+replay store is unavailable. The typed UI manages destinations, one-time
+secrets, verification events, delivery posture, rotation and lifecycle without
+claiming a queued event was delivered.</p>
+<p>Unit, adversarial, Lambda/worker contract and CDK synthesis evidence cover
+tamper, expiry, replay, dual-key overlap, role and tenant isolation, unsafe
+egress, exact-version secret authority, durable queueing, terminal audit and
+posture repair without redelivery. This completes the implementation foundation
+of P1-ADM-10. A real customer receiver, durable receiver replay store, egress
+policy and interruption/rotation/DLQ replay exercise remain acceptance work.
+P0-07 remains a Splunk stub. See <a href="../secure-webhooks-design/">Secure webhooks</a>.</p>
 <h3 id="p1-flt-01-acceptance-evidence">P1-FLT-01 acceptance evidence</h3>
 <p><strong>Bulk enrollment and assignment is complete for the requirement's “select
 many” path.</strong> The hosted group detail UI selects up to 100 active unassigned

@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/enterprise-integration-design/">
       
       
-        <link rel="prev" href="../terraform-provider-design/">
+        <link rel="prev" href="../secure-webhooks-design/">
       
       
         <link rel="next" href="../runtime-attestation-design/">
@@ -1825,6 +1825,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../secure-webhooks-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secure webhooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -3372,6 +3399,13 @@ remain required before enterprise-wide rollout.</p>
 is a schema and workflow stub and must report <code>deliveryVerified: false</code>; it
 cannot satisfy the enterprise SIEM gate until authenticated delivery, retry,
 dead-letter, monitoring and replay have live evidence.</p>
+<p>Signed webhooks are a separate automation primitive. They provide managed
+public-HTTPS destinations, one-time server-generated HMAC keys, bounded
+zero-downtime rotation, persistent outbox delivery, DLQ handling and a receiver
+verification helper. They currently carry only server-owned test and endpoint
+alert lifecycle events. This foundation is useful for customer automation but
+does not convert the Splunk stub into P0-07 delivery. See
+<a href="../secure-webhooks-design/">Secure webhooks</a>.</p>
 <p>Every supported host follows the same lifecycle:</p>
 <pre><code class="language-text">discover host -&gt; generate scoped installer -&gt; install SDK adapter
               -&gt; register deployment/agent -&gt; assign group policy

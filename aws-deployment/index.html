@@ -1828,6 +1828,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../secure-webhooks-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secure webhooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
@@ -2680,6 +2707,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#secure-webhook-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secure-webhook operations
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3182,6 +3220,17 @@
     <span class="md-ellipsis">
       
         Tenant evidence governance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#secure-webhook-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secure-webhook operations
       
     </span>
   </a>
@@ -3900,6 +3949,23 @@ a failed job leaves the longer future policy active and requires reconciliation,
 not rollback. Follow <a href="../asynchronous-retention-design/">Asynchronous tenant retention</a>
 and retain separate live cross-region count/order/hash/retention recovery
 evidence.</p>
+<h3 id="secure-webhook-operations">Secure-webhook operations</h3>
+<p>The stack provisions <code>WebhookDeliveryQueue</code> and its five-receive FIFO DLQ, a
+separate scheduled-dispatch DLQ, <code>WebhookDeliveryWorker</code>, and a rotating
+<code>WebhookSecretKey</code>. The API role may create, version and schedule deletion only
+under <code>aai-sec/webhooks/*</code>, encrypt with that key and send to the delivery
+queue. The worker can read only that secret prefix, decrypt with that key,
+update the control table, write terminal audit evidence and consume the queue;
+it has no Cognito or policy-signing permissions.</p>
+<p>Monitor <code>WebhookDeliveryDeadLetters</code> and <code>WebhookDispatchDeadLetters</code>. A DLQ
+item contains only tenant and delivery identity; inspect the retained delivery
+record and immutable terminal audit before redrive. Redrive preserves the
+delivery ID, so the customer receiver must atomically deduplicate it. Verify
+deployment egress controls restrict the worker to approved public receiver
+origins, because application DNS checks alone cannot eliminate DNS rebinding.
+Follow the creation, receiver verification and rotation procedure in
+<a href="../secure-webhooks-design/">Secure webhooks</a>. No live receiver is configured by
+CDK and the Splunk stub is unchanged.</p>
 <p>This is the first AWS deployment slice, not a production security
 certification. Before production use:</p>
 <ul>
