@@ -8,12 +8,16 @@ import subprocess
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 ROOT = Path(__file__).parents[1]
 INFRA = ROOT / "infra/aws-control-plane"
 
 
 def synth(**updates: str) -> dict[str, Any]:
     """Synthesize the stack with explicit synthetic GitHub deployment inputs."""
+    if not (INFRA / "node_modules/aws-cdk-lib").is_dir():
+        pytest.skip("pinned CDK dependencies are absent; the policy-source-iac job owns synthesis")
     environment = {
         **os.environ,
         "POLICY_GITHUB_SECRET_NAME": "aai-sec/policy/github",
