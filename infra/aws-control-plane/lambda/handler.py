@@ -13476,6 +13476,207 @@ def _discovery_export(tenant):
     return {**report, "contentHash": digest}
 
 
+def _assurance_report(tenant, profile, *, now=None):
+    """Build one content-addressed, read-only enterprise assurance summary.
+
+    The report derives every fact from bounded server-owned records. It does
+    not reconcile lifecycle state or write an audit event because a read-only
+    report must never change the authority or evidence it is describing.
+    """
+    if profile not in {"executive", "auditor"}:
+        raise ValueError("assurance report profile is unsupported")
+    current = int(time.time()) if now is None else int(now)
+    discovery = _discovery_report(tenant, now=current)
+    endpoint = _endpoint_evidence_health(tenant, now=current)
+    agents = [
+        item
+        for item in _all_agents(tenant, consistent_read=True)
+        if _agent_lifecycle_state(item) == "active"
+    ]
+    groups = _list(tenant, "GROUP", consistent_read=True)
+    policies = _list(tenant, "POLICY", consistent_read=True)
+    versions = _list(tenant, "POLICY_VERSION", consistent_read=True)
+    exceptions = _list(tenant, "POLICY_EXCEPTION", consistent_read=True)
+    approvals = _list(tenant, "APPROVAL", consistent_read=True)
+    alerts = _list(tenant, "ALERT", consistent_read=True)
+    cases = _list(tenant, "CASE", consistent_read=True)
+    decisions, decisions_truncated = _decision_window(tenant)
+
+    active_policy_ids = {
+        str(item.get("id"))
+        for item in policies
+        if isinstance(item.get("id"), str) and int(item.get("version", 0)) > 0
+    }
+    pending_states = {"draft", "review", "approved", "staged"}
+    policy_state_counts = {
+        state: sum(1 for item in versions if item.get("state") == state)
+        for state in sorted(_POLICY_VERSION_STATES)
+    }
+    connected = sum(
+        1
+        for item in agents
+        if item.get("status") == "connected" and int(item.get("expires_at", 0)) > current
+    )
+    attested = sum(
+        1
+        for item in agents
+        if item.get("attestation_status") == "compliant"
+        and int(item.get("attestation_expires_at", 0)) > current
+    )
+    managed = sum(
+        1
+        for item in agents
+        if isinstance(item.get("managed_configuration"), dict)
+        and item["managed_configuration"].get("status") == "enforced"
+    )
+    active_exceptions = sum(
+        1
+        for item in exceptions
+        if item.get("state") == "active" and int(item.get("expires_at", 0)) > current
+    )
+    expiring_exceptions = sum(
+        1
+        for item in exceptions
+        if item.get("state") == "active"
+        and current < int(item.get("expires_at", 0)) <= current + (7 * 24 * 60 * 60)
+    )
+    approval_counts = {
+        state: sum(1 for item in approvals if _approval_status(item, current) == state)
+        for state in ("pending", "approved", "consumed", "denied", "expired")
+    }
+    open_alerts = sum(1 for item in alerts if item.get("status") not in {"resolved", "closed"})
+    open_cases = sum(1 for item in cases if item.get("status") not in {"resolved", "closed"})
+    evidence_monitor = _evidence_monitor_view(_evidence_monitor_record(tenant))
+
+    population = _json(discovery["summary"])
+    runtime = {
+        "activeAgents": len(agents),
+        "connected": connected,
+        "runtimeAttested": attested,
+        "managedConfigurationEnforced": managed,
+        "endpointDevices": int(endpoint["summary"]["devices"]),
+        "healthyEndpointDevices": int(endpoint["summary"]["healthy"]),
+    }
+    policy = {
+        "policies": len(policies),
+        "activePolicies": len(active_policy_ids),
+        "pendingVersions": sum(policy_state_counts[state] for state in pending_states),
+        "groups": len(groups),
+        "groupsWithActivePolicy": sum(
+            1 for item in groups if item.get("policyId") in active_policy_ids
+        ),
+        "versionStates": policy_state_counts,
+    }
+    exception = {
+        "active": active_exceptions,
+        "expiringWithinSevenDays": expiring_exceptions,
+        "totalRetained": len(exceptions),
+    }
+    operations = {
+        "openAlerts": open_alerts,
+        "openCases": open_cases,
+        "approvalStates": approval_counts,
+        "recentDecisions": len(decisions),
+        "recentDecisionWindowTruncated": decisions_truncated,
+        "fleetEmergencyStop": _fleet_emergency_stop_active(tenant),
+    }
+    evidence = {
+        "status": evidence_monitor["status"],
+        "reasonCodes": evidence_monitor["reasonCodes"],
+        "lastCheckedAt": evidence_monitor["checkedAt"],
+        "durableAlertDelivered": evidence_monitor["alertDelivered"],
+        "immutableStore": "s3-object-lock",
+    }
+
+    blind_spots = list(discovery["blindSpots"])
+    if agents and connected < len(agents):
+        blind_spots.append("agent_heartbeat_incomplete")
+    if agents and attested < len(agents):
+        blind_spots.append("runtime_attestation_incomplete")
+    if agents and managed < len(agents):
+        blind_spots.append("managed_configuration_incomplete")
+    if agents and endpoint["summary"]["devices"] == 0:
+        blind_spots.append("endpoint_evidence_unavailable")
+    if evidence_monitor["status"] != "verified":
+        blind_spots.append("immutable_evidence_not_verified")
+    blind_spots = sorted(set(blind_spots))
+    attention = bool(
+        open_alerts
+        or open_cases
+        or active_exceptions
+        or connected < len(agents)
+        or attested < len(agents)
+        or managed < len(agents)
+    )
+    posture = (
+        "evidence_incomplete"
+        if blind_spots or population.get("coverageAvailable") is not True
+        else "attention"
+        if attention
+        else "ready"
+    )
+    sections = {
+        "population": population,
+        "runtime": runtime,
+        "policy": policy,
+        "exceptions": exception,
+        "operations": operations,
+        "evidence": evidence,
+    }
+    routes = {
+        "population": "/api/enterprise/discovery/export",
+        "runtime": "/api/enterprise/endpoint-evidence",
+        "policy": "/api/enterprise/policies",
+        "exceptions": "/api/enterprise/policy-exceptions",
+        "operations": "/api/enterprise/cases",
+        "evidence": "/api/enterprise/evidence/export",
+    }
+    trace = [
+        {
+            "section": name,
+            "contentHash": _canonical_sha256(value),
+            **({"evidenceRoute": routes[name]} if profile == "auditor" else {}),
+        }
+        for name, value in sections.items()
+    ]
+    report = {
+        "schemaVersion": 1,
+        "profile": profile,
+        "generatedAt": current,
+        "posture": posture,
+        "sections": sections,
+        "blindSpots": blind_spots,
+        "nonGuarantees": [
+            "This report is not a compliance certification.",
+            "Agent and endpoint reports are operational evidence, not authorization facts.",
+            "The content hash is not a digital signature or trusted timestamp.",
+        ],
+        "trace": trace,
+    }
+    if profile == "auditor":
+        report["details"] = {
+            "breakdowns": _json(discovery["breakdowns"]),
+            "policies": [
+                {
+                    "policyId": item.get("id"),
+                    "activeVersion": int(item.get("version", 0)),
+                }
+                for item in sorted(policies, key=lambda value: str(value.get("id", "")))
+            ],
+            "groups": [
+                {
+                    "groupId": item.get("id"),
+                    "policyId": item.get("policyId"),
+                    "membershipMode": _group_membership_mode(item),
+                    "memberCount": len(item.get("agent_keys", [])),
+                }
+                for item in sorted(groups, key=lambda value: str(value.get("id", "")))
+            ],
+            "accessCertificationRoute": "/api/enterprise/identity/access-certification",
+        }
+    return {**report, "contentHash": _canonical_sha256(report)}
+
+
 def _fleet(tenant):
     agents = _all_agents(tenant)
     groups = []
@@ -14816,6 +15017,25 @@ def handler(event, context):
         if path.startswith("/enterprise/") or path.startswith("/api/enterprise/"):
             suffix = path.split("/enterprise/", 1)[1]
             parts = [p for p in suffix.split("/") if p]
+            if (
+                method == "GET"
+                and len(parts) == 2
+                and parts[0] == "reports"
+                and parts[1] in {"executive", "auditor"}
+            ):
+                if not _operator_roles(event):
+                    return _response(
+                        403,
+                        {"error": "enterprise assurance reports require a tenant role"},
+                    )
+                if parts[1] == "auditor" and not _operator_authorized(
+                    event, "evidence_read", tenant
+                ):
+                    return _response(
+                        403,
+                        {"error": "auditor assurance requires evidence-read authority"},
+                    )
+                return _response(200, _assurance_report(tenant, parts[1]))
             if method == "GET" and parts in (["evidence"], ["evidence", "export"]):
                 if not _operator_authorized(event, "evidence_read", tenant):
                     return _response(

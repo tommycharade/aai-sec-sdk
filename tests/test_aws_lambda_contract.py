@@ -1,6 +1,7 @@
 """Contract tests for the deployed AWS control-plane Lambda boundary."""
 
 import base64
+import copy
 import hashlib
 import hmac
 import importlib.util
@@ -684,6 +685,125 @@ def _runtime_manifest(host: str = "claude-code") -> dict[str, Any]:
         "hookDigest": "e" * 64,
         "host": host,
     }
+
+
+def test_enterprise_assurance_reports_are_honest_hashed_and_read_only(
+    monkeypatch: Any,
+) -> None:
+    """Purpose-specific reports must preserve gaps and never mutate evidence."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-assurance-report"
+    now = 1_800_000_000
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "POLICY", "policy-a"),
+            "tenant_id": tenant,
+            "id": "policy-a",
+            "version": 1,
+        }
+    )
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "GROUP", "group-a"),
+            "tenant_id": tenant,
+            "id": "group-a",
+            "policyId": "policy-a",
+            "agent_keys": [],
+        }
+    )
+    table.put_item(
+        Item={
+            **module._item_key("tenant-other", "POLICY", "policy-private"),
+            "tenant_id": "tenant-other",
+            "id": "policy-private",
+            "version": 99,
+        }
+    )
+    before = copy.deepcopy(table.items)
+
+    executive = module._assurance_report(tenant, "executive", now=now)
+    auditor = module._assurance_report(tenant, "auditor", now=now)
+
+    assert executive["profile"] == "executive"
+    assert executive["posture"] == "evidence_incomplete"
+    assert executive["sections"]["population"]["coverageAvailable"] is False
+    assert "details" not in executive
+    assert all("evidenceRoute" not in item for item in executive["trace"])
+    assert auditor["details"]["policies"] == [{"policyId": "policy-a", "activeVersion": 1}]
+    assert auditor["details"]["groups"] == [
+        {
+            "groupId": "group-a",
+            "policyId": "policy-a",
+            "membershipMode": "manual",
+            "memberCount": 0,
+        }
+    ]
+    assert all("evidenceRoute" in item for item in auditor["trace"])
+    unsigned = {key: value for key, value in auditor.items() if key != "contentHash"}
+    assert auditor["contentHash"] == module._canonical_sha256(unsigned)
+    encoded = json.dumps(auditor, sort_keys=True)
+    assert "project_root" not in encoded
+    assert "business_contact" not in encoded
+    assert "decision_reason" not in encoded
+    assert "policy-private" not in encoded
+    assert table.items == before
+    table.items[(f"TENANT#{tenant}", "GROUP#group-a")]["agent_keys"] = ["deployment-a:agent-a"]
+    changed = module._assurance_report(tenant, "auditor", now=now)
+    assert changed["contentHash"] != auditor["contentHash"]
+
+
+def test_enterprise_assurance_report_routes_enforce_profile_roles(monkeypatch: Any) -> None:
+    """Only evidence readers receive identifier-bearing auditor trace data."""
+    module, _ = _load_handler(monkeypatch)
+    tenant = "tenant-assurance-route"
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-author"],
+        "sub": "author-a",
+    }
+    auditor = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["auditor"],
+        "sub": "auditor-a",
+    }
+    anonymous = {"custom:tenant_id": tenant, "sub": "anonymous-a"}
+    table = module.TABLE
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "TENANT", "root"),
+            "tenant_id": tenant,
+            "id": tenant,
+            "status": "active",
+        }
+    )
+
+    assert (
+        _invoke(
+            module,
+            _event("/api/enterprise/reports/executive", "GET", claims=author),
+        )["statusCode"]
+        == 200
+    )
+    denied = _invoke(
+        module,
+        _event("/api/enterprise/reports/auditor", "GET", claims=author),
+    )
+    assert denied["statusCode"] == 403
+    assert "evidence-read" in json.loads(denied["body"])["error"]
+    assert (
+        _invoke(
+            module,
+            _event("/api/enterprise/reports/auditor", "GET", claims=auditor),
+        )["statusCode"]
+        == 200
+    )
+    assert (
+        _invoke(
+            module,
+            _event("/api/enterprise/reports/executive", "GET", claims=anonymous),
+        )["statusCode"]
+        == 403
+    )
 
 
 def test_evidence_assurance_retention_legal_hold_and_export(monkeypatch: Any) -> None:

@@ -1025,6 +1025,18 @@ diffs highlight expansions, restrictions and data-capture changes without
 turning reviewer judgement into an automated allow decision. See
 [Policy change assurance](policy-change-assurance-design.md).
 
+Enterprise assurance reports are read-only projections, not new authority.
+The server derives tenant and canonical operator role from authentication,
+strongly reads bounded tenant records and preserves unavailable coverage when
+population evidence is incomplete. The executive profile omits entity
+identifiers; the auditor profile requires evidence-read authority and exposes
+only bounded identifiers and routes to existing least-privilege evidence APIs.
+Neither profile includes raw project paths, command content, credentials or
+free-form narratives. Section and report hashes detect alteration of a retained
+snapshot but are not signatures, trusted timestamps, compliance certificates
+or substitutes for Object Lock evidence assurance. See
+[Enterprise assurance reports](enterprise-assurance-reports-design.md).
+
 Case export is a separate read authority available only to canonical evidence
 roles. The server, never the browser, assembles a complete bounded snapshot,
 rechecks case and source-alert revisions, removes raw content, credentials and

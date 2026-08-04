@@ -47,6 +47,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Policy composition and GitOps](docs/policy-composition-and-gitops-design.md)
 - [GitHub App policy-source authentication](docs/github-app-policy-source-auth-design.md)
 - [Policy change assurance](docs/policy-change-assurance-design.md)
+- [Enterprise assurance reports](docs/enterprise-assurance-reports-design.md)
 - [Policy change assurance live acceptance — 2026-08-01](docs/policy-change-assurance-acceptance-2026-08-01.md)
 - [Signed policy bundles](docs/signed-policy-bundles-design.md)
 - [Signed policy bundle acceptance — 2026-08-01](docs/signed-policy-acceptance-2026-08-01.md)
