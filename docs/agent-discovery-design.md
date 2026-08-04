@@ -102,7 +102,7 @@ Production-shaped ingestion uses a source-scoped credential and three phases:
    generation, its expected source revision, observation/expiry times and a
    page count from 1 to 20.
 2. `PUT /discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/pages/{pageNumber}`
-   uploads one immutable page containing 1 to 100 normalized observations. The
+   uploads one immutable page containing 1 to 1,000 normalized observations. The
    response returns the canonical page hash.
 3. `POST /discovery-ingest/{tenantId}/{sourceId}/generations/{generation}/commit`
    supplies the ordered hash of every declared page. The control plane strongly
@@ -112,7 +112,10 @@ Production-shaped ingestion uses a source-scoped credential and three phases:
 Until commit succeeds, a generation has no effect on coverage. Missing pages,
 hash mismatches, duplicate observations, credential revocation, replay, or a
 concurrent source revision all fail closed. A committed generation supports up
-to 2,000 observations while retaining bounded Lambda and DynamoDB work.
+to 20,000 observations while retaining a fixed maximum of 20 exact-version
+object reads. DynamoDB stores page identity, count and immutable S3 references,
+not new page payloads. See
+[Object-backed discovery ingestion](object-backed-discovery-ingestion-design.md).
 For source-control generations, commit additionally writes a normalized,
 content-minimised baseline to a private versioned S3 bucket and atomically binds
 its exact version and SHA-256 digest into the generation metadata. Integrity
@@ -145,9 +148,10 @@ canonical `contentHash` for evidence handling.
 ## Deployment constraints and next acceptance work
 
 The legacy snapshot route remains for small pilots and compatibility. Connector
-generations remove its 100-record ceiling and are suitable for a bounded pilot;
-very large estates should move immutable pages to dedicated object storage and
-retain the same atomic current-generation pointer. AWS deployments can use the
+generations remove its 100-record ceiling and use dedicated object storage for
+up to 20,000 observations. This is a bounded synchronous operating envelope,
+not unlimited fleet scale; larger estates require partitioned asynchronous
+reconciliation. AWS deployments can use the
 [managed Entra, Intune and GitHub collectors](scheduled-discovery-connectors-design.md),
 which deliver credentials through KMS-encrypted Secrets Manager values and run
 bounded EventBridge schedules. Their application bearers are still revocable

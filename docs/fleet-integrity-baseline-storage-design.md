@@ -10,10 +10,9 @@ authority.
 
 This tranche removes repeated page reads from the per-agent detector path and
 keeps repository observations out of alert, case and telemetry payloads. The
-existing bounded discovery upload remains the ingestion limit: at most 20 pages
-of 100 normalized observations (2,000 observations) per source generation.
-Larger discovery ingestion remains a separate scaling requirement and is not
-claimed as complete here.
+object-backed discovery upload remains bounded at 20 pages of 1,000 normalized
+observations (20,000 observations) per source generation. See
+[Object-backed discovery ingestion](object-backed-discovery-ingestion-design.md).
 
 ## Trust boundary
 
@@ -72,4 +71,3 @@ generation references them.
   retention and least-privilege handler access;
 - a deployed source-control generation proving the S3/DynamoDB binding before
   this item can be called operationally complete.
-

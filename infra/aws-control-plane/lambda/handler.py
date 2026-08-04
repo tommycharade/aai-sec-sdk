@@ -162,11 +162,15 @@ _DISCOVERY_OBSERVATION_KINDS = {
     "source_control": frozenset({"repository"}),
 }
 _DISCOVERY_SNAPSHOT_LIMIT = 100
-_DISCOVERY_GENERATION_PAGE_LIMIT = 100
-# The reconciler loads committed pages synchronously. Twenty pages cap one
-# request at 2,000 observations and 20 strong reads, keeping Lambda work and
-# response construction bounded until pages move to dedicated object storage.
+_DISCOVERY_GENERATION_PAGE_LIMIT = 1_000
+# The reconciler loads committed pages synchronously. Twenty object reads keep
+# request fan-out fixed while larger S3-backed pages raise the generation bound
+# to 20,000 normalized observations. The bound is an execution invariant, not
+# a customer-controlled tuning option.
 _DISCOVERY_GENERATION_MAX_PAGES = 20
+_DISCOVERY_PAGE_SCHEMA_VERSION = 1
+_DISCOVERY_PAGE_STORAGE = "s3_versioned_v1"
+_DISCOVERY_PAGE_MAX_BYTES = 2_000_000
 _INTEGRITY_BASELINE_SCHEMA_VERSION = 1
 _INTEGRITY_BASELINE_MAX_BYTES = 16_000_000
 _DISCOVERY_EXPECTED_HOST_LIMIT = 2
@@ -8316,6 +8320,10 @@ def _begin_discovery_generation(tenant, source_id, connector, value):
     now = int(time.time())
     if page_count > _DISCOVERY_GENERATION_MAX_PAGES:
         raise ValueError("pageCount exceeds the bounded generation limit")
+    if not os.environ.get("DISCOVERY_PAGE_BUCKET", "").strip():
+        # New generations must never silently fall back to DynamoDB payloads:
+        # that would restore the old item-size and fleet-scale failure mode.
+        raise RuntimeError("discovery page storage is not configured")
     if observed_at > now + 300 or expires_at <= now:
         raise ValueError("discovery generation must be current")
     if expires_at <= observed_at or expires_at - observed_at > _DISCOVERY_MAX_VALIDITY_SECONDS:
@@ -8336,6 +8344,7 @@ def _begin_discovery_generation(tenant, source_id, connector, value):
         "observedAt": observed_at,
         "expiresAt": expires_at,
         "pageCount": page_count,
+        "pageStorage": _DISCOVERY_PAGE_STORAGE,
         "state": "uploading",
         "createdAt": now,
     }
@@ -8353,7 +8362,20 @@ def _put_discovery_generation_page(tenant, source_id, generation, page_number, v
     ).get("Item")
     if not generation_record or generation_record.get("state") != "uploading":
         raise LookupError("uploading discovery generation not found")
-    if page_number >= int(generation_record["pageCount"]):
+    if (
+        generation_record.get("sourceId") != source_id
+        or generation_record.get("generation") != generation
+        or generation_record.get("sourceKind") not in _DISCOVERY_SOURCE_KINDS
+        or generation_record.get("pageStorage") != _DISCOVERY_PAGE_STORAGE
+    ):
+        raise ValueError("uploading discovery generation metadata is invalid")
+    declared_pages = _discovery_integer(
+        generation_record.get("pageCount"),
+        "pageCount",
+        minimum=1,
+        maximum=_DISCOVERY_GENERATION_MAX_PAGES,
+    )
+    if page_number >= declared_pages:
         raise ValueError("pageNumber is outside the declared generation")
     if not isinstance(value, dict) or set(value) != {"observations"}:
         raise ValueError("discovery generation page has an invalid schema")
@@ -8362,7 +8384,7 @@ def _put_discovery_generation_page(tenant, source_id, generation, page_number, v
         not isinstance(observations, list)
         or not 1 <= len(observations) <= _DISCOVERY_GENERATION_PAGE_LIMIT
     ):
-        raise ValueError("discovery generation page must contain 1 to 100 observations")
+        raise ValueError("discovery generation page must contain 1 to 1000 observations")
     normalized = [
         _discovery_observation(item, generation_record["sourceKind"]) for item in observations
     ]
@@ -8373,6 +8395,15 @@ def _put_discovery_generation_page(tenant, source_id, generation, page_number, v
     page_hash = hashlib.sha256(
         json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+    storage_reference = _store_discovery_generation_page(
+        tenant,
+        source_id,
+        generation,
+        source_kind=generation_record["sourceKind"],
+        page_number=page_number,
+        page_hash=page_hash,
+        observations=normalized,
+    )
     record = {
         **_item_key(
             tenant,
@@ -8381,13 +8412,193 @@ def _put_discovery_generation_page(tenant, source_id, generation, page_number, v
         ),
         "tenant_id": tenant,
         "sourceId": source_id,
+        "sourceKind": generation_record["sourceKind"],
         "generation": generation,
         "pageNumber": page_number,
         "pageHash": page_hash,
-        "observations": normalized,
+        "observationCount": len(normalized),
+        "pageStorage": _DISCOVERY_PAGE_STORAGE,
+        **storage_reference,
     }
     TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
     return {"pageNumber": page_number, "pageHash": page_hash, "observationCount": len(normalized)}
+
+
+def _discovery_page_object_key(tenant, source_id, generation, page_number):
+    """Return the tenant-derived key for one immutable discovery page."""
+    tenant_digest = hashlib.sha256(str(tenant).encode()).hexdigest()
+    return (
+        f"tenant={tenant_digest}/source={source_id}/generation={generation}/"
+        f"page={page_number:05d}/discovery-page.json"
+    )
+
+
+def _store_discovery_generation_page(
+    tenant,
+    source_id,
+    generation,
+    *,
+    source_kind,
+    page_number,
+    page_hash,
+    observations,
+):
+    """Store one canonical page and return its exact immutable S3 reference."""
+    bucket = os.environ.get("DISCOVERY_PAGE_BUCKET", "").strip()
+    if not bucket:
+        raise RuntimeError("discovery page storage is not configured")
+    document = {
+        "schemaVersion": _DISCOVERY_PAGE_SCHEMA_VERSION,
+        "sourceId": source_id,
+        "sourceKind": source_kind,
+        "generation": generation,
+        "pageNumber": page_number,
+        "pageHash": page_hash,
+        "observations": observations,
+    }
+    body = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    if not 1 <= len(body) <= _DISCOVERY_PAGE_MAX_BYTES:
+        raise ValueError("discovery generation page exceeds its safe object bound")
+    digest = hashlib.sha256(body).hexdigest()
+    key = _discovery_page_object_key(tenant, source_id, generation, page_number)
+    try:
+        response = S3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+            ServerSideEncryption="AES256",
+            IfNoneMatch="*",
+            Metadata={
+                "sha256": digest,
+                "schema-version": str(_DISCOVERY_PAGE_SCHEMA_VERSION),
+            },
+        )
+        version_id = response.get("VersionId")
+    except Exception as error:
+        if getattr(error, "response", {}).get("Error", {}).get("Code") != "PreconditionFailed":
+            raise
+        # A previous attempt may have persisted S3 before losing the DynamoDB
+        # create race. Only byte-identical evidence may be resumed.
+        head = S3.head_object(Bucket=bucket, Key=key)
+        version_id = head.get("VersionId")
+        existing = S3.get_object(Bucket=bucket, Key=key, VersionId=version_id).get("Body")
+        existing_body = (
+            existing.read(_DISCOVERY_PAGE_MAX_BYTES + 1) if hasattr(existing, "read") else existing
+        )
+        if not isinstance(existing_body, bytes) or not secrets.compare_digest(
+            hashlib.sha256(existing_body).hexdigest(), digest
+        ):
+            raise ValueError("discovery page object collision") from error
+    if not isinstance(version_id, str) or not 1 <= len(version_id) <= 1_024:
+        raise RuntimeError("discovery page storage did not return an immutable version")
+    return {
+        "pageObjectKey": key,
+        "pageObjectVersionId": version_id,
+        "pageObjectSha256": digest,
+    }
+
+
+def _load_discovery_generation_page(
+    tenant,
+    source_id,
+    generation,
+    page_number,
+    *,
+    source_kind,
+):
+    """Load and independently verify one legacy or exact-version object page."""
+    if source_kind not in _DISCOVERY_SOURCE_KINDS:
+        raise ValueError("discovery generation source kind is invalid")
+    page = TABLE.get_item(
+        Key=_item_key(tenant, "DISCOVERY_PAGE", f"{source_id}:{generation}:{page_number:05d}"),
+        ConsistentRead=True,
+    ).get("Item")
+    if (
+        not page
+        or page.get("sourceId") != source_id
+        or page.get("generation") != generation
+        or _discovery_integer(page.get("pageNumber"), "pageNumber") != page_number
+        or page.get("sourceKind", source_kind) != source_kind
+    ):
+        raise ValueError("generation page is missing or crosses its committed scope")
+    if "observations" in page:
+        # Compatibility for generations committed before object-backed pages.
+        observations = page.get("observations")
+    else:
+        references = {"pageObjectKey", "pageObjectVersionId", "pageObjectSha256"}
+        if page.get("pageStorage") != _DISCOVERY_PAGE_STORAGE or any(
+            not page.get(field) for field in references
+        ):
+            raise ValueError("discovery page object reference is incomplete")
+        expected_key = _discovery_page_object_key(tenant, source_id, generation, page_number)
+        version_id = page.get("pageObjectVersionId")
+        digest_reference = page.get("pageObjectSha256")
+        if (
+            page.get("pageObjectKey") != expected_key
+            or not isinstance(version_id, str)
+            or not 1 <= len(version_id) <= 1_024
+            or not isinstance(digest_reference, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest_reference)
+        ):
+            raise ValueError("discovery page object reference is malformed or cross-tenant")
+        bucket = os.environ.get("DISCOVERY_PAGE_BUCKET", "").strip()
+        if not bucket:
+            raise ValueError("discovery page storage is unavailable")
+        try:
+            response = S3.get_object(
+                Bucket=bucket,
+                Key=expected_key,
+                VersionId=version_id,
+            )
+            stream = response.get("Body")
+            body = stream.read(_DISCOVERY_PAGE_MAX_BYTES + 1) if hasattr(stream, "read") else stream
+        except Exception as error:
+            raise ValueError("discovery page object is unavailable") from error
+        if not isinstance(body, bytes) or not 1 <= len(body) <= _DISCOVERY_PAGE_MAX_BYTES:
+            raise ValueError("discovery page object size is invalid")
+        if not secrets.compare_digest(hashlib.sha256(body).hexdigest(), digest_reference):
+            raise ValueError("discovery page object digest is invalid")
+        try:
+            document = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("discovery page object is malformed") from error
+        required = {
+            "schemaVersion",
+            "sourceId",
+            "sourceKind",
+            "generation",
+            "pageNumber",
+            "pageHash",
+            "observations",
+        }
+        if (
+            not isinstance(document, dict)
+            or set(document) != required
+            or document.get("schemaVersion") != _DISCOVERY_PAGE_SCHEMA_VERSION
+            or document.get("sourceId") != source_id
+            or document.get("sourceKind") != source_kind
+            or document.get("generation") != generation
+            or _discovery_integer(document.get("pageNumber"), "pageNumber") != page_number
+            or document.get("pageHash") != page.get("pageHash")
+        ):
+            raise ValueError("discovery page object does not match committed metadata")
+        observations = document.get("observations")
+    if (
+        not isinstance(observations, list)
+        or not 1 <= len(observations) <= _DISCOVERY_GENERATION_PAGE_LIMIT
+    ):
+        raise ValueError("discovery generation page has an invalid observation count")
+    normalized = [_discovery_observation(item, source_kind) for item in observations]
+    normalized.sort(key=lambda item: (item["kind"], item["id"]))
+    page_hash = hashlib.sha256(
+        json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if not secrets.compare_digest(str(page.get("pageHash", "")), page_hash):
+        raise ValueError("discovery generation page integrity failed")
+    if "observationCount" in page and int(page["observationCount"]) != len(normalized):
+        raise ValueError("discovery generation page count is invalid")
+    return {**page, "observations": normalized, "pageHash": page_hash}
 
 
 def _integrity_baseline_object_key(tenant, source_id, generation):
@@ -8464,9 +8675,8 @@ def _store_repository_integrity_baseline(
             if hasattr(existing, "read")
             else existing
         )
-        if (
-            not isinstance(existing_body, bytes)
-            or not secrets.compare_digest(hashlib.sha256(existing_body).hexdigest(), digest)
+        if not isinstance(existing_body, bytes) or not secrets.compare_digest(
+            hashlib.sha256(existing_body).hexdigest(), digest
         ):
             raise ValueError("repository integrity baseline object collision") from error
     if not isinstance(version_id, str) or not version_id:
@@ -8487,10 +8697,23 @@ def _commit_discovery_generation(tenant, source_id, generation, value, actor):
     staged = TABLE.get_item(Key=generation_key, ConsistentRead=True).get("Item")
     if not staged or staged.get("state") != "uploading":
         raise LookupError("uploading discovery generation not found")
+    if (
+        staged.get("sourceId") != source_id
+        or staged.get("generation") != generation
+        or staged.get("sourceKind") not in _DISCOVERY_SOURCE_KINDS
+        or staged.get("pageStorage") not in {None, _DISCOVERY_PAGE_STORAGE}
+    ):
+        raise ValueError("discovery generation metadata is invalid")
+    page_count = _discovery_integer(
+        staged.get("pageCount"),
+        "pageCount",
+        minimum=1,
+        maximum=_DISCOVERY_GENERATION_MAX_PAGES,
+    )
     page_hashes = value.get("pageHashes")
     if (
         not isinstance(page_hashes, list)
-        or len(page_hashes) != int(staged["pageCount"])
+        or len(page_hashes) != page_count
         or any(
             not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item)
             for item in page_hashes
@@ -8500,11 +8723,14 @@ def _commit_discovery_generation(tenant, source_id, generation, value, actor):
     pages = []
     observations = []
     for page_number, expected_hash in enumerate(page_hashes):
-        page = TABLE.get_item(
-            Key=_item_key(tenant, "DISCOVERY_PAGE", f"{source_id}:{generation}:{page_number:05d}"),
-            ConsistentRead=True,
-        ).get("Item")
-        if not page or not secrets.compare_digest(str(page.get("pageHash", "")), expected_hash):
+        page = _load_discovery_generation_page(
+            tenant,
+            source_id,
+            generation,
+            page_number,
+            source_kind=staged["sourceKind"],
+        )
+        if not secrets.compare_digest(str(page.get("pageHash", "")), expected_hash):
             raise ValueError("generation page is missing or its hash does not match")
         pages.append(page)
         observations.extend(page.get("observations", []))
@@ -8516,7 +8742,6 @@ def _commit_discovery_generation(tenant, source_id, generation, value, actor):
     # in-memory contract and never depends on boto3 representation details.
     observed_at = _discovery_integer(staged["observedAt"], "observedAt", minimum=1)
     expires_at = _discovery_integer(staged["expiresAt"], "expiresAt", minimum=1)
-    page_count = _discovery_integer(staged["pageCount"], "pageCount", minimum=1)
     content_hash = hashlib.sha256(
         json.dumps(
             {
@@ -8555,6 +8780,7 @@ def _commit_discovery_generation(tenant, source_id, generation, value, actor):
         "expiresAt": expires_at,
         "complete": True,
         "pageCount": page_count,
+        "pageStorage": staged.get("pageStorage", "dynamodb_legacy"),
         "observationCount": len(observations),
         "contentHash": content_hash,
         **baseline_reference,
@@ -8605,9 +8831,7 @@ def _commit_discovery_generation(tenant, source_id, generation, value, actor):
             "content_hash": content_hash,
             **(
                 {
-                    "baseline_object_version_id": baseline_reference[
-                        "baselineObjectVersionId"
-                    ],
+                    "baseline_object_version_id": baseline_reference["baselineObjectVersionId"],
                     "baseline_object_sha256": baseline_reference["baselineObjectSha256"],
                 }
                 if baseline_reference
@@ -8626,23 +8850,33 @@ def _discovery_generation_observations(tenant, source):
     """Load only pages named by an atomically committed source generation."""
     if "observations" in source:
         return source.get("observations") if isinstance(source.get("observations"), list) else []
-    generation = source.get("generation")
-    page_count = source.get("pageCount")
-    if not isinstance(generation, str) or not isinstance(page_count, (int, Decimal)):
-        return []
-    observations = []
-    for page_number in range(int(page_count)):
-        page = TABLE.get_item(
-            Key=_item_key(
+    try:
+        source_id = _bounded_identifier(source.get("sourceId"), "sourceId")
+        generation = _bounded_identifier(source.get("generation"), "generation")
+        source_kind = source.get("sourceKind")
+        page_count = _discovery_integer(
+            source.get("pageCount"),
+            "pageCount",
+            minimum=1,
+            maximum=_DISCOVERY_GENERATION_MAX_PAGES,
+        )
+        if source_kind not in _DISCOVERY_SOURCE_KINDS:
+            raise ValueError("discovery source kind is invalid")
+        observations = []
+        for page_number in range(page_count):
+            page = _load_discovery_generation_page(
                 tenant,
-                "DISCOVERY_PAGE",
-                f"{source.get('sourceId')}:{generation}:{page_number:05d}",
-            ),
-            ConsistentRead=True,
-        ).get("Item")
-        if not page:
-            return []
-        observations.extend(page.get("observations", []))
+                source_id,
+                generation,
+                page_number,
+                source_kind=source_kind,
+            )
+            observations.extend(page["observations"])
+    except (TypeError, ValueError):
+        # Corrupt or unavailable object evidence can only lower assurance. The
+        # report's semantic completeness checks turn an empty source into a
+        # blind spot instead of trusting stale metadata or failing open.
+        return []
     return observations
 
 
@@ -15124,11 +15358,7 @@ def _repository_baseline_document(tenant, source_id, generation, record):
             VersionId=version_id,
         )
         stream = response.get("Body")
-        body = (
-            stream.read(_INTEGRITY_BASELINE_MAX_BYTES + 1)
-            if hasattr(stream, "read")
-            else stream
-        )
+        body = stream.read(_INTEGRITY_BASELINE_MAX_BYTES + 1) if hasattr(stream, "read") else stream
     except Exception as error:
         raise ValueError("repository baseline object is unavailable") from error
     if not isinstance(body, bytes) or not 1 <= len(body) <= _INTEGRITY_BASELINE_MAX_BYTES:

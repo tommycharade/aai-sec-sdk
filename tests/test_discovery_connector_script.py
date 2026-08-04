@@ -55,6 +55,7 @@ def test_publisher_uploads_pages_then_commits_returned_hashes() -> None:
     [
         ({"token": ""}, "credential"),
         ({"page_size": 0}, "page size"),
+        ({"page_size": 1_001}, "page size"),
         ({"expected_revision": -1}, "revision"),
         ({"api_url": "http://control.example.invalid"}, "HTTPS"),
     ],
@@ -100,3 +101,32 @@ def test_publisher_stops_before_commit_when_a_page_response_is_invalid() -> None
             request_json=request,
         )
     assert methods == ["POST", "PUT"]
+
+
+def test_publisher_rejects_more_than_twenty_thousand_observations_locally() -> None:
+    """Oversized generations fail before a connector sends any inventory."""
+    module = _module()
+    called = False
+
+    def request(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        return {}
+
+    observations = [
+        {"kind": "identity", "id": f"user-{index}", "active": True} for index in range(20_001)
+    ]
+    with pytest.raises(module.DiscoveryPublishError, match="20,000-observation"):
+        module.publish_generation(
+            api_url="https://control.example.invalid",
+            tenant_id="tenant-a",
+            source_id="source-a",
+            token="synthetic-source-token",  # noqa: S106
+            generation="generation-a",
+            expected_revision=0,
+            observed_at=100,
+            expires_at=200,
+            observations=observations,
+            request_json=request,
+        )
+    assert called is False

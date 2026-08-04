@@ -520,9 +520,10 @@ reconciling the expected Claude Code and Codex population with enrolled agents:
   provider payloads. Any authenticated tenant operator may read it; mutations
   remain limited to `discovery_write`.
 - `/discovery-ingest/{tenantId}/{sourceId}/generations/...` lets that
-  connector declare a bounded generation, upload immutable hash-addressed pages
-  and atomically commit the complete generation. Partial uploads never affect
-  the report.
+  connector declare a bounded generation, upload up to 20 immutable
+  exact-version S3 pages of 1,000 observations and atomically commit the
+  complete generation. Partial uploads never affect the report. The service,
+  not the connector, derives tenant-isolated object keys.
 - `GET /api/enterprise/discovery` returns current source confidence, the
   expected-instance denominator, findings, and business-unit/repository/device
   breakdowns.
@@ -530,7 +531,8 @@ reconciling the expected Claude Code and Codex population with enrolled agents:
   evidence handling.
 
 Percentages are `null` unless every required source class is complete and
-current. See [Agent population discovery](agent-discovery-design.md) for exact
+current. See [Agent population discovery](agent-discovery-design.md) and
+[object-backed discovery ingestion](object-backed-discovery-ingestion-design.md) for exact
 schemas, limits, credential handling, commit semantics, and trust boundaries.
 The repository's `collect_discovery_inventory.py` reference adapters normalize
 Entra Graph, deployment-owned endpoint exports, and GitHub repository inventory.

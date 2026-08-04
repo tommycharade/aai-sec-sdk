@@ -63,6 +63,9 @@ The stack creates:
 - an S3 Object Lock audit bucket;
 - a retained private, encrypted and versioned integrity-baseline bucket whose
   exact object versions are digest-bound to committed source-control generations;
+- a separate retained private, encrypted and versioned discovery-page bucket;
+  page keys are tenant-derived and exact object versions and SHA-256 digests are
+  bound into DynamoDB before a generation can become current;
 - an SNS security-alert topic wired to Lambda and idempotency CloudWatch
   alarms (subscribe the enterprise SOC endpoint before production);
 - a private S3 UI bucket behind CloudFront.

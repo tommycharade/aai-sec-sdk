@@ -24,8 +24,8 @@ from typing import Any
 
 import certifi
 
-_DEFAULT_PAGE_SIZE = 100
-_MAX_PAGE_SIZE = 100
+_DEFAULT_PAGE_SIZE = 1_000
+_MAX_PAGE_SIZE = 1_000
 _DEFAULT_TIMEOUT_SECONDS = 15.0
 
 
@@ -137,7 +137,7 @@ def publish_generation(
         observed_at: Unix time at which collection completed.
         expires_at: Unix time after which evidence is no longer current.
         observations: Content-minimised records matching the source schema.
-        page_size: Records per page, from 1 through 100.
+        page_size: Records per page, from 1 through 1,000.
         timeout_seconds: Timeout applied independently to each HTTP operation.
         request_json: Injectable transport for deterministic tests.
 
@@ -156,7 +156,7 @@ def publish_generation(
     if isinstance(expected_revision, bool) or expected_revision < 0:
         raise DiscoveryPublishError("expected revision must be a non-negative integer")
     if not 1 <= page_size <= _MAX_PAGE_SIZE:
-        raise DiscoveryPublishError("page size must be between 1 and 100")
+        raise DiscoveryPublishError("page size must be between 1 and 1000")
     if not observations:
         raise DiscoveryPublishError("at least one observation is required")
     pages = [
@@ -164,7 +164,7 @@ def publish_generation(
         for index in range(0, len(observations), page_size)
     ]
     if len(pages) > 20:
-        raise DiscoveryPublishError("generation exceeds the 20-page control-plane limit")
+        raise DiscoveryPublishError("generation exceeds the 20,000-observation control-plane limit")
     base = _endpoint(api_url, tenant_id, source_id)
     common = {"timeout_seconds": timeout_seconds}
     request_json(

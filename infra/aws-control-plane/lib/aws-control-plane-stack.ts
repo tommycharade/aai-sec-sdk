@@ -378,6 +378,17 @@ export class AwsControlPlaneStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       autoDeleteObjects: false,
     });
+    // Normalized inventory pages can exceed DynamoDB's item ceiling at useful
+    // enterprise fleet sizes. Keep each immutable page in a separate private,
+    // versioned bucket and commit only exact version/digest references.
+    const discoveryPages = new s3.Bucket(this, "DiscoveryPageBucket", {
+      versioned: true,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      autoDeleteObjects: false,
+    });
     const auditReplicaArn = process.env.AUDIT_REPLICA_BUCKET_ARN;
     let auditBatchReplicationRole: iam.Role | undefined;
     if (auditReplicaArn) {
@@ -822,6 +833,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       WEBHOOK_SECRET_PREFIX: "aai-sec/webhooks/",
       WEBHOOK_SECRET_KMS_KEY_ARN: webhookSecretKey.keyArn,
       INTEGRITY_BASELINE_BUCKET: integrityBaselines.bucketName,
+      DISCOVERY_PAGE_BUCKET: discoveryPages.bucketName,
       RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
       RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
       POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
@@ -941,6 +953,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
     handler.addToRolePolicy(new iam.PolicyStatement({
       actions: ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"],
       resources: [integrityBaselines.arnForObjects("tenant=*")],
+    }));
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"],
+      resources: [discoveryPages.arnForObjects("tenant=*")],
     }));
     evidenceWorkerQueue.grantSendMessages(handler);
     evidenceRetentionWorkerQueue.grantSendMessages(handler);
@@ -1509,6 +1525,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "EvidenceReportBucketName", { value: evidenceReports.bucketName });
     new cdk.CfnOutput(this, "IntegrityBaselineBucketName", {
       value: integrityBaselines.bucketName,
+    });
+    new cdk.CfnOutput(this, "DiscoveryPageBucketName", {
+      value: discoveryPages.bucketName,
     });
     new cdk.CfnOutput(this, "EvidenceWorkerDlqArn", { value: evidenceWorkerDlq.queueArn });
     new cdk.CfnOutput(this, "EvidenceScheduleDlqArn", { value: evidenceScheduleDlq.queueArn });
