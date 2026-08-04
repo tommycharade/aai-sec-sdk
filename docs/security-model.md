@@ -864,6 +864,18 @@ remove and batch routes, preventing those older paths from bypassing the rule.
 Audit evidence contains only rule hashes and change counts; full membership,
 prompts, tool arguments and credentials are excluded.
 
+Scheduled convergence is a separate internal service boundary. EventBridge
+supplies only a fixed source and schema version; tenant, group, rule, candidate
+inventory and actor are resolved by the control plane. The reconciler accepts
+only a previously operator-applied canonical rule, verifies its hash, repeats
+strong inventory and overlap checks and compares the exact membership revision
+when authority changes. It cannot author a rule or consume browser-selected
+members. A malformed rule, overlap, incomplete lineage, bound exhaustion or
+concurrent change preserves the last-known membership, stores a fixed-code
+failure status and fails the invocation for bounded retry and monitored DLQ
+delivery. Status records contain counts and health timestamps, never member
+lists. See [Dynamic policy groups](dynamic-groups-design.md).
+
 ## Population discovery boundary
 
 Discovery inputs are deployment-owned observations, never authorization. They

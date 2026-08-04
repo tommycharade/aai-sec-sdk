@@ -223,7 +223,7 @@ def verify(template: dict[str, Any]) -> dict[str, int | str]:
         raise PassiveCellVerificationError("passive cell must not attach a custom API domain")
 
     rules = _resources(template, "AWS::Events::Rule")
-    if len(rules) != 4 or any(
+    if len(rules) != 5 or any(
         _object(rule.get("Properties"), "EventBridge properties").get("State") != "DISABLED"
         for rule in rules
     ):

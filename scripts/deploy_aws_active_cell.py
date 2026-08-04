@@ -385,8 +385,8 @@ def discover_target_resources(
         set(functions) != {"handler", "evidence-worker", "retention-worker"}
         or len(mappings) != 2
         or len(set(mappings)) != 2
-        or len(rules) != 4
-        or len(set(rules)) != 4
+        or len(rules) != 5
+        or len(set(rules)) != 5
     ):
         raise ActiveCellDeploymentError("target runtime resource set is incomplete or ambiguous")
     ordered_mappings = sorted(mappings)
@@ -494,8 +494,8 @@ def discover_primary_target_resources(
         set(functions) != {"handler", "evidence-worker", "retention-worker"}
         or len(mappings) != 2
         or len(set(mappings)) != 2
-        or len(rules) != 4
-        or len(set(rules)) != 4
+        or len(rules) != 5
+        or len(set(rules)) != 5
     ):
         raise ActiveCellDeploymentError("primary target runtime is incomplete or ambiguous")
     ordered_mappings = sorted(mappings)

@@ -217,6 +217,11 @@ export class PassiveRegionalCellStack extends cdk.Stack {
         enforceSSL: true,
         retentionPeriod: cdk.Duration.days(14),
       }),
+      dynamicGroups: new sqs.Queue(this, "DynamicGroupReconciliationDlq", {
+        encryption: sqs.QueueEncryption.SQS_MANAGED,
+        enforceSSL: true,
+        retentionPeriod: cdk.Duration.days(14),
+      }),
       assurance: new sqs.Queue(this, "EvidenceAssuranceDlq", {
         encryption: sqs.QueueEncryption.SQS_MANAGED,
         enforceSSL: true,
@@ -453,6 +458,12 @@ export class PassiveRegionalCellStack extends cdk.Stack {
         events.Schedule.rate(cdk.Duration.minutes(5)),
         scheduleDlqs.rollout,
         { source: "aai.rollout-reconciliation", schemaVersion: 1 },
+      ],
+      [
+        "DynamicGroupReconciliationSchedule",
+        events.Schedule.rate(cdk.Duration.minutes(5)),
+        scheduleDlqs.dynamicGroups,
+        { source: "aai.dynamic-group-reconciliation", schemaVersion: 1 },
       ],
       [
         "EvidenceAssuranceSchedule",

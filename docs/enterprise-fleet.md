@@ -160,7 +160,11 @@ unsupported fields and transaction races fail closed without a partial update.
 
 After apply, the group stores its canonical rule, rule hash, evaluation actor
 and time. Manual single-agent and bulk membership routes reject changes to a
-dynamic group; future changes use another preview and rule reevaluation. See
+dynamic group. A monitored five-minute service schedule reevaluates the last
+approved rule against current trusted inventory. The group view reports the
+last attempt, last success, result counts and a fixed failure code; a failure
+preserves the last-known membership and requires operator investigation. Rule
+changes still use another preview and reviewed apply. See
 [Dynamic policy groups](dynamic-groups-design.md) for the complete contract and
 security invariants.
 
