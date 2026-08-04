@@ -713,7 +713,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       tracing: lambda.Tracing.PASS_THROUGH,
     });
     table.grantReadWriteData(handler);
-    policySigningKey.grant(handler, "kms:Sign", "kms:GetPublicKey");
+    policySigningKey.grant(handler, "kms:Sign", "kms:Verify", "kms:GetPublicKey");
     // CDK's read/write convenience grant excludes TransactWriteItems. Policy
     // activation uses one same-table transaction so active authority, the
     // immutable candidate, and the retired predecessor cannot diverge.

@@ -119,7 +119,7 @@ def _template() -> dict[str, Any]:
                         },
                         {
                             "Effect": "Allow",
-                            "Action": ["kms:Sign", "kms:GetPublicKey"],
+                            "Action": ["kms:Sign", "kms:Verify", "kms:GetPublicKey"],
                             "Resource": _KEY,
                         },
                     ]
@@ -200,7 +200,7 @@ def test_complete_active_template_is_bounded_and_not_routed() -> None:
         "enabledScheduleCount": 4,
         "enabledEventSourceCount": 2,
         "privateBucketCount": 2,
-        "iamActionCount": 11,
+        "iamActionCount": 12,
         "activationEvidenceSha256": _DIGEST,
         "signingKeyArn": _KEY,
         "entraTenantId": _ENTRA,

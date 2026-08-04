@@ -362,7 +362,7 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       retentionQueue.grantSendMessages(handler);
       regionalFaultCanaryQueue.grantSendMessages(handler);
       alerts.grantPublish(handler);
-      policySigningReplica.grant(handler, "kms:Sign", "kms:GetPublicKey");
+      policySigningReplica.grant(handler, "kms:Sign", "kms:Verify", "kms:GetPublicKey");
 
       control.grantReadWriteData(evidenceWorker);
       auditReplica.grantRead(evidenceWorker);

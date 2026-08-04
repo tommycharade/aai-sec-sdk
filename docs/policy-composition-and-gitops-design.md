@@ -38,6 +38,11 @@ support signed bundles, including AWS, additionally require valid stored
 integrity evidence. The SQLite reference provider is not presented as signed
 or highly available production authority.
 
+The AWS Lambda uses a checked-in standalone runtime generated mechanically from
+the canonical SDK composition module. CI verifies source freshness and semantic
+parity. This keeps the deployable Lambda self-contained without creating a
+second editable set of merge rules.
+
 Retired versions remain valid immutable inputs for an existing or new draft;
 retirement removes active fleet assignment, not retained reviewed evidence.
 Deletion of referenced policy versions is prohibited.

@@ -32,6 +32,7 @@ _REQUIRED_ACTIONS = {
     "dynamodb:UpdateItem",
     "kms:GetPublicKey",
     "kms:Sign",
+    "kms:Verify",
     "s3:GetObjectRetention",
     "s3:PutObject",
     "s3:PutObjectRetention",
@@ -54,6 +55,7 @@ _ALLOWED_ACTIONS = {
     "dynamodb:UpdateItem",
     "kms:GetPublicKey",
     "kms:Sign",
+    "kms:Verify",
     "s3:Abort*",
     "s3:DeleteObject*",
     "s3:GetBucket*",
@@ -199,13 +201,17 @@ def _verify_iam(template: dict[str, Any], signing_key_arn: str) -> set[str]:
                 raise ActiveCellVerificationError(
                     f"active runtime contains administrative authority: {action}"
                 )
-            if lowered.startswith("kms:") and action not in {"kms:Sign", "kms:GetPublicKey"}:
+            if lowered.startswith("kms:") and action not in {
+                "kms:Sign",
+                "kms:Verify",
+                "kms:GetPublicKey",
+            }:
                 raise ActiveCellVerificationError(
                     "active runtime contains unapproved KMS authority"
                 )
             if lowered.startswith("lambda:") or lowered == "sts:assumerole":
                 raise ActiveCellVerificationError("active runtime can mutate or assume authority")
-        if actions.intersection({"kms:Sign", "kms:GetPublicKey"}):
+        if actions.intersection({"kms:Sign", "kms:Verify", "kms:GetPublicKey"}):
             resource = statement.get("Resource")
             if resource != signing_key_arn:
                 raise ActiveCellVerificationError("KMS signing authority names a different key")

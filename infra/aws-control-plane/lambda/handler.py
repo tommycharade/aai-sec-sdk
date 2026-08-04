@@ -22,7 +22,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import boto3
 from boto3.dynamodb.conditions import Key
-from policy_signing import bundle_from_record, sign_policy_bundle
+from policy_composition import PolicyComponent, PolicyCompositionError, compose_policy
+from policy_signing import bundle_from_record, sign_policy_bundle, verify_policy_bundle
 from regional_fault_target import run as run_regional_fault_target_probe
 
 CONTROL_TABLE_NAME = os.environ["CONTROL_TABLE"]
@@ -4106,6 +4107,7 @@ def _policy_version_view(tenant, record, versions=None):
         else None
     )
     integrity = record.get("bundle_integrity")
+    composition = _policy_composition_metadata(record)
     return {
         "policyId": record["policy_id"],
         "organizationId": record.get("organization_id", ""),
@@ -4129,6 +4131,7 @@ def _policy_version_view(tenant, record, versions=None):
         "activatedBy": record.get("activated_by"),
         "activatedAt": record.get("activated_at"),
         "changeSummary": semantic_change,
+        "composition": composition,
         "integrity": {
             "status": "signed" if isinstance(integrity, dict) else "unsigned",
             "contentHash": record.get("effective_content_hash"),
@@ -4290,12 +4293,181 @@ def _policy_organization(tenant, body):
     return organization_id
 
 
+def _policy_composition_metadata(record):
+    """Return reproducible composition metadata for new and legacy versions."""
+    local = record.get("local_configuration")
+    references = record.get("component_refs")
+    graph_digest = record.get("graph_digest")
+    explanation = record.get("composition_explanation")
+    if local is None and references is None and graph_digest is None:
+        # Pre-composition versions had no parents; treating their signed
+        # effective configuration as local intent preserves exact authority.
+        result = compose_policy((), _json(record.get("configuration", {}))).to_dict()
+        return {
+            "localConfiguration": _json(record.get("configuration", {})),
+            "componentRefs": [],
+            "graphDigest": result["graphDigest"],
+            "explanation": result["explanation"],
+        }
+    if (
+        not isinstance(local, dict)
+        or not isinstance(references, list)
+        or not isinstance(graph_digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", graph_digest)
+        or not isinstance(explanation, list)
+    ):
+        raise PolicyConflict("policy component composition metadata is malformed")
+    return {
+        "localConfiguration": _json(local),
+        "componentRefs": _json(references),
+        "graphDigest": graph_digest,
+        "explanation": _json(explanation),
+    }
+
+
+def _compose_governed_policy(tenant, organization_id, policy_id, body):
+    """Resolve signed exact component versions and compose restrictive authority."""
+    has_configuration = "configuration" in body
+    has_local = "localConfiguration" in body
+    if has_configuration and has_local:
+        raise ValueError("provide configuration or localConfiguration, not both")
+    references = body.get("componentRefs", [])
+    if has_configuration and references:
+        raise ValueError("componentRefs require explicit localConfiguration")
+    if not isinstance(references, list):
+        raise ValueError("componentRefs must be an array")
+    if len(references) > 8:
+        raise ValueError("a policy may reference at most eight components")
+    local = body.get("localConfiguration") if has_local else body.get("configuration", {})
+    local = _policy_configuration(tenant, local)
+    visited = set()
+
+    def resolve(reference, depth, owner_policy_id):
+        if depth > 4:
+            raise ValueError("policy component depth exceeds four levels")
+        if not isinstance(reference, dict) or set(reference) != {
+            "policyId",
+            "version",
+            "contentHash",
+        }:
+            raise ValueError("component references require policyId, version, and contentHash")
+        component_policy_id = _bounded_identifier(reference.get("policyId"), "policyId")
+        version = _positive_policy_version(reference.get("version"))
+        content_hash = reference.get("contentHash")
+        if not isinstance(content_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", content_hash):
+            raise ValueError("component contentHash must be SHA-256 hex")
+        if secrets.compare_digest(component_policy_id, owner_policy_id):
+            raise ValueError("a policy cannot reference its own versions")
+        identity = (component_policy_id, version)
+        if identity in visited:
+            raise ValueError("policy component graph contains a duplicate or cycle")
+        visited.add(identity)
+        if len(visited) > 32:
+            raise ValueError("policy component graph exceeds 32 versions")
+        record = _policy_version_record(tenant, component_policy_id, version)
+        if record.get("organization_id") != organization_id:
+            raise PermissionError("policy components must belong to the same organization")
+        if record.get("state") not in {"active", "retired"}:
+            raise PolicyConflict("policy components must be active or retired")
+        if (
+            record.get("decision") != "approved"
+            or not record.get("decided_by")
+            or record.get("decided_by") == record.get("author")
+        ):
+            raise PermissionError("policy component lacks independent approval")
+        if not secrets.compare_digest(str(record.get("content_hash", "")), content_hash):
+            raise PolicyConflict("policy component content hash does not match")
+        configuration = _json(record.get("configuration", {}))
+        if not secrets.compare_digest(_configuration_hash(configuration), content_hash):
+            raise PolicyConflict("policy component content integrity check failed")
+        # AWS components must retain a self-consistent signed bundle from their
+        # activation. Browser or database metadata alone is never sufficient.
+        bundle = bundle_from_record(tenant, component_policy_id, version, _json(record))
+        verify_policy_bundle(KMS, POLICY_SIGNING_KEY_ARN, bundle)
+        if bundle["configuration"] != _managed_policy_configuration(tenant, configuration):
+            raise PolicyConflict("policy component signed authority is inconsistent")
+        metadata = _policy_composition_metadata(record)
+        nested_components = []
+        for nested in metadata["componentRefs"]:
+            nested_record, nested_metadata = resolve(nested, depth + 1, component_policy_id)
+            nested_components.append(
+                PolicyComponent(
+                    nested_record["policy_id"],
+                    int(nested_record["version"]),
+                    nested_record["content_hash"],
+                    _json(nested_record["configuration"]),
+                    nested_metadata["graphDigest"],
+                )
+            )
+        try:
+            reproduced = compose_policy(nested_components, metadata["localConfiguration"]).to_dict()
+        except PolicyCompositionError as error:
+            raise PolicyConflict("policy component cannot be reproduced") from error
+        if reproduced["configuration"] != configuration:
+            raise PolicyConflict("policy component effective configuration is inconsistent")
+        if not secrets.compare_digest(reproduced["graphDigest"], metadata["graphDigest"]):
+            raise PolicyConflict("policy component graph integrity check failed")
+        return record, metadata
+
+    components = []
+    normalized_references = []
+    for reference in references:
+        record, metadata = resolve(reference, 1, policy_id)
+        normalized_references.append(
+            {
+                "policyId": record["policy_id"],
+                "version": int(record["version"]),
+                "contentHash": record["content_hash"],
+            }
+        )
+        components.append(
+            PolicyComponent(
+                record["policy_id"],
+                int(record["version"]),
+                record["content_hash"],
+                _json(record["configuration"]),
+                metadata["graphDigest"],
+            )
+        )
+    try:
+        result = compose_policy(components, local).to_dict()
+    except PolicyCompositionError as error:
+        raise ValueError(str(error)) from error
+    effective = _policy_configuration(tenant, result["configuration"])
+    return {
+        "configuration": effective,
+        "local_configuration": local,
+        "component_refs": normalized_references,
+        "graph_digest": result["graphDigest"],
+        "composition_explanation": result["explanation"],
+    }
+
+
+def _assert_governed_policy_composition(tenant, record):
+    """Reproduce one stored candidate before staging or activation."""
+    metadata = _policy_composition_metadata(record)
+    recomposed = _compose_governed_policy(
+        tenant,
+        record.get("organization_id", ""),
+        record["policy_id"],
+        {
+            "localConfiguration": metadata["localConfiguration"],
+            "componentRefs": metadata["componentRefs"],
+        },
+    )
+    if recomposed["configuration"] != _json(record.get("configuration", {})):
+        raise PolicyConflict("policy effective configuration no longer reproduces")
+    if not secrets.compare_digest(recomposed["graph_digest"], metadata["graphDigest"]):
+        raise PolicyConflict("policy composition provenance no longer reproduces")
+
+
 def _create_governed_policy(tenant, body, actor):
     """Atomically create a policy shell and its first inactive draft."""
     policy_id = _bounded_identifier(body.get("policyId"), "policyId")
     name = _bounded_text(body.get("name"), "name")
-    configuration = _policy_configuration(tenant, body.get("configuration", {}))
     organization_id = _policy_organization(tenant, body)
+    composition = _compose_governed_policy(tenant, organization_id, policy_id, body)
+    configuration = composition["configuration"]
     now = int(time.time())
     policy = {
         **_item_key(tenant, "POLICY", policy_id),
@@ -4328,6 +4500,10 @@ def _create_governed_policy(tenant, body, actor):
         "base_version": 0,
         "name": name,
         "configuration": configuration,
+        "local_configuration": composition["local_configuration"],
+        "component_refs": composition["component_refs"],
+        "graph_digest": composition["graph_digest"],
+        "composition_explanation": composition["composition_explanation"],
         "content_hash": _configuration_hash(configuration),
         "state": "draft",
         "author": actor,
@@ -4358,7 +4534,13 @@ def _create_policy_draft(tenant, policy_id, body, actor):
     latest = max((int(item.get("version", 0)) for item in versions), default=0)
     version_number = latest + 1
     name = _bounded_text(body.get("name"), "name")
-    configuration = _policy_configuration(tenant, body.get("configuration", {}))
+    composition = _compose_governed_policy(
+        tenant,
+        policy.get("organization_id", ""),
+        policy_id,
+        body,
+    )
+    configuration = composition["configuration"]
     now = int(time.time())
     version = {
         **_item_key(
@@ -4374,6 +4556,10 @@ def _create_policy_draft(tenant, policy_id, body, actor):
         "base_version": int(policy.get("version", 0)),
         "name": name,
         "configuration": configuration,
+        "local_configuration": composition["local_configuration"],
+        "component_refs": composition["component_refs"],
+        "graph_digest": composition["graph_digest"],
+        "composition_explanation": composition["composition_explanation"],
         "content_hash": _configuration_hash(configuration),
         "state": "draft",
         "author": actor,
@@ -4510,6 +4696,7 @@ def _stage_policy_version(tenant, policy_id, version, actor):
         raise PermissionError("policy version lacks independent approval")
     if int(record.get("base_version", -1)) != int(policy.get("version", 0)):
         raise PolicyConflict("policy active version changed before staging")
+    _assert_governed_policy_composition(tenant, record)
     updated = {
         **record,
         "state": "staged",
@@ -4546,6 +4733,7 @@ def _activate_policy_version(tenant, policy_id, version, body, actor):
         or int(candidate.get("base_version", -1)) != expected
     ):
         raise PolicyConflict("policy active version changed before activation")
+    _assert_governed_policy_composition(tenant, candidate)
     now = int(time.time())
     effective_configuration = _managed_policy_configuration(tenant, candidate["configuration"])
     bundle = _sign_policy_bundle(tenant, policy_id, version, effective_configuration, now)
@@ -14258,6 +14446,21 @@ def handler(event, context):
                         **_response_rule_summary(rule, versions),
                         "versions": [_response_rule_version_view(item) for item in versions],
                         "executions": executions,
+                    },
+                )
+            if method == "POST" and parts == ["policies", "composition", "preview"]:
+                body = _body(event)
+                policy_id = _bounded_identifier(body.get("policyId"), "policyId")
+                organization_id = _policy_organization(tenant, body)
+                composition = _compose_governed_policy(tenant, organization_id, policy_id, body)
+                return _response(
+                    200,
+                    {
+                        "configuration": composition["configuration"],
+                        "localConfiguration": composition["local_configuration"],
+                        "componentRefs": composition["component_refs"],
+                        "graphDigest": composition["graph_digest"],
+                        "explanation": composition["composition_explanation"],
                     },
                 )
             if (

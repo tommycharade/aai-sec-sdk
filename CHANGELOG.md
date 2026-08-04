@@ -1,5 +1,11 @@
 # Changelog
 
+- Added AWS control-plane parity for exact-version policy composition. Hosted
+  previews and drafts resolve only same-organization, independently approved,
+  signed active or retired component versions; staging and activation reproduce
+  effective content and nested graph provenance. The Lambda runtime is generated
+  from the canonical SDK composition module and parity-checked in CI.
+
 - Added provider-neutral, deterministic restrictive policy composition and the
   reference control-plane preview/persistence contract. Drafts can bind exact
   independently approved active or retired policy versions, retain local intent

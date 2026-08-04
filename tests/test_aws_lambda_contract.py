@@ -502,6 +502,15 @@ class FakeKms:
             "PublicKey": b"synthetic-p256-subject-public-key-info",
         }
 
+    def verify(self, **value: Any) -> dict[str, Any]:
+        """Accept only the exact synthetic signature emitted by this KMS double."""
+        self.calls.append(dict(value))
+        return {
+            "KeyId": self.key_id,
+            "SigningAlgorithm": "ECDSA_SHA_256",
+            "SignatureValid": value.get("Signature") == b"synthetic-ecdsa-signature",
+        }
+
 
 class FakeCondition:
     """Composable placeholder for boto3 key expressions ignored by FakeTable."""
@@ -4687,6 +4696,137 @@ def test_aws_policy_governance_migrates_existing_active_authority(monkeypatch: A
     )
 
 
+def test_aws_policy_components_are_signed_exact_and_restrictive(monkeypatch: Any) -> None:
+    """AWS composition accepts only signed governed versions and never widens authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-policy-components"
+    organization_id = "org-a"
+    policy_id = "policy-baseline"
+    configuration = {
+        "policy": {"denyByDefault": True},
+        "tools": {"allowed": ["read_repository", "run_tests"]},
+        "budgets": {"maxActions": 100},
+    }
+    composition = module.compose_policy((), configuration).to_dict()
+    bundle = module._sign_policy_bundle(tenant, policy_id, 1, configuration, 2_210_000_000)
+    component = module._item_key(
+        tenant,
+        "POLICY_VERSION",
+        module._policy_version_identifier(policy_id, 1),
+    ) | {
+        "tenant_id": tenant,
+        "id": module._policy_version_identifier(policy_id, 1),
+        "policy_id": policy_id,
+        "organization_id": organization_id,
+        "version": 1,
+        "base_version": 0,
+        "name": "Baseline",
+        "configuration": configuration,
+        "local_configuration": configuration,
+        "component_refs": [],
+        "graph_digest": composition["graphDigest"],
+        "composition_explanation": composition["explanation"],
+        "content_hash": module._configuration_hash(configuration),
+        **module._bundle_record_fields(bundle),
+        "state": "active",
+        "author": "author-a",
+        "decision": "approved",
+        "decided_by": "reviewer-b",
+        "created_at": 2_210_000_000,
+    }
+    table.put_item(Item=component)
+    reference = {
+        "policyId": policy_id,
+        "version": 1,
+        "contentHash": component["content_hash"],
+    }
+
+    result = module._compose_governed_policy(
+        tenant,
+        organization_id,
+        "policy-workload",
+        {
+            "localConfiguration": {
+                "tools": {"allowed": ["read_repository", "write_repository"]},
+                "budgets": {"maxActions": 25},
+            },
+            "componentRefs": [reference],
+        },
+    )
+    assert result["configuration"] == {
+        "policy": {"denyByDefault": True},
+        "tools": {"allowed": ["read_repository"]},
+        "budgets": {"maxActions": 25},
+    }
+    assert result["component_refs"] == [reference]
+    assert len(result["graph_digest"]) == 64
+
+    with pytest.raises(module.PolicyConflict, match="content hash"):
+        module._compose_governed_policy(
+            tenant,
+            organization_id,
+            "policy-workload",
+            {
+                "localConfiguration": {},
+                "componentRefs": [{**reference, "contentHash": "0" * 64}],
+            },
+        )
+    table.put_item(Item={**component, "bundle_integrity": None})
+    with pytest.raises(RuntimeError, match="signed effective authority"):
+        module._compose_governed_policy(
+            tenant,
+            organization_id,
+            "policy-workload",
+            {"localConfiguration": {}, "componentRefs": [reference]},
+        )
+    forged_integrity = {
+        **component["bundle_integrity"],
+        "signature": base64.b64encode(b"forged-signature").decode("ascii"),
+    }
+    table.put_item(Item={**component, "bundle_integrity": forged_integrity})
+    with pytest.raises(RuntimeError, match="signature verification failed"):
+        module._compose_governed_policy(
+            tenant,
+            organization_id,
+            "policy-workload",
+            {"localConfiguration": {}, "componentRefs": [reference]},
+        )
+
+
+def test_aws_policy_composition_preview_route_is_effective_and_side_effect_free(
+    monkeypatch: Any,
+) -> None:
+    """Hosted UI preview returns server-composed authority without creating a draft."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-policy-preview"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(tenant, "ORG", "org-a") | {"id": "org-a"})
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-author"],
+        "sub": "author-a",
+    }
+    response = _invoke(
+        module,
+        _event(
+            "/enterprise/policies/composition/preview",
+            "POST",
+            body={
+                "organizationId": "org-a",
+                "policyId": "policy-candidate",
+                "localConfiguration": {"policy": {"denyByDefault": True}},
+                "componentRefs": [],
+            },
+            claims=claims,
+        ),
+    )
+    assert response["statusCode"] == 200
+    result = json.loads(response["body"])
+    assert result["configuration"] == {"policy": {"denyByDefault": True}}
+    assert len(result["graphDigest"]) == 64
+    assert not any(item.get("id") == "policy-candidate" for item in table.items.values())
+
+
 def test_aws_policy_governance_deployment_grants_transaction_authority() -> None:
     """The Lambda role explicitly permits its same-table atomic activation write."""
     stack = (
@@ -4817,7 +4957,7 @@ def test_policy_signing_key_is_asymmetric_retained_and_least_privileged() -> Non
     assert "keyUsage: kms.KeyUsage.SIGN_VERIFY" in stack
     assert "removalPolicy: cdk.RemovalPolicy.RETAIN" in stack
     assert 'policySigningKey.grant(trialOnboarding, "kms:Sign")' in stack
-    assert 'policySigningKey.grant(handler, "kms:Sign", "kms:GetPublicKey")' in stack
+    assert 'policySigningKey.grant(handler, "kms:Sign", "kms:Verify", "kms:GetPublicKey")' in stack
     assert "POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn" in stack
     assert "REGIONAL_POLICY_SIGNING_KEY_ARN: regionalPolicySigningKey.keyArn" in stack
     assert 'RECOVERY_REGION: process.env.AUDIT_REPLICA_REGION ?? "eu-west-1"' in stack
