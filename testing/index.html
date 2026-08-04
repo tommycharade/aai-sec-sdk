@@ -1476,6 +1476,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../alert-suppression-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governed alert suppression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -3134,6 +3161,12 @@ field. The private UI suite proves the typed trust-boundary editor and the
 human-readable incident explanation. These are synthetic control-plane
 contracts; they do not prove complete telemetry from a compromised host or
 production SIEM delivery.</p>
+<p>Alert-suppression contracts additionally prove exact target matching,
+seven-day maximum expiry, broad/wildcard/unauthorized denial, retained
+suppressed evidence, no delivery or automatic containment, optimistic
+revocation, endpoint reopening and stable behavior grouping across evaluation
+windows. See <a href="../alert-suppression-design/">Governed alert suppression and
+deduplication</a>.</p>
 <p><code>scripts/test_aws_entra_scim.py</code> is the live Microsoft Entra provisioning
 acceptance command. It discovers Entra and SCIM status from the selected
 CloudFormation stack, resolves the dedicated bearer directly from Secrets

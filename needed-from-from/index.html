@@ -1396,6 +1396,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../alert-suppression-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governed alert suppression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -2222,6 +2249,17 @@
   
     <nav class="md-nav" aria-label="Immediate critical-path inputs">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#aws-cdk-development-tooling-advisory-decision-2026-08-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AWS CDK development-tooling advisory decision (2026-08-04)
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#machine-api-live-acceptance" class="md-nav__link">
@@ -3109,6 +3147,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#aws-cdk-development-tooling-advisory-decision-2026-08-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AWS CDK development-tooling advisory decision (2026-08-04)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#machine-api-live-acceptance" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3274,6 +3323,23 @@ only the product owner or an enterprise stakeholder can provide.</p>
 credentials in source control, issues, documentation or chat. Store secrets in
 the approved secrets manager and provide only the secret resource name.</p>
 <h2 id="immediate-critical-path-inputs">Immediate critical-path inputs</h2>
+<h3 id="aws-cdk-development-tooling-advisory-decision-2026-08-04">AWS CDK development-tooling advisory decision (2026-08-04)</h3>
+<p>The latest published <code>aws-cdk-lib@2.263.0</code> bundle contains
+<code>brace-expansion@5.0.8</code>. <code>npm audit</code> now reports
+<code>GHSA-rgw5-rvv9-x895</code> as high severity and requires <code>5.0.9</code>. The package is a
+build/deployment-only dependency and is absent from the SDK, UI and Lambda
+runtime, but the previous dated exception covers a different advisory and must
+not be silently widened.</p>
+<p>Choose one of these paths:</p>
+<ul>
+<li>wait for AWS CDK to publish a bundle containing <code>brace-expansion&gt;=5.0.9</code>,
+  then upgrade the exact pin; or</li>
+<li>explicitly approve a new dated, owner-assigned development-tooling risk
+  record with compensating controls and an expiry no later than 2026-08-28.</li>
+</ul>
+<p>No credential or production input is required. Until one path is chosen, a
+clean full Node development-dependency audit remains blocked; production-only
+dependency audit remains clear.</p>
 <h3 id="machine-api-live-acceptance">Machine API live acceptance</h3>
 <p>The scoped service-identity implementation and synthetic adversarial contracts
 are complete. First-customer acceptance still needs owner/platform inputs that

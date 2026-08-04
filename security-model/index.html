@@ -1647,6 +1647,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../alert-suppression-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governed alert suppression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -4340,6 +4367,13 @@ lifecycle, deployment, sole group, active policy and project-root digest. This
 prevents browser or agent output from selecting authority while preserving a
 manual response path. See <a href="../behavior-detection-design/">Explainable agent behavior
 detection</a>.</p>
+<p>Alert suppression is incident-response authority, not presentation state. The
+server requires an exact identity selector, derives operator and time, limits
+duration to seven days, retains the matched alert, withholds outbound delivery,
+and prevents a suppressed endpoint alert from entering automatic containment.
+Expiry or revocation restores routing for later observations without rewriting
+earlier evidence. See <a href="../alert-suppression-design/">Governed alert suppression and
+deduplication</a>.</p>
 <p>Policy simulation is not execution and does not grant authority. The control
 plane evaluates only a pending immutable version against a bounded tenant- and
 policy-scoped window of redacted decision evidence. It reports missing command

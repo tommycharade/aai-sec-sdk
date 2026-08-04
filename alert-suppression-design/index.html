@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/policy-trust-convergence-design/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/alert-suppression-design/">
       
       
-        <link rel="prev" href="../evidence-continuity-acceptance-2026-08-02/">
+        <link rel="prev" href="../behavior-detection-design/">
       
       
-        <link rel="next" href="../policy-trust-convergence-acceptance-2026-08-02/">
+        <link rel="next" href="../endpoint-evidence-acceptance-2026-08-01/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Managed policy-signing trust convergence - Agentic AI Security SDK</title>
+        <title>Governed alert suppression - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#managed-policy-signing-trust-convergence" class="md-skip">
+        <a href="#governed-alert-suppression-and-deduplication" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Managed policy-signing trust convergence
+              Governed alert suppression
             
           </span>
         </div>
@@ -1204,37 +1204,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Managed policy-signing trust convergence
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../policy-trust-convergence-design/" class="md-nav__link">
         
   
   
@@ -1250,92 +1223,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decision
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#trust-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trust boundary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#package-and-installation-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Package and installation contract
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#server-derived-cutover-readiness" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Server-derived cutover readiness
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#operator-flow" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operator flow
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#guarantees-and-non-guarantees" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Guarantees and non-guarantees
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1506,10 +1393,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../alert-suppression-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governed alert suppression
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1525,6 +1439,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detection-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detection behavior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ui-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guarantees-and-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guarantees and non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -3041,17 +3030,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#decision" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decision
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#trust-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3063,10 +3041,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#package-and-installation-contract" class="md-nav__link">
+  <a href="#detection-behavior" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Package and installation contract
+        Detection behavior
       
     </span>
   </a>
@@ -3074,21 +3052,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#server-derived-cutover-readiness" class="md-nav__link">
+  <a href="#ui-journey" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Server-derived cutover readiness
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#operator-flow" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operator flow
+        UI journey
       
     </span>
   </a>
@@ -3100,6 +3067,17 @@
     <span class="md-ellipsis">
       
         Guarantees and non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification
       
     </span>
   </a>
@@ -3126,113 +3104,73 @@
   
 
 
-<h1 id="managed-policy-signing-trust-convergence">Managed policy-signing trust convergence</h1>
-<h2 id="decision">Decision</h2>
-<p>Signer rotation and regional recovery use a schema-v2 managed endpoint package.
-It atomically combines the host-native Claude Code or Codex configuration with
-one canonical public policy-trust artifact. The package digest binds all files,
-but package bytes do not choose trust authority: the control plane separately
-owns <code>policyTrustBundleSha256</code>, and the privileged installer requires that exact
-digest before writing anything.</p>
-<p>Schema-v1 packages remain readable during migration. They cannot report policy
-trust and therefore cannot satisfy signer-cutover readiness.</p>
+<h1 id="governed-alert-suppression-and-deduplication">Governed alert suppression and deduplication</h1>
+<p>Alert suppression reduces known operational noise without deleting evidence or
+changing agent authority. It is a tenant control-plane capability for incident
+responders and security operators. It is not a browser filter, policy override,
+approval, quarantine release, or way to make a detection appear healthy.</p>
 <h2 id="trust-boundary">Trust boundary</h2>
-<pre><code class="language-text">deployment-owned active/staged/recovery KMS identities
-          -&gt; reviewed canonical overlap bundle
-          -&gt; separately approved trust SHA-256
-          -&gt; schema-v2 managed package publication
-          -&gt; root-owned atomic endpoint installation
-          -&gt; no-follow exact file measurement on every heartbeat
-          -&gt; server-derived fleet convergence
-          -&gt; signer cutover eligibility (never automatic cutover)
-</code></pre>
-<p>The browser, model, project repository and package transport cannot introduce a
-fourth signer. The AWS adapter accepts schema-v2 trust only when its key IDs are
-exactly the deployed active key, staged multi-Region primary and derived
-recovery replica. Altering public bytes for one of those identities can cause a
-safe denial but cannot create signing authority because KMS still holds the
-corresponding private key.</p>
-<h2 id="package-and-installation-contract">Package and installation contract</h2>
-<p><code>ManagedDeploymentPackage</code> version 2 adds <code>policyTrust</code>, containing the exact
-administrator path, canonical trust JSON and SHA-256. Supported paths are:</p>
-<table>
-<thead>
-<tr>
-<th>Platform</th>
-<th>Trust path</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>macOS/Linux</td>
-<td><code>/opt/aai-security/trust/policy-signing.json</code></td>
-</tr>
-<tr>
-<td>Windows</td>
-<td><code>C:\Program Files\AAI Security\trust\policy-signing.json</code></td>
-</tr>
-</tbody>
-</table>
-<p>Windows package parsing is supported, but privileged installation and ACL
-measurement remain unavailable until a Windows adapter is implemented.</p>
-<p>The installer preflights the independent package, native bundle and trust
-digests before its first write. It stages every file with restrictive mode,
-replaces the complete set, reopens and hashes final bytes while backups still
-exist, and rolls all files back if any final verification fails. It refuses
-symlinks, devices, unsafe ownership, writable parent chains, missing executable
-prerequisites and cross-host/platform packages.</p>
-<p><code>measure_managed_deployment_package</code> reopens all native and trust files without
-following symlinks on every heartbeat. Its evidence contains only host/policy
-identity, native bundle hash, trust hash and short-lived timestamps. Missing,
-stale or different trust produces <code>conflict</code> or <code>stale</code>, never enforcement.</p>
-<h2 id="server-derived-cutover-readiness">Server-derived cutover readiness</h2>
-<p><code>GET /enterprise/resilience/policy-trust</code> returns tenant-wide posture. It is
-read-only and requires an operator role. <code>readyForSignerCutover</code> is true only
-when:</p>
+<p>The browser proposes a closed typed match. The authenticated control plane
+derives the tenant, operator and current server time, validates the exact scope,
+and persists the suppression. Models, agents and endpoint reports cannot create,
+extend or revoke suppressions.</p>
+<p>Every suppression:</p>
 <ul>
-<li>deployment trust authority is configured from stack-owned key identities;</li>
-<li>at least one active Claude Code or Codex endpoint is in scope;</li>
-<li>every scoped deployment has one common desired trust digest;</li>
-<li>every current package carries that digest;</li>
-<li>every rollout is 100% and server-derived <code>converged</code>; and</li>
-<li>every active endpoint has fresh exact native and trust evidence.</li>
+<li>has an immutable stable ID, display name, accountable operator and rationale;</li>
+<li>selects one or both supported sources and explicit severities;</li>
+<li>must also select at least one exact reason code, response-rule ID, deployment,
+  agent or managed-device ID;</li>
+<li>rejects wildcards, partial matching, duplicate values and unknown fields;</li>
+<li>starts immediately and expires between five minutes and seven days after the
+  server's current time;</li>
+<li>cannot be edited or extended; a changed scope requires a new record;</li>
+<li>is retained for 90 days after expiry for operational traceability; and</li>
+<li>may be revoked with optimistic concurrency and a second rationale.</li>
 </ul>
-<p>This flag is evidence, not authority. It never calls KMS, edits Lambda
-configuration, signs a policy or routes recovery traffic. Signer cutover still
-requires the reviewed recovery runbook and independent approval.</p>
-<h2 id="operator-flow">Operator flow</h2>
-<p>Generate the reviewed overlap bundle with all three deployed identities, then
-upgrade an existing digest-pinned package without modifying either input:</p>
-<pre><code class="language-bash">python3 scripts/upgrade_managed_package_trust.py \
-  --package /secure/package-v1.json \
-  --expected-package-sha256 &quot;$PACKAGE_SHA256&quot; \
-  --trust-bundle /secure/policy-trust-overlap.json \
-  --expected-trust-sha256 &quot;$INPUT_TRUST_FILE_SHA256&quot; \
-  --output /secure/package-v2.json
-</code></pre>
-<p>Use the printed canonical policy-trust digest in the deployment's managed-host
-desired state. Publish the printed package digest, start a canary rollout and
-install only with both independent expected values:</p>
-<pre><code class="language-bash">sudo python3 scripts/install_managed_host_package.py \
-  --package /secure/package-v2.json \
-  --expected-package-sha256 &quot;$PACKAGE_V2_SHA256&quot; \
-  --expected-bundle-hash &quot;$NATIVE_BUNDLE_SHA256&quot; \
-  --expected-policy-trust-sha256 &quot;$CANONICAL_TRUST_SHA256&quot; \
-  --host claude-code --platform macos --install
-</code></pre>
-<p>Restart the host, run allowed/denied/approval/MCP probes, and wait for fresh
-heartbeat measurement. Do not infer convergence from successful file copying.</p>
+<p>The control plane caps each selector list at 20 values and each tenant at 100
+simultaneously active suppressions. Credential-shaped rationale is rejected.</p>
+<h2 id="detection-behavior">Detection behavior</h2>
+<p>A matching detection is still materialized as an immutable alert. Its status
+and delivery state are <code>suppressed</code>, and it records the suppression ID and
+expiry. The control plane writes a content-minimised audit event. It does not
+publish the alert to SNS or signed webhooks, and an endpoint automatic-response
+rule cannot consume it.</p>
+<p>Revocation or expiry does not rewrite earlier alert evidence. A later behavior
+window creates a normally routed alert. A continuing endpoint condition reopens
+its stable alert on the next reconciliation. Suppression therefore reduces
+delivery noise without creating a historical blind spot.</p>
+<p>Endpoint detections retain their existing stable alert ID as the deduplication
+key. Behavior detections retain one evidence record per deterministic evaluation
+window and expose a separate stable deduplication key derived from tenant,
+active rule version, exact agent, signal and content-minimised dimension hash.
+The UI can group those records without collapsing or mutating their evidence.</p>
+<h2 id="ui-journey">UI journey</h2>
+<p>Open <strong>Incidents → Suppressions</strong> to see active, expired and revoked records,
+including owner, exact scope and expiry. <strong>Create suppression</strong> uses a typed form
+for source, severity, exact selector, duration and rationale. Contextual help
+explains every field. The review copy states that evidence remains retained and
+agent authority is unchanged. Revocation is a separate confirmation with an
+optimistic revision and rationale.</p>
+<p>The expert API supports intersections of several exact selector lists. The UI
+starts with one explicit identity to keep the common workflow understandable.
+Neither surface supports regexes or wildcard scope.</p>
 <h2 id="guarantees-and-non-guarantees">Guarantees and non-guarantees</h2>
-<p>The implementation guarantees exact package parsing, deployment-owned signer
-identities, all-or-rollback installation, short-lived measured evidence and
-server-derived readiness. Tests cover forged keys, altered trust, omitted
-out-of-band digests, symlinks, unsafe files, partial replacement and stale or
-conflicting heartbeat evidence.</p>
-<p>It does not prove that a host process loaded native settings; live action probes
-remain required. It does not replace MDM, hardware-backed device identity,
-Cognito/Entra recovery, audit continuity, passive API deployment or a rehearsed
-regional failover. A process with root authority can replace trust and remains
-inside the endpoint-administrator trust boundary.</p>
+<p>The implementation guarantees bounded exact matching, server-time expiry,
+retained alert and audit evidence, no outbound delivery for a currently matched
+suppressed alert, and exclusion from automatic endpoint containment.</p>
+<p>It does not prove that an external receiver discarded an alert already delivered
+before suppression, remove the underlying security condition, silence local
+agent/endpoint logs, or replace maintenance/change approval. A compromised host
+may still omit telemetry; behavior detection remains limited by authenticated,
+retained observations and complete-history bounds.</p>
+<h2 id="verification">Verification</h2>
+<p>AWS Lambda contracts cover exact target matching, unrelated-target delivery,
+expiry/revocation reopening, stable cross-window behavior grouping, retained
+records, audit events, suppressed response executions, and rejection of broad,
+overlong, wildcard and unauthorized requests. UI tests cover the dedicated
+workspace, trust copy, contextual help, disabled invalid submission and exact
+HTTP contracts. The full repository gate remains <code>make check</code>; the private UI
+gate remains <code>npm run check</code>.</p>
 
 
 
