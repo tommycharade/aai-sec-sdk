@@ -1261,6 +1261,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.export_policy_source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        export_policy_source
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.health" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1276,6 +1287,17 @@
     <span class="md-ellipsis">
       
         heartbeat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.import_policy_source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        import_policy_source
       
     </span>
   </a>
@@ -1408,6 +1430,17 @@
     <span class="md-ellipsis">
       
         persistence_capabilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.policy_import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        policy_import
       
     </span>
   </a>
@@ -4717,6 +4750,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.export_policy_source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        export_policy_source
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.health" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4732,6 +4776,17 @@
     <span class="md-ellipsis">
       
         heartbeat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.import_policy_source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        import_policy_source
       
     </span>
   </a>
@@ -4864,6 +4919,17 @@
     <span class="md-ellipsis">
       
         persistence_capabilities
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.policy_import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        policy_import
       
     </span>
   </a>
@@ -6575,7 +6641,7 @@ portable boundary for a PostgreSQL or managed database adapter.</p>
 
 
 <h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.__init__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">audit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">now</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">heartbeat_ttl_seconds</span><span class="o">=</span><span class="mi">90</span><span class="p">,</span> <span class="n">sqlite_busy_timeout_ms</span><span class="o">=</span><span class="mi">5000</span><span class="p">,</span> <span class="n">persistence</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">require_high_availability</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">slo_window_seconds</span><span class="o">=</span><span class="mi">86400</span><span class="p">,</span> <span class="n">slo_target</span><span class="o">=</span><span class="mf">0.99</span><span class="p">,</span> <span class="n">authorities</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">alert_sink</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">audit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">now</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">heartbeat_ttl_seconds</span><span class="o">=</span><span class="mi">90</span><span class="p">,</span> <span class="n">sqlite_busy_timeout_ms</span><span class="o">=</span><span class="mi">5000</span><span class="p">,</span> <span class="n">persistence</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">require_high_availability</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">slo_window_seconds</span><span class="o">=</span><span class="mi">86400</span><span class="p">,</span> <span class="n">slo_target</span><span class="o">=</span><span class="mf">0.99</span><span class="p">,</span> <span class="n">authorities</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">alert_sink</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">policy_source_verifier</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">policy_export_signer</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 </h3>
 
@@ -6987,6 +7053,26 @@ responsible for translating it into its typed policy and adapters.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.export_policy_source" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">export_policy_source</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">policy_id</span><span class="p">,</span> <span class="n">version</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Export one immutable policy version with signed control-plane provenance.</p>
+<p>The export is transport data, not runtime authority. It contains no
+approval, activation, assignment, bearer token, or signing secret.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.health" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">health</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">cursor</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span></code>
 
@@ -7014,6 +7100,27 @@ responsible for translating it into its typed policy and adapters.</p>
     <div class="doc doc-contents ">
 
         <p>Refresh a session and persist bounded telemetry and managed evidence.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.import_policy_source" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">import_policy_source</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">import_id</span><span class="p">,</span> <span class="n">request</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Verify an exact Git source and atomically create an ordinary draft.</p>
+<p>Verification occurs before the database transaction and receives no
+model-controlled credential. Repeated requests are content-idempotent;
+a changed locator under the same import ID fails closed.</p>
 
 
     </div>
@@ -7230,6 +7337,24 @@ responsible for translating it into its typed policy and adapters.</p>
     <div class="doc doc-contents ">
 
         <p>Return safe adapter metadata so deployment checks can prove HA selection.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.policy_import" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">policy_import</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">import_id</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return one tenant-scoped policy import and its immutable provenance.</p>
 
 
     </div>

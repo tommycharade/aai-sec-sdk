@@ -3179,7 +3179,7 @@ path from an allow-listed repository and returns server-observed facts:</p>
 <li>signer identity and signature-verification result; and</li>
 <li>retrieval time and provider evidence digest.</li>
 </ul>
-<p>The first production adapter targets GitHub. Its installation credential is a
+<p>The first provider adapter targets GitHub. Its installation credential is a
 deployment-owned secret reference with read-only Contents, Metadata and Pull
 Requests access. The browser supplies no token, review status, signer result or
 policy content. Provider calls use bounded timeouts and pagination and fail
@@ -3211,7 +3211,8 @@ rather than introducing an unsafe parser.</p>
 that binds tenant, policy/version/content hash, component graph digest,
 exporting subject/time and signing key. The envelope is signed by the existing
 policy-signing adapter. It contains no credentials or provider token.</p>
-<p>Import accepts only repository, full commit SHA and path. The server retrieves
+<p>Import accepts an idempotency identity plus repository, full commit SHA and
+path. The server retrieves
 and verifies the document, checks tenant/policy scope, resolves components and
 creates a normal draft. It records immutable Git and control-plane provenance
 on that draft. Import never submits, approves, stages, activates or assigns a
@@ -3226,6 +3227,29 @@ POST /api/enterprise/policies/{policyId}/versions/{version}/export
 POST /api/enterprise/policies/imports
 GET  /api/enterprise/policies/imports/{importId}
 </code></pre>
+<p>The reference implementation is available through <code>EnterpriseFleetStore</code>.
+Inject a deployment-owned <code>PolicySourceVerifier</code> and <code>PolicyExportSigner</code> when
+constructing the store. If either adapter is absent, its operation fails
+closed. <code>GitHubPolicySourceVerifier</code> supplies the GitHub evidence contract but
+deliberately receives the credential callback and bounded HTTP transport from
+the deployment; it neither discovers ambient credentials nor performs work in
+its constructor.</p>
+<pre><code class="language-python">from agentic_security import EnterpriseFleetStore, GitHubPolicySourceVerifier
+
+verifier = GitHubPolicySourceVerifier(
+    token_provider=resolve_read_only_github_app_token,  # deployment-owned
+    transport=bounded_no_redirect_transport,
+    now=clock,
+)
+store = EnterpriseFleetStore(
+    &quot;fleet.sqlite&quot;,
+    policy_source_verifier=verifier,
+    policy_export_signer=kms_policy_export_signer,
+)
+</code></pre>
+<p>The names in this abbreviated integration example are application adapters,
+not SDK globals. Production deployments should use PostgreSQL and a KMS/HSM
+signer; SQLite remains the local reference persistence adapter.</p>
 <p>Normal create/update requests gain <code>componentRefs</code> and
 <code>localConfiguration</code>. Legacy <code>configuration</code> remains accepted only when
 <code>componentRefs</code> is absent; it maps to local configuration. Sending both forms
