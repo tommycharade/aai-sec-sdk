@@ -1504,6 +1504,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../behavior-detection-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Explainable agent behavior detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -3212,7 +3239,7 @@ bodies and credential-shaped rationale fail closed.</p>
    clear the condition.</li>
 </ol>
 <h2 id="approved-automatic-response">Approved automatic response</h2>
-<p>The <strong>Incidents → Response rules</strong> workspace can establish narrowly bounded
+<p>The <strong>Incidents → Detection rules</strong> workspace can establish narrowly bounded
 automatic containment for these server-derived detections. A typed rule fixes
 the reason codes, severities, Claude Code/Codex host scope, hourly action limit,
 per-agent cooldown and priority. Its only action is SDK quarantine of the exact
@@ -3230,8 +3257,10 @@ the rule language, governance lifecycle, non-guarantees and acceptance model.</p
 cases, authoritative endpoint-to-agent binding and approved automatic SDK
 quarantine. It does not provide MDM/EDR device isolation, process termination,
 network isolation, automatic third-party credential revocation, maintenance
-windows, anomaly baselines or a production SIEM adapter. Those remain explicit
-P1 work.</p>
+windows, repository/configuration anomaly baselines or a production SIEM
+adapter. Alert-only tool, MCP, decision-volume and approval-volume behavior
+detection is specified separately in
+<a href="../behavior-detection-design/">Explainable agent behavior detection</a>.</p>
 
 
 

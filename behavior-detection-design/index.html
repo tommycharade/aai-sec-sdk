@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/claude-managed-resources/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/behavior-detection-design/">
       
       
-        <link rel="prev" href="../signed-policy-acceptance-2026-08-01/">
+        <link rel="prev" href="../automatic-response-rules-design/">
       
       
-        <link rel="next" href="../enterprise-ui/">
+        <link rel="next" href="../endpoint-evidence-acceptance-2026-08-01/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Managed Claude resources - Agentic AI Security SDK</title>
+        <title>Explainable agent behavior detection - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#managed-claude-resources" class="md-skip">
+        <a href="#explainable-agent-behavior-detection" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Managed Claude resources
+              Explainable agent behavior detection
             
           </span>
         </div>
@@ -1366,10 +1366,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../behavior-detection-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Explainable agent behavior detection
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1385,6 +1412,114 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#customer-outcome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Customer outcome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#trust-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trust boundaries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#closed-rule-language" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Closed rule language
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#baseline-and-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Baseline and evaluation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#governance-and-operator-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Governance and operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alert-case-and-delivery-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alert, case and delivery behavior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-modes-and-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure modes and non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1717,37 +1852,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Managed Claude resources
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../claude-managed-resources/" class="md-nav__link">
         
   
   
@@ -1763,59 +1871,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#trust-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trust boundary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#application-lifecycle" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Application lifecycle
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-this-does-not-provide" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What this does not provide
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2981,10 +3036,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#trust-boundary" class="md-nav__link">
+  <a href="#customer-outcome" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Trust boundary
+        Customer outcome
       
     </span>
   </a>
@@ -2992,10 +3047,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#application-lifecycle" class="md-nav__link">
+  <a href="#trust-boundaries" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Application lifecycle
+        Trust boundaries
       
     </span>
   </a>
@@ -3003,10 +3058,65 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-this-does-not-provide" class="md-nav__link">
+  <a href="#closed-rule-language" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What this does not provide
+        Closed rule language
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#baseline-and-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Baseline and evaluation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#governance-and-operator-journey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Governance and operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alert-case-and-delivery-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alert, case and delivery behavior
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failure-modes-and-non-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure modes and non-guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required evidence
       
     </span>
   </a>
@@ -3033,49 +3143,123 @@
   
 
 
-<h1 id="managed-claude-resources">Managed Claude resources</h1>
-<p>Skills and MCP servers are enterprise resources, not arbitrary policy JSON.
-The control plane owns a tenant-scoped registry; policies reference registered
-resource IDs; and an enrolled deployment reconciles the effective policy into
-the project configuration.</p>
-<h2 id="trust-boundary">Trust boundary</h2>
-<p>The browser never writes to a developer's filesystem. It can register a
-resource and select it in a policy, but a deployment agent must authenticate,
-fetch the effective policy, validate the resource manifest, and apply it to
-the target project. The deployment agent reports the applied manifest hash and
-drift status back to the control plane.</p>
-<p>Skills are stored as reviewed, versioned content with a digest. They are
-installed as project-scoped <code>.claude/skills/&lt;name&gt;/SKILL.md</code> files. Skill
-content is prompt input and may influence the model; it is not a security
-authority and cannot alter immutable SDK safeguards.</p>
-<p>MCP registrations contain transport, executable or URL, arguments, and
-non-secret environment references. Secret values are deployment-owned and are
-never stored in the policy or resource registry. Project-scoped MCP entries
-are written to <code>.mcp.json</code>; the SDK gateway remains mandatory for SDK-owned
-tools. External MCP servers are only made available when explicitly selected
-by the policy and allowed by the deployment's host controls.</p>
-<h2 id="application-lifecycle">Application lifecycle</h2>
-<ol>
-<li>A security operator registers and reviews a Skill or MCP server.</li>
-<li>The operator selects resource IDs in a typed policy editor.</li>
-<li>Applying the policy creates a new immutable policy version and audits the
-   resource set.</li>
-<li>The enrolled deployment agent fetches the effective policy, resolves the
-   selected registry entries, validates signatures/digests and writes only the
-   project-scoped managed files.</li>
-<li>Claude Code is restarted or refreshed, and the agent reports the applied
-   manifest hash. Missing, invalid, revoked, or unavailable resources fail
-   closed and are not installed.</li>
-</ol>
-<p>Removing a resource from a policy removes it from the managed set on the next
-reconciliation. Files outside the managed manifest are preserved and are
-reported as unmanaged configuration rather than silently deleted.</p>
-<h2 id="what-this-does-not-provide">What this does not provide</h2>
-<p>This mechanism does not sandbox Claude Code, make arbitrary Skills trusted, or
-make an external MCP server secure. High-risk MCP actions still need to route
-through the SDK gateway or an independently reviewed, authenticated adapter.
-Host-level permissions, secrets, network egress and process isolation remain
-deployment-owned controls.</p>
+<h1 id="explainable-agent-behavior-detection">Explainable agent behavior detection</h1>
+<p>This design adds a production-shaped slice of P1-SOC-06 and P1-SOC-07 to the
+hosted control plane. It extends the existing independently reviewed response
+rule ledger with an <strong>alert-only</strong> agent-activity rule. It does not let
+agent-reported telemetry quarantine an endpoint automatically and it does not
+claim that the parked Splunk stub delivers these alerts.</p>
+<h2 id="customer-outcome">Customer outcome</h2>
+<p>Security operations can define a typed, versioned rule for Claude Code and
+Codex activity, preview the current baseline, route the exact immutable version
+through two-person approval, and activate it. A matching rule creates one
+deduplicated alert that explains:</p>
+<ul>
+<li>the observed signal and affected enrolled agent;</li>
+<li>the current-window count;</li>
+<li>the historical baseline count and normalized expected count;</li>
+<li>the configured threshold and sensitivity multiplier;</li>
+<li>whether the baseline was complete enough to evaluate; and</li>
+<li>the rule version and content hash that produced the result.</li>
+</ul>
+<p>The first catalogue covers newly observed tools, newly observed MCP servers,
+denied-action spikes, approval-request spikes and overall decision-volume
+spikes. Repository and configuration anomaly signals remain follow-on work;
+their current evidence is not sufficiently action-specific to make a credible
+baseline claim.</p>
+<h2 id="trust-boundaries">Trust boundaries</h2>
+<p>Agent decision reports are authenticated, content-minimised observations, not
+authorization facts. The control plane derives tenant, deployment, agent,
+host, policy version and server time from the live enrolled session. MCP server
+identity may be reported only as a bounded identifier and is retained as an
+untrusted observation. It is never used to grant execution authority.</p>
+<p>Behavior rules therefore have a fixed <code>create_alert</code> action. They cannot use
+the automatic <code>quarantine_agent</code> action reserved for independently derived
+endpoint evidence. A human incident responder may open a case and apply the
+existing case-owned quarantine after reviewing the evidence and confirming the
+server-owned enrolled-agent binding.</p>
+<p>The model, endpoint and browser cannot choose a tenant, agent, policy,
+timestamp, alert identifier, rule version, baseline result or threshold
+outcome.</p>
+<h2 id="closed-rule-language">Closed rule language</h2>
+<p>An agent-activity configuration contains only:</p>
+<ul>
+<li>source <code>agent_activity</code>;</li>
+<li>one or more fixed signal types;</li>
+<li>Claude Code and/or Codex host scope;</li>
+<li>alert severity;</li>
+<li>a 1–30 day historical lookback;</li>
+<li>a 5–60 minute current window;</li>
+<li>1–2,000 minimum historical events;</li>
+<li>1–100 minimum current events;</li>
+<li>a 1.5–10.0 sensitivity multiplier;</li>
+<li>fixed action <code>create_alert</code>; and</li>
+<li>deterministic evaluation priority.</li>
+</ul>
+<p>Signal lists use OR semantics. Host scope and the selected signal use AND
+semantics. Unknown fields, empty sets, non-finite numbers and out-of-range
+values fail closed.</p>
+<h2 id="baseline-and-evaluation">Baseline and evaluation</h2>
+<p>The evaluator reads at most 2,000 recent tenant decisions from the dedicated
+timeline index. It uses server receipt time and splits evidence into a current
+window and an immediately preceding historical window. A truncated history,
+missing active rule version, malformed retained evidence or insufficient
+historical sample produces a content-minimised <code>baseline_insufficient</code> outcome
+and no alert.</p>
+<p>For volume signals, the expected current count is the historical matching
+count normalized to the current-window duration. The threshold is the larger
+of <code>minimumCurrentEvents</code> and <code>ceil(expected × multiplier)</code>. New-tool and
+new-MCP signals require the observed identity to be absent from the historical
+window and to reach <code>minimumCurrentEvents</code> in the current window.</p>
+<p>One deterministic alert identity binds tenant, rule version, signal, agent,
+window start and the SHA-256 digest of the observed dimension. Re-evaluation
+cannot create duplicates. Raw prompts, arguments, commands, paths, tool output,
+credentials and approval rationale are never retained in the alert.</p>
+<h2 id="governance-and-operator-journey">Governance and operator journey</h2>
+<p>The existing rule lifecycle remains <code>draft -&gt; review -&gt; approved -&gt; active</code>.
+The author cannot approve their own version. Activation compares the exact
+active base version, and active versions are immutable. Disabling a rule
+immediately removes future detection authority; restoring a superseded version
+uses the existing audited rollback path.</p>
+<p>The evidence source is immutable for the lifetime of a rule ID. A later
+version cannot convert <code>agent_activity</code> into <code>endpoint_evidence</code> and thereby
+upgrade an alert-only identity into automatic containment. Operators must
+create and independently review a distinct rule for a different trust boundary.</p>
+<p>The Incidents workspace presents <strong>Detection &amp; response rules</strong>. The editor
+first asks whether the rule is endpoint containment or behavior detection,
+then shows only controls valid for that trust boundary. The preview reports
+baseline readiness, matches and thresholds without creating alerts or changing
+agent authority. Every control includes contextual help.</p>
+<h2 id="alert-case-and-delivery-behavior">Alert, case and delivery behavior</h2>
+<p>Behavior alerts use the same open, acknowledged and case-owned lifecycle as
+endpoint alerts. Their agent binding is derived from the authenticated decision
+record and revalidated against current lifecycle, group and policy state before
+any case response. The UI distinguishes agent-reported activity from
+independently derived endpoint posture.</p>
+<p>Each newly materialized window-bound alert enters the existing durable SNS/SQS
+operations channel and tenant webhooks when the destination explicitly
+subscribes to <code>behavior.alert.opened</code>. A later window produces a new
+deterministic alert; it never mutates earlier behavior evidence into a reopened
+occurrence. Splunk remains <code>deliveryVerified: false</code>.</p>
+<h2 id="failure-modes-and-non-guarantees">Failure modes and non-guarantees</h2>
+<ul>
+<li>An offline, tampered or bypassed host may omit activity. Runtime attestation,
+  managed configuration and complete discovery remain separate P0 controls.</li>
+<li>A behavioral match proves that retained reports crossed a configured
+  threshold; it does not prove malicious intent.</li>
+<li>A missing or incomplete baseline yields no alert and an explicit degraded
+  result; the system never fabricates normal behavior.</li>
+<li>Alert-only rules do not widen or automatically remove agent authority.</li>
+<li>The first catalogue does not close repository/configuration anomaly,
+  third-party credential revocation, MDM/EDR isolation or SIEM delivery.</li>
+</ul>
+<h2 id="required-evidence">Required evidence</h2>
+<p>Tests must cover strict schema validation, two-person governance, baseline
+normalization, insufficient/truncated history, new identities, spike
+thresholds, exact host scope, idempotent alerts, tenant isolation, untrusted MCP
+identity, alert acknowledgement, case binding, manual containment, webhook
+schema, redaction and disabled/rolled-back versions. The full repository and UI
+quality gates must pass before deployment.</p>
 
 
 
