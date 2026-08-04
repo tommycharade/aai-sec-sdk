@@ -732,3 +732,30 @@ severity, `claude-code`/`codex` host scope, fixed `quarantine_agent` action,
 1–25 successful actions per hour, a 300–86,400 second per-agent cooldown and
 priority 1–1,000. Unknown fields and empty selections are rejected. See
 [Approved automatic response rules](automatic-response-rules-design.md).
+
+## Secure webhooks
+
+Authenticated tenant roles may read secret-free webhook posture. Only a
+platform administrator may mutate destinations:
+
+- `GET /api/enterprise/webhooks` lists destinations and the exact supported
+  event-type allow-list.
+- `POST /api/enterprise/webhooks` accepts exactly `name`, `description`,
+  `endpoint` and `eventTypes`; it returns the HMAC secret exactly once.
+- `GET /api/enterprise/webhooks/{destinationId}` returns one redacted
+  destination and worker-derived last-delivery posture.
+- `GET /api/enterprise/webhooks/{destinationId}/deliveries` returns up to 100
+  content-free delivery records.
+- `POST /api/enterprise/webhooks/{destinationId}/test` accepts only
+  `expectedRevision` and queues a server-owned synthetic event.
+- `POST /api/enterprise/webhooks/{destinationId}/rotate` accepts
+  `expectedRevision` and `overlapSeconds` from 3,600 through 604,800, then
+  returns the new secret once while retaining the previous signature authority
+  for that interval.
+- `pause`, `resume` and `retire` accept `expectedRevision` plus a 20–500
+  character operational reason. Retirement is irreversible through this API.
+
+Secrets Manager names, versions, ARNs and key bytes are never returned by a
+read. Event payloads cannot be supplied by an operator. See
+[Secure webhooks](secure-webhooks-design.md) for signature headers, replay,
+retry and receiver requirements.

@@ -27,6 +27,7 @@ The recommended navigation is:
 - Identity and access
 - Deployments
 - SDK runtime
+- Webhooks
 
 The **Identity and access** page must not be one continuous administration
 form. Its overview shows verified identity foundations and one next-best
@@ -35,6 +36,16 @@ action. Separate workspaces cover **Entra setup**, **Directory & roles**,
 rare emergency and certification work out of the routine federation journey.
 The parked Splunk stub belongs to integration posture, not identity readiness,
 and must not appear as a failed identity control.
+
+The **Webhooks** administration page is a focused destination workflow, not a
+generic integration form. It lists endpoint, event coverage, delivery posture,
+key posture and lifecycle state; opens recent content-free delivery evidence;
+and gives platform administrators typed create, test, rotate, pause, resume and
+retire actions. Signing secrets appear in a blocking one-time reveal. Every
+event and security-sensitive setting has contextual help. Non-platform roles
+receive the same secret-free posture without mutation controls. The page does
+not describe a queued test as verified delivery and does not present webhooks
+as completed SIEM integration.
 
 ## Enterprise-managed features
 

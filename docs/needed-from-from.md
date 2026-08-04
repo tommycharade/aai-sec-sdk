@@ -247,6 +247,14 @@ are required before an enterprise production claim:
 Splunk remains an explicitly labelled non-delivering stub for the current
 iteration. No Splunk credential is required yet.
 
+Secure-webhook implementation can be developed and synthesized without a
+customer endpoint. Live acceptance requires a customer-controlled public HTTPS
+receiver, an approved secret-manager location, a durable atomic replay store,
+the permitted egress/DNS policy and an operator who can retain evidence from a
+verification, key-overlap rotation, interruption, bounded retry and DLQ replay
+exercise. These inputs are not permission to send production events; event
+types and test tenant must be approved explicitly.
+
 ## Customer-readiness inputs
 
 - Target customer size, regulated sector and expected managed-agent count.

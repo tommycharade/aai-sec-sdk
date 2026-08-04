@@ -93,7 +93,7 @@ installation and convergence are deliberately not claimed.
 | Fleet lifecycle | Partial | Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and monitored five-minute deterministic reevaluation, health, immutable desired/package rollout binding, deterministic canary rings, time-zone maintenance windows, server-derived endpoint convergence, automatic health/deadline pause, exact known-good rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, server-clock-expiring exact-agent policy exceptions, source-reconciled orphan/leaver detection, AWS-managed Entra/Intune/GitHub discovery connectors, signed endpoint installation/process collection, per-device credential lifecycle and server-derived evidence health | Real release manifests for managed SDK/gateway/hook upgrades, physical MDM distribution, real-provider population coverage and response automation |
 | Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, semantic authority diff, bounded redacted historical simulation, restrictive composition, reviewed exact-commit GitHub import, immutable provenance UI, draft-only writes, KMS-signed canonical export, unattended repository- and permission-scoped GitHub App token minting, signed bundles, temporary agent exceptions, canary/scheduling, evidence-only convergence and known-good rollback | Complete live Git-provider acceptance and physical-endpoint rollout-SLO acceptance |
 | Security operations | Partial | Approvals, audit timeline, independent scoped emergency stops, scheduled server-derived endpoint detections, deduplicated alert lifecycle, audited acknowledgement, durable SNS/SQS delivery, revisioned cases, authoritative endpoint-to-agent binding, evidence-preserving agent quarantine, independently approved versioned endpoint-response rules with preview, action limits, cooldown, idempotent evidence, disable and rollback, session revocation, recovery-gated release and integrity-verifiable content-minimised case export | Broader tool/MCP/repository/configuration anomaly rules, credential-broker response, maintenance windows, baselines, MDM/EDR isolation and external workflow integrations |
-| Reporting and administration | Partial | Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; content-hashed export; purpose-specific executive and evidence-reader assurance reports with explicit blind spots, non-guarantees and content-addressed traceability; scoped expiring service identities with one-time credentials, exact machine-route capabilities, rotation, revocation and usage evidence; versioned Terraform provider for tenant inspection, governed drafts, groups, Skills and MCP servers with import and revision-guarded drift handling | Customer-validated framework mappings and signed/scheduled report distribution, real-workload machine-API and Terraform acceptance, provider Registry release/signing, CMK/residency and private access |
+| Reporting and administration | Partial | Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; content-hashed export; purpose-specific executive and evidence-reader assurance reports with explicit blind spots, non-guarantees and content-addressed traceability; scoped expiring service identities with one-time credentials, exact machine-route capabilities, rotation, revocation and usage evidence; versioned Terraform provider for tenant inspection, governed drafts, groups, Skills and MCP servers with import and revision-guarded drift handling; tenant-managed signed webhooks with one-time HMAC keys, dual-key rotation, durable outbox/DLQ delivery, replay-verification helper and secret-free posture | Customer-validated framework mappings and signed/scheduled report distribution, real-workload machine-API and Terraform acceptance, provider Registry release/signing, live customer webhook interruption/replay acceptance, CMK/residency and private access |
 
 ### P1-ADM-08 implementation evidence
 
@@ -143,6 +143,35 @@ vets and tests the provider and formats its HCL example. Registry publication,
 release signing and a deployed real-workload Terraform apply remain external
 acceptance work; see [Terraform provider and declarative
 management](terraform-provider-design.md).
+
+### P1-ADM-10 implementation evidence
+
+The hosted control plane now creates tenant-scoped public-HTTPS webhook
+destinations under platform-administrator authority. A 256-bit HMAC key is
+generated server-side, encrypted with a dedicated rotating KMS key, selected by
+exact Secrets Manager version and returned only at creation or rotation. A
+bounded one-hour to seven-day overlap causes the isolated worker to send both
+current and previous signatures without exposing either secret to the queue,
+database views or ordinary browser reads.
+
+Events enter a persistent DynamoDB outbox before their tenant/delivery identity
+is submitted to a FIFO queue. The worker reloads live authority, rejects
+redirects and private DNS answers, bounds timeout and response bytes, retries
+five times, uses a DLQ and writes content-minimised terminal evidence to Object
+Lock. A separate health projection cannot overwrite destination configuration.
+The public `verify_webhook` helper validates exact bytes, timestamp and key ID,
+uses constant-time comparison and fails closed when its caller-provided atomic
+replay store is unavailable. The typed UI manages destinations, one-time
+secrets, verification events, delivery posture, rotation and lifecycle without
+claiming a queued event was delivered.
+
+Unit, adversarial, Lambda/worker contract and CDK synthesis evidence cover
+tamper, expiry, replay, dual-key overlap, role and tenant isolation, unsafe
+egress, exact-version secret authority, durable queueing, terminal audit and
+posture repair without redelivery. This completes the implementation foundation
+of P1-ADM-10. A real customer receiver, durable receiver replay store, egress
+policy and interruption/rotation/DLQ replay exercise remain acceptance work.
+P0-07 remains a Splunk stub. See [Secure webhooks](secure-webhooks-design.md).
 
 ### P1-FLT-01 acceptance evidence
 

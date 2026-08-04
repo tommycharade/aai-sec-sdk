@@ -1150,3 +1150,30 @@ by the API. Server-clock expiry, revocation, agent lifecycle change, group
 reassignment or base-policy change restores the ordinary signed bundle.
 Corrupt derived signing evidence fails the refresh closed rather than falling
 back silently. See [Time-limited policy exceptions](time-limited-policy-exceptions-design.md).
+
+## Outbound webhook threat model
+
+Webhook destinations are untrusted network peers. An authenticated browser may
+request a configuration change but never supplies an event payload, signing
+key, tenant identity or delivery message. Platform-administrator authority,
+strict public HTTPS validation and optimistic revision checks are repeated at
+the control-plane boundary. Signing keys are generated server-side, encrypted
+under a dedicated KMS key, selected by exact Secrets Manager version and shown
+to the browser only once.
+
+The API persists a content-minimised tenant-scoped outbox record before sending
+only its identity to a FIFO queue. A dedicated worker reloads the live endpoint,
+payload and exact key versions on every attempt. It resolves DNS immediately
+before a no-redirect request and rejects any non-global address, but
+deployment-owned egress filtering is still required against the residual DNS
+rebinding interval. The worker has no policy-signing, Cognito or broad secret
+authority.
+
+Signatures bind timestamp, stable delivery ID and exact raw body with
+HMAC-SHA256. Timestamp validation limits delay; a receiver-owned durable atomic
+claim on the delivery ID prevents replay and duplicate processing. Signature
+validation without that claim is insufficient. Rotation uses a bounded dual
+signature interval so the receiver can move keys without an unsigned gap.
+Terminal status is written to Object Lock without response content or key
+material. At-least-once transport means receiver idempotency remains mandatory.
+See [Secure webhooks](secure-webhooks-design.md).

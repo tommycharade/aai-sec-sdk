@@ -299,6 +299,14 @@ export class AwsControlPlaneStack extends cdk.Stack {
       // crosses tenants through this index.
       projectionType: dynamodb.ProjectionType.KEYS_ONLY,
     });
+    table.addGlobalSecondaryIndex({
+      indexName: "WebhookOutbox",
+      partitionKey: { name: "webhook_outbox_pk", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "webhook_outbox_sk", type: dynamodb.AttributeType.STRING },
+      // Only unqueued records carry these attributes. Successful SQS dispatch
+      // removes them so retry cost is bounded by pending work, not 30-day history.
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
 
     const presence = new dynamodb.Table(this, "PresenceTable", {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
@@ -508,6 +516,26 @@ export class AwsControlPlaneStack extends cdk.Stack {
         enforceSSL: true,
       },
     );
+    const webhookDeliveryDlq = new sqs.Queue(this, "WebhookDeliveryDlq", {
+      fifo: true,
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const webhookDeliveryQueue = new sqs.Queue(this, "WebhookDeliveryQueue", {
+      fifo: true,
+      contentBasedDeduplication: false,
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      visibilityTimeout: cdk.Duration.seconds(60),
+      retentionPeriod: cdk.Duration.days(4),
+      deadLetterQueue: { queue: webhookDeliveryDlq, maxReceiveCount: 5 },
+      enforceSSL: true,
+    });
+    const webhookDispatchDlq = new sqs.Queue(this, "WebhookDispatchDlq", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
     const evidenceWorkerDlq = new sqs.Queue(this, "EvidenceWorkerDlq", {
       fifo: true,
       encryption: sqs.QueueEncryption.SQS_MANAGED,
@@ -620,6 +648,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
       description: "Signs immutable tenant-bound AAI Security policy bundles",
       keySpec: kms.KeySpec.ECC_NIST_P256,
       keyUsage: kms.KeyUsage.SIGN_VERIFY,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    const webhookSecretKey = new kms.Key(this, "WebhookSecretKey", {
+      alias: "alias/aai-sec-webhook-secrets",
+      description: "Encrypts tenant webhook signing keys retained in Secrets Manager",
+      enableKeyRotation: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
     // This key is staged before signer cutover so endpoint trust bundles can
@@ -766,6 +800,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
       REGIONAL_CELL_ROLE: "primary",
       REGIONAL_JOB_RECONCILIATION_ENABLED: "true",
       SECURITY_ALERTS_TOPIC_ARN: securityAlerts.topicArn,
+      WEBHOOK_QUEUE_URL: webhookDeliveryQueue.queueUrl,
+      WEBHOOK_SECRET_PREFIX: "aai-sec/webhooks/",
+      WEBHOOK_SECRET_KMS_KEY_ARN: webhookSecretKey.keyArn,
       RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
       RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
       POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
@@ -865,6 +902,22 @@ export class AwsControlPlaneStack extends cdk.Stack {
       resources: [audit.arnForObjects("tenant=*")],
     }));
     securityAlerts.grantPublish(handler);
+    webhookDeliveryQueue.grantSendMessages(handler);
+    webhookSecretKey.grantEncrypt(handler);
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        "secretsmanager:CreateSecret",
+        "secretsmanager:PutSecretValue",
+        "secretsmanager:DeleteSecret",
+      ],
+      resources: [
+        cdk.Stack.of(this).formatArn({
+          service: "secretsmanager",
+          resource: "secret",
+          resourceName: "aai-sec/webhooks/*",
+        }),
+      ],
+    }));
     evidenceReports.grantRead(handler);
     evidenceWorkerQueue.grantSendMessages(handler);
     evidenceRetentionWorkerQueue.grantSendMessages(handler);
@@ -899,6 +952,38 @@ export class AwsControlPlaneStack extends cdk.Stack {
     securityAlerts.grantPublish(evidenceWorker);
     evidenceWorkerQueue.grantSendMessages(evidenceWorker);
     evidenceWorker.addEventSource(new lambdaEventSources.SqsEventSource(evidenceWorkerQueue, {
+      batchSize: 1,
+      reportBatchItemFailures: false,
+    }));
+
+    const webhookWorker = new lambda.Function(this, "WebhookDeliveryWorker", {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: lambda.Architecture.ARM_64,
+      handler: "webhook_worker.handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+      timeout: cdk.Duration.seconds(15),
+      memorySize: 256,
+      reservedConcurrentExecutions: 20,
+      environment: {
+        CONTROL_TABLE: table.tableName,
+        AUDIT_BUCKET: audit.bucketName,
+      },
+      tracing: lambda.Tracing.PASS_THROUGH,
+    });
+    table.grantReadWriteData(webhookWorker);
+    audit.grantPut(webhookWorker);
+    webhookSecretKey.grantDecrypt(webhookWorker);
+    webhookWorker.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["secretsmanager:GetSecretValue"],
+      resources: [
+        cdk.Stack.of(this).formatArn({
+          service: "secretsmanager",
+          resource: "secret",
+          resourceName: "aai-sec/webhooks/*",
+        }),
+      ],
+    }));
+    webhookWorker.addEventSource(new lambdaEventSources.SqsEventSource(webhookDeliveryQueue, {
       batchSize: 1,
       reportBatchItemFailures: false,
     }));
@@ -983,6 +1068,22 @@ export class AwsControlPlaneStack extends cdk.Stack {
         }),
         deadLetterQueue: dynamicGroupReconciliationDlq,
         maxEventAge: cdk.Duration.hours(1),
+        retryAttempts: 2,
+      }),
+    );
+    const webhookDispatchRule = new events.Rule(this, "WebhookDispatchSchedule", {
+      description: "Retry persisted webhook outbox records that were not accepted by SQS",
+      schedule: events.Schedule.rate(cdk.Duration.minutes(1)),
+      enabled: true,
+    });
+    webhookDispatchRule.addTarget(
+      new eventTargets.LambdaFunction(handler, {
+        event: events.RuleTargetInput.fromObject({
+          source: "aai.webhook-dispatch",
+          schemaVersion: 1,
+        }),
+        deadLetterQueue: webhookDispatchDlq,
+        maxEventAge: cdk.Duration.minutes(15),
         retryAttempts: 2,
       }),
     );
@@ -1315,6 +1416,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       ["EvidenceScheduleDeadLetters", evidenceScheduleDlq, "Scheduled evidence assurance exhausted bounded retries."],
       ["EvidenceRetentionWorkerDeadLetters", evidenceRetentionWorkerDlq, "Evidence retention exhausted bounded retries."],
       ["EvidenceRetentionScheduleDeadLetters", evidenceRetentionScheduleDlq, "Scheduled evidence-retention dispatch exhausted bounded retries."],
+      ["WebhookDeliveryDeadLetters", webhookDeliveryDlq, "Signed webhook delivery exhausted bounded retries."],
+      ["WebhookDispatchDeadLetters", webhookDispatchDlq, "Webhook outbox dispatch exhausted bounded retries."],
     ] as const) {
       const alarm = new cloudwatch.Alarm(this, id, {
         metric: queue.metricApproximateNumberOfMessagesVisible({
@@ -1389,6 +1492,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "EvidenceRetentionScheduleDlqArn", {
       value: evidenceRetentionScheduleDlq.queueArn,
     });
+    new cdk.CfnOutput(this, "WebhookDeliveryQueueArn", { value: webhookDeliveryQueue.queueArn });
+    new cdk.CfnOutput(this, "WebhookDeliveryDlqArn", { value: webhookDeliveryDlq.queueArn });
+    new cdk.CfnOutput(this, "WebhookDispatchDlqArn", { value: webhookDispatchDlq.queueArn });
+    new cdk.CfnOutput(this, "WebhookSecretKmsKeyArn", { value: webhookSecretKey.keyArn });
     new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });
     new cdk.CfnOutput(this, "PolicySigningKeyArn", { value: policySigningKey.keyArn });
     new cdk.CfnOutput(this, "RegionalPolicySigningKeyArn", {

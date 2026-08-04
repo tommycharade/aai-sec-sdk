@@ -762,6 +762,26 @@ not rollback. Follow [Asynchronous tenant retention](asynchronous-retention-desi
 and retain separate live cross-region count/order/hash/retention recovery
 evidence.
 
+### Secure-webhook operations
+
+The stack provisions `WebhookDeliveryQueue` and its five-receive FIFO DLQ, a
+separate scheduled-dispatch DLQ, `WebhookDeliveryWorker`, and a rotating
+`WebhookSecretKey`. The API role may create, version and schedule deletion only
+under `aai-sec/webhooks/*`, encrypt with that key and send to the delivery
+queue. The worker can read only that secret prefix, decrypt with that key,
+update the control table, write terminal audit evidence and consume the queue;
+it has no Cognito or policy-signing permissions.
+
+Monitor `WebhookDeliveryDeadLetters` and `WebhookDispatchDeadLetters`. A DLQ
+item contains only tenant and delivery identity; inspect the retained delivery
+record and immutable terminal audit before redrive. Redrive preserves the
+delivery ID, so the customer receiver must atomically deduplicate it. Verify
+deployment egress controls restrict the worker to approved public receiver
+origins, because application DNS checks alone cannot eliminate DNS rebinding.
+Follow the creation, receiver verification and rotation procedure in
+[Secure webhooks](secure-webhooks-design.md). No live receiver is configured by
+CDK and the Splunk stub is unchanged.
+
 This is the first AWS deployment slice, not a production security
 certification. Before production use:
 

@@ -42,6 +42,14 @@ is a schema and workflow stub and must report `deliveryVerified: false`; it
 cannot satisfy the enterprise SIEM gate until authenticated delivery, retry,
 dead-letter, monitoring and replay have live evidence.
 
+Signed webhooks are a separate automation primitive. They provide managed
+public-HTTPS destinations, one-time server-generated HMAC keys, bounded
+zero-downtime rotation, persistent outbox delivery, DLQ handling and a receiver
+verification helper. They currently carry only server-owned test and endpoint
+alert lifecycle events. This foundation is useful for customer automation but
+does not convert the Splunk stub into P0-07 delivery. See
+[Secure webhooks](secure-webhooks-design.md).
+
 Every supported host follows the same lifecycle:
 
 ```text
