@@ -6,6 +6,11 @@ rule to create a case and quarantine exactly one authoritatively correlated
 Claude Code or Codex agent. It never grants authority, selects a browser-
 supplied target, disables evidence collection or claims device isolation.
 
+The same governance ledger also supports alert-only agent-activity rules. They
+cannot use this document's automatic containment action because authenticated
+agent reports are observations, not independent authorization facts. See
+[Explainable agent behavior detection](behavior-detection-design.md).
+
 ## Customer outcome
 
 Security teams can author a typed rule, preview it against current retained
@@ -51,6 +56,8 @@ approved version based on the current active version. Activating a replacement
 atomically supersedes the old version. An authorized operator can immediately
 disable the active rule because reducing automatic authority must not wait for
 a new approval cycle; re-enabling requires activation of an approved version.
+The source trust boundary cannot change across versions of one rule ID; moving
+between behavior observation and endpoint containment requires a new rule.
 
 `security-operator` and `platform-admin` may author and independently approve
 rules. `incident-responder` can read rules and executions but cannot establish
@@ -109,7 +116,7 @@ with the derived binding status and one of: `would_contain`,
 The UI explains the resulting SDK authority, shows exact safeguards and makes
 the independent approval boundary visible before activation.
 
-The Incidents workspace has separate **Cases** and **Response rules** views.
+The Incidents workspace has separate **Cases** and **Detection rules** views.
 The rules view starts with governed inventory and health metadata, then opens a
 focused detail/editor with active version, pending change, recent outcomes,
 preview, submit, approve, activate and disable actions.
@@ -124,7 +131,9 @@ Quarantine is an SDK/control-plane authority restriction. It does not kill a
 process, isolate a laptop, block network traffic, revoke a third-party token or
 prove that an offline endpoint received the change. Splunk remains a clearly
 labelled non-delivering stub. MDM/EDR isolation, credential-broker revocation,
-portable rule signatures and anomaly baselines remain separate requirements.
+portable rule signatures and repository/configuration anomaly baselines remain
+separate requirements. Tool, MCP, decision-volume and approval-volume behavior
+baselines are provided only as alerting under the separate behavior design.
 
 ## Acceptance evidence
 

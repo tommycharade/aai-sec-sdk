@@ -1,5 +1,14 @@
 # Changelog
 
+- Added independently reviewed explainable behavior detection for Claude Code
+  and Codex. Alert-only rules cover new tools, new MCP server identities,
+  denied-action spikes, approval-request spikes and decision-volume spikes;
+  incomplete or truncated baselines fail closed. Alerts contain normalized
+  counts, thresholds and evidence digests without raw activity, enter the
+  durable incident/webhook path and may be manually contained only after the
+  control plane revalidates the exact enrolled-agent binding. Agent activity
+  can never select automatic quarantine authority.
+
 - Preserved the deployed Cognito managed-login CloudFormation logical ID after
   its token-safe construct migration, preventing routine stack updates from
   attempting to recreate the already-owned physical domain.

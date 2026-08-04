@@ -640,6 +640,7 @@ class ControlPlaneAgentClient:
         resource_kind: str,
         reason_code: str,
         action_digest: str | None = None,
+        mcp_server_id: str | None = None,
     ) -> JsonObject:
         """Report one content-minimised decision from this enrolled process.
 
@@ -656,6 +657,15 @@ class ControlPlaneAgentClient:
             raise ControlPlaneConfigurationError("decision ID must be a SHA-256 event digest")
         if action_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", action_digest):
             raise ControlPlaneConfigurationError("decision action digest must be SHA-256")
+        if mcp_server_id is not None and (
+            not isinstance(mcp_server_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", mcp_server_id)
+        ):
+            raise ControlPlaneConfigurationError("decision MCP server ID is invalid")
+        if mcp_server_id is not None and source != "mcp" and resource_kind != "mcp_tool":
+            raise ControlPlaneConfigurationError(
+                "decision MCP server ID requires MCP decision evidence"
+            )
         vocabularies = {
             "source": ({"claude_native", "codex_native", "mcp", "sdk_runtime"}, source),
             "decision": ({"allowed", "denied", "approval_required"}, decision),
@@ -694,6 +704,8 @@ class ControlPlaneAgentClient:
         }
         if action_digest is not None:
             report["actionDigest"] = action_digest
+        if mcp_server_id is not None:
+            report["mcpServerId"] = mcp_server_id
         response = self._request(self._agent_path("decisions"), report)
         if response.get("accepted") is not True:
             raise ControlPlaneDependencyError("control plane did not acknowledge decision evidence")
@@ -1135,6 +1147,11 @@ class ControlPlaneDecisionExporter:
             resource_kind = "mcp_tool"
         else:
             resource_kind = "sdk_tool"
+        mcp_server_id = None
+        if resource_kind == "mcp_tool" and tool_name.startswith("mcp__"):
+            parts = tool_name.split("__", 2)
+            if len(parts) == 3 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", parts[1]):
+                mcp_server_id = parts[1]
         self.client.report_decision(
             decision_id=event.event_hash,
             source=self.source,
@@ -1143,6 +1160,7 @@ class ControlPlaneDecisionExporter:
             resource_kind=resource_kind,
             reason_code=self._reason(event, decision),
             action_digest=action_digest,
+            mcp_server_id=mcp_server_id,
         )
 
 

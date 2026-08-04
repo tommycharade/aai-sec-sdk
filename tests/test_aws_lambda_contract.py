@@ -783,7 +783,11 @@ def test_secure_webhook_lifecycle_is_tenant_scoped_rotatable_and_secret_free(
                 "name": "SOC automation",
                 "description": "Signed alerts for the enterprise response gateway",
                 "endpoint": "https://hooks.example.test/aai/events",
-                "eventTypes": ["endpoint.alert.opened", "webhook.test"],
+                "eventTypes": [
+                    "behavior.alert.opened",
+                    "endpoint.alert.opened",
+                    "webhook.test",
+                ],
             },
         ),
     )
@@ -796,6 +800,32 @@ def test_secure_webhook_lifecycle_is_tenant_scoped_rotatable_and_secret_free(
     assert destination["revision"] == 1
     encoded_record = json.dumps(table.items[(f"TENANT#{tenant}", f"WEBHOOK#{destination['id']}")])
     assert secret["secret"] not in encoded_record
+
+    module._queue_endpoint_alert_webhooks(
+        tenant,
+        {
+            "id": "behavior-alert-a",
+            "source": "behavior_analytics",
+            "severity": "high",
+            "type": "agent_new_mcp_server",
+            "deviceId": "",
+            "deploymentId": "dep-a",
+            "agentId": "agent-a",
+            "reasonCode": "new_mcp_server",
+            "firstObservedAt": now,
+            "lastObservedAt": now,
+            "revision": 1,
+        },
+    )
+    behavior_delivery = next(
+        item
+        for item in module._list(tenant, "WEBHOOK_DELIVERY")
+        if item.get("event_type") == "behavior.alert.opened"
+    )
+    behavior_payload = json.loads(behavior_delivery["payload"])
+    assert behavior_payload["data"]["agentId"] == "agent-a"
+    assert behavior_payload["data"]["deploymentId"] == "dep-a"
+    assert "behavior" not in behavior_payload["data"]
 
     listed = json.loads(
         _invoke(
@@ -7329,6 +7359,34 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
         ),
     )
     assert raw_content["statusCode"] == 400
+    mcp_body = {
+        **body,
+        "decisionId": "9" * 64,
+        "source": "mcp",
+        "toolName": "mcp__github__list_issues",
+        "resourceKind": "mcp_tool",
+        "mcpServerId": "github",
+    }
+    mcp_recorded = _invoke(
+        module,
+        _event("/agent/dep-a/agent-a/decisions", "POST", body=mcp_body, token=token),
+    )
+    assert mcp_recorded["statusCode"] == 202
+    mcp_stored_key = (f"TENANT#{tenant}", f"DECISION#dep-a:agent-a:{'9' * 64}")
+    assert table.items[mcp_stored_key]["mcp_server_id"] == "github"
+    assert module._decision_view(table.items[mcp_stored_key])["mcpServerId"] == "github"
+    unrelated_mcp_identity = _invoke(
+        module,
+        _event(
+            "/agent/dep-a/agent-a/decisions",
+            "POST",
+            body={**body, "decisionId": "8" * 64, "mcpServerId": "github"},
+            token=token,
+        ),
+    )
+    assert unrelated_mcp_identity["statusCode"] == 400
+    # Keep the original dashboard assertion focused on one retained decision.
+    del table.items[mcp_stored_key]
     wrong_agent = _invoke(
         module,
         _event("/agent/dep-a/other-agent/decisions", "POST", body=body, token=token),
@@ -8566,6 +8624,410 @@ def test_endpoint_reads_cannot_trigger_automatic_response(monkeypatch: Any) -> N
         automatic_response=True,
     )
     assert evaluations == [tenant]
+
+
+def test_behavior_rule_is_explainable_alert_only_and_case_bound(monkeypatch: Any) -> None:
+    """Agent observations may create governed alerts but never automatic authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-behavior-rule"
+    now = 2_165_500_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    agent_key = "deployment-a:agent-a"
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", agent_key)
+        | {
+            "id": "agent-a",
+            "deployment_id": "deployment-a",
+            "host": "claude-code",
+            "project_root": "/synthetic/behavior-project",
+            "status": "connected",
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            "session_revision": 1,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-a")
+        | {"id": "policy-a", "name": "Safe", "version": 3}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-a")
+        | {"id": "group-a", "policyId": "policy-a", "agent_keys": [agent_key]}
+    )
+
+    def decision(
+        identifier: str,
+        observed_at: int,
+        *,
+        tool: str,
+        source: str,
+        mcp: str | None = None,
+    ) -> None:
+        record: dict[str, Any] = {
+            **module._item_key(tenant, "DECISION", f"{agent_key}:{identifier}"),
+            "id": identifier,
+            "deployment_id": "deployment-a",
+            "agent_id": "agent-a",
+            "host": "claude-code",
+            "tool_name": tool,
+            "source": source,
+            "decision": "allowed",
+            "resource_kind": "mcp_tool" if mcp or source == "mcp" else "project_file",
+            "reason_code": "explicit_allow",
+            "observed_at": observed_at,
+            "timeline_pk": f"TENANT#{tenant}#DECISION",
+            "timeline_sk": f"{observed_at:010d}#{agent_key}:{identifier}",
+        }
+        if mcp:
+            record["mcp_server_id"] = mcp
+        table.put_item(Item=record)
+
+    for index in range(5):
+        decision(f"history-{index}", now - 86_400 + index, tool="Read", source="claude_native")
+    decision(
+        "current-a",
+        now - 60,
+        tool="mcp__github__list_issues",
+        source="claude_native",
+        mcp="github",
+    )
+    decision(
+        "current-b",
+        now,
+        tool="mcp__github__get_issue",
+        source="claude_native",
+        mcp="github",
+    )
+
+    configuration = {
+        "match": {
+            "source": "agent_activity",
+            "signalTypes": ["new_mcp_server"],
+            "hosts": ["claude-code"],
+            "severity": "high",
+        },
+        "action": {"type": "create_alert"},
+        "baseline": {
+            "lookbackDays": 7,
+            "currentWindowMinutes": 15,
+            "minimumBaselineEvents": 5,
+            "minimumCurrentEvents": 2,
+            "sensitivityMultiplier": 3.0,
+        },
+        "priority": 100,
+    }
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "behavior-author",
+    }
+    approver = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "behavior-approver",
+    }
+    preview = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules/preview",
+            "POST",
+            body={"configuration": configuration},
+            claims=author,
+        ),
+    )
+    assert preview["statusCode"] == 200, preview
+    preview_body = json.loads(preview["body"])
+    assert preview_body["mutated"] is False
+    assert preview_body["count"] == 1
+    assert (
+        preview_body["matches"][0]
+        | {
+            "agentKey": agent_key,
+            "outcome": "would_alert",
+            "baselineComplete": True,
+            "baselineCount": 5,
+            "currentCount": 2,
+            "threshold": 2,
+            "dimension": "github",
+        }
+        == preview_body["matches"][0]
+    )
+    assert module._list(tenant, "ALERT") == []
+
+    created = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules",
+            "POST",
+            body={
+                "ruleId": "detect-new-mcp",
+                "name": "Detect newly observed MCP servers",
+                "description": "Alert when an enrolled agent reports a new MCP server identity.",
+                "configuration": configuration,
+            },
+            claims=author,
+        ),
+    )
+    assert created["statusCode"] == 201, created
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/response-rules/detect-new-mcp/versions/1/submit",
+                "POST",
+                claims=author,
+            ),
+        )["statusCode"]
+        == 200
+    )
+    decision_path = "/api/enterprise/response-rules/detect-new-mcp/versions/1/decision"
+    assert (
+        _invoke(
+            module,
+            _event(
+                decision_path,
+                "POST",
+                body={
+                    "decision": "approved",
+                    "reason": "Self approval must remain unavailable for behavior detections.",
+                },
+                claims=author,
+            ),
+        )["statusCode"]
+        == 403
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                decision_path,
+                "POST",
+                body={
+                    "decision": "approved",
+                    "reason": "The alert-only scope and explainable threshold are appropriate.",
+                },
+                claims=approver,
+            ),
+        )["statusCode"]
+        == 200
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/response-rules/detect-new-mcp/versions/1/activate",
+                "POST",
+                body={"expectedActiveVersion": 0},
+                claims=approver,
+            ),
+        )["statusCode"]
+        == 200
+    )
+
+    changed_boundary = _invoke(
+        module,
+        _event(
+            "/api/enterprise/response-rules/detect-new-mcp/versions",
+            "POST",
+            body={
+                "name": "Illegitimate containment upgrade",
+                "description": ("A later version must not change the permanent evidence boundary."),
+                "configuration": {
+                    "match": {
+                        "source": "endpoint_evidence",
+                        "reasonCodes": ["signature_invalid"],
+                        "severities": ["critical"],
+                        "hosts": ["claude-code"],
+                    },
+                    "action": {"type": "quarantine_agent"},
+                    "safeguards": {
+                        "maxActionsPerHour": 1,
+                        "agentCooldownSeconds": 3600,
+                    },
+                    "priority": 1,
+                },
+            },
+            claims=approver,
+        ),
+    )
+    assert changed_boundary["statusCode"] == 400
+    assert "evidence boundary cannot change" in json.loads(changed_boundary["body"])["error"]
+
+    alerts = module._evaluate_behavior_rules_for_agent(tenant, agent_key, now=now)
+    assert len(alerts) == 1
+    alert = alerts[0]
+    assert alert["source"] == "behavior_analytics"
+    assert alert["reasonCode"] == "new_mcp_server"
+    assert alert["behavior"]["dimension"] == "github"
+    assert alert["behavior"]["reportedByAgent"] is True
+    assert alert["behavior"]["threshold"] == 2
+    assert module._list(tenant, "CONTAINMENT") == []
+    repeated = module._evaluate_behavior_rules_for_agent(tenant, agent_key, now=now)
+    assert repeated[0]["id"] == alert["id"]
+    assert len(module._list(tenant, "ALERT")) == 1
+    assert len(module._list(tenant, "RESPONSE_EXECUTION")) == 1
+    assert module._list(tenant, "RESPONSE_EXECUTION")[0]["outcome"] == "alerted"
+
+    case = module._create_case(
+        tenant,
+        {
+            "alertId": alert["id"],
+            "expectedAlertRevision": module._list(tenant, "ALERT")[0]["revision"],
+            "reason": "Investigate the newly observed MCP identity before containment.",
+        },
+        "incident-responder",
+    )
+    assert case["alertSource"] == "behavior_analytics"
+    assert case["binding"]["status"] == "bound"
+    assert case["binding"]["agentKey"] == agent_key
+    export = module._case_export(tenant, case["id"], "incident-responder")
+    assert export["content"]["case"]["alertSource"] == "behavior_analytics"
+    assert (
+        export["content"]["evidence"]["behaviorEvidenceDigest"]
+        == alert["behavior"]["evidenceDigest"]
+    )
+    retained_alert = module._list(tenant, "ALERT")[0]
+    acknowledged = module._acknowledge_endpoint_alert(
+        tenant,
+        alert["id"],
+        {
+            "expectedRevision": retained_alert["revision"],
+            "reason": "A responder owns investigation of the newly observed MCP identity.",
+        },
+        "incident-responder",
+    )
+    assert acknowledged["source"] == "behavior_analytics"
+    assert acknowledged["status"] == "acknowledged"
+    assert (
+        module._case_view(
+            tenant,
+            module._list(tenant, "CASE")[0],
+            detailed=True,
+        )["bindingCurrent"]
+        is True
+    )
+    contained = module._contain_case(
+        tenant,
+        case["id"],
+        {
+            "expectedCaseRevision": case["revision"],
+            "expectedBindingDigest": case["binding"]["bindingDigest"],
+            "reason": "Quarantine the exact enrolled agent during the MCP investigation.",
+        },
+        "incident-responder",
+    )
+    assert contained["status"] == "contained"
+    assert (
+        module._agent_control_state(
+            tenant, table.items[(f"TENANT#{tenant}", f"AGENT#{agent_key}")]
+        )["executionAllowed"]
+        is False
+    )
+
+
+def test_behavior_baseline_fails_closed_and_rejects_authority_widening(
+    monkeypatch: Any,
+) -> None:
+    """Incomplete history cannot alert and agent activity cannot auto-quarantine."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-behavior-incomplete"
+    now = 2_166_000_000
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "deployment_id": "dep-a",
+            "host": "codex",
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            "session_revision": 1,
+        }
+    )
+    configuration = {
+        "match": {
+            "source": "agent_activity",
+            "signalTypes": ["denied_action_spike"],
+            "hosts": ["codex"],
+            "severity": "critical",
+        },
+        "action": {"type": "create_alert"},
+        "baseline": {
+            "lookbackDays": 7,
+            "currentWindowMinutes": 15,
+            "minimumBaselineEvents": 20,
+            "minimumCurrentEvents": 3,
+            "sensitivityMultiplier": 2.0,
+        },
+        "priority": 1,
+    }
+    normalized = module._response_rule_configuration(configuration)
+    metrics = module._behavior_rule_metrics(tenant, normalized, "dep-a:agent-a", now=now)
+    assert metrics == [
+        {
+            "signalType": "denied_action_spike",
+            "outcome": "baseline_insufficient",
+            "baselineComplete": True,
+            "baselineCount": 0,
+            "minimumBaselineEvents": 20,
+            "currentCount": 0,
+            "threshold": None,
+            "expectedCurrentCount": None,
+            "dimension": None,
+            "dimensionHash": None,
+            "evidenceDigest": module._configuration_hash([]),
+        }
+    ]
+    truncated = module._behavior_signal_metrics(
+        normalized,
+        "denied_action_spike",
+        "dep-a:agent-a",
+        [],
+        [],
+        now=now,
+        history_truncated=True,
+    )
+    assert truncated[0]["outcome"] == "baseline_insufficient"
+    assert truncated[0]["baselineComplete"] is False
+
+    spike_decisions = [
+        {
+            "id": f"historical-{index}",
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "decision": "denied" if index == 0 else "allowed",
+            "observed_at": now - 86_400 + index,
+        }
+        for index in range(20)
+    ] + [
+        {
+            "id": f"current-{index}",
+            "deployment_id": "dep-a",
+            "agent_id": "agent-a",
+            "decision": "denied",
+            "observed_at": now - index,
+        }
+        for index in range(3)
+    ]
+    spike = module._behavior_signal_metrics(
+        normalized,
+        "denied_action_spike",
+        "dep-a:agent-a",
+        spike_decisions,
+        [],
+        now=now,
+    )
+    assert spike[0]["outcome"] == "would_alert"
+    assert spike[0]["currentCount"] == 3
+    assert spike[0]["threshold"] == 3
+    with pytest.raises(ValueError, match="create_alert"):
+        module._response_rule_configuration(
+            {**configuration, "action": {"type": "quarantine_agent"}}
+        )
+    with pytest.raises(ValueError, match="sensitivityMultiplier"):
+        invalid_configuration: dict[str, Any] = copy.deepcopy(configuration)
+        invalid_configuration["baseline"]["sensitivityMultiplier"] = float("nan")
+        module._response_rule_configuration(invalid_configuration)
 
 
 def test_automatic_response_reservation_cannot_exceed_limit_under_race(

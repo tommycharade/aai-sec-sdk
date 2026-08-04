@@ -548,12 +548,15 @@ manifest, key, privilege and freshness boundaries, and
 ingestion and health APIs. The service derives health; endpoint reports never
 carry authority or a submitted health label.
 
-`GET /enterprise/alerts` reconciles and returns content-minimised endpoint
-detections to authorized security operators. `POST
+`GET /enterprise/alerts` reconciles and returns content-minimised endpoint and
+explainable behavior detections to authorized security operators. `POST
 /enterprise/alerts/{alertId}/acknowledge` requires `incident_response`, an exact
 live revision and a redaction-safe investigation rationale. Acknowledgement is
-ownership evidence, not remediation. See [Endpoint detection and
-response](endpoint-detection-response.md).
+ownership evidence, not remediation. Behavior alerts expose only fixed signal,
+count, threshold, baseline and digest metadata; raw commands, arguments,
+prompts and results are excluded. See [Endpoint detection and
+response](endpoint-detection-response.md) and [Explainable agent behavior
+detection](behavior-detection-design.md).
 
 ## Policy change assurance
 
@@ -630,12 +633,16 @@ management](terraform-provider-design.md).
 
 ## Incident cases and response authority
 
-The hosted AWS adapter exposes a revisioned case API for endpoint detections:
+The hosted AWS adapter exposes a revisioned case API for endpoint and
+explainable behavior detections:
 
 - `POST /enterprise/cases` opens one deterministic case from an exact live
-  alert revision. The server, not the browser, correlates the endpoint to an
-  agent using current managed-device inventory, fresh signed evidence, exact
-  host identity and the SHA-256 of the registered project root.
+  alert revision. For endpoint alerts, the server—not the browser—correlates
+  current managed-device inventory, fresh signed evidence, exact host identity
+  and the SHA-256 of the registered project root. For behavior alerts, it
+  reloads the authenticated enrolled-agent lifecycle, deployment, sole group,
+  active policy and project-root digest. The reported behavior never grants
+  containment authority.
 - `GET /enterprise/cases` and `GET /enterprise/cases/{caseId}` return case
   metadata, authoritative binding state, a content-minimised timeline and
   correlated decision/approval references. Raw endpoint payloads, project
@@ -656,8 +663,10 @@ The hosted AWS adapter exposes a revisioned case API for endpoint detections:
   on their next live-authority check.
 - `POST /enterprise/cases/{caseId}/release` requires exact case and
   containment revisions. Release is denied unless binding remains current,
-  endpoint evidence is healthy, non-response verification checks pass, no
-  independent stop scope is active and the source alert is ready.
+  non-response verification checks pass, no independent stop scope is active
+  and the source alert is ready. Endpoint cases additionally require healthy
+  endpoint evidence; behavior cases require the alert to be acknowledged or
+  resolved.
 - `resolve` and `close` preserve the case timeline and cannot bypass active
   containment.
 
@@ -704,16 +713,17 @@ text is content-hashed before audit persistence. See
 [Asynchronous tenant retention](asynchronous-retention-design.md) for queue
 authority, cutover, snapshot, hash-chain, schedule, alert and failure behavior.
 
-## Automatic response rules
+## Detection and response rules
 
-The hosted adapter exposes an independently governed automatic-response API:
+The hosted adapter exposes one independently governed rule API with two closed
+trust boundaries:
 
 - `GET /enterprise/response-rules` lists active authority separately from a
   pending version; `GET /enterprise/response-rules/{ruleId}` includes immutable
   versions and content-minimised execution outcomes.
 - `POST /enterprise/response-rules/preview` evaluates one typed configuration
-  against current retained alerts without creating a case or changing agent
-  authority.
+  against current retained alerts or complete bounded activity history without
+  creating an alert, case or changing agent authority.
 - `POST /enterprise/response-rules` creates a rule shell and version-1 draft;
   `POST /enterprise/response-rules/{ruleId}/versions` appends a draft based on
   the current active version.
@@ -723,15 +733,22 @@ The hosted adapter exposes an independently governed automatic-response API:
 - `POST /enterprise/response-rules/{ruleId}/disable` immediately removes new
   automatic authority; `rollback` atomically restores only an independently
   approved superseded version.
-- `GET /enterprise/response-executions` returns idempotent outcomes for matched,
-  contained and safely skipped alert occurrences without prompts, arguments,
-  results, credentials or raw endpoint payloads.
+- `GET /enterprise/response-executions` returns idempotent `alerted`,
+  `contained` and safely skipped outcomes without prompts, arguments, results,
+  credentials or raw endpoint payloads.
 
-The closed schema permits endpoint-evidence reason codes, medium/high/critical
-severity, `claude-code`/`codex` host scope, fixed `quarantine_agent` action,
-1–25 successful actions per hour, a 300–86,400 second per-agent cooldown and
-priority 1–1,000. Unknown fields and empty selections are rejected. See
-[Approved automatic response rules](automatic-response-rules-design.md).
+The endpoint schema permits server-derived reason codes,
+medium/high/critical severity, `claude-code`/`codex` host scope, fixed
+`quarantine_agent` action, 1–25 actions per hour, a 300–86,400 second
+per-agent cooldown and priority 1–1,000. The agent-activity schema permits only
+`new_tool`, `new_mcp_server`, `denied_action_spike`,
+`approval_request_spike` and `decision_volume_spike`; a 1–30 day lookback,
+5–60 minute current window, bounded minimum sample sizes, a 1.5–10 sensitivity
+multiplier and fixed `create_alert` action. Unknown fields, non-finite values,
+empty selections and attempts to assign automatic containment to agent
+activity are rejected. See [Approved automatic response
+rules](automatic-response-rules-design.md) and [Explainable agent behavior
+detection](behavior-detection-design.md).
 
 ## Secure webhooks
 

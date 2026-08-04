@@ -213,6 +213,18 @@ _RESPONSE_RULE_VERSION_STATES = frozenset(
 )
 _RESPONSE_RULE_PENDING_STATES = frozenset({"draft", "review", "approved"})
 _RESPONSE_RULE_PREVIEW_LIMIT = 100
+_BEHAVIOR_SIGNAL_TYPES = frozenset(
+    {
+        "new_tool",
+        "new_mcp_server",
+        "denied_action_spike",
+        "approval_request_spike",
+        "decision_volume_spike",
+    }
+)
+_BEHAVIOR_HISTORY_LIMIT = 2_000
+_BEHAVIOR_ACTIVE_RULE_LIMIT = 100
+_BEHAVIOR_EVENT_REASONS = _BEHAVIOR_SIGNAL_TYPES
 _ENDPOINT_EVENT_REASONS = frozenset({"signature_invalid", "report_replayed"})
 _ENDPOINT_ALERT_DEFINITIONS = {
     "credential_not_configured": (
@@ -365,6 +377,7 @@ _BREAK_GLASS_REQUEST_SECONDS = 15 * 60
 _STRONG_AUTH_MAX_AGE_SECONDS = 10 * 60
 _WEBHOOK_EVENT_TYPES = frozenset(
     {
+        "behavior.alert.opened",
         "endpoint.alert.opened",
         "endpoint.alert.reopened",
         "webhook.test",
@@ -11462,7 +11475,7 @@ def _decision_value(body, field, allowed):
 def _decision_view(item):
     """Return content-minimised host evidence in the dashboard contract."""
     observed_at = int(item.get("observed_at", 0))
-    return {
+    view = {
         "id": item["id"],
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(observed_at)),
         "agent": item.get("agent_id", "unknown-agent"),
@@ -11477,6 +11490,9 @@ def _decision_view(item):
         "actionDigest": item.get("action_digest"),
         "reportedByAgent": True,
     }
+    if item.get("mcp_server_id"):
+        view["mcpServerId"] = item["mcp_server_id"]
+    return view
 
 
 def _record_agent_decision(tenant, deployment_id, agent_id, body):
@@ -11495,8 +11511,11 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
         "reasonCode",
     }
     supplied_fields = set(body) if isinstance(body, dict) else set()
-    if not isinstance(body, dict) or (
-        supplied_fields != required_fields and supplied_fields != required_fields | {"actionDigest"}
+    optional_fields = {"actionDigest", "mcpServerId"}
+    if (
+        not isinstance(body, dict)
+        or not required_fields.issubset(supplied_fields)
+        or not supplied_fields.issubset(required_fields | optional_fields)
     ):
         raise ValueError("decision evidence contains unsupported fields")
     decision_id = body.get("decisionId")
@@ -11512,6 +11531,11 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
         not isinstance(action_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", action_digest)
     ):
         raise ValueError("actionDigest must be a SHA-256 action digest")
+    mcp_server_id = body.get("mcpServerId")
+    if mcp_server_id is not None:
+        mcp_server_id = _bounded_identifier(mcp_server_id, "mcpServerId")
+        if source != "mcp" and resource_kind != "mcp_tool":
+            raise ValueError("mcpServerId requires MCP decision evidence")
     agent_key = f"{deployment_id}:{agent_id}"
     agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
         "Item"
@@ -11554,6 +11578,8 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
     }
     if action_digest is not None:
         values["action_digest"] = action_digest
+    if mcp_server_id is not None:
+        values["mcp_server_id"] = mcp_server_id
     try:
         item = _create_item(tenant, "DECISION", record_id, values)
     except Exception as error:
@@ -11571,6 +11597,7 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
             "resource_kind",
             "reason_code",
             "action_digest",
+            "mcp_server_id",
         )
         if existing and all(existing.get(key) == values.get(key) for key in comparable):
             return {"accepted": True, "duplicate": True, "decisionId": decision_id}
@@ -11589,10 +11616,19 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
             "resource_kind": resource_kind,
             "reason_code": reason_code,
             "action_digest": action_digest,
+            "mcp_server_id": mcp_server_id,
             "policy_id": policy["id"],
             "policy_version": int(policy.get("version", 0)),
         },
     )
+    try:
+        _evaluate_behavior_rules_for_agent(tenant, agent_key, now=observed_at)
+    except Exception:
+        # Decision reporting is observational and follows the governed action.
+        # Detection failure must be visible but cannot rewrite that past action
+        # or leak provider details into logs.
+        _record_behavior_health(tenant, "degraded", now=observed_at)
+        print(json.dumps({"warning": "behavior detection evaluation remains degraded"}))
     return {"accepted": True, "duplicate": False, "decisionId": item["id"]}
 
 
@@ -12326,16 +12362,20 @@ def _endpoint_alert_id(tenant, device_id, reason_code):
 
 
 def _endpoint_alert_view(item):
-    """Project a content-minimised endpoint alert for operator APIs."""
+    """Project a content-minimised endpoint or behavior alert."""
     return {
         "id": item.get("id"),
-        "source": "endpoint_evidence",
+        "source": item.get("source", "endpoint_evidence"),
         "severity": item.get("severity"),
         "type": item.get("type"),
         "deviceId": item.get("deviceId"),
-        "deploymentId": "",
+        "deploymentId": item.get("deploymentId", ""),
+        "agentId": item.get("agentId"),
+        "agentKey": item.get("agentKey"),
+        "host": item.get("host"),
         "message": item.get("message"),
         "reasonCode": item.get("reasonCode"),
+        "behavior": _json(item.get("behavior")) if item.get("behavior") else None,
         "status": item.get("status"),
         "acknowledged": item.get("status") in {"acknowledged", "resolved"},
         "revision": int(item.get("revision", 0)),
@@ -12364,17 +12404,19 @@ def _publish_endpoint_alert(tenant, alert):
         return False
     SNS.publish(
         TopicArn=topic_arn,
-        Subject=f"AAI endpoint alert: {alert['type']}",
+        Subject=f"AAI security alert: {alert['type']}",
         Message=json.dumps(
             {
                 "schemaVersion": 1,
                 "tenantId": tenant,
                 "alertId": alert["id"],
                 "revision": int(alert["revision"]),
-                "source": "endpoint_evidence",
+                "source": alert.get("source", "endpoint_evidence"),
                 "severity": alert["severity"],
                 "type": alert["type"],
-                "deviceId": alert["deviceId"],
+                "deviceId": alert.get("deviceId", ""),
+                "deploymentId": alert.get("deploymentId", ""),
+                "agentId": alert.get("agentId", ""),
                 "reasonCode": alert["reasonCode"],
                 "observedAt": int(alert["lastObservedAt"]),
             },
@@ -12384,7 +12426,10 @@ def _publish_endpoint_alert(tenant, alert):
         MessageAttributes={
             "tenantId": {"DataType": "String", "StringValue": tenant},
             "severity": {"DataType": "String", "StringValue": alert["severity"]},
-            "source": {"DataType": "String", "StringValue": "endpoint_evidence"},
+            "source": {
+                "DataType": "String",
+                "StringValue": alert.get("source", "endpoint_evidence"),
+            },
         },
     )
     return True
@@ -12392,7 +12437,15 @@ def _publish_endpoint_alert(tenant, alert):
 
 def _queue_endpoint_alert_webhooks(tenant, alert):
     """Materialize one deduplicated webhook outbox record per active destination."""
-    event_type = "endpoint.alert.reopened" if alert.get("reopenedAt") else "endpoint.alert.opened"
+    if alert.get("source") == "behavior_analytics":
+        # Behavior identities include the deterministic evaluation window, so
+        # a later recurrence is a new explainable alert rather than a mutation
+        # of evidence from an earlier window.
+        event_type = "behavior.alert.opened"
+    else:
+        event_type = (
+            "endpoint.alert.reopened" if alert.get("reopenedAt") else "endpoint.alert.opened"
+        )
     occurrence = int(alert.get("reopenedAt") or alert.get("firstObservedAt") or 0)
     for destination in _list(tenant, "WEBHOOK", consistent_read=True):
         if destination.get("status") != "active" or event_type not in destination.get(
@@ -12419,6 +12472,8 @@ def _queue_endpoint_alert_webhooks(tenant, alert):
                     "severity": alert.get("severity"),
                     "type": alert.get("type"),
                     "deviceId": alert.get("deviceId"),
+                    "deploymentId": alert.get("deploymentId"),
+                    "agentId": alert.get("agentId"),
                     "reasonCode": alert.get("reasonCode"),
                     "observedAt": int(alert.get("lastObservedAt", 0)),
                 },
@@ -12433,10 +12488,13 @@ def _queue_endpoint_alert_webhooks(tenant, alert):
 def _deliver_pending_endpoint_alerts(tenant):
     """Retry undelivered active alerts without losing their durable record."""
     for alert in _list(tenant, "ALERT", consistent_read=True):
-        if alert.get("source") == "endpoint_evidence" and alert.get("status") != "resolved":
+        if (
+            alert.get("source") in {"endpoint_evidence", "behavior_analytics"}
+            and alert.get("status") != "resolved"
+        ):
             _queue_endpoint_alert_webhooks(tenant, alert)
         if (
-            alert.get("source") != "endpoint_evidence"
+            alert.get("source") not in {"endpoint_evidence", "behavior_analytics"}
             or alert.get("status") == "resolved"
             or alert.get("deliveryStatus") == "delivered"
         ):
@@ -12459,7 +12517,7 @@ def _deliver_pending_endpoint_alerts(tenant):
             # The durable alert remains pending and the scheduled reconciler
             # retries it. Never include provider exception text or alert data
             # in Lambda logs at this credential-bearing boundary.
-            print(json.dumps({"warning": "endpoint alert delivery remains pending"}))
+            print(json.dumps({"warning": "security alert delivery remains pending"}))
 
 
 def _open_endpoint_alert(tenant, device_id, reason_code, *, now, reopen_acknowledged=False):
@@ -12623,10 +12681,10 @@ def _acknowledge_endpoint_alert(tenant, alert_id, body, actor):
         raise ValueError("reason must not contain credential material")
     key = _item_key(tenant, "ALERT", alert_id)
     alert = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
-    if not alert or alert.get("source") != "endpoint_evidence":
-        raise LookupError("endpoint alert not found")
+    if not alert or alert.get("source") not in {"endpoint_evidence", "behavior_analytics"}:
+        raise LookupError("security alert not found")
     if int(alert.get("revision", 0)) != expected:
-        raise PolicyConflict("endpoint alert revision changed")
+        raise PolicyConflict("security alert revision changed")
     if alert.get("status") != "open":
         raise PolicyConflict("only an open endpoint alert can be acknowledged")
     acknowledged = {
@@ -12645,13 +12703,19 @@ def _acknowledge_endpoint_alert(tenant, alert_id, body, actor):
         )
     except Exception as error:
         if _is_conditional_conflict(error):
-            raise PolicyConflict("endpoint alert revision changed") from error
+            raise PolicyConflict("security alert revision changed") from error
         raise
     _audit(
         tenant,
-        "endpoint_alert_acknowledged",
+        "security_alert_acknowledged",
         actor,
-        {"alert_id": alert_id, "device_id": alert.get("deviceId"), "revision": expected + 1},
+        {
+            "alert_id": alert_id,
+            "source": alert.get("source"),
+            "device_id": alert.get("deviceId"),
+            "agent_key": alert.get("agentKey"),
+            "revision": expected + 1,
+        },
     )
     return _endpoint_alert_view(acknowledged)
 
@@ -12806,6 +12870,103 @@ def _endpoint_agent_binding(tenant, device_id, *, now=None):
     }
 
 
+def _behavior_agent_binding(tenant, alert):
+    """Revalidate the enrolled agent identity attached to a behavior alert.
+
+    The authenticated agent session selected the alert identity when the
+    observation was received. The retained alert is still observational, so
+    every consequential case action reloads lifecycle, assignment and policy
+    state rather than trusting a browser or the original report.
+    """
+    agent_key = str(alert.get("agentKey", ""))
+    base = {
+        "status": "unbound",
+        "reasonCode": "behavior_binding_unavailable",
+        "deviceId": "",
+        "agentKey": None,
+        "deploymentId": None,
+        "agentId": None,
+        "host": None,
+        "projectRootDigest": None,
+        "installationIds": [],
+        "evidenceRevision": None,
+        "evidenceObservedAt": None,
+        "evidenceDigest": None,
+        "agentLifecycleRevision": None,
+        "groupIds": [],
+        "policyId": None,
+        "policyVersion": None,
+    }
+    if not agent_key or ":" not in agent_key:
+        return base
+    agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
+        "Item"
+    )
+    if (
+        not agent
+        or _agent_lifecycle_state(agent) != "active"
+        or _stored_agent_lifecycle_revision(agent.get("lifecycle_revision")) is None
+        or _agent_session_revision(agent) is None
+        or agent.get("deployment_id") != alert.get("deploymentId")
+        or agent.get("id") != alert.get("agentId")
+    ):
+        return base
+    groups = [
+        group
+        for group in _list(tenant, "GROUP", consistent_read=True)
+        if agent_key in group.get("agent_keys", [])
+    ]
+    if len(groups) != 1:
+        return {**base, "reasonCode": "behavior_policy_assignment_unavailable"}
+    policy = TABLE.get_item(
+        Key=_item_key(tenant, "POLICY", groups[0].get("policyId", "")),
+        ConsistentRead=True,
+    ).get("Item")
+    if not policy or int(policy.get("version", 0)) <= 0:
+        return {**base, "reasonCode": "behavior_policy_unavailable"}
+    project_root = agent.get("project_root")
+    binding = {
+        **base,
+        "status": "bound",
+        "reasonCode": "authenticated_agent_activity",
+        "agentKey": agent_key,
+        "deploymentId": agent.get("deployment_id"),
+        "agentId": agent.get("id"),
+        "host": agent.get("host"),
+        "projectRootDigest": hashlib.sha256(project_root.encode()).hexdigest()
+        if isinstance(project_root, str) and project_root
+        else None,
+        # Alert lifecycle revisions change when a case is attached or the
+        # alert is acknowledged. Bind response authority to the immutable rule
+        # version and evidence digest instead of that presentation lifecycle.
+        "evidenceRevision": int((alert.get("behavior") or {}).get("ruleVersion", 0)),
+        "evidenceObservedAt": int(alert.get("lastObservedAt", 0)),
+        "evidenceDigest": (alert.get("behavior") or {}).get("evidenceDigest"),
+        "agentLifecycleRevision": int(agent.get("lifecycle_revision", 0)),
+        "groupIds": [str(groups[0].get("id"))],
+        "policyId": policy.get("id"),
+        "policyVersion": int(policy.get("version", 0)),
+    }
+    return {
+        **binding,
+        "bindingDigest": _configuration_hash(binding),
+    }
+
+
+def _case_current_binding(tenant, case):
+    """Resolve the current binding for either supported case alert source."""
+    alert = TABLE.get_item(
+        Key=_item_key(tenant, "ALERT", case.get("alertId", "")), ConsistentRead=True
+    ).get("Item")
+    if not alert:
+        return {"status": "unbound", "reasonCode": "source_alert_unavailable"}
+    if alert.get("source") == "behavior_analytics":
+        return _behavior_agent_binding(tenant, alert)
+    if alert.get("source") == "endpoint_evidence":
+        return _endpoint_agent_binding(tenant, alert.get("deviceId", ""))
+    return {"status": "unbound", "reasonCode": "source_alert_unsupported"}
+
+
 def _case_timeline_record(tenant, case_id, event_type, actor, payload, *, now, sequence):
     """Build one append-only, content-minimised case timeline event."""
     event_id = str(uuid.uuid4())
@@ -12863,9 +13024,9 @@ def _case_events(tenant, case_id):
 
 
 def _case_view(tenant, case, *, detailed=False):
-    """Project one case without endpoint payloads, project roots or credentials."""
+    """Project one case without raw activity, endpoint payloads or credentials."""
     binding = _json(case.get("binding", {}))
-    current_binding = _endpoint_agent_binding(tenant, case.get("deviceId", ""))
+    current_binding = _case_current_binding(tenant, case)
     binding_current = bool(
         binding.get("status") == "bound"
         and current_binding.get("status") == "bound"
@@ -12881,6 +13042,7 @@ def _case_view(tenant, case, *, detailed=False):
         "severity": case.get("severity"),
         "reasonCode": case.get("reasonCode"),
         "deviceId": case.get("deviceId"),
+        "alertSource": case.get("alertSource", "endpoint_evidence"),
         "ownerId": case.get("ownerId"),
         "status": case.get("status"),
         "revision": int(case.get("revision", 0)),
@@ -12980,7 +13142,7 @@ def _case_export(tenant, case_id, actor):
     alert = TABLE.get_item(
         Key=_item_key(tenant, "ALERT", case.get("alertId", "")), ConsistentRead=True
     ).get("Item")
-    if not alert or alert.get("source") != "endpoint_evidence":
+    if not alert or alert.get("source") not in {"endpoint_evidence", "behavior_analytics"}:
         raise RuntimeError("case source alert is unavailable for export")
     alert_revision = int(alert.get("revision", 0))
     timeline = [_case_export_event(item) for item in _case_events(tenant, case["id"])]
@@ -13055,6 +13217,9 @@ def _case_export(tenant, case_id, actor):
             "endpointReportRevision": binding.get("evidenceRevision"),
             "endpointObservedAt": binding.get("evidenceObservedAt"),
             "projectRootDigest": binding.get("projectRootDigest"),
+            "behaviorEvidenceDigest": binding.get("evidenceDigest")
+            if alert.get("source") == "behavior_analytics"
+            else None,
         },
         "completeness": {
             "complete": True,
@@ -13109,18 +13274,99 @@ def _response_rule_version_identifier(rule_id, version):
 
 
 def _response_rule_configuration(value):
-    """Validate and normalize the closed automatic-response rule language."""
-    if not isinstance(value, dict) or set(value) != {
-        "match",
-        "action",
-        "safeguards",
-        "priority",
-    }:
+    """Validate the closed endpoint-response or alert-only behavior language."""
+    if not isinstance(value, dict) or "match" not in value:
         raise ValueError("response rule configuration has an invalid schema")
     match = value.get("match")
+    if not isinstance(match, dict):
+        raise ValueError("response rule match has an invalid schema")
+    source = match.get("source")
+    if source == "agent_activity":
+        if set(value) != {"match", "action", "baseline", "priority"} or set(match) != {
+            "source",
+            "signalTypes",
+            "hosts",
+            "severity",
+        }:
+            raise ValueError("behavior rule configuration has an invalid schema")
+        signal_types = match.get("signalTypes")
+        if (
+            not isinstance(signal_types, list)
+            or not signal_types
+            or len(signal_types) > len(_BEHAVIOR_SIGNAL_TYPES)
+            or any(item not in _BEHAVIOR_SIGNAL_TYPES for item in signal_types)
+        ):
+            raise ValueError("behavior rule signalTypes are unsupported")
+        hosts = match.get("hosts")
+        if (
+            not isinstance(hosts, list)
+            or not hosts
+            or len(hosts) > 2
+            or any(item not in {"claude-code", "codex"} for item in hosts)
+        ):
+            raise ValueError("behavior rule hosts are unsupported")
+        severity = match.get("severity")
+        if severity not in {"medium", "high", "critical"}:
+            raise ValueError("behavior rule severity is unsupported")
+        if value.get("action") != {"type": "create_alert"}:
+            raise ValueError("behavior rule action must be create_alert")
+        baseline = value.get("baseline")
+        if not isinstance(baseline, dict) or set(baseline) != {
+            "lookbackDays",
+            "currentWindowMinutes",
+            "minimumBaselineEvents",
+            "minimumCurrentEvents",
+            "sensitivityMultiplier",
+        }:
+            raise ValueError("behavior rule baseline has an invalid schema")
+        multiplier = baseline.get("sensitivityMultiplier")
+        if (
+            isinstance(multiplier, bool)
+            or not isinstance(multiplier, (int, float, Decimal))
+            or not math.isfinite(float(multiplier))
+            or not 1.5 <= float(multiplier) <= 10.0
+        ):
+            raise ValueError("sensitivityMultiplier must be between 1.5 and 10")
+        priority = _discovery_integer(value.get("priority"), "priority", minimum=1, maximum=1_000)
+        return {
+            "match": {
+                "source": "agent_activity",
+                "signalTypes": sorted(set(signal_types)),
+                "hosts": sorted(set(hosts)),
+                "severity": severity,
+            },
+            "action": {"type": "create_alert"},
+            "baseline": {
+                "lookbackDays": _discovery_integer(
+                    baseline.get("lookbackDays"), "lookbackDays", minimum=1, maximum=30
+                ),
+                "currentWindowMinutes": _discovery_integer(
+                    baseline.get("currentWindowMinutes"),
+                    "currentWindowMinutes",
+                    minimum=5,
+                    maximum=60,
+                ),
+                "minimumBaselineEvents": _discovery_integer(
+                    baseline.get("minimumBaselineEvents"),
+                    "minimumBaselineEvents",
+                    minimum=1,
+                    maximum=_BEHAVIOR_HISTORY_LIMIT,
+                ),
+                "minimumCurrentEvents": _discovery_integer(
+                    baseline.get("minimumCurrentEvents"),
+                    "minimumCurrentEvents",
+                    minimum=1,
+                    maximum=100,
+                ),
+                "sensitivityMultiplier": float(multiplier),
+            },
+            "priority": priority,
+        }
+    if set(value) != {"match", "action", "safeguards", "priority"}:
+        raise ValueError("response rule configuration has an invalid schema")
     action = value.get("action")
     safeguards = value.get("safeguards")
-    if not isinstance(match, dict) or set(match) != {
+    if set(match) != {
         "source",
         "reasonCodes",
         "severities",
@@ -13356,6 +13602,15 @@ def _create_response_rule_draft(tenant, rule_id, body, actor):
     name = _bounded_text(body.get("name"), "name", 120)
     description = _case_reason(body.get("description"))
     configuration = _response_rule_configuration(body.get("configuration"))
+    active_configuration = rule.get("configuration")
+    if isinstance(active_configuration, dict) and active_configuration:
+        active_source = (active_configuration.get("match") or {}).get("source")
+        if active_source != configuration["match"]["source"]:
+            # A stable rule identity has one permanent trust boundary. This
+            # prevents an alert-only rule from being upgraded into automatic
+            # containment through a later version; use a distinct reviewed
+            # rule ID for a different evidence source.
+            raise ValueError("response rule evidence boundary cannot change")
     now = int(time.time())
     version = {
         **_item_key(
@@ -13682,6 +13937,8 @@ def _rollback_response_rule(tenant, rule_id, body, actor):
 def _response_rule_matches(configuration, alert, binding=None):
     """Return whether fixed alert and host facts match a normalized rule."""
     matcher = configuration["match"]
+    if matcher.get("source") != "endpoint_evidence":
+        return False
     if alert.get("source") != "endpoint_evidence":
         return False
     if alert.get("reasonCode") not in matcher["reasonCodes"]:
@@ -13896,9 +14153,413 @@ def _record_response_execution(
     return _response_rule_execution_view(item)
 
 
+def _record_behavior_health(tenant, status, *, now=None):
+    """Persist content-free evaluator health without accepting browser input."""
+    if status not in {"healthy", "degraded"}:
+        raise ValueError("behavior health status is unsupported")
+    observed_at = int(time.time()) if now is None else int(now)
+    try:
+        TABLE.put_item(
+            Item={
+                **_item_key(tenant, "BEHAVIOR_HEALTH", "current"),
+                "tenant_id": tenant,
+                "id": "current",
+                "status": status,
+                "observed_at": observed_at,
+                "ttl": observed_at + (30 * 24 * 60 * 60),
+            }
+        )
+    except Exception:
+        print(json.dumps({"warning": "behavior detection health persistence failed"}))
+
+
+def _behavior_decision_history(tenant):
+    """Read a complete bounded activity history or refuse a misleading baseline."""
+    result = TABLE.query(
+        IndexName=_DECISION_TIMELINE_INDEX,
+        KeyConditionExpression=Key("timeline_pk").eq(f"TENANT#{tenant}#DECISION"),
+        ScanIndexForward=False,
+        Limit=_BEHAVIOR_HISTORY_LIMIT + 1,
+    )
+    items = result.get("Items", [])
+    truncated = bool(result.get("LastEvaluatedKey") or len(items) > _BEHAVIOR_HISTORY_LIMIT)
+    return items[:_BEHAVIOR_HISTORY_LIMIT], truncated
+
+
+def _behavior_signal_metrics(
+    configuration,
+    signal,
+    agent_key,
+    decisions,
+    approvals,
+    *,
+    now,
+    history_truncated=False,
+):
+    """Return explainable, content-minimised matches for one closed signal."""
+    if signal not in _BEHAVIOR_SIGNAL_TYPES:
+        raise ValueError("behavior signal is unsupported")
+    baseline = configuration["baseline"]
+    current_seconds = int(baseline["currentWindowMinutes"]) * 60
+    current_start = now - current_seconds
+    history_start = now - (int(baseline["lookbackDays"]) * 86_400)
+    minimum_baseline = int(baseline["minimumBaselineEvents"])
+    minimum_current = int(baseline["minimumCurrentEvents"])
+    multiplier = float(baseline["sensitivityMultiplier"])
+    agent_decisions = [
+        item
+        for item in decisions
+        if f"{item.get('deployment_id')}:{item.get('agent_id')}" == agent_key
+        and history_start <= int(item.get("observed_at", 0)) <= now
+    ]
+    current_decisions = [
+        item for item in agent_decisions if int(item.get("observed_at", 0)) >= current_start
+    ]
+    historical_decisions = [
+        item for item in agent_decisions if int(item.get("observed_at", 0)) < current_start
+    ]
+    agent_approvals = [
+        item
+        for item in approvals
+        if item.get("agent_key") == agent_key
+        and history_start <= int(item.get("requested_at", item.get("created_at", 0))) <= now
+    ]
+    current_approvals = [
+        item
+        for item in agent_approvals
+        if int(item.get("requested_at", item.get("created_at", 0))) >= current_start
+    ]
+    historical_approvals = [
+        item
+        for item in agent_approvals
+        if int(item.get("requested_at", item.get("created_at", 0))) < current_start
+    ]
+
+    if signal == "approval_request_spike":
+        baseline_records = historical_approvals
+        current_records = current_approvals
+    else:
+        baseline_records = historical_decisions
+        current_records = current_decisions
+    if history_truncated or len(baseline_records) < minimum_baseline:
+        return [
+            {
+                "signalType": signal,
+                "outcome": "baseline_insufficient",
+                "baselineComplete": not history_truncated,
+                "baselineCount": len(baseline_records),
+                "minimumBaselineEvents": minimum_baseline,
+                "currentCount": len(current_records),
+                "threshold": None,
+                "expectedCurrentCount": None,
+                "dimension": None,
+                "dimensionHash": None,
+                "evidenceDigest": _configuration_hash(
+                    sorted(str(item.get("id", "")) for item in current_records)
+                ),
+            }
+        ]
+
+    history_seconds = max(1, current_start - history_start)
+    if signal in {"new_tool", "new_mcp_server"}:
+        field = "tool_name" if signal == "new_tool" else "mcp_server_id"
+        historical_values = {
+            str(item.get(field))
+            for item in historical_decisions
+            if isinstance(item.get(field), str) and item.get(field)
+        }
+        current_by_value = {}
+        for item in current_decisions:
+            value = item.get(field)
+            if signal == "new_mcp_server" and item.get("resource_kind") != "mcp_tool":
+                continue
+            if not isinstance(value, str) or not value:
+                continue
+            current_by_value.setdefault(value, []).append(item)
+        matches = []
+        for value, records in sorted(current_by_value.items()):
+            if value in historical_values or len(records) < minimum_current:
+                continue
+            matches.append(
+                {
+                    "signalType": signal,
+                    "outcome": "would_alert",
+                    "baselineComplete": True,
+                    "baselineCount": len(baseline_records),
+                    "minimumBaselineEvents": minimum_baseline,
+                    "currentCount": len(records),
+                    "threshold": minimum_current,
+                    "expectedCurrentCount": 0.0,
+                    "dimension": value,
+                    "dimensionHash": hashlib.sha256(value.encode()).hexdigest(),
+                    "evidenceDigest": _configuration_hash(
+                        sorted(str(item.get("id", "")) for item in records)
+                    ),
+                }
+            )
+        return matches
+
+    if signal == "denied_action_spike":
+        historical_matches = [
+            item for item in historical_decisions if item.get("decision") == "denied"
+        ]
+        current_matches = [item for item in current_decisions if item.get("decision") == "denied"]
+    elif signal == "approval_request_spike":
+        historical_matches = historical_approvals
+        current_matches = current_approvals
+    else:
+        historical_matches = historical_decisions
+        current_matches = current_decisions
+    expected = len(historical_matches) * (current_seconds / history_seconds)
+    threshold = max(minimum_current, int(math.ceil(expected * multiplier)))
+    if len(current_matches) < threshold:
+        return []
+    return [
+        {
+            "signalType": signal,
+            "outcome": "would_alert",
+            "baselineComplete": True,
+            "baselineCount": len(baseline_records),
+            "minimumBaselineEvents": minimum_baseline,
+            "currentCount": len(current_matches),
+            "threshold": threshold,
+            "expectedCurrentCount": round(expected, 4),
+            "dimension": None,
+            "dimensionHash": None,
+            "evidenceDigest": _configuration_hash(
+                sorted(str(item.get("id", "")) for item in current_matches)
+            ),
+        }
+    ]
+
+
+_BEHAVIOR_ALERT_COPY = {
+    "new_tool": ("agent_new_tool", "A tool not present in the historical baseline was observed."),
+    "new_mcp_server": (
+        "agent_new_mcp_server",
+        "An MCP server not present in the historical baseline was observed.",
+    ),
+    "denied_action_spike": (
+        "agent_denied_action_spike",
+        "Denied agent actions exceeded the approved behavioral threshold.",
+    ),
+    "approval_request_spike": (
+        "agent_approval_request_spike",
+        "Approval requests exceeded the approved behavioral threshold.",
+    ),
+    "decision_volume_spike": (
+        "agent_decision_volume_spike",
+        "Agent decision volume exceeded the approved behavioral threshold.",
+    ),
+}
+
+
+def _open_behavior_alert(tenant, rule, agent, metric, *, now):
+    """Create one deterministic alert without granting automatic response authority."""
+    configuration = _response_rule_configuration(rule.get("configuration"))
+    signal = metric["signalType"]
+    window_seconds = int(configuration["baseline"]["currentWindowMinutes"]) * 60
+    window_start = now - (now % window_seconds)
+    dimension_hash = metric.get("dimensionHash") or ("0" * 64)
+    alert_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            (
+                f"aai-behavior:{tenant}:{rule['id']}:{int(rule['active_version'])}:"
+                f"{agent['deployment_id']}:{agent['id']}:{signal}:{window_start}:{dimension_hash}"
+            ),
+        )
+    )
+    key = _item_key(tenant, "ALERT", alert_id)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if existing:
+        return existing
+    alert_type, message = _BEHAVIOR_ALERT_COPY[signal]
+    behavior = {
+        "ruleId": rule["id"],
+        "ruleVersion": int(rule["active_version"]),
+        "ruleContentHash": rule.get("content_hash"),
+        "signalType": signal,
+        "baselineComplete": True,
+        "baselineCount": int(metric["baselineCount"]),
+        "currentCount": int(metric["currentCount"]),
+        "threshold": int(metric["threshold"]),
+        "expectedCurrentCount": metric.get("expectedCurrentCount"),
+        "sensitivityMultiplier": float(configuration["baseline"]["sensitivityMultiplier"]),
+        "currentWindowMinutes": int(configuration["baseline"]["currentWindowMinutes"]),
+        "lookbackDays": int(configuration["baseline"]["lookbackDays"]),
+        "dimension": metric.get("dimension"),
+        "dimensionHash": metric.get("dimensionHash"),
+        "evidenceDigest": metric["evidenceDigest"],
+        "reportedByAgent": True,
+    }
+    record = {
+        **key,
+        "tenant_id": tenant,
+        "id": alert_id,
+        "source": "behavior_analytics",
+        "severity": configuration["match"]["severity"],
+        "type": alert_type,
+        "deviceId": "",
+        "deploymentId": agent["deployment_id"],
+        "agentId": agent["id"],
+        "agentKey": f"{agent['deployment_id']}:{agent['id']}",
+        "host": agent.get("host"),
+        "message": message,
+        "reasonCode": signal,
+        "behavior": behavior,
+        "status": "open",
+        "revision": 1,
+        "firstObservedAt": now,
+        "lastObservedAt": now,
+        "occurrenceCount": 1,
+        "deliveryStatus": "pending",
+    }
+    try:
+        TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            return TABLE.get_item(Key=key, ConsistentRead=True).get("Item") or record
+        raise
+    _audit(
+        tenant,
+        "behavior_alert_opened",
+        f"system:response-rule:{rule['id']}:v{int(rule['active_version'])}",
+        {
+            "alert_id": alert_id,
+            "agent_key": record["agentKey"],
+            "signal_type": signal,
+            "rule_id": rule["id"],
+            "rule_version": int(rule["active_version"]),
+            "evidence_digest": metric["evidenceDigest"],
+        },
+    )
+    _record_response_execution(
+        tenant,
+        rule,
+        record,
+        outcome="alerted",
+        reason_code=signal,
+        agent_key=record["agentKey"],
+        now=now,
+    )
+    _deliver_pending_endpoint_alerts(tenant)
+    return record
+
+
+def _behavior_rule_metrics(tenant, configuration, agent_key, *, now):
+    """Evaluate one normalized behavior rule without mutating alert state."""
+    decisions, truncated = _behavior_decision_history(tenant)
+    approvals = _list(tenant, "APPROVAL", consistent_read=True)
+    matches = []
+    for signal in configuration["match"]["signalTypes"]:
+        matches.extend(
+            _behavior_signal_metrics(
+                configuration,
+                signal,
+                agent_key,
+                decisions,
+                approvals,
+                now=now,
+                history_truncated=truncated,
+            )
+        )
+        if len(matches) > _RESPONSE_RULE_PREVIEW_LIMIT:
+            raise RuntimeError("behavior rule evaluation exceeds its safe bound")
+    return matches
+
+
+def _evaluate_behavior_rules_for_agent(tenant, agent_key, *, now=None):
+    """Evaluate active alert-only rules for one authenticated enrolled agent."""
+    current_time = int(time.time()) if now is None else int(now)
+    agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
+        "Item"
+    )
+    if not agent or _agent_lifecycle_state(agent) != "active":
+        return []
+    rules = []
+    for item in _list(tenant, "RESPONSE_RULE", consistent_read=True):
+        configuration = item.get("configuration")
+        if (
+            item.get("enabled") is True
+            and int(item.get("active_version", 0)) > 0
+            and isinstance(configuration, dict)
+            and (configuration.get("match") or {}).get("source") == "agent_activity"
+        ):
+            rules.append(item)
+    if len(rules) > _BEHAVIOR_ACTIVE_RULE_LIMIT:
+        raise RuntimeError("active behavior rule count exceeds its safe bound")
+    rules.sort(
+        key=lambda item: (
+            int(item.get("configuration", {}).get("priority", 1_000)),
+            str(item.get("id", "")),
+        )
+    )
+    alerts = []
+    for rule in rules:
+        version = int(rule["active_version"])
+        version_record = _response_rule_version_record(tenant, rule["id"], version)
+        configuration = _response_rule_configuration(rule.get("configuration"))
+        if (
+            version_record.get("state") != "active"
+            or version_record.get("content_hash") != rule.get("content_hash")
+            or _configuration_hash(configuration) != rule.get("content_hash")
+        ):
+            raise RuntimeError("active behavior rule integrity is invalid")
+        if agent.get("host") not in configuration["match"]["hosts"]:
+            continue
+        for metric in _behavior_rule_metrics(tenant, configuration, agent_key, now=current_time):
+            if metric.get("outcome") != "would_alert":
+                continue
+            alerts.append(_open_behavior_alert(tenant, rule, agent, metric, now=current_time))
+    _record_behavior_health(tenant, "healthy", now=current_time)
+    return [_endpoint_alert_view(item) for item in alerts]
+
+
 def _response_rule_preview(tenant, configuration):
     """Preview current alerts without creating cases or response authority."""
     normalized = _response_rule_configuration(configuration)
+    if normalized["match"]["source"] == "agent_activity":
+        now = int(time.time())
+        matches = []
+        agents = [
+            item
+            for item in _all_agents(tenant, consistent_read=True)
+            if _agent_lifecycle_state(item) == "active"
+            and item.get("host") in normalized["match"]["hosts"]
+        ]
+        for agent in sorted(
+            agents, key=lambda item: (str(item.get("deployment_id")), str(item.get("id")))
+        ):
+            agent_key = f"{agent.get('deployment_id')}:{agent.get('id')}"
+            for metric in _behavior_rule_metrics(tenant, normalized, agent_key, now=now):
+                matches.append(
+                    {
+                        "alertId": None,
+                        "deviceId": "",
+                        "reasonCode": metric["signalType"],
+                        "severity": normalized["match"]["severity"],
+                        "bindingStatus": "bound",
+                        "agentKey": agent_key,
+                        "outcome": metric["outcome"],
+                        "baselineComplete": metric["baselineComplete"],
+                        "baselineCount": metric["baselineCount"],
+                        "currentCount": metric["currentCount"],
+                        "threshold": metric["threshold"],
+                        "expectedCurrentCount": metric["expectedCurrentCount"],
+                        "dimension": metric["dimension"],
+                    }
+                )
+                if len(matches) > _RESPONSE_RULE_PREVIEW_LIMIT:
+                    raise RuntimeError("behavior rule preview exceeds its safe bound")
+        return {
+            "matches": matches,
+            "count": sum(1 for item in matches if item["outcome"] == "would_alert"),
+            "baselineInsufficient": sum(
+                1 for item in matches if item["outcome"] == "baseline_insufficient"
+            ),
+            "mutated": False,
+        }
     alerts = [
         item
         for item in _list(tenant, "ALERT", consistent_read=True)
@@ -13944,7 +14605,9 @@ def _evaluate_response_rules(tenant, *, now=None):
     rules = [
         item
         for item in _list(tenant, "RESPONSE_RULE", consistent_read=True)
-        if item.get("enabled") is True and int(item.get("active_version", 0)) > 0
+        if item.get("enabled") is True
+        and int(item.get("active_version", 0)) > 0
+        and (item.get("configuration", {}).get("match") or {}).get("source") == "endpoint_evidence"
     ]
     rules.sort(
         key=lambda item: (
@@ -14104,7 +14767,7 @@ def _evaluate_response_rules(tenant, *, now=None):
 
 
 def _create_case(tenant, body, actor):
-    """Create one deterministic case from a live endpoint alert."""
+    """Create one deterministic case from a live supported security alert."""
     if not isinstance(body, dict) or set(body) != {"alertId", "expectedAlertRevision", "reason"}:
         raise ValueError("case creation request has an invalid schema")
     alert_id = _bounded_identifier(body.get("alertId"), "alertId")
@@ -14114,15 +14777,19 @@ def _create_case(tenant, body, actor):
     reason = _case_reason(body.get("reason"))
     alert_key = _item_key(tenant, "ALERT", alert_id)
     alert = TABLE.get_item(Key=alert_key, ConsistentRead=True).get("Item")
-    if not alert or alert.get("source") != "endpoint_evidence":
-        raise LookupError("endpoint alert not found")
+    if not alert or alert.get("source") not in {"endpoint_evidence", "behavior_analytics"}:
+        raise LookupError("security alert not found")
     if int(alert.get("revision", 0)) != expected:
-        raise PolicyConflict("endpoint alert revision changed")
+        raise PolicyConflict("security alert revision changed")
     if alert.get("status") == "resolved":
-        raise PolicyConflict("a resolved endpoint alert cannot open a case")
+        raise PolicyConflict("a resolved security alert cannot open a case")
     case_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"aai-case:{tenant}:{alert_id}"))
     now = int(time.time())
-    binding = _endpoint_agent_binding(tenant, alert.get("deviceId", ""), now=now)
+    binding = (
+        _behavior_agent_binding(tenant, alert)
+        if alert.get("source") == "behavior_analytics"
+        else _endpoint_agent_binding(tenant, alert.get("deviceId", ""), now=now)
+    )
     case = {
         **_item_key(tenant, "CASE", case_id),
         "tenant_id": tenant,
@@ -14131,7 +14798,8 @@ def _create_case(tenant, body, actor):
         "title": alert.get("message"),
         "severity": alert.get("severity"),
         "reasonCode": alert.get("reasonCode"),
-        "deviceId": alert.get("deviceId"),
+        "deviceId": alert.get("deviceId", ""),
+        "alertSource": alert.get("source"),
         "ownerId": actor,
         "status": "open",
         "revision": 1,
@@ -14205,7 +14873,7 @@ def _contain_case(tenant, case_id, body, actor):
         "investigating",
     }:
         raise PolicyConflict("incident case is not available for containment")
-    binding = _endpoint_agent_binding(tenant, case.get("deviceId", ""))
+    binding = _case_current_binding(tenant, case)
     stored_binding = case.get("binding", {})
     if (
         binding.get("status") != "bound"
@@ -14215,7 +14883,7 @@ def _contain_case(tenant, case_id, body, actor):
             str(stored_binding.get("bindingDigest", "")), expected_binding
         )
     ):
-        raise PolicyConflict("endpoint-to-agent binding is unavailable, ambiguous, or changed")
+        raise PolicyConflict("security-alert-to-agent binding is unavailable or changed")
     agent_key = binding["agentKey"]
     agent_record = TABLE.get_item(
         Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True
@@ -14301,18 +14969,23 @@ def _contain_case(tenant, case_id, body, actor):
 
 def _case_release_ready(tenant, case, containment):
     """Prove live endpoint and agent recovery while excluding this quarantine."""
-    binding = _endpoint_agent_binding(tenant, case.get("deviceId", ""))
+    binding = _case_current_binding(tenant, case)
     if binding.get("status") != "bound" or not secrets.compare_digest(
         str(binding.get("bindingDigest", "")), str(containment.get("bindingDigest", ""))
     ):
-        raise PolicyConflict("endpoint-to-agent binding is not current")
-    health = _endpoint_evidence_health(tenant)
-    device = next(
-        (item for item in health.get("items", []) if item.get("deviceId") == case.get("deviceId")),
-        None,
-    )
-    if not device or device.get("status") != "healthy":
-        raise PolicyConflict("endpoint health has not recovered")
+        raise PolicyConflict("security-alert-to-agent binding is not current")
+    if case.get("alertSource", "endpoint_evidence") == "endpoint_evidence":
+        health = _endpoint_evidence_health(tenant)
+        device = next(
+            (
+                item
+                for item in health.get("items", [])
+                if item.get("deviceId") == case.get("deviceId")
+            ),
+            None,
+        )
+        if not device or device.get("status") != "healthy":
+            raise PolicyConflict("endpoint health has not recovered")
     verification = _verify_agent(tenant, binding["deploymentId"], binding["agentId"])
     non_response_checks = [
         check for name, check in verification["checks"].items() if name != "emergencyStop"
@@ -14327,7 +15000,7 @@ def _case_release_ready(tenant, case, containment):
     ).get("Item")
     if not alert:
         raise PolicyConflict("source alert is unavailable")
-    if alert.get("reasonCode") in _ENDPOINT_EVENT_REASONS:
+    if alert.get("reasonCode") in _ENDPOINT_EVENT_REASONS | _BEHAVIOR_EVENT_REASONS:
         if alert.get("status") not in {"acknowledged", "resolved"}:
             raise PolicyConflict("security event alert has not been acknowledged")
     elif alert.get("status") != "resolved":
@@ -14433,12 +15106,12 @@ def _revoke_case_sessions(tenant, case_id, body, actor):
         "closed",
     }:
         raise PolicyConflict("incident case is not active")
-    binding = _endpoint_agent_binding(tenant, case.get("deviceId", ""))
+    binding = _case_current_binding(tenant, case)
     stored = case.get("binding", {})
     if binding.get("status") != "bound" or not secrets.compare_digest(
         str(binding.get("bindingDigest", "")), str(stored.get("bindingDigest", ""))
     ):
-        raise PolicyConflict("endpoint-to-agent binding is unavailable or changed")
+        raise PolicyConflict("security-alert-to-agent binding is unavailable or changed")
     agent_key = binding["agentKey"]
     agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
         "Item"
@@ -14526,7 +15199,7 @@ def _transition_case(tenant, case_id, body, actor, target):
         Key=_item_key(tenant, "ALERT", case.get("alertId", "")), ConsistentRead=True
     ).get("Item")
     if target == "resolved" and alert:
-        if alert.get("reasonCode") in _ENDPOINT_EVENT_REASONS:
+        if alert.get("reasonCode") in _ENDPOINT_EVENT_REASONS | _BEHAVIOR_EVENT_REASONS:
             ready = alert.get("status") in {"acknowledged", "resolved"}
         else:
             ready = alert.get("status") == "resolved"
@@ -16483,6 +17156,11 @@ def handler(event, context):
                         "expires_at": item["expires_at"],
                     },
                 )
+                try:
+                    _evaluate_behavior_rules_for_agent(tenant, agent_key, now=now)
+                except Exception:
+                    _record_behavior_health(tenant, "degraded", now=now)
+                    print(json.dumps({"warning": "behavior approval detection remains degraded"}))
                 return _response(201, _approval_view(item, now))
             if method == "POST" and action == ["approvals", "consume"]:
                 body = _body(event)
@@ -16789,7 +17467,7 @@ def handler(event, context):
                     items = [
                         _endpoint_alert_view(item)
                         for item in _list(tenant, "ALERT", consistent_read=True)
-                        if item.get("source") == "endpoint_evidence"
+                        if item.get("source") in {"endpoint_evidence", "behavior_analytics"}
                     ]
                     items.sort(
                         key=lambda item: (

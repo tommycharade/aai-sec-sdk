@@ -99,6 +99,19 @@ credential-shaped rationale rejection and automatic health-alert resolution.
 The Splunk status remains a non-delivering stub and is not accepted as SIEM
 evidence.
 
+The hosted behavior-detection contracts in
+`tests/test_aws_lambda_contract.py` prove strict alert-only schema, independent
+review, MCP identity minimisation, normalized spike thresholds,
+insufficient/truncated-history denial, deterministic alert identity,
+idempotence, no automatic containment, acknowledgement, revalidated case
+binding, manual case-owned quarantine and integrity-verified export. SDK
+contracts in `tests/test_ui_control_plane.py` prove that only a bounded MCP
+server identifier is exported and that unrelated evidence cannot smuggle that
+field. The private UI suite proves the typed trust-boundary editor and the
+human-readable incident explanation. These are synthetic control-plane
+contracts; they do not prove complete telemetry from a compromised host or
+production SIEM delivery.
+
 `scripts/test_aws_entra_scim.py` is the live Microsoft Entra provisioning
 acceptance command. It discovers Entra and SCIM status from the selected
 CloudFormation stack, resolves the dedicated bearer directly from Secrets

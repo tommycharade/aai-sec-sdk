@@ -863,6 +863,65 @@ def test_native_action_digest_is_bound_to_tool_input_and_working_directory() -> 
     assert _native_action_digest("Bash", "a" * 64, "d" * 64) != baseline
 
 
+def test_mcp_decision_export_reports_only_bounded_server_identity() -> None:
+    """MCP anomaly evidence identifies the server without exporting tool input."""
+    reports: list[dict[str, object]] = []
+
+    class RecordingClient:
+        def report_decision(self, **report: object) -> dict[str, object]:
+            reports.append(report)
+            return {"accepted": True}
+
+    event = AuditEvent(
+        "action_executed",
+        "tool-use-mcp",
+        {"tool_name": "mcp__github__list_issues"},
+        "2026-08-04T12:00:00Z",
+        "0" * 64,
+        "f" * 64,
+    )
+    ControlPlaneDecisionExporter(
+        cast(ControlPlaneAgentClient, RecordingClient()), source="mcp"
+    ).export(event)
+
+    assert reports == [
+        {
+            "decision_id": "f" * 64,
+            "source": "mcp",
+            "tool_name": "mcp__github__list_issues",
+            "decision": "allowed",
+            "resource_kind": "mcp_tool",
+            "reason_code": "explicit_allow",
+            "action_digest": None,
+            "mcp_server_id": "github",
+        }
+    ]
+    assert "argument" not in json.dumps(reports).lower()
+
+
+def test_decision_report_rejects_mcp_identity_on_non_mcp_evidence() -> None:
+    """A caller cannot label an unrelated SDK action as an MCP observation."""
+    client = ControlPlaneAgentClient(
+        "https://control.example.test",
+        TOKEN,
+        agent_id="agent-a",
+        project_root="/workspace/synthetic",
+        deployment_id="dep-a",
+        aws_agent_session=True,
+    )
+
+    with pytest.raises(ControlPlaneConfigurationError, match="requires MCP"):
+        client.report_decision(
+            decision_id="a" * 64,
+            source="sdk_runtime",
+            tool_name="lookup",
+            decision="allowed",
+            resource_kind="sdk_tool",
+            reason_code="explicit_allow",
+            mcp_server_id="github",
+        )
+
+
 def test_native_decision_export_rejects_missing_working_directory_scope() -> None:
     """Central native evidence fails closed when the host omits project scope."""
 
