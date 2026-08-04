@@ -1585,6 +1585,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../fleet-integrity-baseline-storage-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fleet integrity baseline storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -3313,7 +3340,13 @@ evidence records only source metadata, count, revision, and hash.</p>
 <p>Until commit succeeds, a generation has no effect on coverage. Missing pages,
 hash mismatches, duplicate observations, credential revocation, replay, or a
 concurrent source revision all fail closed. A committed generation supports up
-to 2,000 observations while retaining bounded Lambda and DynamoDB work.</p>
+to 2,000 observations while retaining bounded Lambda and DynamoDB work.
+For source-control generations, commit additionally writes a normalized,
+content-minimised baseline to a private versioned S3 bucket and atomically binds
+its exact version and SHA-256 digest into the generation metadata. Integrity
+detection verifies that object independently and caches it once per invocation;
+legacy generations retain the DynamoDB-page verification path. See <a href="../fleet-integrity-baseline-storage-design/">Fleet
+integrity baseline storage</a>.</p>
 <p>The deployed API Gateway deliberately exposes this connector-authenticated path
 without the operator <code>/api</code> prefix. Supplying <code>/api/discovery-ingest/...</code> enters
 the Cognito-protected operator route and is rejected. The reference publisher

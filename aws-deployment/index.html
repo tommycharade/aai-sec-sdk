@@ -1450,6 +1450,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../fleet-integrity-baseline-storage-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fleet integrity baseline storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../endpoint-evidence-acceptance-2026-08-01/" class="md-nav__link">
         
   
@@ -3415,6 +3442,8 @@ logical-ID contract as a deployment compatibility guard.</p>
   reverse-chronological dashboard reads;</li>
 <li>a retained, point-in-time-recoverable DynamoDB idempotency table with TTL;</li>
 <li>an S3 Object Lock audit bucket;</li>
+<li>a retained private, encrypted and versioned integrity-baseline bucket whose
+  exact object versions are digest-bound to committed source-control generations;</li>
 <li>an SNS security-alert topic wired to Lambda and idempotency CloudWatch
   alarms (subscribe the enterprise SOC endpoint before production);</li>
 <li>a private S3 UI bucket behind CloudFront.</li>
