@@ -271,7 +271,8 @@ Engineering can continue autonomously on:
 - credential-revocation workflows and broader tool/MCP anomaly response;
 - signed and scheduled assurance-report distribution and reviewed framework
   mappings;
-- Terraform deployment support;
+- Terraform Registry namespace/repository authority, release-signing identity
+  and an approved non-production tenant for live provider acceptance;
 - customer-managed key, residency and private-access implementation;
 - UI simplification, accessibility and responsive browser testing; and
 - documentation, threat models, automated tests, pull requests and synthetic

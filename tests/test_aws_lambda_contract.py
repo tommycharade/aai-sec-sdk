@@ -342,6 +342,24 @@ class FakeDynamoClient:
                     ):
                         raise ConditionalFailure()
                     continue
+                if "Delete" in operation:
+                    delete = operation["Delete"]
+                    key_shape = {
+                        key: _decode_ddb_value(value) for key, value in delete["Key"].items()
+                    }
+                    key = (key_shape["pk"], key_shape.get("sk", ""))
+                    existing = self.table.items.get(key)
+                    names = delete.get("ExpressionAttributeNames", {})
+                    values = {
+                        key: _decode_ddb_value(value)
+                        for key, value in delete.get("ExpressionAttributeValues", {}).items()
+                    }
+                    if not _condition_permitted(
+                        delete["ConditionExpression"], existing or {}, names, values
+                    ):
+                        raise ConditionalFailure()
+                    del self.table.items[key]
+                    continue
                 put = operation["Put"]
                 record = {key: _decode_ddb_value(value) for key, value in put["Item"].items()}
                 key = (record["pk"], record.get("sk", ""))
@@ -1118,6 +1136,369 @@ def test_machine_api_allowlist_covers_each_scope_and_excludes_human_governance(
     machine_route = stack.index('path: "/machine/{proxy+}"')
     jwt_route = stack.index('path: "/{proxy+}", methods: [apigwv2.HttpMethod.ANY]', machine_route)
     assert machine_route < jwt_route
+
+
+def test_machine_declarative_resources_reconcile_with_revision_guards(
+    monkeypatch: Any,
+) -> None:
+    """Terraform-facing writes must detect drift and retain retired evidence."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-terraform"
+    now = 1_800_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "ORG", "org-platform")
+        | {"id": "org-platform", "name": "Platform"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-active")
+        | {
+            "id": "policy-active",
+            "tenant_id": tenant,
+            "organization_id": "org-platform",
+            "name": "Active policy",
+            "configuration": {},
+            "version": 1,
+            "activeVersion": 1,
+            "latestVersion": 1,
+            "governanceState": "active",
+            "governance_schema_version": 1,
+            "author": "synthetic-author",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY_VERSION", "policy-active:1")
+        | {
+            "id": "policy-active:1",
+            "tenant_id": tenant,
+            "policy_id": "policy-active",
+            "organization_id": "org-platform",
+            "version": 1,
+            "base_version": 0,
+            "name": "Active policy",
+            "configuration": {},
+            "local_configuration": {},
+            "component_refs": [],
+            "graph_digest": "a" * 64,
+            "composition_explanation": [],
+            "content_hash": "b" * 64,
+            "state": "active",
+            "author": "synthetic-author",
+            "created_at": now,
+        }
+    )
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "synthetic-platform-admin",
+    }
+    credential = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/identity/service-identities",
+                "POST",
+                claims=platform,
+                body={
+                    "serviceIdentityId": "terraform",
+                    "name": "Terraform",
+                    "description": "Synthetic declarative management.",
+                    "purpose": "Exercise deterministic configuration reconciliation.",
+                    "capabilities": [
+                        "inventory_read",
+                        "policy_draft_write",
+                        "fleet_write",
+                    ],
+                    "expiresInDays": 7,
+                },
+            ),
+        )["body"]
+    )["credential"]["accessToken"]
+
+    assert (
+        _invoke(
+            module,
+            _event("/machine/v1/enterprise/tenant", "GET", token=credential),
+        )["statusCode"]
+        == 200
+    )
+    skill_body = {
+        "skillId": "secure-review",
+        "organizationId": "org-platform",
+        "name": "Secure review",
+        "description": "Synthetic safe review guidance.",
+        "version": "1.0.0",
+        "content": "# Secure review\nDo not expose synthetic secrets.\n",
+        "enabled": True,
+    }
+    created = _invoke(
+        module,
+        _event("/machine/v1/enterprise/skills", "POST", token=credential, body=skill_body),
+    )
+    assert created["statusCode"] == 201
+    assert json.loads(created["body"])["revision"] == 1
+    assert (
+        _invoke(
+            module,
+            _event("/machine/v1/enterprise/skills", "POST", token=credential, body=skill_body),
+        )["statusCode"]
+        == 409
+    )
+    updated = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/skills/secure-review",
+            "PUT",
+            token=credential,
+            body={
+                **skill_body,
+                "content": "# Secure review\nDeny unsafe changes.\n",
+                "expectedRevision": 1,
+            },
+        ),
+    )
+    assert updated["statusCode"] == 200
+    assert json.loads(updated["body"])["revision"] == 2
+    stale = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/skills/secure-review",
+            "PUT",
+            token=credential,
+            body={**skill_body, "expectedRevision": 1},
+        ),
+    )
+    assert stale["statusCode"] == 409
+    retired = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/skills/secure-review",
+            "DELETE",
+            token=credential,
+            body={"expectedRevision": 2},
+        ),
+    )
+    assert retired["statusCode"] == 200
+    assert json.loads(retired["body"])["status"] == "retired"
+
+    table.put_item(
+        Item=module._item_key(tenant, "SKILL", "legacy-review")
+        | {
+            "id": "legacy-review",
+            "tenant_id": tenant,
+            "organizationId": "org-platform",
+            "name": "Legacy review",
+            "description": "Synthetic legacy record.",
+            "version": "1.0.0",
+            "content": "# Legacy\n",
+            "enabled": True,
+        }
+    )
+    migrated = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/skills/legacy-review",
+            "PUT",
+            token=credential,
+            body={
+                **skill_body,
+                "skillId": "legacy-review",
+                "name": "Legacy review",
+                "expectedRevision": 1,
+            },
+        ),
+    )
+    assert migrated["statusCode"] == 200
+    assert json.loads(migrated["body"])["revision"] == 2
+
+    insecure_mcp = {
+        "serverId": "github",
+        "organizationId": "org-platform",
+        "name": "GitHub",
+        "description": "Synthetic MCP registration.",
+        "version": "1.0.0",
+        "transport": "http",
+        "url": "http://mcp.example.invalid",
+        "environmentReferences": ["GITHUB_MCP_TOKEN"],
+        "enabled": True,
+    }
+    for unsafe_url in (
+        "http://mcp.example.invalid",
+        "https://synthetic-token@mcp.example.invalid",
+        "https://mcp.example.invalid?token=synthetic",
+        "https://mcp.example.invalid#fragment",
+        "https://[malformed",
+    ):
+        assert (
+            _invoke(
+                module,
+                _event(
+                    "/machine/v1/enterprise/mcp-servers",
+                    "POST",
+                    token=credential,
+                    body={**insecure_mcp, "url": unsafe_url},
+                ),
+            )["statusCode"]
+            == 400
+        )
+    mcp_created = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/mcp-servers",
+            "POST",
+            token=credential,
+            body={**insecure_mcp, "url": "https://mcp.example.invalid/github"},
+        ),
+    )
+    assert mcp_created["statusCode"] == 201
+    assert json.loads(mcp_created["body"])["revision"] == 1
+
+    def race_mcp_update() -> None:
+        current = table.items[(f"TENANT#{tenant}", "MCP#github")]
+        current["revision"] = 2
+        current["url"] = "https://mcp.example.invalid/raced"
+
+    module.DYNAMODB.before_transaction = race_mcp_update
+    with pytest.raises(module.PolicyConflict, match="declarative configuration changed"):
+        module._replace_managed_registration(
+            tenant,
+            "MCP",
+            "github",
+            {
+                **insecure_mcp,
+                "url": "https://mcp.example.invalid/intended",
+                "expectedRevision": 1,
+            },
+            "service:terraform",
+        )
+    assert table.items[(f"TENANT#{tenant}", "MCP#github")]["url"].endswith("/raced")
+    mcp_retired = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/mcp-servers/github",
+            "DELETE",
+            token=credential,
+            body={"expectedRevision": 2},
+        ),
+    )
+    assert mcp_retired["statusCode"] == 200
+    assert json.loads(mcp_retired["body"])["status"] == "retired"
+
+    group_body = {
+        "groupId": "group-platform",
+        "name": "Platform",
+        "policyId": "policy-active",
+    }
+    group = _invoke(
+        module,
+        _event("/machine/v1/enterprise/groups", "POST", token=credential, body=group_body),
+    )
+    assert group["statusCode"] == 201
+    changed = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/groups/group-platform",
+            "PUT",
+            token=credential,
+            body={
+                "name": "Platform engineering",
+                "policyId": "policy-active",
+                "expectedConfigurationRevision": 1,
+            },
+        ),
+    )
+    assert changed["statusCode"] == 200
+    assert json.loads(changed["body"])["configurationRevision"] == 2
+    table.items[(f"TENANT#{tenant}", "GROUP#group-platform")]["agent_keys"] = [
+        "deployment-a:agent-a"
+    ]
+    blocked_delete = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/groups/group-platform",
+            "DELETE",
+            token=credential,
+            body={"expectedConfigurationRevision": 2},
+        ),
+    )
+    assert blocked_delete["statusCode"] == 409
+    table.items[(f"TENANT#{tenant}", "GROUP#group-platform")]["agent_keys"] = []
+    deleted = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/groups/group-platform",
+            "DELETE",
+            token=credential,
+            body={"expectedConfigurationRevision": 2},
+        ),
+    )
+    assert deleted["statusCode"] == 200
+    assert json.loads(deleted["body"])["deleted"] is True
+
+    def unavailable_replica(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("synthetic Object Lock replica unavailable")
+
+    monkeypatch.setattr(module, "_audit", unavailable_replica)
+    durable_without_replica = module._create_managed_registration(
+        tenant,
+        "SKILL",
+        "replica-outage",
+        {
+            **skill_body,
+            "skillId": "replica-outage",
+            "name": "Replica outage",
+        },
+        "service:terraform",
+    )
+    assert durable_without_replica["revision"] == 1
+    configuration_events = {
+        item["event_type"]
+        for item in table.items.values()
+        if item.get("sk", "").startswith("CONFIGURATION_AUDIT#")
+    }
+    assert {
+        "skill_created",
+        "skill_updated",
+        "skill_retired",
+        "mcp_server_created",
+        "mcp_server_retired",
+        "group_created",
+        "group_configuration_updated",
+        "group_deleted",
+    } <= configuration_events
+
+
+def test_machine_declarative_routes_reject_unsafe_mcp_and_governance_escalation(
+    monkeypatch: Any,
+) -> None:
+    """The automation surface must reject insecure endpoints and human transitions."""
+    module, _table = _load_handler(monkeypatch)
+    assert (
+        module._machine_route_capability("PUT", "/api/enterprise/skills/skill-a")
+        == "policy_draft_write"
+    )
+    assert (
+        module._machine_route_capability("DELETE", "/api/enterprise/mcp-servers/server-a")
+        == "policy_draft_write"
+    )
+    assert (
+        module._machine_route_capability("PUT", "/api/enterprise/groups/group-a") == "fleet_write"
+    )
+    assert (
+        module._machine_route_capability("DELETE", "/api/enterprise/groups/group-a")
+        == "fleet_write"
+    )
+    assert (
+        module._machine_route_capability(
+            "POST", "/api/enterprise/policies/policy-a/versions/1/decision"
+        )
+        is None
+    )
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    machine_route = stack.index('path: "/machine/{proxy+}"')
     machine_statement = stack[machine_route : stack.index(";", machine_route)]
     assert "authorizer" not in machine_statement
     assert "MachineApiIntegration" in machine_statement

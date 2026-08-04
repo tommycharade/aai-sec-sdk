@@ -121,6 +121,12 @@ API. The create request schema is:
 }
 ```
 
+The official Terraform provider uses this same boundary for repeatable policy
+draft, group, Skill and MCP configuration. Its revision-guarded update routes
+are included only in `policy_draft_write` or `fleet_write`; human policy
+transitions remain absent. See [Terraform provider and declarative
+management](terraform-provider-design.md).
+
 ## Guarantees and non-guarantees
 
 The implementation guarantees, within the hosted control-plane boundary, that

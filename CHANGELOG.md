@@ -1,5 +1,12 @@
 # Changelog
 
+- Added the first Terraform provider for repeatable tenant inspection, governed
+  policy drafts, groups, Skills and MCP registrations. The provider uses only
+  scoped service identities and the versioned machine API, detects concurrent
+  drift with optimistic revisions, atomically records desired-state evidence,
+  retains governed history on destroy and cannot approve, stage or activate
+  policy.
+
 - Added scoped, expiring service identities and a separate `/machine/v1` API
   for non-human control-plane automation. One-time bearer issue, digest-keyed
   storage, exact route capabilities, optimistic rotation, immediate revocation,

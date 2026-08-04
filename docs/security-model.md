@@ -148,6 +148,11 @@ immutable audit evidence before normal routing. This is bearer security, not
 workload attestation or mTLS; the deployment still owns secret-manager delivery,
 network restriction and leak response. See
 [Scoped service identities and machine API](service-identities-design.md).
+The Terraform provider is constrained to that route allow-list. Optimistic
+resource revisions prevent last-writer-wins authority, group deletion requires
+empty membership, and evidence-bearing policy and integration objects are
+retained or retired rather than silently erased. See [Terraform provider and
+declarative management](terraform-provider-design.md).
 
 Group membership and policy assignment are authority edges, not presentation
 metadata. The API consistently reloads the group, agent and policy records and
