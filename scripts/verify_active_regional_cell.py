@@ -360,7 +360,7 @@ def verify(
         for item in mappings
     ):
         raise ActiveCellVerificationError("active queue mappings are incomplete")
-    if len(rules) != 4 or any(
+    if len(rules) != 5 or any(
         _object(item.get("Properties"), "schedule").get("State") != "ENABLED" for item in rules
     ):
         raise ActiveCellVerificationError("active schedules are incomplete")

@@ -539,7 +539,7 @@ def test_target_discovery_and_live_runtime_are_exact_and_provider_verified() -> 
         ("PassiveRetentionWorkerABC", "AWS::Lambda::Function", "retention-fn"),
         ("EvidenceMapping", "AWS::Lambda::EventSourceMapping", "map-a"),
         ("RetentionMapping", "AWS::Lambda::EventSourceMapping", "map-b"),
-        *[(f"Schedule{index}", "AWS::Events::Rule", f"rule-{index}") for index in range(4)],
+        *[(f"Schedule{index}", "AWS::Events::Rule", f"rule-{index}") for index in range(5)],
     ]
     expected_environment = _active_environment()
     actual_environment = {
@@ -655,7 +655,7 @@ def test_primary_failback_target_discovery_and_runtime_are_exact() -> None:
         ("DiscoveryCollectorABC", "AWS::Lambda::Function", "ignored-discovery"),
         ("EvidenceMapping", "AWS::Lambda::EventSourceMapping", "primary-map-a"),
         ("RetentionMapping", "AWS::Lambda::EventSourceMapping", "primary-map-b"),
-        *[(f"Schedule{index}", "AWS::Events::Rule", f"primary-rule-{index}") for index in range(4)],
+        *[(f"Schedule{index}", "AWS::Events::Rule", f"primary-rule-{index}") for index in range(5)],
     ]
     expected = {
         "ENTRA_TENANT_ID": "12345678-1234-1234-1234-123456789abc",

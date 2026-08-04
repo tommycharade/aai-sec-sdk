@@ -33,6 +33,7 @@ def _template() -> dict[str, Any]:
         "RuleB": {"Type": "AWS::Events::Rule", "Properties": {"State": "DISABLED"}},
         "RuleC": {"Type": "AWS::Events::Rule", "Properties": {"State": "DISABLED"}},
         "RuleD": {"Type": "AWS::Events::Rule", "Properties": {"State": "DISABLED"}},
+        "RuleE": {"Type": "AWS::Events::Rule", "Properties": {"State": "DISABLED"}},
         "MappingA": {
             "Type": "AWS::Lambda::EventSourceMapping",
             "Properties": {"Enabled": False},
@@ -133,7 +134,7 @@ def test_passive_template_requires_every_independent_disable_control() -> None:
     assert evidence == {
         "status": "verified-not-serving",
         "lambdaCount": 3,
-        "disabledScheduleCount": 4,
+        "disabledScheduleCount": 5,
         "disabledEventSourceCount": 2,
         "faultTargetRoleLogicalId": "RuntimeRole",
     }
@@ -250,7 +251,7 @@ def test_passive_stack_source_has_no_activation_or_routing_construct() -> None:
     assert "disableExecuteApiEndpoint: true" in stack
     assert "reservedConcurrentExecutions: active ? 100 : 0" in stack
     assert stack.count("reservedConcurrentExecutions: active ? 5 : 0") == 2
-    # Two queue mappings plus one schedule-loop declaration synthesize to six
+    # Two queue mappings plus one schedule-loop declaration synthesize to seven
     # separately verified disabled resources.
     assert stack.count("enabled: active") == 3
     assert 'POLICY_SIGNING_KEY_ARN: active ? props.policySigningReplicaKeyArn : ""' in stack

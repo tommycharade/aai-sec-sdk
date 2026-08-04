@@ -169,7 +169,7 @@ def _template() -> dict[str, Any]:
             "Type": "AWS::Lambda::EventSourceMapping",
             "Properties": {"Enabled": True},
         }
-    for index in range(4):
+    for index in range(5):
         resources[f"Rule{index}"] = {
             "Type": "AWS::Events::Rule",
             "Properties": {"State": "ENABLED"},
@@ -197,7 +197,7 @@ def test_complete_active_template_is_bounded_and_not_routed() -> None:
     ) == {
         "status": "verified-active-not-routed",
         "lambdaConcurrency": [5, 5, 100],
-        "enabledScheduleCount": 4,
+        "enabledScheduleCount": 5,
         "enabledEventSourceCount": 2,
         "privateBucketCount": 2,
         "iamActionCount": 12,
