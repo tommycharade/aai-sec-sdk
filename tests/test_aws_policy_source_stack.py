@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, cast
@@ -20,6 +21,8 @@ def synth(**updates: str) -> dict[str, Any]:
         pytest.skip("pinned CDK dependencies are absent; the policy-source-iac job owns synthesis")
     environment = {
         **os.environ,
+        "CDK_DEFAULT_ACCOUNT": "111111111111",
+        "CDK_DEFAULT_REGION": "eu-west-2",
         "POLICY_GITHUB_SECRET_NAME": "aai-sec/policy/github",
         "POLICY_GITHUB_ALLOWED_REPOSITORIES": "github.com/example/security-policy",
         **updates,
@@ -47,6 +50,19 @@ def test_policy_source_worker_is_isolated_and_handler_invocation_is_exact() -> N
         and value["Properties"].get("Handler") == "policy_source_verifier.handler"
     ]
     assert len(workers) == 1
+    domains = [
+        value for value in resources.values() if value.get("Type") == "AWS::Cognito::UserPoolDomain"
+    ]
+    assert len(domains) == 1
+    assert domains[0]["Properties"]["ManagedLoginVersion"] == 2
+    domain = domains[0]["Properties"]["Domain"]
+    if isinstance(domain, str):
+        assert re.fullmatch(r"aai-sec-[0-9]{8}", domain)
+    else:
+        # Credential-free synthesis defers the globally unique suffix to the
+        # CloudFormation stack UUID instead of attempting to slice a token.
+        assert "aai-sec-" in json.dumps(domain)
+        assert "AWS::StackId" in json.dumps(domain)
     environment = workers[0]["Properties"]["Environment"]["Variables"]
     assert environment["POLICY_GITHUB_ALLOWED_REPOSITORIES"] == (
         "github.com/example/security-policy"
@@ -90,6 +106,8 @@ def test_policy_source_stack_rejects_partial_or_malformed_configuration() -> Non
     ):
         environment = {
             **os.environ,
+            "CDK_DEFAULT_ACCOUNT": "111111111111",
+            "CDK_DEFAULT_REGION": "eu-west-2",
             "POLICY_GITHUB_SECRET_NAME": "aai-sec/policy/github",
             **updates,
         }

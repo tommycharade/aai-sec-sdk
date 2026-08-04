@@ -535,12 +535,22 @@ export class AwsControlPlaneStack extends cdk.Stack {
       passwordPolicy: { minLength: 14, requireLowercase: true, requireUppercase: true, requireDigits: true, requireSymbols: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
-    const domainPrefix = `aai-sec-${this.account?.slice(-8) ?? "control"}`.toLowerCase();
-    const userPoolDomain = userPool.addDomain("ManagedLogin", {
-      cognitoDomain: { domainPrefix },
-      // Use the current branding-editor experience so the hosted signup page
-      // can carry the same visual identity as the control-plane landing page.
-      managedLoginVersion: cognito.ManagedLoginVersion.NEWER_MANAGED_LOGIN,
+    // CDK synthesis in an uncredentialed review environment leaves the account
+    // unresolved. Do not derive a literal Cognito name by slicing that token:
+    // the L2 construct rejects it before CloudFormation can resolve it. Normal
+    // account-bound deployments retain the existing account suffix, while an
+    // environment-agnostic template receives a stable stack-identity suffix.
+    const stackUuid = cdk.Fn.select(2, cdk.Fn.split("/", cdk.Aws.STACK_ID));
+    const unresolvedAccountSuffix = cdk.Fn.select(4, cdk.Fn.split("-", stackUuid));
+    const domainSuffix = cdk.Token.isUnresolved(this.account)
+      ? unresolvedAccountSuffix
+      : this.account.slice(-8);
+    const domainPrefix = cdk.Fn.join("", ["aai-sec-", domainSuffix]);
+    new cognito.CfnUserPoolDomain(this, "ManagedLogin", {
+      domain: domainPrefix,
+      userPoolId: userPool.userPoolId,
+      // Version 2 is the current branding-editor managed-login experience.
+      managedLoginVersion: 2,
     });
     const nativeOperatorGroups = [
       ["PlatformAdmins", "platform-admin", "Tenant administration and break-glass recovery"],
@@ -1222,7 +1232,16 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "ApiUrl", { value: api.apiEndpoint });
     new cdk.CfnOutput(this, "UserPoolId", { value: userPool.userPoolId });
     new cdk.CfnOutput(this, "UserPoolClientId", { value: client.userPoolClientId });
-    new cdk.CfnOutput(this, "CognitoDomain", { value: userPoolDomain.baseUrl() });
+    new cdk.CfnOutput(this, "CognitoDomain", {
+      value: cdk.Fn.join("", [
+        "https://",
+        domainPrefix,
+        ".auth.",
+        this.region,
+        ".",
+        cdk.Aws.URL_SUFFIX,
+      ]),
+    });
     new cdk.CfnOutput(this, "UiUrl", { value: `https://${distribution.domainName}` });
     new cdk.CfnOutput(this, "UiBucketName", { value: uiBucket.bucketName });
     new cdk.CfnOutput(this, "AuditBucketName", { value: audit.bucketName });
