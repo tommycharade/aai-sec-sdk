@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import boto3
 from boto3.dynamodb.conditions import Key
 from policy_signing import bundle_from_record, sign_policy_bundle
+from regional_fault_target import run as run_regional_fault_target_probe
 
 CONTROL_TABLE_NAME = os.environ["CONTROL_TABLE"]
 TABLE = boto3.resource("dynamodb").Table(CONTROL_TABLE_NAME)
@@ -13580,6 +13581,11 @@ def _renew_agent_session(tenant, session, current_token):
 
 def handler(event, context):
     """Route one API Gateway request through agent or operator trust boundaries."""
+    # This exact direct-invocation contract cannot be formed through API
+    # Gateway. It intentionally runs under this function's live role so a
+    # Regional exercise observes the same IAM deny as production execution.
+    if isinstance(event, dict) and event.get("source") == "aai.regional-fault-target-probe":
+        return run_regional_fault_target_probe(event)
     # Scheduled reconciliation is an internal invocation contract. Let its
     # failures escape Lambda so EventBridge performs bounded retries and moves
     # exhausted events to the monitored DLQ; an HTTP-shaped 500 would look like

@@ -23,6 +23,7 @@ function cell(prefix: string): RegionalFaultCellBoundary {
   return {
     region: required(`${prefix}_FAULT_REGION`),
     targetRoleArn: required(`${prefix}_FAULT_TARGET_ROLE_ARN`),
+    targetFunctionArn: required(`${prefix}_FAULT_TARGET_FUNCTION_ARN`),
     auditBucketArn: required(`${prefix}_FAULT_AUDIT_BUCKET_ARN`),
     dynamodbTableArns: arns(`${prefix}_FAULT_DYNAMODB_TABLE_ARNS`),
     signingKeyArn: required(`${prefix}_FAULT_SIGNING_KEY_ARN`),
@@ -41,10 +42,11 @@ new RegionalFaultControllerStack(app, "AaiSecRegionalFaultController", {
   journalTableName: required("TRANSITION_JOURNAL_TABLE_NAME"),
   journalTableArn: required("TRANSITION_JOURNAL_TABLE_ARN"),
   securityAlertTopicArn: required("FAULT_SECURITY_ALERT_TOPIC_ARN"),
+  hostedZoneId: required("FAULT_ROUTE53_HOSTED_ZONE_ID"),
   description: "Private compensated Regional dependency-fault exercise controller",
   terminationProtection: true,
   tags: {
-    ActiveAuthority: "false-until-real-probes",
+    ActiveAuthority: "manual-two-person-noncognito",
     CoordinationModel: "single-region-strong-cas",
   },
 });

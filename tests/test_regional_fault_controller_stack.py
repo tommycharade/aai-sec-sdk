@@ -181,6 +181,9 @@ def _definition() -> dict[str, Any]:
 def _environment() -> dict[str, Any]:
     return {
         "PRIMARY_FAULT_TARGET_ROLE_ARN": PRIMARY_ROLE,
+        "PRIMARY_FAULT_TARGET_FUNCTION_ARN": (
+            "arn:aws:lambda:eu-west-2:111111111111:function:AaiPrimaryHandler"
+        ),
         "PRIMARY_FAULT_AUDIT_BUCKET_ARN": "arn:aws:s3:::aai-primary-audit-111111",
         "PRIMARY_FAULT_DYNAMODB_TABLE_ARNS": json.dumps(
             [f"arn:aws:dynamodb:eu-west-2:111111111111:table/Primary{i}" for i in range(4)]
@@ -190,6 +193,9 @@ def _environment() -> dict[str, Any]:
         ),
         "PRIMARY_FAULT_QUEUE_ARNS": json.dumps(["arn:aws:sqs:eu-west-2:111111111111:primary"]),
         "RECOVERY_FAULT_TARGET_ROLE_ARN": RECOVERY_ROLE,
+        "RECOVERY_FAULT_TARGET_FUNCTION_ARN": (
+            "arn:aws:lambda:eu-west-1:111111111111:function:AaiRecoveryHandler"
+        ),
         "RECOVERY_FAULT_AUDIT_BUCKET_ARN": "arn:aws:s3:::aai-recovery-audit-111111",
         "RECOVERY_FAULT_DYNAMODB_TABLE_ARNS": json.dumps(
             [f"arn:aws:dynamodb:eu-west-1:111111111111:table/Recovery{i}" for i in range(4)]
@@ -224,6 +230,18 @@ def _function(handler: str, *, environment: bool) -> dict[str, Any]:
     }
     if environment:
         props["Environment"] = {"Variables": _environment()}
+    elif handler == "scripts.regional_fault_probe_lambda.handler":
+        props["Environment"] = {
+            "Variables": {
+                "PRIMARY_FAULT_TARGET_FUNCTION_ARN": _environment()[
+                    "PRIMARY_FAULT_TARGET_FUNCTION_ARN"
+                ],
+                "RECOVERY_FAULT_TARGET_FUNCTION_ARN": _environment()[
+                    "RECOVERY_FAULT_TARGET_FUNCTION_ARN"
+                ],
+                "FAULT_ROUTE53_HOSTED_ZONE_ID": "Z1234567890ABC",
+            }
+        }
     return {"Type": "AWS::Lambda::Function", "Properties": props}
 
 
@@ -265,6 +283,44 @@ def _template() -> dict[str, Any]:
         "Controller": _function(
             "scripts.regional_fault_controller_lambda.handler", environment=True
         ),
+        "ProbePolicy": {
+            "Type": "AWS::IAM::Policy",
+            "Properties": {
+                "Roles": [{"Ref": "ProbeRole"}],
+                "PolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": "lambda:InvokeFunction",
+                            "Effect": "Allow",
+                            "Resource": [
+                                _environment()["PRIMARY_FAULT_TARGET_FUNCTION_ARN"],
+                                _environment()["RECOVERY_FAULT_TARGET_FUNCTION_ARN"],
+                            ],
+                        },
+                        {
+                            "Action": "dynamodb:GetItem",
+                            "Effect": "Allow",
+                            "Resource": JOURNAL_ARN,
+                        },
+                        {
+                            "Action": [
+                                "cloudformation:DescribeStacks",
+                                "cloudformation:GetTemplate",
+                                "cloudformation:ListStackResources",
+                                "events:DescribeRule",
+                                "lambda:GetEventSourceMapping",
+                                "lambda:GetFunctionConcurrency",
+                                "lambda:GetFunctionConfiguration",
+                                "route53:GetHostedZone",
+                                "route53:ListResourceRecordSets",
+                            ],
+                            "Effect": "Allow",
+                            "Resource": "*",
+                        },
+                    ]
+                },
+            },
+        },
         "ControllerPolicy": {
             "Type": "AWS::IAM::Policy",
             "Properties": {
@@ -395,7 +451,9 @@ def _template() -> dict[str, Any]:
     return {
         "Resources": resources,
         "Outputs": {
-            "RegionalFaultControllerStatus": {"Value": "probes-disabled-no-fault-authority"}
+            "RegionalFaultControllerStatus": {
+                "Value": "manual-noncognito-probes-enabled-not-live-accepted"
+            }
         },
     }
 
@@ -414,15 +472,15 @@ def _verify(module: Any, template: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def test_exact_disabled_compensated_stack_is_verified() -> None:
+def test_exact_probe_bound_compensated_stack_is_verified() -> None:
     module = _load()
     assert _verify(module, _template()) == {
-        "status": "verified-probes-disabled",
+        "status": "verified-manual-noncognito-probes",
         "stateCount": 18,
         "compensatedStateCount": 7,
         "publicExecutionGrantCount": 0,
         "alarmCount": 5,
-        "assetFileCount": 6,
+        "assetFileCount": 8,
     }
 
 
@@ -477,7 +535,7 @@ def test_exact_disabled_compensated_stack_is_verified() -> None:
             lambda value: value["Outputs"]["RegionalFaultControllerStatus"].update(
                 {"Value": "ready"}
             ),
-            "disabled probes",
+            "probe readiness disclosure",
         ),
     ],
 )

@@ -476,6 +476,13 @@ export class AwsControlPlaneStack extends cdk.Stack {
       deadLetterQueue: { queue: evidenceRetentionWorkerDlq, maxReceiveCount: 3 },
       enforceSSL: true,
     });
+    // Fault canaries never enter production evidence queues. This content-free
+    // queue exists solely to prove the exact handler role's SQS boundary.
+    const regionalFaultCanaryQueue = new sqs.Queue(this, "RegionalFaultCanaryQueue", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+      retentionPeriod: cdk.Duration.days(1),
+    });
     const evidenceScheduleDlq = new sqs.Queue(this, "EvidenceScheduleDlq", {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       retentionPeriod: cdk.Duration.days(14),
@@ -688,6 +695,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
       RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
       POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
+      REGIONAL_FAULT_CANARY_QUEUE_URL: regionalFaultCanaryQueue.queueUrl,
     };
     const handler = new lambda.Function(this, "ControlPlaneHandler", {
       runtime: lambda.Runtime.PYTHON_3_13,
@@ -726,6 +734,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     evidenceReports.grantRead(handler);
     evidenceWorkerQueue.grantSendMessages(handler);
     evidenceRetentionWorkerQueue.grantSendMessages(handler);
+    regionalFaultCanaryQueue.grantSendMessages(handler);
     handler.addToRolePolicy(new iam.PolicyStatement({ actions: ["sts:AssumeRole"], resources: [scopedToolRole.roleArn] }));
 
     const evidenceWorker = new lambda.Function(this, "EvidenceWorker", {
@@ -1203,6 +1212,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
     // operators and policy payloads never supply role names or IAM documents.
     new cdk.CfnOutput(this, "RegionalFaultTargetExecutionRoleArn", {
       value: handler.role!.roleArn,
+    });
+    new cdk.CfnOutput(this, "RegionalFaultTargetFunctionArn", {
+      value: handler.functionArn,
+    });
+    new cdk.CfnOutput(this, "RegionalFaultCanaryQueueArn", {
+      value: regionalFaultCanaryQueue.queueArn,
     });
     new cdk.CfnOutput(this, "DiscoveryProviderSecretNamePrefix", {
       value: providerSecretPrefix,
