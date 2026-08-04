@@ -4112,6 +4112,15 @@ policy. Exports bind canonical source and graph digests to a separately signed
 control-plane provenance envelope. A source-control administrator or compromised
 reviewer can still approve malicious intent, so independent control-plane review
 and endpoint verification remain mandatory.</p>
+<p>In AWS, the GitHub credential and provider egress are isolated in a dedicated
+Lambda with no DynamoDB or KMS signing permission. The policy-writing Lambda
+cannot read the credential and may invoke only that exact worker. It treats the
+worker response as untrusted, reconstructs typed evidence and compares source
+and evidence digests before one conditional transaction writes the policy
+shell, draft and provenance. This limits a verifier compromise from directly
+activating or signing authority; it does not make a compromised GitHub account,
+reviewer or worker trustworthy, so independent product approval remains a
+separate mandatory boundary.</p>
 <p>AWS activation resolves the exact effective configuration and signs a
 canonical tenant, policy ID, version, content hash and configuration payload
 with a non-exportable P-256 KMS key. The active version, resolved configuration

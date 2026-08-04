@@ -3250,6 +3250,15 @@ store = EnterpriseFleetStore(
 <p>The names in this abbreviated integration example are application adapters,
 not SDK globals. Production deployments should use PostgreSQL and a KMS/HSM
 signer; SQLite remains the local reference persistence adapter.</p>
+<p>The AWS-hosted implementation keeps provider access in a dedicated verifier
+Lambda. That worker can read one configured Secrets Manager secret and call
+only the fixed GitHub API origin; it has no DynamoDB, fleet mutation or KMS
+signing permission. The control-plane Lambda can invoke only that exact worker,
+reconstructs <code>VerifiedPolicySource</code> from its bounded response and compares the
+request and evidence digests before writing anything. Policy shell, immutable
+draft and import record commit in one DynamoDB transaction. KMS signs export
+provenance in the control plane. Missing configuration, verifier errors,
+malformed evidence and transaction races fail without a partial policy.</p>
 <p>Normal create/update requests gain <code>componentRefs</code> and
 <code>localConfiguration</code>. Legacy <code>configuration</code> remains accepted only when
 <code>componentRefs</code> is absent; it maps to local configuration. Sending both forms
