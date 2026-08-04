@@ -1426,6 +1426,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.preview_policy_composition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        preview_policy_composition
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.publish_managed_deployment_package" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2783,6 +2794,33 @@
     
   
     Policy editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-composition-and-gitops-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy composition and GitOps
   
 
     
@@ -4844,6 +4882,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.preview_policy_composition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        preview_policy_composition
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#agentic_security.enterprise_control_plane.EnterpriseFleetStore.publish_managed_deployment_package" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6788,7 +6837,7 @@ credentials, opaque sessions, and raw audit payloads.</p>
 
 
 <h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.create_policy" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">create_policy</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">policy_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">configuration</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">create_policy</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">policy_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">configuration</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">local_configuration</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">component_refs</span><span class="o">=</span><span class="p">())</span></code>
 
 </h3>
 
@@ -7208,6 +7257,24 @@ responsible for translating it into its typed policy and adapters.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.preview_policy_composition" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">preview_policy_composition</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">policy_id</span><span class="p">,</span> <span class="n">local_configuration</span><span class="p">,</span> <span class="n">component_refs</span><span class="p">)</span></code>
+
+</h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return an explainable effective policy without persisting a draft.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.publish_managed_deployment_package" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">publish_managed_deployment_package</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">deployment_id</span><span class="p">,</span> <span class="n">encoded</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">expected_package_sha256</span><span class="p">,</span> <span class="n">expected_revision</span><span class="p">)</span></code>
 
@@ -7511,7 +7578,7 @@ explicit for every enrolled runtime on its next refresh.</p>
 
 
 <h3 id="agentic_security.enterprise_control_plane.EnterpriseFleetStore.update_policy" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">update_policy</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">policy_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">configuration</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">update_policy</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">policy_id</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">configuration</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">local_configuration</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">component_refs</span><span class="o">=</span><span class="p">())</span></code>
 
 </h3>
 

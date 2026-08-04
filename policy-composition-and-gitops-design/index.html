@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/access-governance-runbook/">
+        <link rel="canonical" href="https://tommycharade.github.io/aai-sec-sdk/policy-composition-and-gitops-design/">
       
       
-        <link rel="prev" href="../entra-deployment-guard-design/">
+        <link rel="prev" href="../policy-editor/">
       
       
-        <link rel="next" href="../delegated-administration/">
+        <link rel="next" href="../policy-governance-design/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Emergency access and access certification runbook - Agentic AI Security SDK</title>
+        <title>Policy composition and GitOps - Agentic AI Security SDK</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#emergency-access-and-access-certification-runbook" class="md-skip">
+        <a href="#policy-composition-and-gitops" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Emergency access and access certification runbook
+              Policy composition and GitOps
             
           </span>
         </div>
@@ -1447,10 +1447,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../policy-composition-and-gitops-design/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy composition and GitOps
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1466,6 +1493,136 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-policy-versions-are-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why policy versions are components
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deterministic-restrictive-composition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deterministic restrictive composition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#graph-and-tenant-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graph and tenant constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#effective-policy-explanation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Effective-policy explanation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git-source-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git source contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#import-and-export-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import and export lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threats-and-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threats and controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -2203,37 +2360,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Emergency access and access certification runbook
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../access-governance-runbook/" class="md-nav__link">
         
   
   
@@ -2249,92 +2379,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#security-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Security boundary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#entra-prerequisite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Entra prerequisite
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#request-and-approval-journey" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Request and approval journey
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#certification-export" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Certification export
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#delegated-operator-access" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Delegated operator access
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#acceptance-evidence" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Acceptance evidence
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2852,10 +2896,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#security-boundary" class="md-nav__link">
+  <a href="#decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Security boundary
+        Decision
       
     </span>
   </a>
@@ -2863,10 +2907,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#entra-prerequisite" class="md-nav__link">
+  <a href="#why-policy-versions-are-components" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Entra prerequisite
+        Why policy versions are components
       
     </span>
   </a>
@@ -2874,10 +2918,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#request-and-approval-journey" class="md-nav__link">
+  <a href="#deterministic-restrictive-composition" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Request and approval journey
+        Deterministic restrictive composition
       
     </span>
   </a>
@@ -2885,10 +2929,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#certification-export" class="md-nav__link">
+  <a href="#graph-and-tenant-constraints" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Certification export
+        Graph and tenant constraints
       
     </span>
   </a>
@@ -2896,10 +2940,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#delegated-operator-access" class="md-nav__link">
+  <a href="#effective-policy-explanation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Delegated operator access
+        Effective-policy explanation
       
     </span>
   </a>
@@ -2907,10 +2951,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#acceptance-evidence" class="md-nav__link">
+  <a href="#git-source-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Acceptance evidence
+        Git source contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#import-and-export-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import and export lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#threats-and-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Threats and controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required evidence
       
     </span>
   </a>
@@ -2937,132 +3025,277 @@
   
 
 
-<h1 id="emergency-access-and-access-certification-runbook">Emergency access and access certification runbook</h1>
-<p>This runbook covers the hosted control plane's break-glass workflow and
-periodic operator access export. These controls complement normal Microsoft
-Entra ID and SCIM lifecycle authority; they do not replace directory
-provisioning, conditional access, or customer access-review approval.</p>
-<h2 id="security-boundary">Security boundary</h2>
-<p>Emergency authority is server-owned and evaluated for every API mutation. It
-is never copied into browser state, model output, a policy document, or a
-long-lived Cognito group. A request:</p>
+<h1 id="policy-composition-and-gitops">Policy composition and GitOps</h1>
+<p>This design covers P1-POL-07 and P1-POL-09. It adds reusable, version-bound
+policy components and a Git import/export workflow without allowing Git, a
+browser, or a mutable parent policy to become runtime authority.</p>
+<h2 id="decision">Decision</h2>
+<p>An independently approved policy version is the reusable component. A draft
+may reference up to eight exact versions from other policies in the same
+organization. Each reference binds the component policy ID, version and
+content SHA-256. References never mean “latest” or “active”, so a later change
+to a component cannot silently alter an already reviewed child.</p>
+<p>A policy version stores three distinct objects:</p>
 <ul>
-<li>targets only the immutable subject from the requester's signed token;</li>
-<li>contains one or more exact capabilities, never a wildcard or role;</li>
-<li>lasts between 5 and 60 minutes after approval;</li>
-<li>expires if a different administrator does not decide it within 15 minutes;</li>
-<li>requires a server-owned strong-authentication assertion and signed
-  authentication time no older than 10 minutes from both requester and
-  approver;</li>
-<li>cannot be approved, denied, or revoked by its requester;</li>
-<li>cannot request, approve, deny or revoke another emergency grant using
-  emergency authority; those control actions require the operator's normal
-  directory-derived capability;</li>
-<li>becomes ineffective immediately after expiry or revocation; and</li>
-<li>emits independently stored request, decision, revocation and export audit
-  events without prompts, credentials, token contents, or raw tool data.</li>
+<li><code>localConfiguration</code>: fields authored specifically for this policy;</li>
+<li><code>componentRefs</code>: ordered, exact immutable component identities; and</li>
+<li><code>configuration</code>: the fully composed effective policy evaluated by the
+  existing review, simulation, signing and runtime paths.</li>
 </ul>
-<p>Each authority transition and its content-minimised DynamoDB audit ledger item
-commit in one conditional transaction. S3 audit replication happens only
-after that durable commit; a replication outage cannot produce active
-authority without a ledger event or make a committed decision look
-uncommitted. Operators must alert on the content-free replication warning and
-reconcile the ledger into the retained audit bucket.</p>
-<p>The API conditionally changes pending and active records so concurrent,
-replayed, stale and self-approved decisions fail closed. Emergency evidence is
-retained after authority expires. A control-plane lookup failure grants no
-emergency capability.</p>
-<h2 id="entra-prerequisite">Entra prerequisite</h2>
-<p>Bind the exact Entra enterprise application to a Conditional Access policy
-that requires MFA for every operator who can request or approve emergency
-access. After live verification, deploy with
-<code>ENTRA_STRONG_AUTH_ENFORCED=true</code>. The Cognito pre-token trigger then emits a
-server-owned <code>aai:strong_auth_enforced</code> claim only for the exact configured
-Entra provider. No mapped user attribute or browser value can create it.</p>
-<p>After deployment, inspect a synthetic pilot token without retaining it and
-confirm that Cognito emits fresh <code>auth_time</code>, exact Entra provenance and the
-server-owned strong-authentication assertion. Missing, stale, malformed or
-unproven evidence is denied even when the operator has the normal
-incident-response or identity-administration capability. This deployment
-assertion is not a substitute for retaining the Entra Conditional Access
-configuration and sign-in evidence.</p>
-<h2 id="request-and-approval-journey">Request and approval journey</h2>
-<ol>
-<li>Open <strong>Identity &amp; trust</strong> and select <strong>Request emergency access</strong>.</li>
-<li>Reference the active incident and explain why normal least-privilege access
-   cannot restore service.</li>
-<li>Select only the exact capabilities needed and the shortest useful duration.</li>
-<li>Reauthenticate with MFA if the current authentication is more than 10
-   minutes old, then submit.</li>
-<li>A different platform administrator independently validates the incident,
-   requester, scope and duration before choosing <strong>Approve bounded grant</strong> or
-   <strong>Deny</strong>.</li>
-<li>Confirm the UI reports the grant as active and shows its expiry. Exercise
-   one intended recovery action and one capability outside the grant; retain
-   the allow and deny request IDs.</li>
-<li>Select <strong>Revoke now</strong> as soon as recovery is complete. Confirm the next API
-   call using the emergency capability is denied without waiting for token
-   expiry.</li>
-</ol>
-<p>Do not create a shared emergency account, map a permanent directory group to
-<code>platform-admin</code>, lengthen a grant through direct database changes, or treat an
-active incident as permission to bypass the SDK execution boundary.</p>
-<h2 id="certification-export">Certification export</h2>
-<p>An auditor or platform administrator can select <strong>Generate and download JSON</strong>
-in <strong>Identity &amp; trust</strong>. The tenant-scoped artifact contains:</p>
+<p>The effective configuration and a bounded field-level explanation are
+computed by the control plane before the draft is stored. The browser may
+preview the same operation for usability, but server output is authoritative.
+Activation continues to copy only the effective configuration into the active
+policy snapshot. Existing policies migrate as versions with empty component
+references and a local configuration equal to their current configuration.</p>
+<h2 id="why-policy-versions-are-components">Why policy versions are components</h2>
+<p>Creating a second component lifecycle would duplicate draft, independent
+approval, immutable versioning, signing and audit behavior. Reusing governed
+policy versions means a component has already crossed those boundaries. A
+component may be referenced only while its version is <code>active</code> or <code>retired</code>,
+has an independent approver and has an exact content hash. <code>draft</code>, <code>review</code>,
+<code>approved</code>, <code>staged</code>, rejected or missing versions fail closed. Providers that
+support signed bundles, including AWS, additionally require valid stored
+integrity evidence. The SQLite reference provider is not presented as signed
+or highly available production authority.</p>
+<p>Retired versions remain valid immutable inputs for an existing or new draft;
+retirement removes active fleet assignment, not retained reviewed evidence.
+Deletion of referenced policy versions is prohibited.</p>
+<h2 id="deterministic-restrictive-composition">Deterministic restrictive composition</h2>
+<p>Composition starts with no opinion. Components are applied in their declared
+order, followed by local policy intent. Ordering is retained for explanation,
+but it cannot be used to overwrite a conflict or widen earlier authority.</p>
+<table>
+<thead>
+<tr>
+<th>Field class</th>
+<th>Composition rule</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Allow-list</td>
+<td>Set intersection after the first opinion</td>
+<td>tools, principals, built-ins, Skills, MCP servers, command allow patterns, credential scopes</td>
+</tr>
+<tr>
+<td>Deny-list</td>
+<td>Set union</td>
+<td>denied tools and denied command patterns</td>
+</tr>
+<tr>
+<td>Approval requirement</td>
+<td>Set union; minimum TTL</td>
+<td>required tools/risk classes/commands and approval expiry</td>
+</tr>
+<tr>
+<td>Maximum budget or lifetime</td>
+<td>Numeric minimum</td>
+<td>actions, concurrency, fan-out, cost, rate, delegation, timeout and credential/idempotency TTL</td>
+</tr>
+<tr>
+<td>Required safeguard</td>
+<td>Boolean OR</td>
+<td>deny-by-default, high-risk isolation, credentials when a component requires them, redaction</td>
+</tr>
+<tr>
+<td>Optional capture or egress</td>
+<td>Boolean AND after the first opinion</td>
+<td>tool-content capture and telemetry enablement</td>
+</tr>
+<tr>
+<td>Provider or deployment reference</td>
+<td>Exact equality</td>
+<td>policy, approval, audit, broker, isolation and telemetry provider references</td>
+</tr>
+<tr>
+<td>Closed enum</td>
+<td>Exact equality unless a field-specific restrictive order exists</td>
+<td>credential/isolation modes and managed-host identity</td>
+</tr>
+<tr>
+<td>Unknown legacy field</td>
+<td>Exact equality</td>
+<td>migration extensions cannot gain undocumented merge semantics</td>
+</tr>
+</tbody>
+</table>
+<p>Lists are canonicalized as unique, sorted JSON values. Duplicate values,
+booleans masquerading as numbers, non-finite numbers, unknown typed fields,
+unsafe command patterns and secrets are rejected by the normal policy schema
+before composition. An empty allow-list is valid and means no authority.</p>
+<p>A differing provider, host identity, bundle digest, or unknown legacy value is
+a conflict, not “last writer wins”. The operator must resolve it explicitly in
+the source components before review. Components cannot set
+<code>denyByDefault: false</code>, disable mandatory redaction or weaken immutable SDK
+safeguards.</p>
+<h2 id="graph-and-tenant-constraints">Graph and tenant constraints</h2>
+<p>References are resolved by strongly consistent reads. The control plane:</p>
 <ul>
-<li>every bounded SCIM-provisioned operator, including active state and immutable
-  directory object ID;</li>
-<li>current group membership and exact group-to-role mappings;</li>
-<li>the canonical role-to-capability matrix;</li>
-<li>every delegated role, organization/project/deployment scope, expiry and
-  revocation state;</li>
-<li>pending, active, expired, denied and revoked break-glass records;</li>
-<li>generation time and a SHA-256 digest of the complete review payload.</li>
+<li>rejects self-reference and cross-organization references;</li>
+<li>rejects repeated references and changed content hashes;</li>
+<li>traverses the complete component graph with a maximum depth of four and a
+  maximum of 32 unique versions;</li>
+<li>rejects cycles, missing links and ambiguous duplicate policy identities;</li>
+<li>stores a separate graph digest binding local intent, ordered exact references
+  (including each component graph digest), and the effective result; and</li>
+<li>repeats graph validation at staging and activation so a corrupted provider
+  record cannot be promoted.</li>
 </ul>
-<p>The API refuses a partial oversized SCIM inventory. If SCIM is not configured,
-the artifact is explicitly marked <code>complete: false</code>; it must not be signed off
-as quarterly access certification. The export event is audited with its digest
-and operator count.</p>
-<p>The artifact contains operator names and identifiers and must be handled as
-access-governance evidence under the customer's retention and privacy rules.
-The digest detects accidental or unrecorded content change; it is not a digital
-signature, immutable storage guarantee, or proof that a human completed the
-review.</p>
-<h2 id="delegated-operator-access">Delegated operator access</h2>
-<p>Use <strong>Identity &amp; trust → Delegated operator access</strong> for normal least-privilege
-operations, not break glass. The target must be an active SCIM operator when
-SCIM is configured. Select one non-admin canonical role, an organization,
-project or deployment, an expiry no longer than 366 days, and a reviewable
-business rationale. The API rejects self-delegation and never allows
-<code>platform-admin</code> or identity governance to be delegated.</p>
-<p>After creating the grant, remove any broader Entra group membership that would
-still assign a tenant-wide role. Verify the operator can manage one in-scope
-synthetic resource and receives HTTP 403 for a sibling resource. Revoke the
-grant and repeat the in-scope action to prove immediate denial. The complete
-procedure and API contract are in
-<a href="../delegated-administration/">Delegated administration</a>.</p>
-<h2 id="acceptance-evidence">Acceptance evidence</h2>
-<p>Before enterprise rollout, retain synthetic evidence that proves:</p>
-<ol>
-<li>missing MFA and authentication older than 10 minutes are denied;</li>
-<li>request-body subjects, wildcard capabilities and durations over 60 minutes
-   are rejected;</li>
-<li>the requester cannot decide their own request;</li>
-<li>a second administrator can approve the exact scope once, while replay and
-   concurrent decisions fail;</li>
-<li>granted authority cannot perform an unrequested capability;</li>
-<li>expiry and revocation remove authority on the next API request;</li>
-<li>a cross-tenant subject receives no grant;</li>
-<li>delegated authority permits one descendant resource, denies a sibling,
-   expires automatically and is denied immediately after revocation;</li>
-<li>the certification export is complete, digest-verifiable and auditor-only;
-   and</li>
-<li>every lifecycle transition has content-minimised durable audit evidence.</li>
-</ol>
-<p>Source-level contract tests provide repeatable adversarial evidence. They do
-not replace a deployed Entra MFA, API Gateway claim-projection and two-person
-pilot exercise.</p>
+<p><code>contentHash</code> remains the effective-configuration SHA-256 for compatibility
+with runtime drift and signed-bundle verification. <code>graphDigest</code> proves how
+that result was derived. Lifecycle transitions reproduce and compare both.
+Because every edge names an immutable version, composition is reproducible
+without consulting mutable active-policy pointers.</p>
+<h2 id="effective-policy-explanation">Effective-policy explanation</h2>
+<p>Every draft and version detail returns <code>composition</code> with:</p>
+<ul>
+<li>the graph digest and ordered component identities;</li>
+<li>each effective field, merge rule and winning/restricting sources;</li>
+<li>removed allow-list values and added deny/approval values;</li>
+<li>the local policy contribution;</li>
+<li>conflicts, if preview is requested before draft creation; and</li>
+<li>explicit <code>no-op</code> contributions where a component added no authority change.</li>
+</ul>
+<p>The UI leads with the effective result. It shows reusable components as a
+stack, lets an operator expand “why is this value effective?”, and keeps local
+intent visually separate from inherited restrictions. JSON remains an expert
+view. The UI never describes a component update as applied to a child whose
+exact reference did not change.</p>
+<h2 id="git-source-contract">Git source contract</h2>
+<p>Git is a reviewed source and transport, not an authorization system. A
+deployment-owned <code>PolicySourceVerifier</code> adapter retrieves one exact commit and
+path from an allow-listed repository and returns server-observed facts:</p>
+<ul>
+<li>provider and canonical repository identity;</li>
+<li>full commit SHA and immutable blob SHA;</li>
+<li>path and content digest;</li>
+<li>branch-protection/review result and reviewed pull-request reference;</li>
+<li>signer identity and signature-verification result; and</li>
+<li>retrieval time and provider evidence digest.</li>
+</ul>
+<p>The first production adapter targets GitHub. Its installation credential is a
+deployment-owned secret reference with read-only Contents, Metadata and Pull
+Requests access. The browser supplies no token, review status, signer result or
+policy content. Provider calls use bounded timeouts and pagination and fail
+closed on rate limits, partial review data, changed commits, redirects or an
+unavailable verifier.</p>
+<p>The canonical schema-v1 policy source document contains exactly:</p>
+<pre><code class="language-json">{
+  &quot;schemaVersion&quot;: 1,
+  &quot;policyId&quot;: &quot;policy-engineering&quot;,
+  &quot;organizationId&quot;: &quot;org-example&quot;,
+  &quot;name&quot;: &quot;Engineering agents&quot;,
+  &quot;componentRefs&quot;: [
+    {
+      &quot;policyId&quot;: &quot;policy-enterprise-baseline&quot;,
+      &quot;version&quot;: 4,
+      &quot;contentHash&quot;: &quot;&lt;64 lowercase hex characters&gt;&quot;
+    }
+  ],
+  &quot;localConfiguration&quot;: {}
+}
+</code></pre>
+<p>Unknown fields, duplicate JSON keys, YAML aliases/tags, non-UTF-8 content and
+documents over 1 MiB are rejected. JSON is canonical. YAML may be accepted as
+an authoring format only through a safe parser and is normalized to the same
+canonical JSON before hashing; the initial implementation may ship JSON first
+rather than introducing an unsafe parser.</p>
+<h2 id="import-and-export-lifecycle">Import and export lifecycle</h2>
+<p>Export returns canonical source bytes plus a control-plane provenance envelope
+that binds tenant, policy/version/content hash, component graph digest,
+exporting subject/time and signing key. The envelope is signed by the existing
+policy-signing adapter. It contains no credentials or provider token.</p>
+<p>Import accepts only repository, full commit SHA and path. The server retrieves
+and verifies the document, checks tenant/policy scope, resolves components and
+creates a normal draft. It records immutable Git and control-plane provenance
+on that draft. Import never submits, approves, stages, activates or assigns a
+policy. A second authenticated subject still performs approval in the normal
+control-plane lifecycle.</p>
+<p>Re-importing the same provider evidence and canonical content is idempotent.
+The same request identity with different content, a rewritten commit, changed
+review state, missing signature or another tenant is rejected and audited.</p>
+<h2 id="api-surface">API surface</h2>
+<pre><code class="language-text">POST /api/enterprise/policies/composition/preview
+POST /api/enterprise/policies/{policyId}/versions/{version}/export
+POST /api/enterprise/policies/imports
+GET  /api/enterprise/policies/imports/{importId}
+</code></pre>
+<p>Normal create/update requests gain <code>componentRefs</code> and
+<code>localConfiguration</code>. Legacy <code>configuration</code> remains accepted only when
+<code>componentRefs</code> is absent; it maps to local configuration. Sending both forms
+is ambiguous and fails closed.</p>
+<h2 id="threats-and-controls">Threats and controls</h2>
+<table>
+<thead>
+<tr>
+<th>Threat</th>
+<th>Control</th>
+<th>Failure posture</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mutable parent silently widens children</td>
+<td>Exact policy version and content hash</td>
+<td>Existing child is unchanged</td>
+</tr>
+<tr>
+<td>Component order hides an overwrite</td>
+<td>Restrictive field-specific algebra; conflicts reject</td>
+<td>Draft is not created</td>
+</tr>
+<tr>
+<td>Cross-tenant component reference</td>
+<td>Authenticated organization plus consistent component read</td>
+<td>Request denied</td>
+</tr>
+<tr>
+<td>Cycle or graph bomb</td>
+<td>Depth, unique-node and reference-count bounds</td>
+<td>Composition denied</td>
+</tr>
+<tr>
+<td>Browser forges Git approval</td>
+<td>Server-owned source-verifier adapter</td>
+<td>Import denied</td>
+</tr>
+<tr>
+<td>Git content changes after review</td>
+<td>Exact commit, blob and content digests</td>
+<td>Import denied</td>
+</tr>
+<tr>
+<td>Imported file activates authority</td>
+<td>Import creates only an ordinary draft</td>
+<td>No fleet change</td>
+</tr>
+<tr>
+<td>Unknown field gains merge behavior</td>
+<td>Closed typed schema or exact-equality legacy rule</td>
+<td>Conflict/rejection</td>
+</tr>
+<tr>
+<td>Explanation differs from runtime</td>
+<td>Effective configuration stored once and used by review/sign/runtime</td>
+<td>Promotion denied on digest mismatch</td>
+</tr>
+</tbody>
+</table>
+<h2 id="required-evidence">Required evidence</h2>
+<p>Unit and adversarial tests must prove every merge operator, deterministic
+canonicalization, changed-order behavior, empty intersections, provider
+conflicts, graph bounds, cycles, stale hashes, cross-tenant denial and legacy
+migration. Control-plane and AWS contracts must prove immutable references,
+strongly consistent reads, activation revalidation, audit/provenance retention,
+idempotent import and no side effect on preview/provider failure. UI tests must
+prove effective-first explanation, local-versus-inherited clarity, conflict
+resolution, no silent activation and accessible keyboard/screen-reader flows.</p>
+<p>Live acceptance requires an organization-owned GitHub repository with branch
+protection, two independent identities, a read-only GitHub App installation
+and retained export/import/approval/activation evidence. Synthetic provider
+tests do not satisfy that deployment acceptance.</p>
 
 
 

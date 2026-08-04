@@ -16,7 +16,7 @@
         <link rel="prev" href="../dynamic-groups-design/">
       
       
-        <link rel="next" href="../policy-governance-design/">
+        <link rel="next" href="../policy-composition-and-gitops-design/">
       
       
         
@@ -1549,6 +1549,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reuse-inheritance-and-git" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reuse, inheritance and Git
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#out-of-scope" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1574,6 +1585,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy-composition-and-gitops-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy composition and GitOps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2913,6 +2951,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reuse-inheritance-and-git" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reuse, inheritance and Git
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#out-of-scope" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3154,6 +3203,13 @@ and server-clock countdown. Expiry, revocation, agent/group reassignment or a
 base-policy change restores the normal signed policy automatically. The UI
 does not describe an approved draft as applied and does not treat an active
 control-plane exception as endpoint-convergence evidence.</p>
+<h2 id="reuse-inheritance-and-git">Reuse, inheritance and Git</h2>
+<p>Reusable policy components are exact independently approved policy versions,
+never mutable “latest” pointers. The editor shows local intent separately from
+the effective restrictive composition and explains which component produced or
+narrowed every field. Git import creates a draft only; provider-observed review
+and signature evidence cannot replace normal independent control-plane
+approval. See <a href="../policy-composition-and-gitops-design/">Policy composition and GitOps</a>.</p>
 <h2 id="out-of-scope">Out of scope</h2>
 <p>The editor must not expose switches for security invariants such as dynamic
 tool lookup, bypassing the runtime, trusting model-supplied identity,
