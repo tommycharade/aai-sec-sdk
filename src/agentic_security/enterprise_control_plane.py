@@ -31,6 +31,14 @@ from ._command_patterns import compile_command_patterns
 from .audit import AuditSink
 from .managed_deployment import ManagedDeploymentPackage
 from .policy_composition import PolicyComponent, PolicyCompositionError, compose_policy
+from .policy_sources import (
+    PolicyExportSigner,
+    PolicySourceDocument,
+    PolicySourceRequest,
+    PolicySourceVerificationError,
+    PolicySourceVerifier,
+    constant_digest_equal,
+)
 
 _MAX_TEXT = 256
 _MAX_PAGE_SIZE = 200
@@ -794,6 +802,8 @@ class EnterpriseFleetStore:
         slo_target: float = 0.99,
         authorities: Mapping[str, FleetDeploymentAuthority] | None = None,
         alert_sink: FleetAlertSink | None = None,
+        policy_source_verifier: PolicySourceVerifier | None = None,
+        policy_export_signer: PolicyExportSigner | None = None,
     ) -> None:
         """Open or create a migrated fleet database with bounded heartbeat TTL."""
         if heartbeat_ttl_seconds < 15 or heartbeat_ttl_seconds > 86_400:
@@ -821,6 +831,8 @@ class EnterpriseFleetStore:
         self.slo_target = slo_target
         self.authorities = dict(authorities or {})
         self.alert_sink = alert_sink
+        self.policy_source_verifier = policy_source_verifier
+        self.policy_export_signer = policy_export_signer
         self._lock = RLock()
         self._connection = self.persistence.connect(self.path, sqlite_busy_timeout_ms)
         self._migrate()
@@ -830,7 +842,7 @@ class EnterpriseFleetStore:
         return {
             "adapter": self.persistence.name,
             "highAvailability": self.persistence.supports_high_availability,
-            "schemaVersion": 8,
+            "schemaVersion": 9,
         }
 
     def close(self) -> None:
@@ -1421,6 +1433,264 @@ class EnterpriseFleetStore:
             "graphDigest": composition["graphDigest"],
             "explanation": json.loads(composition["explanationJson"]),
         }
+
+    def export_policy_source(
+        self, identity: FleetIdentity, policy_id: str, version: int
+    ) -> dict[str, Any]:
+        """Export one immutable policy version with signed control-plane provenance.
+
+        The export is transport data, not runtime authority. It contains no
+        approval, activation, assignment, bearer token, or signing secret.
+        """
+        policy_id, version = _text(policy_id, "policyId"), _positive_version(version)
+        signer = self.policy_export_signer
+        if signer is None:
+            raise FleetConfigurationError("policy export signing is not configured")
+        with self._lock:
+            record = self._policy_version(policy_id, version)
+            if record["organizationId"] != identity.organization_id:
+                raise FleetAuthorizationError("organization scope is not permitted")
+            composition = record["composition"]
+            document = PolicySourceDocument.from_bytes(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "policyId": policy_id,
+                        "organizationId": identity.organization_id,
+                        "name": record["name"],
+                        "componentRefs": composition["componentRefs"],
+                        "localConfiguration": composition["localConfiguration"],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+            )
+            exported_at = int(self._now())
+            provenance = {
+                "schemaVersion": 1,
+                "organizationId": identity.organization_id,
+                "policyId": policy_id,
+                "version": version,
+                "contentHash": record["contentHash"],
+                "graphDigest": composition["graphDigest"],
+                "sourceSha256": document.content_digest,
+                "exportedBy": identity.subject,
+                "exportedAt": exported_at,
+            }
+        payload = json.dumps(
+            provenance, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        try:
+            signature = signer.sign(payload)
+        except PolicySourceVerificationError as exc:
+            raise FleetConfigurationError(str(exc)) from exc
+        except Exception as exc:
+            raise FleetConfigurationError("policy export signing failed") from exc
+        result = {
+            "document": document.wire(),
+            "canonicalDocument": document.canonical_bytes().decode("utf-8"),
+            "sourceSha256": document.content_digest,
+            "provenance": {**provenance, "integrity": signature.wire()},
+        }
+        self._audit(
+            "fleet_policy_source_exported",
+            identity.subject,
+            {
+                "organizationId": identity.organization_id,
+                "policyId": policy_id,
+                "version": version,
+                "sourceSha256": document.content_digest,
+                "keyId": signature.key_id,
+            },
+            identity.organization_id,
+        )
+        return result
+
+    def import_policy_source(
+        self,
+        identity: FleetIdentity,
+        *,
+        import_id: str,
+        request: PolicySourceRequest,
+    ) -> dict[str, Any]:
+        """Verify an exact Git source and atomically create an ordinary draft.
+
+        Verification occurs before the database transaction and receives no
+        model-controlled credential. Repeated requests are content-idempotent;
+        a changed locator under the same import ID fails closed.
+        """
+        import_id = _text(import_id, "importId")
+        verifier = self.policy_source_verifier
+        if verifier is None:
+            raise FleetConfigurationError("policy source verification is not configured")
+        with self._lock:
+            existing = self._connection.execute(
+                "SELECT * FROM policy_imports WHERE organization_id=? AND import_id=?",
+                (identity.organization_id, import_id),
+            ).fetchone()
+            if existing is not None:
+                if constant_digest_equal(existing["request_digest"], request.request_digest):
+                    return self._policy_import(existing)
+                raise FleetConflictError("policy import ID is bound to a different source")
+        try:
+            verified = verifier.verify(request)
+            if not (
+                hmac.compare_digest(verified.repository, request.repository)
+                and hmac.compare_digest(verified.commit_sha, request.commit_sha)
+                and hmac.compare_digest(verified.path, request.path)
+            ):
+                raise PolicySourceVerificationError(
+                    "policy source verifier returned different source coordinates"
+                )
+            document = PolicySourceDocument.from_bytes(verified.content)
+        except PolicySourceVerificationError as exc:
+            raise FleetConfigurationError(str(exc)) from exc
+        except Exception as exc:
+            raise FleetConfigurationError("policy source verification failed") from exc
+        if document.organization_id != identity.organization_id:
+            raise FleetAuthorizationError("policy source organization scope is not permitted")
+        evidence = verified.evidence()
+        provenance = {
+            "schemaVersion": 1,
+            "importId": import_id,
+            "requestDigest": request.request_digest,
+            "canonicalSourceDigest": document.content_digest,
+            "providerEvidence": evidence,
+            "evidenceDigest": verified.evidence_digest,
+        }
+        now = self._now()
+        with self._lock:
+            existing = self._connection.execute(
+                "SELECT * FROM policy_imports WHERE organization_id=? AND import_id=?",
+                (identity.organization_id, import_id),
+            ).fetchone()
+            if existing is not None:
+                if constant_digest_equal(existing["request_digest"], request.request_digest):
+                    return self._policy_import(existing)
+                raise FleetConflictError("policy import ID is bound to a different source")
+            duplicate = self._connection.execute(
+                "SELECT * FROM policy_imports WHERE organization_id=? AND evidence_digest=? "
+                "AND source_digest=?",
+                (identity.organization_id, verified.evidence_digest, document.content_digest),
+            ).fetchone()
+            if duplicate is not None:
+                return self._policy_import(duplicate)
+            self._assert_identity_org(identity, identity.organization_id)
+            try:
+                policy_row = self._connection.execute(
+                    "SELECT organization_id,version FROM policies WHERE id=?",
+                    (document.policy_id,),
+                ).fetchone()
+                if policy_row is None:
+                    base_version, version = 0, 1
+                    self._connection.execute(
+                        "INSERT INTO policies(id,organization_id,name,configuration,version,"
+                        "created_at,created_by) VALUES(?,?,?,?,?,?,?)",
+                        (
+                            document.policy_id,
+                            identity.organization_id,
+                            document.name,
+                            "{}",
+                            0,
+                            now,
+                            identity.subject,
+                        ),
+                    )
+                else:
+                    if policy_row["organization_id"] != identity.organization_id:
+                        raise FleetAuthorizationError("policy source policy scope is not permitted")
+                    pending = self._connection.execute(
+                        "SELECT 1 FROM policy_versions WHERE policy_id=? AND state IN "
+                        "('draft','review','approved','staged') LIMIT 1",
+                        (document.policy_id,),
+                    ).fetchone()
+                    if pending is not None:
+                        raise FleetConflictError("policy already has a pending governed version")
+                    base_version = int(policy_row["version"])
+                    latest = self._connection.execute(
+                        "SELECT COALESCE(MAX(version),0) AS latest FROM policy_versions "
+                        "WHERE policy_id=?",
+                        (document.policy_id,),
+                    ).fetchone()
+                    version = int(latest["latest"]) + 1
+                composition = self._compose_policy_version(
+                    identity.organization_id,
+                    document.policy_id,
+                    configuration=None,
+                    local_configuration=document.local_configuration,
+                    component_refs=document.component_refs,
+                )
+                provenance_json = json.dumps(
+                    provenance, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                )
+                self._insert_policy_version(
+                    policy_id=document.policy_id,
+                    organization_id=identity.organization_id,
+                    version=version,
+                    base_version=base_version,
+                    name=document.name,
+                    configuration_json=composition["configurationJson"],
+                    local_configuration_json=composition["localConfigurationJson"],
+                    component_refs_json=composition["componentRefsJson"],
+                    graph_digest=composition["graphDigest"],
+                    composition_explanation_json=composition["explanationJson"],
+                    source_provenance_json=provenance_json,
+                    state="draft",
+                    author=identity.subject,
+                    created_at=now,
+                )
+                self._connection.execute(
+                    "INSERT INTO policy_imports(organization_id,import_id,request_digest,"
+                    "evidence_digest,source_digest,repository,commit_sha,blob_sha,path,policy_id,"
+                    "policy_version,status,provenance,created_at,created_by) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        identity.organization_id,
+                        import_id,
+                        request.request_digest,
+                        verified.evidence_digest,
+                        document.content_digest,
+                        verified.repository,
+                        verified.commit_sha,
+                        verified.blob_sha,
+                        verified.path,
+                        document.policy_id,
+                        version,
+                        "draft_created",
+                        provenance_json,
+                        now,
+                        identity.subject,
+                    ),
+                )
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
+            row = self._connection.execute(
+                "SELECT * FROM policy_imports WHERE organization_id=? AND import_id=?",
+                (identity.organization_id, import_id),
+            ).fetchone()
+            result = self._policy_import(row)
+        self._audit(
+            "fleet_policy_source_imported",
+            identity.subject,
+            result,
+            identity.organization_id,
+        )
+        return result
+
+    def policy_import(self, identity: FleetIdentity, import_id: str) -> dict[str, Any]:
+        """Return one tenant-scoped policy import and its immutable provenance."""
+        import_id = _text(import_id, "importId")
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM policy_imports WHERE organization_id=? AND import_id=?",
+                (identity.organization_id, import_id),
+            ).fetchone()
+            if row is None:
+                raise FleetNotFoundError("policy import not found")
+            return self._policy_import(row)
 
     def submit_policy_version(
         self, identity: FleetIdentity, policy_id: str, version: int
@@ -2971,6 +3241,7 @@ class EnterpriseFleetStore:
                     component_refs TEXT NOT NULL DEFAULT '[]',
                     graph_digest TEXT NOT NULL DEFAULT '',
                     composition_explanation TEXT NOT NULL DEFAULT '[]',
+                    source_provenance TEXT NOT NULL DEFAULT '{}',
                     content_hash TEXT NOT NULL, state TEXT NOT NULL,
                     author TEXT NOT NULL, created_at REAL NOT NULL,
                     submitted_by TEXT, submitted_at REAL,
@@ -2980,6 +3251,19 @@ class EnterpriseFleetStore:
                     PRIMARY KEY(policy_id,version));
                 CREATE INDEX IF NOT EXISTS idx_policy_versions_org_state
                     ON policy_versions(organization_id,state,created_at);
+                CREATE TABLE IF NOT EXISTS policy_imports(
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    import_id TEXT NOT NULL, request_digest TEXT NOT NULL,
+                    evidence_digest TEXT NOT NULL, source_digest TEXT NOT NULL,
+                    repository TEXT NOT NULL, commit_sha TEXT NOT NULL,
+                    blob_sha TEXT NOT NULL, path TEXT NOT NULL,
+                    policy_id TEXT NOT NULL, policy_version INTEGER NOT NULL,
+                    status TEXT NOT NULL, provenance TEXT NOT NULL,
+                    created_at REAL NOT NULL, created_by TEXT NOT NULL,
+                    PRIMARY KEY(organization_id,import_id),
+                    UNIQUE(organization_id,evidence_digest,source_digest),
+                    FOREIGN KEY(policy_id,policy_version)
+                        REFERENCES policy_versions(policy_id,version));
                 CREATE TABLE IF NOT EXISTS skills(
                     id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
                     name TEXT NOT NULL, description TEXT NOT NULL, version TEXT NOT NULL,
@@ -3100,6 +3384,11 @@ class EnterpriseFleetStore:
                     "ALTER TABLE policy_versions ADD COLUMN "
                     "composition_explanation TEXT NOT NULL DEFAULT '[]'"
                 )
+            if "source_provenance" not in policy_version_columns:
+                self._connection.execute(
+                    "ALTER TABLE policy_versions ADD COLUMN "
+                    "source_provenance TEXT NOT NULL DEFAULT '{}'"
+                )
             existing_policies = self._connection.execute(
                 "SELECT id,organization_id,name,configuration,version,created_at,created_by "
                 "FROM policies WHERE version > 0"
@@ -3151,6 +3440,7 @@ class EnterpriseFleetStore:
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(3)")
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(4)")
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(8)")
+            self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(9)")
             self._connection.commit()
 
     @staticmethod
@@ -3423,6 +3713,7 @@ class EnterpriseFleetStore:
         component_refs_json: str | None = None,
         graph_digest: str | None = None,
         composition_explanation_json: str | None = None,
+        source_provenance_json: str = "{}",
     ) -> None:
         """Insert one content-hashed policy ledger entry inside the caller's transaction."""
         if state not in _POLICY_VERSION_STATES:
@@ -3442,8 +3733,8 @@ class EnterpriseFleetStore:
         self._connection.execute(
             "INSERT INTO policy_versions(policy_id,organization_id,version,base_version,name,"
             "configuration,local_configuration,component_refs,graph_digest,"
-            "composition_explanation,content_hash,state,author,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "composition_explanation,source_provenance,content_hash,state,author,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 policy_id,
                 organization_id,
@@ -3455,6 +3746,7 @@ class EnterpriseFleetStore:
                 component_refs_json,
                 graph_digest,
                 composition_explanation_json,
+                source_provenance_json,
                 hashlib.sha256(configuration_json.encode()).hexdigest(),
                 state,
                 author,
@@ -3516,7 +3808,7 @@ class EnterpriseFleetStore:
         row = self._connection.execute(
             "SELECT policy_id,organization_id,version,base_version,name,configuration,"
             "local_configuration,component_refs,graph_digest,composition_explanation,"
-            "content_hash,state,author,created_at,submitted_by,submitted_at,decided_by,"
+            "source_provenance,content_hash,state,author,created_at,submitted_by,submitted_at,decided_by,"
             "decided_at,decision_reason,staged_by,staged_at,activated_by,activated_at "
             "FROM policy_versions WHERE policy_id=? AND version=?",
             (policy_id, version),
@@ -3555,6 +3847,11 @@ class EnterpriseFleetStore:
             "decidedBy": row["decided_by"],
             "decidedAt": row["decided_at"],
             "decisionReason": row["decision_reason"],
+            "decision": "approved"
+            if state in {"approved", "staged", "active", "retired"}
+            else "rejected"
+            if state == "rejected"
+            else None,
             "approvedBy": row["decided_by"]
             if state in {"approved", "staged", "active", "retired"}
             else None,
@@ -3569,6 +3866,34 @@ class EnterpriseFleetStore:
                 "graphDigest": row["graph_digest"],
                 "explanation": json.loads(row["composition_explanation"]),
             },
+            "sourceProvenance": json.loads(row["source_provenance"]) or None,
+        }
+
+    @staticmethod
+    def _policy_import(row: Any) -> dict[str, Any]:
+        """Serialize one persisted import without source content or credentials."""
+        if row is None:
+            raise FleetNotFoundError("policy import not found")
+        return {
+            "organizationId": row["organization_id"],
+            "importId": row["import_id"],
+            "status": row["status"],
+            "source": {
+                "repository": row["repository"],
+                "commitSha": row["commit_sha"],
+                "blobSha": row["blob_sha"],
+                "path": row["path"],
+                "sourceDigest": row["source_digest"],
+                "evidenceDigest": row["evidence_digest"],
+            },
+            "draft": {
+                "policyId": row["policy_id"],
+                "version": row["policy_version"],
+                "state": "draft",
+            },
+            "provenance": json.loads(row["provenance"]),
+            "createdAt": row["created_at"],
+            "createdBy": row["created_by"],
         }
 
     def _policy(self, policy_id: str) -> dict[str, Any]:
@@ -4107,6 +4432,16 @@ class EnterpriseFleetApplication:
                 if resource == "integrations":
                     self._authorize(identity, "read")
                     return self._respond(start_response, 200, self._development_integrations())
+                if resource.startswith("policies/imports/"):
+                    self._authorize(identity, "read")
+                    parts = resource.split("/")
+                    if len(parts) != 3:
+                        raise FleetConfigurationError("policy import route is invalid")
+                    return self._respond(
+                        start_response,
+                        200,
+                        self.store.policy_import(identity, _text(parts[2], "importId")),
+                    )
                 if resource.startswith("deployments/") and resource.endswith("/managed-package"):
                     self._authorize(identity, "read")
                     parts = resource.split("/")
@@ -4466,6 +4801,24 @@ class EnterpriseFleetApplication:
                     component_refs=component_refs,
                 )
                 return self._respond(start_response, 200, result)
+            if method == "POST" and path == "/api/enterprise/policies/imports":
+                self._authorize(identity, "manage_configuration")
+                if set(body) != {"importId", "repository", "commitSha", "path"}:
+                    raise FleetConfigurationError("policy import request schema is invalid")
+                try:
+                    request = PolicySourceRequest(
+                        repository=_text(body.get("repository"), "repository"),
+                        commit_sha=_text(body.get("commitSha"), "commitSha"),
+                        path=_text(body.get("path"), "path"),
+                    )
+                except PolicySourceVerificationError as exc:
+                    raise FleetConfigurationError(str(exc)) from exc
+                result = self.store.import_policy_source(
+                    identity,
+                    import_id=_text(body.get("importId"), "importId"),
+                    request=request,
+                )
+                return self._respond(start_response, 201, result)
             if method == "POST" and path == "/api/enterprise/policies":
                 self._authorize(identity, "manage_configuration")
                 configuration = body.get("configuration")
@@ -4539,6 +4892,13 @@ class EnterpriseFleetApplication:
                     except ValueError as exc:
                         raise FleetConfigurationError("policy version must be an integer") from exc
                     action = policy_parts[3]
+                    if action == "export":
+                        self._authorize(identity, "manage_configuration")
+                        return self._respond(
+                            start_response,
+                            200,
+                            self.store.export_policy_source(identity, policy_id, version),
+                        )
                     if action == "submit":
                         self._authorize(identity, "manage_configuration")
                         return self._respond(

@@ -113,6 +113,11 @@ from .errors import (
     RuntimeStateError,
     SecurityConfigurationError,
 )
+from .github_policy_source import (
+    GitHubHttpResponse,
+    GitHubHttpTransport,
+    GitHubPolicySourceVerifier,
+)
 from .idempotency import (
     IdempotencyClaim,
     IdempotencyClaimStatus,
@@ -178,6 +183,16 @@ from .policy_composition import (
     PolicyCompositionResult,
     PolicyCompositionStep,
     compose_policy,
+)
+from .policy_sources import (
+    CallbackPolicyExportSigner,
+    PolicyExportSignature,
+    PolicyExportSigner,
+    PolicySourceDocument,
+    PolicySourceRequest,
+    PolicySourceVerificationError,
+    PolicySourceVerifier,
+    VerifiedPolicySource,
 )
 from .runtime import GuardedRuntime, RuntimeConfig
 from .runtime_attestation import (
@@ -397,6 +412,17 @@ __all__ = [
     "PolicyCompositionError",
     "PolicyCompositionResult",
     "PolicyCompositionStep",
+    "PolicySourceDocument",
+    "PolicySourceRequest",
+    "PolicySourceVerificationError",
+    "PolicySourceVerifier",
+    "VerifiedPolicySource",
+    "PolicyExportSignature",
+    "PolicyExportSigner",
+    "CallbackPolicyExportSigner",
+    "GitHubHttpResponse",
+    "GitHubHttpTransport",
+    "GitHubPolicySourceVerifier",
     "PolicyPreparation",
     "PolicyEngine",
     "PolicyResult",

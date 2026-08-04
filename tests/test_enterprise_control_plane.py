@@ -42,6 +42,12 @@ from agentic_security import (
     StaticFleetAuthenticator,
     WebhookFleetAlertSink,
 )
+from agentic_security.policy_sources import (
+    PolicyExportSignature,
+    PolicySourceRequest,
+    PolicySourceVerificationError,
+    VerifiedPolicySource,
+)
 
 
 class Clock:
@@ -62,6 +68,69 @@ class AlertSink:
 
     def publish(self, alert: Mapping[str, Any]) -> None:
         self.alerts.append(dict(alert))
+
+
+class PolicyVerifier:
+    """Synthetic deployment-owned verifier with deterministic provider evidence."""
+
+    def __init__(self, content: bytes) -> None:
+        self.content = content
+        self.requests: list[PolicySourceRequest] = []
+        self.failure: Exception | None = None
+
+    def verify(self, request: PolicySourceRequest) -> VerifiedPolicySource:
+        """Return reviewed and signed synthetic GitHub evidence."""
+        self.requests.append(request)
+        if self.failure is not None:
+            raise self.failure
+        return VerifiedPolicySource(
+            provider="github",
+            repository=request.repository,
+            commit_sha=request.commit_sha,
+            blob_sha="b" * 40,
+            path=request.path,
+            content=self.content,
+            pull_request="https://github.com/acme/policies/pull/42",
+            reviewed_by=("reviewer-2",),
+            signer_identity="author-1",
+            retrieved_at=1_000,
+        )
+
+
+class PolicySigner:
+    """Synthetic signer retaining canonical bytes for contract assertions."""
+
+    def __init__(self) -> None:
+        self.payloads: list[bytes] = []
+
+    def sign(self, payload: bytes) -> PolicyExportSignature:
+        """Return bounded synthetic KMS-style signing evidence."""
+        self.payloads.append(payload)
+        return PolicyExportSignature(
+            key_id="kms://synthetic/policy-export",
+            algorithm="ECDSA_SHA_256",
+            signature=b"synthetic-signature",
+            signed_at=1_001,
+        )
+
+
+def policy_source_bytes(*, organization_id: str = "org-a") -> bytes:
+    """Build one closed-schema policy source using only synthetic values."""
+    return json.dumps(
+        {
+            "schemaVersion": 1,
+            "policyId": "policy-from-git",
+            "organizationId": organization_id,
+            "name": "Reviewed Git policy",
+            "componentRefs": [],
+            "localConfiguration": {
+                "policy": {"denyByDefault": True},
+                "tools": {"allowed": ["read_repository"], "denied": ["shell"]},
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
 
 
 def test_webhook_alert_sink_is_bounded_and_fail_closed() -> None:
@@ -152,7 +221,7 @@ def test_reference_persistence_is_explicitly_rejected_for_ha_requirements(tmp_pa
     assert store.persistence_capabilities() == {
         "adapter": "sqlite-reference",
         "highAvailability": False,
-        "schemaVersion": 8,
+        "schemaVersion": 9,
     }
     store.close()
     with pytest.raises(FleetConfigurationError):
@@ -1915,7 +1984,7 @@ def test_policy_lifecycle_is_immutable_two_person_and_fail_closed(tmp_path: Path
         decision="approved",
         reason="Independent change review",
     )
-    assert approved["approvedBy"] == "reviewer-2"
+    assert approved["approvedBy"] == "reviewer-2" and approved["decision"] == "approved"
     with pytest.raises(FleetConflictError, match="awaiting review"):
         store.decide_policy_version(
             reviewer,
@@ -1957,6 +2026,133 @@ def test_policy_lifecycle_is_immutable_two_person_and_fail_closed(tmp_path: Path
         "fleet_policy_staged",
         "fleet_policy_activated",
     }
+
+
+def test_policy_git_import_is_atomic_idempotent_and_never_grants_authority(
+    tmp_path: Path,
+) -> None:
+    """Reviewed Git content creates only a tenant draft with immutable provenance."""
+    verifier = PolicyVerifier(policy_source_bytes())
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite", policy_source_verifier=verifier)
+    seed(store)
+    author = identity("org-a", subject="author-1")
+    request = PolicySourceRequest("github.com/acme/policies", "a" * 40, "policies/claude.json")
+
+    imported = store.import_policy_source(author, import_id="import-42", request=request)
+
+    assert imported["status"] == "draft_created"
+    assert imported["draft"] == {
+        "policyId": "policy-from-git",
+        "version": 1,
+        "state": "draft",
+    }
+    assert imported["provenance"]["providerEvidence"]["reviewVerified"] is True
+    policy = store.list_policies(author).items[0]
+    assert policy["activeVersion"] is None and policy["pendingVersion"] == 1
+    version = store.policy_version(author, "policy-from-git", 1)
+    assert version["state"] == "draft" and version["sourceProvenance"] == imported["provenance"]
+    assert store.list_groups(author).items == ()
+
+    replay = store.import_policy_source(author, import_id="import-42", request=request)
+    duplicate = store.import_policy_source(author, import_id="import-duplicate", request=request)
+    assert replay == imported and duplicate == imported
+    assert len(verifier.requests) == 2
+    assert len(store.list_policy_versions(author, "policy-from-git").items) == 1
+    with pytest.raises(FleetConflictError, match="different source"):
+        store.import_policy_source(
+            author,
+            import_id="import-42",
+            request=PolicySourceRequest(
+                "github.com/acme/policies", "c" * 40, "policies/claude.json"
+            ),
+        )
+
+
+def test_policy_git_import_and_export_fail_closed_without_partial_state(
+    tmp_path: Path,
+) -> None:
+    """Adapter failure, wrong tenancy, and missing signing never leave authority behind."""
+    verifier = PolicyVerifier(policy_source_bytes())
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite", policy_source_verifier=verifier)
+    seed(store)
+    author = identity("org-a", subject="author-1")
+    request = PolicySourceRequest("github.com/acme/policies", "a" * 40, "policies/claude.json")
+    verifier.failure = PolicySourceVerificationError("synthetic verification failure")
+    with pytest.raises(FleetConfigurationError, match="verification failure"):
+        store.import_policy_source(author, import_id="failed", request=request)
+    assert store.list_policies(author).items == ()
+    with pytest.raises(FleetNotFoundError):
+        store.policy_import(author, "failed")
+
+    verifier.failure = None
+    verifier.content = policy_source_bytes(organization_id="org-b")
+    with pytest.raises(FleetAuthorizationError, match="organization scope"):
+        store.import_policy_source(author, import_id="wrong-tenant", request=request)
+    assert store.list_policies(author).items == ()
+
+    verifier.content = policy_source_bytes()
+    imported = store.import_policy_source(author, import_id="valid", request=request)
+    with pytest.raises(FleetConfigurationError, match="signing is not configured"):
+        store.export_policy_source(author, imported["draft"]["policyId"], 1)
+
+
+def test_policy_export_signs_exact_canonical_provenance_and_api_routes(
+    tmp_path: Path,
+) -> None:
+    """HTTP import/export/get routes preserve canonical documents and safe evidence."""
+    verifier = PolicyVerifier(policy_source_bytes())
+    signer = PolicySigner()
+    store = EnterpriseFleetStore(
+        tmp_path / "fleet.sqlite",
+        now=lambda: 1_000.0,
+        policy_source_verifier=verifier,
+        policy_export_signer=signer,
+    )
+    seed(store)
+    app = EnterpriseFleetApplication(
+        store,
+        authenticator=StaticFleetAuthenticator(
+            {"fleet-admin-token-1234": identity("org-a", subject="author-1")}
+        ),
+    )
+    body = {
+        "importId": "api-import-42",
+        "repository": "github.com/acme/policies",
+        "commitSha": "a" * 40,
+        "path": "policies/claude.json",
+    }
+    status, imported = call_api(app, "POST", "/api/enterprise/policies/imports", body)
+    assert status.startswith("201") and imported["draft"]["state"] == "draft"
+    status, fetched = call_api(app, "GET", "/api/enterprise/policies/imports/api-import-42")
+    assert status.startswith("200") and fetched == imported
+
+    status, exported = call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/policy-from-git/versions/1/export",
+        {},
+    )
+    assert status.startswith("200")
+    assert json.loads(exported["canonicalDocument"]) == exported["document"]
+    assert (
+        exported["sourceSha256"]
+        == hashlib.sha256(exported["canonicalDocument"].encode()).hexdigest()
+    )
+    signed_payload = json.loads(signer.payloads[0])
+    assert signed_payload == {
+        key: value for key, value in exported["provenance"].items() if key != "integrity"
+    }
+    assert (
+        exported["provenance"]["integrity"]["signature"]
+        == base64.b64encode(b"synthetic-signature").decode()
+    )
+    status, malformed = call_api(
+        app,
+        "POST",
+        "/api/enterprise/policies/imports",
+        {**body, "unexpected": True},
+    )
+    assert status.startswith("400") and "schema" in malformed["error"]
 
 
 def test_policy_components_compose_exact_governed_versions_and_explain_authority(
