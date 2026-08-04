@@ -15,6 +15,7 @@ import * as stepfunctions from "aws-cdk-lib/aws-stepfunctions";
 export interface RegionalFaultCellBoundary {
   readonly region: string;
   readonly targetRoleArn: string;
+  readonly targetFunctionArn: string;
   readonly auditBucketArn: string;
   readonly dynamodbTableArns: readonly string[];
   readonly signingKeyArn: string;
@@ -40,6 +41,11 @@ function requireCell(cell: RegionalFaultCellBoundary, label: string): void {
   }
   if (!bucketPattern.test(cell.auditBucketArn)) {
     throw new Error(`${label} fault audit bucket ARN is invalid`);
+  }
+  if (!new RegExp(
+    `^arn:(aws|aws-us-gov|aws-cn):lambda:${cell.region}:\\d{12}:function:[A-Za-z0-9-_]{1,64}$`,
+  ).test(cell.targetFunctionArn)) {
+    throw new Error(`${label} fault target function ARN is invalid`);
   }
   if (
     cell.dynamodbTableArns.length !== 4
@@ -109,6 +115,7 @@ export class RegionalFaultControllerStack extends cdk.Stack {
     for (const cell of [props.primary, props.recovery]) {
       if (
         !cell.targetRoleArn.startsWith(`${deploymentPrefix}iam::${deploymentAccount}:role/`)
+        || !cell.targetFunctionArn.startsWith(`${deploymentPrefix}lambda:${cell.region}:${deploymentAccount}:function:`)
         || !cell.auditBucketArn.startsWith(`${deploymentPrefix}s3:::`)
         || !cell.signingKeyArn.startsWith(`${deploymentPrefix}kms:${cell.region}:${deploymentAccount}:key/`)
         || cell.dynamodbTableArns.some((arn) => !arn.startsWith(`${deploymentPrefix}dynamodb:${cell.region}:${deploymentAccount}:table/`))
@@ -154,7 +161,11 @@ export class RegionalFaultControllerStack extends cdk.Stack {
     const probeFunction = new lambda.Function(this, "FaultProbe", {
       ...commonFunction,
       handler: "scripts.regional_fault_probe_lambda.handler",
-      description: "Fail-closed Regional fault probe gate; no provider authority",
+      description: "Target-role Regional provider probe with fail-closed preconditions",
+      environment: {
+        PRIMARY_FAULT_TARGET_FUNCTION_ARN: props.primary.targetFunctionArn,
+        RECOVERY_FAULT_TARGET_FUNCTION_ARN: props.recovery.targetFunctionArn,
+      },
     });
     const cleanupFunction = new lambda.Function(this, "FaultCleanup", {
       ...commonFunction,
@@ -176,6 +187,7 @@ export class RegionalFaultControllerStack extends cdk.Stack {
 
     const cellEnvironment = (prefix: string, cell: RegionalFaultCellBoundary): Record<string, string> => ({
       [`${prefix}_FAULT_TARGET_ROLE_ARN`]: cell.targetRoleArn,
+      [`${prefix}_FAULT_TARGET_FUNCTION_ARN`]: cell.targetFunctionArn,
       [`${prefix}_FAULT_AUDIT_BUCKET_ARN`]: cell.auditBucketArn,
       [`${prefix}_FAULT_DYNAMODB_TABLE_ARNS`]: JSON.stringify(cell.dynamodbTableArns),
       [`${prefix}_FAULT_SIGNING_KEY_ARN`]: cell.signingKeyArn,
@@ -226,6 +238,10 @@ export class RegionalFaultControllerStack extends cdk.Stack {
     cleanupFunction.addToRolePolicy(new iam.PolicyStatement({
       actions: ["dynamodb:GetItem", "dynamodb:TransactWriteItems"],
       resources: [props.journalTableArn],
+    }));
+    probeFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["lambda:InvokeFunction"],
+      resources: [props.primary.targetFunctionArn, props.recovery.targetFunctionArn],
     }));
     cleanupFunction.addToRolePolicy(new iam.PolicyStatement({
       actions: ["iam:DeleteRolePolicy"],

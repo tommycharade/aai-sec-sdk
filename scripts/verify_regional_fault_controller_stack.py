@@ -17,7 +17,7 @@ class RegionalFaultStackVerificationError(ValueError):
 _COUNTS = {
     "AWS::CDK::Metadata": 1,
     "AWS::CloudWatch::Alarm": 5,
-    "AWS::IAM::Policy": 4,
+    "AWS::IAM::Policy": 5,
     "AWS::IAM::Role": 5,
     "AWS::Lambda::Function": 3,
     "AWS::Logs::LogGroup": 1,
@@ -141,8 +141,15 @@ def verify(
         for handler, (_, props) in by_handler.items()
     }
     probe_props = by_handler["scripts.regional_fault_probe_lambda.handler"][1]
-    if "Environment" in probe_props:
-        raise RegionalFaultStackVerificationError("disabled probe has ambient configuration")
+    probe_environment = _object(
+        _object(probe_props.get("Environment"), "probe environment").get("Variables"),
+        "probe variables",
+    )
+    if set(probe_environment) != {
+        "PRIMARY_FAULT_TARGET_FUNCTION_ARN",
+        "RECOVERY_FAULT_TARGET_FUNCTION_ARN",
+    }:
+        raise RegionalFaultStackVerificationError("probe has ambient configuration")
 
     controller_environment = _object(
         _object(
@@ -167,11 +174,13 @@ def verify(
         or set(controller_environment)
         != {
             "PRIMARY_FAULT_TARGET_ROLE_ARN",
+            "PRIMARY_FAULT_TARGET_FUNCTION_ARN",
             "PRIMARY_FAULT_AUDIT_BUCKET_ARN",
             "PRIMARY_FAULT_DYNAMODB_TABLE_ARNS",
             "PRIMARY_FAULT_SIGNING_KEY_ARN",
             "PRIMARY_FAULT_QUEUE_ARNS",
             "RECOVERY_FAULT_TARGET_ROLE_ARN",
+            "RECOVERY_FAULT_TARGET_FUNCTION_ARN",
             "RECOVERY_FAULT_AUDIT_BUCKET_ARN",
             "RECOVERY_FAULT_DYNAMODB_TABLE_ARNS",
             "RECOVERY_FAULT_SIGNING_KEY_ARN",
@@ -437,8 +446,23 @@ def verify(
     if cleanup_role not in policy_roles.get("iam:DeleteRolePolicy", set()):
         raise RegionalFaultStackVerificationError("cleanup role lacks exact delete authority")
     probe_role = function_roles["scripts.regional_fault_probe_lambda.handler"]
-    if any(probe_role in roles for roles in policy_roles.values()):
-        raise RegionalFaultStackVerificationError("disabled probe has provider IAM authority")
+    if (
+        policy_roles.get("lambda:InvokeFunction") is None
+        or probe_role not in policy_roles["lambda:InvokeFunction"]
+    ):
+        raise RegionalFaultStackVerificationError("probe lacks exact target invocation authority")
+    probe_invoke = [
+        item
+        for item in policy_statements
+        if _actions(item) == {"lambda:InvokeFunction"}
+        and item.get("Resource")
+        == [
+            probe_environment["PRIMARY_FAULT_TARGET_FUNCTION_ARN"],
+            probe_environment["RECOVERY_FAULT_TARGET_FUNCTION_ARN"],
+        ]
+    ]
+    if len(probe_invoke) != 1:
+        raise RegionalFaultStackVerificationError("probe target invocation authority differs")
     put_statements = [item for item in policy_statements if "iam:PutRolePolicy" in _actions(item)]
     if len(put_statements) != 1 or set(put_statements[0].get("Resource", [])) != {
         primary_role_arn,

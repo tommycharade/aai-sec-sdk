@@ -1,5 +1,12 @@
 # Changelog
 
+- Added real target-handler provider canaries for Regional audit, DynamoDB,
+  KMS and queue dependency exercises. The independent probe accepts only exact
+  AWS access denials during the fault and successful digest-bound operations
+  after cleanup; a dedicated canary queue isolates synthetic traffic. Live
+  precondition proof remains fail-closed, so fault injection is still
+  unreachable.
+
 - Added the private coordination-Region Regional fault workflow: an exact
   18-state Standard Step Functions topology, immediate exception compensation,
   independent Scheduler watchdog with retained encrypted DLQ, stack termination

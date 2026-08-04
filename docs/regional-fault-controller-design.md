@@ -11,8 +11,11 @@ leave the target cell unavailable indefinitely.
 boundary. `RegionalFaultControllerStack` now packages the private Lambda,
 Scheduler and Step Functions runtime in the independent coordination Region.
 The deployed workflow still has no usable fault authority: its first task is a
-code-owned probe Lambda that validates the complete request and always fails
-until real target-only AWS probes replace it.
+code-owned probe Lambda whose live precondition phase deliberately fails. Real
+target-role probes now exist for S3 audit writes, four consistent DynamoDB
+reads, KMS public-key/sign operations and a dedicated SQS canary queue, but no
+IAM mutation is reachable until live source-fence, target-runtime and routing
+preconditions are independently proved.
 
 ## Authority contract
 
@@ -168,9 +171,13 @@ dependency:
 | KMS | Exact target signing/verification key calls | Target policy signing and enrolled verification recover |
 | Queue | Exact target evidence/retention queue operations | Revision-bound synthetic job dispatch and zero-conflict check recover |
 
-A mocked error flag is not dependency evidence. The controller must observe a
-real provider denial produced by its exact target boundary and independently
-observe recovery after removal.
+A mocked error flag is not dependency evidence. The witness-region probe
+directly invokes the exact target control-plane Lambda with a non-HTTP internal
+event. The operation therefore runs under the same handler role receiving the
+deny. Only real AWS `AccessDenied`/`AccessDeniedException` observations satisfy
+the outage phases; recovery requires a successful provider operation with
+digest-bound, content-free evidence. Queue probes use a dedicated one-day
+canary queue and never contaminate evidence-worker traffic.
 
 The IAM boundary implementation currently enables `audit`, `dynamodb`, `kms`
 and `queue`. `cognito` fails closed before IAM mutation: API Gateway validates
@@ -223,9 +230,10 @@ weakened DLQ and falsely ready status.
 The authority parser, exact target-handler discovery, code-owned IAM boundaries,
 single-writer lock, Scheduler creation, expiry-safe cleanup handlers and private
 compensated Step Functions topology are implemented and synthetically tested.
-They are not deployed. The probe Lambda deliberately returns an error for every
-phase; therefore the synthesized stack cannot reach the lock or IAM mutation.
-Live target/source preconditions and real dependency/recovery probes are not yet
+They are not deployed. Target-role audit, DynamoDB, KMS and queue denial and
+recovery probes are implemented and contract tested. The precondition phase
+still deliberately returns an error, so the synthesized stack cannot reach the
+lock or IAM mutation. Live target/source/routing preconditions are not yet
 implemented. Cognito remains unsupported rather than simulated. No live fault
 has been injected.
 The generic AWS exercise adapter therefore continues to reject dependency and

@@ -257,12 +257,14 @@ jobs:
           FAULT_SECURITY_ALERT_TOPIC_ARN: arn:aws:sns:eu-central-1:111111111111:aai-sec-security-alerts
           PRIMARY_FAULT_REGION: eu-west-2
           PRIMARY_FAULT_TARGET_ROLE_ARN: arn:aws:iam::111111111111:role/AaiPrimaryHandler
+          PRIMARY_FAULT_TARGET_FUNCTION_ARN: arn:aws:lambda:eu-west-2:111111111111:function:AaiPrimaryHandler
           PRIMARY_FAULT_AUDIT_BUCKET_ARN: arn:aws:s3:::aai-primary-audit-111111
           PRIMARY_FAULT_DYNAMODB_TABLE_ARNS: '["arn:aws:dynamodb:eu-west-2:111111111111:table/AaiControl","arn:aws:dynamodb:eu-west-2:111111111111:table/AaiPresence","arn:aws:dynamodb:eu-west-2:111111111111:table/AaiIdempotency","arn:aws:dynamodb:eu-west-2:111111111111:table/AaiScim"]'
           PRIMARY_FAULT_SIGNING_KEY_ARN: arn:aws:kms:eu-west-2:111111111111:key/mrk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           PRIMARY_FAULT_QUEUE_ARNS: '["arn:aws:sqs:eu-west-2:111111111111:aai-primary-evidence"]'
           RECOVERY_FAULT_REGION: eu-west-1
           RECOVERY_FAULT_TARGET_ROLE_ARN: arn:aws:iam::111111111111:role/AaiRecoveryHandler
+          RECOVERY_FAULT_TARGET_FUNCTION_ARN: arn:aws:lambda:eu-west-1:111111111111:function:AaiRecoveryHandler
           RECOVERY_FAULT_AUDIT_BUCKET_ARN: arn:aws:s3:::aai-recovery-audit-111111
           RECOVERY_FAULT_DYNAMODB_TABLE_ARNS: '["arn:aws:dynamodb:eu-west-1:111111111111:table/AaiControl","arn:aws:dynamodb:eu-west-1:111111111111:table/AaiPresence","arn:aws:dynamodb:eu-west-1:111111111111:table/AaiIdempotency","arn:aws:dynamodb:eu-west-1:111111111111:table/AaiScim"]'
           RECOVERY_FAULT_SIGNING_KEY_ARN: arn:aws:kms:eu-west-1:111111111111:key/mrk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

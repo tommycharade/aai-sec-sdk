@@ -1,9 +1,13 @@
-"""Fail-closed contracts for the not-yet-implemented Regional provider probes."""
+"""Fail-closed contracts for independent Regional provider probes."""
 
 from __future__ import annotations
 
 import copy
+import hashlib
+import importlib
 import importlib.util
+import io
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -22,13 +26,10 @@ def _fixtures() -> Any:
 
 
 def _load() -> Any:
-    path = Path(__file__).parents[1] / "scripts" / "regional_fault_probe_lambda.py"
-    spec = importlib.util.spec_from_file_location("aai_regional_fault_probe", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    root = str(Path(__file__).parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    return importlib.import_module("scripts.regional_fault_probe_lambda")
 
 
 def _event(phase: str = "preconditions") -> dict[str, Any]:
@@ -41,19 +42,66 @@ def _event(phase: str = "preconditions") -> dict[str, Any]:
     }
 
 
+def test_preconditions_remain_fail_closed_until_live_proof_exists() -> None:
+    module = _load()
+    with pytest.raises(module.RegionalFaultProbeError, match="precondition"):
+        module.probe(_event(), now=1000)
+
+
 @pytest.mark.parametrize(
-    "phase",
+    ("phase", "provider_status", "result_status"),
     [
-        "preconditions",
-        "dependency-unavailable",
-        "execution-denied-no-bypass",
-        "dependency-and-target-recovered",
+        ("dependency-unavailable", "denied", "verified-target-provider-denied"),
+        ("execution-denied-no-bypass", "denied", "verified-target-provider-denied"),
+        ("dependency-and-target-recovered", "available", "verified-target-provider-recovered"),
     ],
 )
-def test_every_probe_phase_validates_authority_then_fails_closed(phase: str) -> None:
+def test_target_provider_observation_is_independently_verified(
+    monkeypatch: Any, phase: str, provider_status: str, result_status: str
+) -> None:
     module = _load()
-    with pytest.raises(module.RegionalFaultProbeError, match=f"dynamodb probe for {phase}"):
-        module.probe(_event(phase), now=1000)
+    request = _event(phase)
+    fixtures = _fixtures()
+    authority = fixtures._authority("dynamodb")
+    parsed = module._parse_event(
+        {
+            "schemaVersion": 1,
+            "operation": "acquire",
+            "manifest": fixtures._manifest(),
+            "faultAuthority": authority,
+        },
+        now=1000,
+    )[2]
+    observed = {
+        "authoritySha256": parsed.sha256(),
+        "dependency": "dynamodb",
+        "faultId": authority["faultId"],
+        "operationCount": 0 if provider_status == "denied" else 4,
+        "phase": phase,
+        "providerStatus": provider_status,
+    }
+    if provider_status == "denied":
+        observed["errorCode"] = "AccessDeniedException"
+    observed["evidenceSha256"] = hashlib.sha256(
+        json.dumps(observed, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+    class Lambda:
+        def invoke(self, **_kwargs: Any) -> dict[str, Any]:
+            return {"StatusCode": 200, "Payload": io.BytesIO(json.dumps(observed).encode())}
+
+    class Boto:
+        @staticmethod
+        def client(name: str, **_kwargs: Any) -> Lambda:
+            assert name == "lambda"
+            return Lambda()
+
+    monkeypatch.setattr(module, "boto3", Boto())
+    monkeypatch.setenv(
+        "RECOVERY_FAULT_TARGET_FUNCTION_ARN",
+        "arn:aws:lambda:eu-west-1:111111111111:function:AaiRecoveryHandler",
+    )
+    assert module.probe(request, now=1000)["status"] == result_status
 
 
 def test_unknown_phase_and_fields_fail_before_authority_interpretation() -> None:

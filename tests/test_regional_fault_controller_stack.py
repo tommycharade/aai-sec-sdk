@@ -181,6 +181,9 @@ def _definition() -> dict[str, Any]:
 def _environment() -> dict[str, Any]:
     return {
         "PRIMARY_FAULT_TARGET_ROLE_ARN": PRIMARY_ROLE,
+        "PRIMARY_FAULT_TARGET_FUNCTION_ARN": (
+            "arn:aws:lambda:eu-west-2:111111111111:function:AaiPrimaryHandler"
+        ),
         "PRIMARY_FAULT_AUDIT_BUCKET_ARN": "arn:aws:s3:::aai-primary-audit-111111",
         "PRIMARY_FAULT_DYNAMODB_TABLE_ARNS": json.dumps(
             [f"arn:aws:dynamodb:eu-west-2:111111111111:table/Primary{i}" for i in range(4)]
@@ -190,6 +193,9 @@ def _environment() -> dict[str, Any]:
         ),
         "PRIMARY_FAULT_QUEUE_ARNS": json.dumps(["arn:aws:sqs:eu-west-2:111111111111:primary"]),
         "RECOVERY_FAULT_TARGET_ROLE_ARN": RECOVERY_ROLE,
+        "RECOVERY_FAULT_TARGET_FUNCTION_ARN": (
+            "arn:aws:lambda:eu-west-1:111111111111:function:AaiRecoveryHandler"
+        ),
         "RECOVERY_FAULT_AUDIT_BUCKET_ARN": "arn:aws:s3:::aai-recovery-audit-111111",
         "RECOVERY_FAULT_DYNAMODB_TABLE_ARNS": json.dumps(
             [f"arn:aws:dynamodb:eu-west-1:111111111111:table/Recovery{i}" for i in range(4)]
@@ -224,6 +230,17 @@ def _function(handler: str, *, environment: bool) -> dict[str, Any]:
     }
     if environment:
         props["Environment"] = {"Variables": _environment()}
+    elif handler == "scripts.regional_fault_probe_lambda.handler":
+        props["Environment"] = {
+            "Variables": {
+                "PRIMARY_FAULT_TARGET_FUNCTION_ARN": _environment()[
+                    "PRIMARY_FAULT_TARGET_FUNCTION_ARN"
+                ],
+                "RECOVERY_FAULT_TARGET_FUNCTION_ARN": _environment()[
+                    "RECOVERY_FAULT_TARGET_FUNCTION_ARN"
+                ],
+            }
+        }
     return {"Type": "AWS::Lambda::Function", "Properties": props}
 
 
@@ -265,6 +282,24 @@ def _template() -> dict[str, Any]:
         "Controller": _function(
             "scripts.regional_fault_controller_lambda.handler", environment=True
         ),
+        "ProbePolicy": {
+            "Type": "AWS::IAM::Policy",
+            "Properties": {
+                "Roles": [{"Ref": "ProbeRole"}],
+                "PolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": "lambda:InvokeFunction",
+                            "Effect": "Allow",
+                            "Resource": [
+                                _environment()["PRIMARY_FAULT_TARGET_FUNCTION_ARN"],
+                                _environment()["RECOVERY_FAULT_TARGET_FUNCTION_ARN"],
+                            ],
+                        }
+                    ]
+                },
+            },
+        },
         "ControllerPolicy": {
             "Type": "AWS::IAM::Policy",
             "Properties": {

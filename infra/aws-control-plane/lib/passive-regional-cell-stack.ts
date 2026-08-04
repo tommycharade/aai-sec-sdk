@@ -201,6 +201,11 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       visibilityTimeout: cdk.Duration.minutes(6),
       deadLetterQueue: { queue: retentionDlq, maxReceiveCount: 5 },
     });
+    const regionalFaultCanaryQueue = new sqs.Queue(this, "RegionalFaultCanaryQueue", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+      retentionPeriod: cdk.Duration.days(1),
+    });
     const scheduleDlqs = {
       endpoint: new sqs.Queue(this, "EndpointDetectionDlq", {
         encryption: sqs.QueueEncryption.SQS_MANAGED,
@@ -249,6 +254,7 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       AUDIT_BUCKET: auditReplica.bucketName,
       EVIDENCE_QUEUE_URL: evidenceQueue.queueUrl,
       EVIDENCE_RETENTION_QUEUE_URL: retentionQueue.queueUrl,
+      REGIONAL_FAULT_CANARY_QUEUE_URL: regionalFaultCanaryQueue.queueUrl,
       SECURITY_ALERTS_TOPIC_ARN: alerts.topicArn,
       EVIDENCE_REPORT_BUCKET: evidenceReports?.bucketName ?? "",
       PASSIVE_CELL_MODE: active ? "active" : "standby",
@@ -354,6 +360,7 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       evidenceReports.grantRead(handler);
       evidenceQueue.grantSendMessages(handler);
       retentionQueue.grantSendMessages(handler);
+      regionalFaultCanaryQueue.grantSendMessages(handler);
       alerts.grantPublish(handler);
       policySigningReplica.grant(handler, "kms:Sign", "kms:GetPublicKey");
 
@@ -515,6 +522,12 @@ export class PassiveRegionalCellStack extends cdk.Stack {
     // it is never selected by an operator, UI request or model output.
     new cdk.CfnOutput(this, "RegionalFaultTargetExecutionRoleArn", {
       value: handler.role!.roleArn,
+    });
+    new cdk.CfnOutput(this, "RegionalFaultTargetFunctionArn", {
+      value: handler.functionArn,
+    });
+    new cdk.CfnOutput(this, "RegionalFaultCanaryQueueArn", {
+      value: regionalFaultCanaryQueue.queueArn,
     });
   }
 }

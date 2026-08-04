@@ -23,6 +23,7 @@ function cell(prefix: string): RegionalFaultCellBoundary {
   return {
     region: required(`${prefix}_FAULT_REGION`),
     targetRoleArn: required(`${prefix}_FAULT_TARGET_ROLE_ARN`),
+    targetFunctionArn: required(`${prefix}_FAULT_TARGET_FUNCTION_ARN`),
     auditBucketArn: required(`${prefix}_FAULT_AUDIT_BUCKET_ARN`),
     dynamodbTableArns: arns(`${prefix}_FAULT_DYNAMODB_TABLE_ARNS`),
     signingKeyArn: required(`${prefix}_FAULT_SIGNING_KEY_ARN`),
