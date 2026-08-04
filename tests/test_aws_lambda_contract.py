@@ -651,6 +651,7 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("AUDIT_BUCKET", "audit")
     monkeypatch.setenv("EVIDENCE_REPORT_BUCKET", "evidence-reports")
     monkeypatch.setenv("INTEGRITY_BASELINE_BUCKET", "integrity-baselines")
+    monkeypatch.setenv("DISCOVERY_PAGE_BUCKET", "discovery-pages")
     monkeypatch.setenv("EVIDENCE_QUEUE_URL", "https://sqs.example.invalid/evidence.fifo")
     monkeypatch.setenv(
         "EVIDENCE_RETENTION_QUEUE_URL",
@@ -1155,6 +1156,197 @@ def test_enterprise_assurance_report_routes_enforce_profile_roles(monkeypatch: A
         )["statusCode"]
         == 403
     )
+
+
+def test_discovery_object_pages_preserve_legacy_reads_and_fail_closed_on_loss(
+    monkeypatch: Any,
+) -> None:
+    """Legacy pages remain readable while unavailable object evidence disappears."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-discovery-page-compatibility"
+    generation = "identity-generation-a"
+    observation = {"kind": "identity", "id": "synthetic-user-a", "active": True}
+    normalized = [module._discovery_observation(observation, "identity")]
+    page_hash = hashlib.sha256(
+        json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    table.put_item(
+        Item=module._item_key(
+            tenant,
+            "DISCOVERY_PAGE",
+            f"identity-a:{generation}:00000",
+        )
+        | {
+            "sourceId": "identity-a",
+            "generation": generation,
+            "pageNumber": 0,
+            "pageHash": page_hash,
+            "observations": normalized,
+        }
+    )
+    source = {
+        "sourceId": "identity-a",
+        "sourceKind": "identity",
+        "generation": generation,
+        "pageCount": 1,
+    }
+    assert module._discovery_generation_observations(tenant, source) == normalized
+
+    staged_generation = "identity-generation-b"
+    table.put_item(
+        Item=module._item_key(
+            tenant,
+            "DISCOVERY_GENERATION",
+            f"identity-a:{staged_generation}",
+        )
+        | {
+            "sourceId": "identity-a",
+            "sourceKind": "identity",
+            "generation": staged_generation,
+            "pageCount": 1,
+            "pageStorage": "s3_versioned_v1",
+            "state": "uploading",
+        }
+    )
+    module._put_discovery_generation_page(
+        tenant,
+        "identity-a",
+        staged_generation,
+        0,
+        {"observations": [observation]},
+    )
+    object_source = {
+        **source,
+        "generation": staged_generation,
+        "pageStorage": "s3_versioned_v1",
+    }
+    assert module._discovery_generation_observations(tenant, object_source) == normalized
+    reads_before_oversized_metadata = len(module.S3.get_requests)
+    assert (
+        module._discovery_generation_observations(
+            tenant,
+            {**object_source, "pageCount": 21},
+        )
+        == []
+    )
+    assert len(module.S3.get_requests) == reads_before_oversized_metadata
+    pointer = table.items[
+        (
+            f"TENANT#{tenant}",
+            f"DISCOVERY_PAGE#identity-a:{staged_generation}:00000",
+        )
+    ]
+    module.S3.put_object(
+        Bucket="discovery-pages",
+        Key=pointer["pageObjectKey"],
+        Body=b'{"synthetic":"newer-untrusted-version"}',
+    )
+    assert module._discovery_generation_observations(tenant, object_source) == normalized
+    object_digest = pointer.pop("pageObjectSha256")
+    assert module._discovery_generation_observations(tenant, object_source) == []
+    pointer["pageObjectSha256"] = object_digest
+    del module.S3.objects[(pointer["pageObjectKey"], pointer["pageObjectVersionId"])]
+    assert module._discovery_generation_observations(tenant, object_source) == []
+
+    oversized_generation = "identity-generation-oversized"
+    table.put_item(
+        Item=module._item_key(
+            tenant,
+            "DISCOVERY_GENERATION",
+            f"identity-a:{oversized_generation}",
+        )
+        | {
+            "sourceId": "identity-a",
+            "sourceKind": "identity",
+            "generation": oversized_generation,
+            "pageCount": 1,
+            "pageStorage": "s3_versioned_v1",
+            "state": "uploading",
+        }
+    )
+    with pytest.raises(ValueError, match="1 to 1000"):
+        module._put_discovery_generation_page(
+            tenant,
+            "identity-a",
+            oversized_generation,
+            0,
+            {
+                "observations": [
+                    {"kind": "identity", "id": f"user-{index}", "active": True}
+                    for index in range(1_001)
+                ]
+            },
+        )
+
+
+def test_discovery_object_pages_commit_the_twenty_thousand_record_envelope(
+    monkeypatch: Any,
+) -> None:
+    """The documented maximum is accepted with fixed twenty-object fan-out."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-discovery-maximum"
+    source_id = "identity-maximum"
+    generation = "identity-maximum-generation"
+    now = int(time.time())
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(
+            tenant,
+            "DISCOVERY_GENERATION",
+            f"{source_id}:{generation}",
+        )
+        | {
+            "tenant_id": tenant,
+            "sourceId": source_id,
+            "sourceKind": "identity",
+            "generation": generation,
+            "expectedRevision": 0,
+            "observedAt": now,
+            "expiresAt": now + 300,
+            "pageCount": 20,
+            "pageStorage": "s3_versioned_v1",
+            "state": "uploading",
+            "createdAt": now,
+        }
+    )
+    page_hashes = []
+    for page_number in range(20):
+        result = module._put_discovery_generation_page(
+            tenant,
+            source_id,
+            generation,
+            page_number,
+            {
+                "observations": [
+                    {
+                        "kind": "identity",
+                        "id": f"synthetic-user-{page_number:02d}-{index:04d}",
+                        "active": True,
+                    }
+                    for index in range(1_000)
+                ]
+            },
+        )
+        page_hashes.append(result["pageHash"])
+
+    committed = module._commit_discovery_generation(
+        tenant,
+        source_id,
+        generation,
+        {"pageHashes": page_hashes},
+        "synthetic-scale-acceptance",
+    )
+    assert committed["observationCount"] == 20_000
+    assert committed["pageCount"] == 20
+    assert committed["pageStorage"] == "s3_versioned_v1"
+    assert len(module._discovery_generation_observations(tenant, committed)) == 20_000
+    page_records = [
+        item
+        for (pk, sk), item in table.items.items()
+        if pk == f"TENANT#{tenant}" and sk.startswith(f"DISCOVERY_PAGE#{source_id}:")
+    ]
+    assert len(page_records) == 20
+    assert all("observations" not in item for item in page_records)
 
 
 def test_service_identity_lifecycle_is_one_time_scoped_and_evidenced(monkeypatch: Any) -> None:
@@ -10598,6 +10790,25 @@ def test_aws_integrity_baselines_are_private_versioned_and_handler_scoped() -> N
     assert 'CfnOutput(this, "IntegrityBaselineBucketName"' in stack
 
 
+def test_aws_discovery_pages_are_private_versioned_and_handler_scoped() -> None:
+    """Fleet inventory payloads require retained exact-version private storage."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    start = stack.index('new s3.Bucket(this, "DiscoveryPageBucket"')
+    end = stack.index("});", start)
+    bucket = stack[start:end]
+    assert "versioned: true" in bucket
+    assert "s3.BucketEncryption.S3_MANAGED" in bucket
+    assert "s3.BlockPublicAccess.BLOCK_ALL" in bucket
+    assert "enforceSSL: true" in bucket
+    assert "cdk.RemovalPolicy.RETAIN" in bucket
+    assert 'discoveryPages.arnForObjects("tenant=*")' in stack
+    assert "discoveryPages.grantReadWrite(handler)" not in stack
+    assert "DISCOVERY_PAGE_BUCKET: discoveryPages.bucketName" in stack
+    assert 'CfnOutput(this, "DiscoveryPageBucketName"' in stack
+
+
 def test_aws_dynamic_groups_have_a_monitored_internal_reconciliation_schedule() -> None:
     """Approved dynamic rules must converge without relying on a browser session."""
     stack = (
@@ -13723,7 +13934,6 @@ def test_discovery_connector_commits_complete_paginated_generation_atomically(
         )["statusCode"]
         == 403
     )
-
     base = f"/api/discovery-ingest/{tenant}/github/generations"
     generation = {
         "generation": "github-page-set-1",
@@ -13782,6 +13992,24 @@ def test_discovery_connector_commits_complete_paginated_generation_atomically(
         assert response["statusCode"] == 201
         page_hashes.append(json.loads(response["body"])["pageHash"])
 
+    first_page_key = (
+        f"TENANT#{tenant}",
+        "DISCOVERY_PAGE#github:github-page-set-1:00000",
+    )
+    first_page_record = table.items[first_page_key]
+    assert first_page_record["pageStorage"] == "s3_versioned_v1"
+    assert "observations" not in first_page_record
+    assert first_page_record["pageObjectKey"].startswith(
+        f"tenant={hashlib.sha256(tenant.encode()).hexdigest()}/"
+    )
+    first_page_object = module.S3.objects[
+        (first_page_record["pageObjectKey"], first_page_record["pageObjectVersionId"])
+    ]
+    assert (
+        hashlib.sha256(first_page_object["Body"]).hexdigest()
+        == first_page_record["pageObjectSha256"]
+    )
+
     before_commit = json.loads(
         _invoke(module, _event("/api/enterprise/discovery", "GET", claims=platform))["body"]
     )
@@ -13798,6 +14026,35 @@ def test_discovery_connector_commits_complete_paginated_generation_atomically(
         ),
     )
     assert bad_commit["statusCode"] == 400
+    original_page_body = first_page_object["Body"]
+    first_page_object["Body"] = original_page_body + b" "
+    tampered_commit = _invoke(
+        module,
+        _event(
+            f"{base}/github-page-set-1/commit",
+            "POST",
+            body={"pageHashes": page_hashes},
+            token=token,
+        ),
+    )
+    assert tampered_commit["statusCode"] == 400
+    first_page_object["Body"] = original_page_body
+    original_page_key = first_page_record["pageObjectKey"]
+    first_page_record["pageObjectKey"] = original_page_key.replace(
+        hashlib.sha256(tenant.encode()).hexdigest(),
+        hashlib.sha256(b"other-tenant").hexdigest(),
+    )
+    cross_tenant_commit = _invoke(
+        module,
+        _event(
+            f"{base}/github-page-set-1/commit",
+            "POST",
+            body={"pageHashes": page_hashes},
+            token=token,
+        ),
+    )
+    assert cross_tenant_commit["statusCode"] == 400
+    first_page_record["pageObjectKey"] = original_page_key
     committed = _invoke(
         module,
         _event(

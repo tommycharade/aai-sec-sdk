@@ -48,6 +48,7 @@ nav:
   - Management UI: ui.md
   - Enterprise fleet: enterprise-fleet.md
   - Agent population discovery: agent-discovery-design.md
+  - Object-backed discovery ingestion: object-backed-discovery-ingestion-design.md
   - AWS-managed discovery connectors: scheduled-discovery-connectors-design.md
   - Endpoint evidence publisher: endpoint-evidence-publisher-design.md
   - Hosted endpoint evidence: hosted-endpoint-evidence.md

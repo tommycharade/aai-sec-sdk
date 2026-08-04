@@ -717,13 +717,16 @@ def test_atomic_publisher_uses_live_revision_and_hash_bound_commit(
     monkeypatch.setattr(module, "_ingestion_request", request)
     monkeypatch.setattr(module.uuid, "uuid4", lambda: types.SimpleNamespace(hex="a" * 32))
     observations = [
-        {"kind": "identity", "id": f"user-{index}", "active": True} for index in range(101)
+        {"kind": "identity", "id": f"user-{index}", "active": True} for index in range(1_001)
     ]
 
     result = module._publish(configuration, "connector-token", observations, now=1_785_000_000)
 
     assert result["revision"] == 8
     assert [method for _, method, _ in calls] == ["POST", "PUT", "PUT", "POST"]
+    assert calls[0][2]["pageCount"] == 2
+    assert len(calls[1][2]["observations"]) == 1_000
+    assert len(calls[2][2]["observations"]) == 1
     assert calls[0][2]["expectedRevision"] == 7
     assert calls[0][2]["pageCount"] == 2
     assert calls[-1][2]["pageHashes"] == [f"{2:064x}", f"{3:064x}"]

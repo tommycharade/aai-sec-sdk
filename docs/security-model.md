@@ -932,6 +932,15 @@ Application bearer theft remains a deployment risk, so production deployments
 must deliver it through a secret manager, rotate it, restrict connector egress,
 and may add cloud workload identity at the API gateway.
 
+New pages are stored in a private, versioned S3 bucket under a server-derived
+tenant-hash prefix. DynamoDB binds the exact object version and SHA-256 digest;
+commit and reconciliation independently verify object size, digest, closed
+schema, tenant/source/generation/page scope, normalized observations and page
+hash. Missing, altered, oversized or cross-tenant object references lower
+assurance and cannot establish coverage. Fixed 20-page fan-out supports at most
+20,000 observations. See [Object-backed discovery
+ingestion](object-backed-discovery-ingestion-design.md).
+
 The operator source directory is a separate read model, not a credential
 store. It strongly reads source and connector records, emits only lifecycle and
 freshness metadata, and excludes both the stored digest and observation

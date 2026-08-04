@@ -44,9 +44,10 @@ _EVENT_FIELDS = frozenset(
 _IDENTIFIER_PATTERN = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
 )
-_MAX_PROVIDER_PAGES = 20
+_MAX_PROVIDER_PAGES = 200
 _MAX_USERS_PER_PAGE = 100
-_MAX_OBSERVATIONS = 2_000
+_INGESTION_PAGE_SIZE = 1_000
+_MAX_OBSERVATIONS = 20_000
 _MAX_RESPONSE_BYTES = 1_000_000
 _REQUEST_TIMEOUT_SECONDS = 10.0
 _PROVIDERS = frozenset({"entra", "intune", "github"})
@@ -344,7 +345,7 @@ def _validated_graph_url(value: str) -> str:
 
 
 def _collect_entra_users(token: str) -> list[dict[str, Any]]:
-    """Collect at most 2,000 content-minimised Entra identity observations."""
+    """Collect at most 20,000 content-minimised Entra identity observations."""
     url: str | None = (
         "https://graph.microsoft.com/v1.0/users?$select=id,accountEnabled,department&$top=100"
     )
@@ -760,8 +761,8 @@ def _publish(
     base = _control_plane_endpoint(configuration["tenantId"], configuration["sourceId"])
     generation = f"{configuration['provider']}-{now}-{uuid.uuid4().hex}"
     pages = [
-        observations[index : index + _MAX_USERS_PER_PAGE]
-        for index in range(0, len(observations), _MAX_USERS_PER_PAGE)
+        observations[index : index + _INGESTION_PAGE_SIZE]
+        for index in range(0, len(observations), _INGESTION_PAGE_SIZE)
     ]
     _ingestion_request(
         base,

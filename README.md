@@ -44,6 +44,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Explainable agent behavior detection](docs/behavior-detection-design.md)
 - [Repository and configuration anomaly detection](docs/repository-configuration-anomaly-design.md)
 - [Fleet integrity baseline storage](docs/fleet-integrity-baseline-storage-design.md)
+- [Object-backed discovery ingestion](docs/object-backed-discovery-ingestion-design.md)
 - [Governed alert suppression and deduplication](docs/alert-suppression-design.md)
 - [Endpoint evidence publisher acceptance — 2026-08-01](docs/endpoint-evidence-acceptance-2026-08-01.md)
 - [Policy editor](docs/policy-editor.md)

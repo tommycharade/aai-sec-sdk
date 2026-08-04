@@ -1,12 +1,20 @@
 # Changelog
 
+- Added private, versioned object-backed discovery pages. New generations store
+  normalized payloads outside DynamoDB, bind exact S3 versions and SHA-256
+  digests into tenant-derived page records, and independently verify bytes,
+  closed schema, scope, count and page hash on commit and reconciliation.
+  Fixed 20-page fan-out now supports up to 20,000 observations; tampering,
+  partial references, cross-tenant keys and unavailable storage fail closed,
+  while legacy DynamoDB generations remain readable.
+
 - Added private, versioned fleet integrity baseline storage for newly committed
   source-control generations. Exact S3 object versions and SHA-256 digests are
   committed into DynamoDB, independently revalidated before detection and
   cached once per invocation across matching agents. Missing, partial,
   oversized or tampered objects fail closed; legacy DynamoDB generations remain
-  compatible. The existing 2,000-observation ingestion bound is unchanged and
-  is documented rather than overstated as unlimited fleet scale.
+  compatible. Object-backed discovery now raises the separate ingestion bound
+  to 20,000 observations without claiming unlimited fleet scale.
 
 - Added independently derived repository and configuration anomaly detection
   for Claude Code and Codex. Governed alert-only rules compare complete,

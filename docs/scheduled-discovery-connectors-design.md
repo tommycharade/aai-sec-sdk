@@ -118,10 +118,10 @@ The GitHub collector may contact only `api.github.com` at the fixed
 origin. The service supplies the API version, sort order, pagination and page
 size; browser input cannot change a hostname, path or query.
 
-Collection is bounded to 20 pages and 2,000 observations, applies independent request
+Collection is bounded to 20 object-backed pages and 20,000 observations, applies independent request
 timeouts, rejects duplicate or malformed identities, and retains only opaque
 object ID, active state, and optional department. GitHub collection has the
-same 20-page and 2,000-observation limits. It rejects duplicate or malformed
+same 20-page and 20,000-observation limits. It rejects duplicate or malformed
 repository IDs and requires every visible active repository to have exactly one
 deployment-owned mapping and every configured repository to be visible.
 Archived, unmapped repositories are ignored. Only the numeric repository ID,
