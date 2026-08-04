@@ -1,5 +1,17 @@
 # Changelog
 
+- Added the private coordination-Region Regional fault workflow: an exact
+  18-state Standard Step Functions topology, immediate exception compensation,
+  independent Scheduler watchdog with retained encrypted DLQ, stack termination
+  protection, isolated least-privilege roles, content-free workflow logging and
+  five security alarms. Its first
+  probe task deliberately fails closed, so synthesis cannot currently reach a
+  lock or IAM mutation. A dedicated CI verifier rejects public execution,
+  precondition bypass, missing compensation, broad IAM and falsely ready state.
+  Fault acquisition now atomically rejects retained evidence and advanced
+  duplicate workflows; attach rejects incomplete or competing live inline
+  policy inventories.
+
 - Added the Regional fault-controller Lambda primitives: an exact
   single-writer journal lock, independent Scheduler watchdog, code-owned
   audit/DynamoDB/KMS/queue deny boundaries, watchdog-before-mutation proof,

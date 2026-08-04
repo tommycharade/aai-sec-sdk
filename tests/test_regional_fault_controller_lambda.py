@@ -144,14 +144,42 @@ def _config() -> Any:
         "aai-sec-regional-fault-watchdogs",
         "arn:aws:iam::111111111111:role/FaultWatchdog",
         "arn:aws:lambda:eu-central-1:111111111111:function:AaiSecFaultCleanup",
+        "arn:aws:sqs:eu-central-1:111111111111:aai-sec-fault-watchdog-dlq",
     )
+
+
+def test_environment_requires_exact_watchdog_dlq_and_cell_maps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    expected = _config()
+    for prefix, cell in (("PRIMARY", expected.primary), ("RECOVERY", expected.recovery)):
+        monkeypatch.setenv(f"{prefix}_FAULT_TARGET_ROLE_ARN", cell.role_arn)
+        monkeypatch.setenv(f"{prefix}_FAULT_AUDIT_BUCKET_ARN", cell.audit_bucket_arn)
+        monkeypatch.setenv(f"{prefix}_FAULT_DYNAMODB_TABLE_ARNS", json.dumps(cell.table_arns))
+        monkeypatch.setenv(f"{prefix}_FAULT_SIGNING_KEY_ARN", cell.signing_key_arn)
+        monkeypatch.setenv(f"{prefix}_FAULT_QUEUE_ARNS", json.dumps(cell.queue_arns))
+    monkeypatch.setenv("TRANSITION_JOURNAL_TABLE_NAME", expected.journal_table_name)
+    monkeypatch.setenv("FAULT_WATCHDOG_SCHEDULE_GROUP", expected.schedule_group_name)
+    monkeypatch.setenv("FAULT_WATCHDOG_ROLE_ARN", expected.scheduler_role_arn)
+    monkeypatch.setenv("FAULT_CLEANUP_FUNCTION_ARN", expected.cleanup_function_arn)
+    monkeypatch.setenv("FAULT_WATCHDOG_DLQ_ARN", expected.watchdog_dlq_arn)
+    assert module.ControllerConfig.from_environment() == expected
+    monkeypatch.delenv("FAULT_WATCHDOG_DLQ_ARN")
+    with pytest.raises(module.RegionalFaultControllerError, match="DLQ"):
+        module.ControllerConfig.from_environment()
 
 
 class FakeDynamoDB:
     """Minimal stateful DynamoDB contract for lock sequencing tests."""
 
-    def __init__(self, item: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        item: dict[str, Any] | None = None,
+        evidence: dict[str, Any] | None = None,
+    ) -> None:
         self.item = item
+        self.evidence = evidence
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def put_item(self, **kwargs: Any) -> None:
@@ -162,6 +190,8 @@ class FakeDynamoDB:
 
     def get_item(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(("get_item", kwargs))
+        if kwargs["Key"]["pk"] == {"S": "REGIONAL_FAULT_EVIDENCE"}:
+            return {"Item": self.evidence} if self.evidence is not None else {}
         return {"Item": self.item} if self.item is not None else {}
 
     def update_item(self, **kwargs: Any) -> None:
@@ -178,6 +208,13 @@ class FakeDynamoDB:
 
     def transact_write_items(self, **kwargs: Any) -> None:
         self.calls.append(("transact_write_items", kwargs))
+        transaction = kwargs["TransactItems"]
+        if "ConditionCheck" in transaction[0]:
+            if self.item is not None or self.evidence is not None:
+                raise FakeClientError("ConditionalCheckFailedException", "TransactWriteItems")
+            self.item = transaction[1]["Put"]["Item"]
+            return
+        self.evidence = transaction[0]["Put"]["Item"]
         self.item = None
 
 
@@ -190,6 +227,8 @@ class Recorder:
     def __getattr__(self, name: str) -> Any:
         def record(**kwargs: Any) -> dict[str, Any]:
             self.calls.append((name, kwargs))
+            if name == "list_role_policies":
+                return {"PolicyNames": [], "IsTruncated": False}
             return {}
 
         return record
@@ -241,6 +280,9 @@ def test_watchdog_is_independent_bounded_and_content_free() -> None:
     assert name == "create_schedule"
     assert call["ScheduleExpression"] == "at(1970-01-01T00:19:40)"
     assert call["ActionAfterCompletion"] == "DELETE"
+    assert call["Target"]["DeadLetterConfig"] == {
+        "Arn": "arn:aws:sqs:eu-central-1:111111111111:aai-sec-fault-watchdog-dlq"
+    }
     payload = json.loads(call["Target"]["Input"])
     assert set(payload) == {"schemaVersion", "faultId", "authoritySha256", "targetCellRole"}
     assert "manifest" not in call["Target"]["Input"]
@@ -258,7 +300,11 @@ def test_apply_uses_only_code_owned_exact_dynamodb_boundary() -> None:
         scheduler=Recorder(),
         now=1000,
     )
-    name, call = iam.calls[0]
+    assert iam.calls[0] == (
+        "list_role_policies",
+        {"RoleName": "RecoveryHandler", "MaxItems": 100},
+    )
+    name, call = iam.calls[1]
     assert name == "put_role_policy"
     assert call["RoleName"] == "RecoveryHandler"
     assert call["PolicyName"] == "AaiSecRegionalFault-42345678-1234-4234-8234-123456789abc"
@@ -268,6 +314,42 @@ def test_apply_uses_only_code_owned_exact_dynamodb_boundary() -> None:
         item for arn in _config().recovery.table_arns for item in (arn, f"{arn}/index/*")
     ]
     assert all(action.startswith("dynamodb:") for action in policy["Statement"][0]["Action"])
+
+
+def test_apply_rejects_another_or_incomplete_live_fault_policy_inventory() -> None:
+    module = _module()
+    dynamodb = FakeDynamoDB({"authoritySha256": {"S": _digest()}, "state": {"S": "WATCHDOG_ARMED"}})
+
+    class Inventory(Recorder):
+        def __init__(self, response: dict[str, Any]) -> None:
+            super().__init__()
+            self.response = response
+
+        def list_role_policies(self, **kwargs: Any) -> dict[str, Any]:
+            self.calls.append(("list_role_policies", kwargs))
+            return self.response
+
+    for response, message in (
+        (
+            {
+                "PolicyNames": ["AaiSecRegionalFault-52345678-1234-4234-8234-123456789abc"],
+                "IsTruncated": False,
+            },
+            "another Regional",
+        ),
+        ({"PolicyNames": [], "IsTruncated": True}, "incomplete"),
+    ):
+        iam = Inventory(response)
+        with pytest.raises(module.RegionalFaultControllerError, match=message):
+            module.execute(
+                _event("apply-deny"),
+                config=_config(),
+                dynamodb=dynamodb,
+                iam=iam,
+                scheduler=Recorder(),
+                now=1000,
+            )
+        assert all(name != "put_role_policy" for name, _ in iam.calls)
 
 
 def test_unsupported_cognito_boundary_fails_before_iam_mutation() -> None:
@@ -304,12 +386,31 @@ def test_single_writer_lock_rejects_overlapping_fault() -> None:
         )
 
 
+def test_acquire_atomically_rejects_retained_evidence_and_writes_one_lock() -> None:
+    module = _module()
+    dynamodb = FakeDynamoDB()
+    module.execute(
+        _event("acquire"),
+        config=_config(),
+        dynamodb=dynamodb,
+        iam=Recorder(),
+        scheduler=Recorder(),
+        now=1000,
+    )
+    transaction = dynamodb.calls[0][1]["TransactItems"]
+    assert transaction[0]["ConditionCheck"]["Key"] == {
+        "pk": {"S": "REGIONAL_FAULT_EVIDENCE"},
+        "sk": {"S": "FAULT#42345678-1234-4234-8234-123456789abc"},
+    }
+    assert transaction[1]["Put"]["Item"]["state"] == {"S": "LOCKED"}
+
+
 def test_same_fault_acquire_is_retry_safe_after_lost_response() -> None:
     module = _module()
     dynamodb = FakeDynamoDB(
         {
             "authoritySha256": {"S": _digest()},
-            "state": {"S": "WATCHDOG_ARMED"},
+            "state": {"S": "LOCKED"},
         }
     )
     result = module.execute(
@@ -321,6 +422,33 @@ def test_same_fault_acquire_is_retry_safe_after_lost_response() -> None:
         now=1000,
     )
     assert result["status"] == "already-completed"
+
+
+def test_completed_authority_and_advanced_duplicate_workflow_cannot_reacquire() -> None:
+    module = _module()
+    for dynamodb in (
+        FakeDynamoDB(
+            {
+                "authoritySha256": {"S": _digest()},
+                "state": {"S": "WATCHDOG_ARMED"},
+            }
+        ),
+        FakeDynamoDB(
+            evidence={
+                "authoritySha256": {"S": _digest()},
+                "status": {"S": "COMPLETE"},
+            }
+        ),
+    ):
+        with pytest.raises(module.RegionalFaultControllerError, match="consumed"):
+            module.execute(
+                _event("acquire"),
+                config=_config(),
+                dynamodb=dynamodb,
+                iam=Recorder(),
+                scheduler=Recorder(),
+                now=1000,
+            )
 
 
 def test_failed_watchdog_creation_can_release_only_the_unarmed_exact_lock() -> None:
