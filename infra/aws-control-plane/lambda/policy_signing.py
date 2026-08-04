@@ -6,6 +6,7 @@ The private key never enters Lambda memory; KMS receives only a SHA-256 digest.
 """
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -94,9 +95,7 @@ def sign_policy_bundle(kms_client, key_id, tenant_id, policy_id, version, config
         raise RuntimeError("policy signing key must be an exact KMS key ARN")
     if isinstance(signed_at, bool) or not isinstance(signed_at, int) or signed_at <= 0:
         raise ValueError("policy signing time must be positive")
-    payload, content_hash = canonical_policy_payload(
-        tenant_id, policy_id, version, configuration
-    )
+    payload, content_hash = canonical_policy_payload(tenant_id, policy_id, version, configuration)
     result = kms_client.sign(
         KeyId=key_id,
         Message=hashlib.sha256(payload).digest(),
@@ -125,6 +124,54 @@ def sign_policy_bundle(kms_client, key_id, tenant_id, policy_id, version, config
             "signedAt": signed_at,
         },
     }
+
+
+def verify_policy_bundle(kms_client, key_id, bundle):
+    """Verify one stored bundle through KMS before reusing it as authority."""
+    if not isinstance(key_id, str) or not KMS_KEY_ARN.fullmatch(key_id):
+        raise RuntimeError("policy verification key must be an exact KMS key ARN")
+    if not isinstance(bundle, dict):
+        raise RuntimeError("policy bundle is malformed")
+    integrity = bundle.get("integrity")
+    if not isinstance(integrity, dict) or set(integrity) != {
+        "algorithm",
+        "keyId",
+        "signature",
+        "signedAt",
+    }:
+        raise RuntimeError("policy signing evidence is malformed")
+    if integrity.get("algorithm") != ALGORITHM or integrity.get("keyId") != key_id:
+        raise RuntimeError("policy signing evidence uses an untrusted key or algorithm")
+    signature_text = integrity.get("signature")
+    if not isinstance(signature_text, str):
+        raise RuntimeError("policy signature is malformed")
+    try:
+        signature = base64.b64decode(signature_text, validate=True)
+    except (binascii.Error, ValueError, TypeError) as error:
+        raise RuntimeError("policy signature is malformed") from error
+    if not signature:
+        raise RuntimeError("policy signature is malformed")
+    payload, content_hash = canonical_policy_payload(
+        bundle.get("tenantId"),
+        bundle.get("policyId"),
+        bundle.get("version"),
+        bundle.get("configuration"),
+    )
+    if not hmac_compare(str(bundle.get("contentHash", "")), content_hash):
+        raise RuntimeError("policy signed content hash is inconsistent")
+    result = kms_client.verify(
+        KeyId=key_id,
+        Message=hashlib.sha256(payload).digest(),
+        MessageType="DIGEST",
+        Signature=signature,
+        SigningAlgorithm=ALGORITHM,
+    )
+    if (
+        result.get("KeyId") != key_id
+        or result.get("SigningAlgorithm") != ALGORITHM
+        or result.get("SignatureValid") is not True
+    ):
+        raise RuntimeError("policy signature verification failed")
 
 
 def bundle_from_record(tenant_id, policy_id, version, record):
