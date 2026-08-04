@@ -1747,6 +1747,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../enterprise-assurance-reports-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise assurance reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../enterprise-integration-design/" class="md-nav__link">
         
   
@@ -2056,6 +2083,17 @@
     <span class="md-ellipsis">
       
         Journey 4a: Establish population coverage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#journey-4b-review-enterprise-assurance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journey 4b: Review enterprise assurance
       
     </span>
   </a>
@@ -2984,6 +3022,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#journey-4b-review-enterprise-assurance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journey 4b: Review enterprise assurance
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3156,6 +3205,29 @@ filters.</p>
 <p>If any source is missing, incomplete, or stale, the journey stops at source
 recovery. The UI must not present a percentage or recommend destructive action
 from absence alone.</p>
+<h3 id="journey-4b-review-enterprise-assurance">Journey 4b: Review enterprise assurance</h3>
+<p><strong>Actor:</strong> Executive sponsor, security leader, auditor or evidence reader.</p>
+<ol>
+<li>Open <strong>Assurance</strong>. The default executive profile shows a bounded,
+   server-derived summary without agent, policy or group-level details.</li>
+<li>Review posture, generation time and every visible blind spot before using
+   the totals. <code>evidence_incomplete</code> is an investigation state, not a passing
+   result.</li>
+<li>Compare population, runtime, policy, exceptions, operational response and
+   durable-evidence sections. Each section exposes a content hash tied to the
+   displayed report.</li>
+<li>An operator with <code>evidence_read</code> may switch to <strong>Auditor</strong> to inspect the
+   bounded policy/group references, discovery breakdowns and least-privilege
+   source routes behind the summary. Other roles cannot request that profile.</li>
+<li>Download the exact server snapshot for review or handoff. Confirm its
+   canonical content hash before relying on it downstream.</li>
+<li>Resolve blind spots in the owning workspace, then request a fresh report;
+   the report itself does not change policy, agents or retained evidence.</li>
+</ol>
+<p>The assurance workspace explicitly does not certify a framework, prove data
+residency or immutable retention, replace endpoint/provider acceptance, or
+guarantee that an unobserved agent does not exist. Those claims require their
+own independently retained evidence.</p>
 <h2 id="journey-5-respond-to-an-incident">Journey 5: Respond to an incident</h2>
 <p><strong>Actor:</strong> Security operations engineer.</p>
 <ol>

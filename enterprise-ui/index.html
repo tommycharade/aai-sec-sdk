@@ -16,7 +16,7 @@
         <link rel="prev" href="../claude-managed-resources/">
       
       
-        <link rel="next" href="../enterprise-integration-design/">
+        <link rel="next" href="../enterprise-assurance-reports-design/">
       
       
         
@@ -1802,6 +1802,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#assurance-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assurance workspace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#group-and-policy-relationship" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1844,6 +1855,33 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-assurance-reports-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise assurance reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2896,6 +2934,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#assurance-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assurance workspace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#group-and-policy-relationship" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2966,6 +3015,7 @@ the central team's operating workflows.</p>
 <p>The recommended navigation is:</p>
 <ul>
 <li>Dashboard</li>
+<li>Assurance</li>
 <li>Coverage</li>
 <li>Groups</li>
 <li>Agents</li>
@@ -3171,8 +3221,26 @@ and must not appear as a failed identity control.</p>
 <td>Configuration backups</td>
 <td>Show backup status and provide controlled restore operations.</td>
 </tr>
+<tr>
+<td>Executive and auditor assurance</td>
+<td>Present server-derived, content-hashed posture summaries with explicit blind spots; restrict entity-level evidence lineage to evidence readers and export the exact viewed snapshot.</td>
+</tr>
 </tbody>
 </table>
+<h2 id="assurance-workspace">Assurance workspace</h2>
+<p><strong>Assurance</strong> is the reporting surface for leadership and assessors. It is not
+a second dashboard and it must not manufacture compliance conclusions. The
+executive profile presents bounded tenant posture, population, runtime,
+policy, exception, operations and evidence summaries without entity details.
+The auditor profile adds only the least-privilege policy, group, discovery and
+source-evidence references required to trace those summaries.</p>
+<p>Both profiles are derived by the control plane from strongly read tenant
+records and expose the same report time, section hashes and canonical content
+hash. The UI makes incomplete evidence prominent, states the report's explicit
+non-guarantees and downloads the exact server response. It never converts
+missing coverage into zero, accepts client-authored posture, or treats a
+download as proof of immutable retention. Auditor detail requires the
+<code>evidence_read</code> capability.</p>
 <h2 id="group-and-policy-relationship">Group and policy relationship</h2>
 <p>A group is the deployment-management boundary. Each group selects one policy
 version and contains zero or more enrolled agents. The UI should show the
