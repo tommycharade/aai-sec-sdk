@@ -54,6 +54,7 @@ def test_policy_source_worker_is_isolated_and_handler_invocation_is_exact() -> N
         value for value in resources.values() if value.get("Type") == "AWS::Cognito::UserPoolDomain"
     ]
     assert len(domains) == 1
+    assert "OperatorUserPoolManagedLogin47105600" in resources
     assert domains[0]["Properties"]["ManagedLoginVersion"] == 2
     domain = domains[0]["Properties"]["Domain"]
     if isinstance(domain, str):

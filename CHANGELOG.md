@@ -1,5 +1,9 @@
 # Changelog
 
+- Preserved the deployed Cognito managed-login CloudFormation logical ID after
+  its token-safe construct migration, preventing routine stack updates from
+  attempting to recreate the already-owned physical domain.
+
 - Added tenant-managed secure webhooks with one-time HMAC keys, bounded
   dual-signature rotation, exact-body receiver verification, durable replay
   claims, persistent FIFO outbox delivery, isolated no-redirect public-egress

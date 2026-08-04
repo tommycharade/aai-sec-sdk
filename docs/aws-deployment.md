@@ -34,6 +34,12 @@ AWS_PROFILE=p1 AWS_REGION=eu-west-2 npm run deploy
 identity configuration through `scripts/deploy_aws_control_plane.py`; do not
 replace it with a direct `npx cdk deploy` command.
 
+The Cognito managed-login domain retains the original deployed CloudFormation
+logical ID even though its construct now uses a token-safe low-level resource.
+Changing or removing that override would make CloudFormation attempt to create
+the same globally unique domain as a second resource. Treat the synthesized
+logical-ID contract as a deployment compatibility guard.
+
 The stack creates:
 
 - Cognito User Pool Managed Login with authorization-code OAuth;

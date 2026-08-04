@@ -619,12 +619,19 @@ export class AwsControlPlaneStack extends cdk.Stack {
       ? unresolvedAccountSuffix
       : this.account.slice(-8);
     const domainPrefix = cdk.Fn.join("", ["aai-sec-", domainSuffix]);
-    new cognito.CfnUserPoolDomain(this, "ManagedLogin", {
+    const managedLogin = new cognito.CfnUserPoolDomain(this, "ManagedLogin", {
       domain: domainPrefix,
       userPoolId: userPool.userPoolId,
       // Version 2 is the current branding-editor managed-login experience.
       managedLoginVersion: 2,
     });
+    // The deployed stack originally created this domain through
+    // userPool.addDomain("ManagedLogin"), whose generated logical ID includes
+    // the parent construct. Preserve that exact CloudFormation identity after
+    // moving to CfnUserPoolDomain for token-safe synthesis; otherwise an update
+    // attempts to create the already-owned physical domain and fails before
+    // applying any unrelated security change.
+    managedLogin.overrideLogicalId("OperatorUserPoolManagedLogin47105600");
     const nativeOperatorGroups = [
       ["PlatformAdmins", "platform-admin", "Tenant administration and break-glass recovery"],
       ["SecurityOperators", "security-operator", "Security monitoring, response and approval operations"],
