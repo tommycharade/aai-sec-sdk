@@ -1,5 +1,14 @@
 # Changelog
 
+- Added scoped, expiring service identities and a separate `/machine/v1` API
+  for non-human control-plane automation. One-time bearer issue, digest-keyed
+  storage, exact route capabilities, optimistic rotation, immediate revocation,
+  content-minimised usage evidence and immutable lifecycle audit all fail
+  closed independently of human Cognito/Entra, delegated and break-glass
+  authority. The private enterprise UI adds a table-first API-access workflow
+  with least-privilege capability help, expiry/unused posture and one-time
+  secret handling.
+
 - Added purpose-specific enterprise assurance reports. The executive profile is
   aggregate-only; the evidence-reader profile adds bounded identifiers and
   least-privilege trace routes. Both preserve unavailable coverage, expose

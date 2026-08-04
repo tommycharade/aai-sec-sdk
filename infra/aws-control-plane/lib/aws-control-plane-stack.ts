@@ -1065,6 +1065,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
     // Discovery connectors authenticate with a revocable source-scoped bearer
     // in the handler. They are deliberately isolated from operator JWT routes.
     api.addRoutes({ path: "/discovery-ingest/{proxy+}", methods: [apigwv2.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration("DiscoveryIngestIntegration", handler) });
+    // Service identities use a separate, versioned non-browser boundary. The
+    // handler verifies the one-time-issued bearer and an explicit route/scope
+    // intersection before translating the request into normal tenant routing.
+    // Human Cognito tokens grant no authority on this route.
+    api.addRoutes({ path: "/machine/{proxy+}", methods: [apigwv2.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration("MachineApiIntegration", handler) });
     api.addRoutes({ path: "/{proxy+}", methods: [apigwv2.HttpMethod.OPTIONS], integration: new integrations.HttpLambdaIntegration("OptionsIntegration", handler) });
     api.addRoutes({ path: "/{proxy+}", methods: [apigwv2.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration("ApiIntegration", handler), authorizer: jwt });
 

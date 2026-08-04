@@ -404,3 +404,20 @@ only a Secrets Manager ARN and the bounded non-secret map; it never accepts or
 stores a provider token. Source rows distinguish provider schedule health,
 credential state and current evidence and show only a redacted organization and
 repository count for GitHub.
+
+## API access
+
+**Administration → API access** manages non-human control-plane authority. It
+is table-first: operators see every retained service identity's state,
+capability summary, last admitted request, expiry and non-secret fingerprint.
+Selecting an identity opens its full capability set, purpose, revision, request
+count and recent content-minimised usage evidence.
+
+Only platform administrators see create, rotate and revoke controls. Creation
+uses typed identity, purpose, expiry and capability fields; each capability has
+inline help and the immutable human-governance exclusions remain visible.
+Plaintext credentials are rendered only in the create or rotate result and the
+operator must acknowledge secure storage before dismissing them. Later reads
+never retrieve the bearer. Read-only operators receive posture without
+authority-changing controls. See
+[Scoped service identities and machine API](service-identities-design.md).

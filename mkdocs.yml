@@ -90,6 +90,7 @@ nav:
   - Managed Claude resources: claude-managed-resources.md
   - Wider enterprise UI: enterprise-ui.md
   - Enterprise assurance reports: enterprise-assurance-reports-design.md
+  - Scoped service identities and machine API: service-identities-design.md
   - Enterprise integration design: enterprise-integration-design.md
   - Runtime attestation design: runtime-attestation-design.md
   - Managed host configuration: managed-host-configuration.md

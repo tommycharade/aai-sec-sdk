@@ -359,6 +359,31 @@ _BREAK_GLASS_MIN_SECONDS = 5 * 60
 _BREAK_GLASS_MAX_SECONDS = 60 * 60
 _BREAK_GLASS_REQUEST_SECONDS = 15 * 60
 _STRONG_AUTH_MAX_AGE_SECONDS = 10 * 60
+
+# Machine identities are deliberately narrower than human roles. They can
+# automate bounded operational work but can never approve their own policy,
+# alter identity governance, invoke break glass, or perform incident response.
+_SERVICE_IDENTITY_CAPABILITIES = frozenset(
+    {
+        "evidence_read",
+        "fleet_write",
+        "inventory_read",
+        "policy_draft_write",
+        "policy_simulation",
+        "runtime_write",
+    }
+)
+_SERVICE_IDENTITY_MAX_SECONDS = 90 * 24 * 60 * 60
+_SERVICE_CAPABILITY_GRANTS = {
+    "evidence_read": frozenset({"evidence_read"}),
+    "fleet_write": frozenset({"fleet_write"}),
+    "inventory_read": frozenset(),
+    "policy_draft_write": frozenset({"policy_write"}),
+    "policy_simulation": frozenset({"policy_simulation"}),
+    # Runtime configuration currently shares some fleet mutation routes. The
+    # versioned machine allowlist below keeps this grant on those exact paths.
+    "runtime_write": frozenset({"fleet_write", "runtime_admin"}),
+}
 _POLICY_VERSION_STATES = frozenset(
     {"draft", "review", "approved", "staged", "active", "rejected", "retired"}
 )
@@ -965,6 +990,8 @@ def _operator_roles(event):
 def _required_mutation_capability(path):
     """Classify a mutating route into one least-privilege capability."""
     normalized = path.removeprefix("/api")
+    if normalized.startswith("/enterprise/identity/service-identities"):
+        return "identity_admin"
     if normalized == "/enterprise/identity/break-glass/requests":
         return "incident_response"
     if normalized.startswith("/enterprise/identity/break-glass/requests/"):
@@ -1052,6 +1079,15 @@ def _operator_authorized(
     )
     if normally_authorized:
         return True
+    service_capabilities = _service_capabilities(event)
+    if service_capabilities:
+        granted = frozenset().union(
+            *(_SERVICE_CAPABILITY_GRANTS[value] for value in service_capabilities)
+        )
+        # Machine identities never inherit delegated or emergency authority.
+        # Their versioned route was already checked independently, and this
+        # second capability check preserves the normal mutation boundary.
+        return capability in granted
     if include_delegated and tenant is not None and resource_scope is not None:
         try:
             if _delegated_operator_authorized(tenant, event, capability, resource_scope):
@@ -1279,7 +1315,7 @@ def _delegated_operator_can_read(tenant, event, kind, scope):
 
 def _filter_enterprise_items(tenant, event, kind, items):
     """Filter tenant inventory for a delegated-only operator or fail closed."""
-    if _operator_roles(event):
+    if _operator_roles(event) or _service_capabilities(event):
         return items
     result = []
     for item in items:
@@ -1287,6 +1323,571 @@ def _filter_enterprise_items(tenant, event, kind, items):
         if scope is not None and _delegated_operator_can_read(tenant, event, kind, scope):
             result.append(item)
     return result
+
+
+def _service_capabilities(event):
+    """Return server-injected machine capabilities after bearer authentication.
+
+    Cognito claims with similar names are intentionally ignored. Only the
+    private marker created by ``_machine_request`` after a live credential
+    lookup can enter this branch.
+    """
+    if not isinstance(event, dict) or event.get("_aai_machine_authenticated") is not True:
+        return frozenset()
+    raw = _claims(event).get("aai:service_capabilities", [])
+    return frozenset(_bounded_claim_values(raw) & _SERVICE_IDENTITY_CAPABILITIES)
+
+
+def _service_identity_view(item, *, now=None):
+    """Project one service identity without bearer material or token digests."""
+    current = int(time.time()) if now is None else int(now)
+    stored_status = item.get("status")
+    status = (
+        "expired"
+        if stored_status == "active" and int(item.get("expires_at", 0)) <= current
+        else stored_status
+    )
+    return {
+        "id": item.get("id", ""),
+        "name": item.get("name", ""),
+        "description": item.get("description", ""),
+        "purpose": item.get("purpose", ""),
+        "capabilities": sorted(item.get("capabilities", [])),
+        "status": status,
+        "revision": int(item.get("revision", 0)),
+        "credentialFingerprint": item.get("credential_fingerprint", ""),
+        "createdAt": int(item.get("created_at", 0)),
+        "createdBy": item.get("created_by", ""),
+        "rotatedAt": int(item["rotated_at"]) if item.get("rotated_at") else None,
+        "expiresAt": int(item.get("expires_at", 0)),
+        "revokedAt": int(item["revoked_at"]) if item.get("revoked_at") else None,
+        "lastUsedAt": int(item["last_used_at"]) if item.get("last_used_at") else None,
+        "lastUsedMethod": item.get("last_used_method") or None,
+        "lastUsedRoute": item.get("last_used_route") or None,
+        "useCount": int(item.get("use_count", 0)),
+    }
+
+
+def _service_identity_audit_record(tenant, event_type, actor, payload, *, now):
+    """Build immutable primary evidence for a machine-authority transition."""
+    event_id = str(uuid.uuid4())
+    redacted = {
+        "event_type": event_type,
+        "actor": actor,
+        "tenant_id": tenant,
+        "occurred_at": now,
+        "payload": payload,
+    }
+    return {
+        **_item_key(tenant, "SERVICE_IDENTITY_AUDIT", f"{now:012d}#{event_id}"),
+        **redacted,
+        "id": event_id,
+        "payload_hash": hashlib.sha256(
+            json.dumps(redacted, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+
+
+def _service_identity_duration(value):
+    """Return a positive one-to-90-day credential duration in seconds."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 90:
+        raise ValueError("expiresInDays must be an integer from 1 to 90")
+    duration = value * 24 * 60 * 60
+    if duration > _SERVICE_IDENTITY_MAX_SECONDS:
+        raise ValueError("service identity credential exceeds the maximum lifetime")
+    return duration
+
+
+def _service_identity_capability_set(value):
+    """Require a non-empty exact set of supported non-human capabilities."""
+    if (
+        not isinstance(value, list)
+        or not 1 <= len(value) <= len(_SERVICE_IDENTITY_CAPABILITIES)
+        or any(not isinstance(item, str) for item in value)
+    ):
+        raise ValueError("service identity capabilities have an invalid schema")
+    capabilities = frozenset(value)
+    if len(capabilities) != len(value) or not capabilities <= _SERVICE_IDENTITY_CAPABILITIES:
+        raise ValueError("service identity capability is unsupported or duplicated")
+    return capabilities
+
+
+def _service_credential(identity_id):
+    """Create one bearer and its digest-keyed server record."""
+    secret = secrets.token_urlsafe(32)
+    token = f"aai_si_{identity_id}.{secret}"
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    return token, f"sha256:{digest[:12]}"
+
+
+def _service_identity_issue(tenant, value, actor):
+    """Create one scoped service identity and return its bearer exactly once."""
+    if not isinstance(value, dict) or set(value) != {
+        "serviceIdentityId",
+        "name",
+        "description",
+        "purpose",
+        "capabilities",
+        "expiresInDays",
+    }:
+        raise ValueError("service identity request has an invalid schema")
+    identity_id = _bounded_identifier(value.get("serviceIdentityId"), "serviceIdentityId")
+    capabilities = _service_identity_capability_set(value.get("capabilities"))
+    duration = _service_identity_duration(value.get("expiresInDays"))
+    now = int(time.time())
+    expires_at = now + duration
+    token, fingerprint = _service_credential(identity_id)
+    description_value = value.get("description")
+    if (
+        not isinstance(description_value, str)
+        or len(description_value.strip()) > 500
+        or any(ord(char) < 32 for char in description_value)
+    ):
+        raise ValueError("description must be bounded text")
+    identity = {
+        **_item_key(tenant, "SERVICE_IDENTITY", identity_id),
+        "tenant_id": tenant,
+        "id": identity_id,
+        "name": _bounded_text(value.get("name"), "name", 120),
+        "description": description_value.strip(),
+        "purpose": _bounded_text(value.get("purpose"), "purpose", 500),
+        "capabilities": sorted(capabilities),
+        "status": "active",
+        "revision": 1,
+        "credential_key": _token_key("SERVICE_IDENTITY", token),
+        "credential_fingerprint": fingerprint,
+        "created_at": now,
+        "created_by": actor,
+        "expires_at": expires_at,
+        "use_count": 0,
+    }
+    pointer = {
+        "pk": _token_key("SERVICE_IDENTITY", token),
+        "sk": "CREDENTIAL",
+        "tenant_id": tenant,
+        "service_identity_id": identity_id,
+        "credential_revision": 1,
+        "status": "active",
+        "expires_at": expires_at,
+        "ttl": expires_at,
+    }
+    payload = {
+        "service_identity_id": identity_id,
+        "capabilities": sorted(capabilities),
+        "expires_at": expires_at,
+        "revision": 1,
+    }
+    audit = _service_identity_audit_record(
+        tenant, "service_identity_created", actor, payload, now=now
+    )
+    try:
+        DYNAMODB.transact_write_items(
+            TransactItems=[
+                _transaction_put(identity, condition="attribute_not_exists(pk)"),
+                _transaction_put(pointer, condition="attribute_not_exists(pk)"),
+                _transaction_put(audit, condition="attribute_not_exists(pk)"),
+            ]
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("service identity already exists") from error
+        raise
+    _export_identity_governance_audit(tenant, "service_identity_created", actor, payload)
+    return {
+        **_service_identity_view(identity, now=now),
+        "credential": {
+            "accessToken": token,
+            "tokenType": "Bearer",
+            "expiresAt": expires_at,
+            "fingerprint": fingerprint,
+        },
+    }
+
+
+def _service_identity_rotate(tenant, identity_id, value, actor):
+    """Atomically replace one active bearer and revoke its previous digest."""
+    if not isinstance(value, dict) or set(value) != {"expectedRevision", "expiresInDays"}:
+        raise ValueError("service identity rotation has an invalid schema")
+    identity_id = _bounded_identifier(identity_id, "serviceIdentityId")
+    expected_revision = _discovery_integer(
+        value.get("expectedRevision"), "expectedRevision", minimum=1
+    )
+    duration = _service_identity_duration(value.get("expiresInDays"))
+    current = TABLE.get_item(
+        Key=_item_key(tenant, "SERVICE_IDENTITY", identity_id), ConsistentRead=True
+    ).get("Item")
+    if not current:
+        raise LookupError("service identity not found")
+    if current.get("status") != "active" or int(current.get("revision", 0)) != expected_revision:
+        raise PolicyConflict("service identity is inactive or changed")
+    now = int(time.time())
+    expires_at = now + duration
+    token, fingerprint = _service_credential(identity_id)
+    revision = expected_revision + 1
+    replacement = {
+        **current,
+        "revision": revision,
+        "credential_key": _token_key("SERVICE_IDENTITY", token),
+        "credential_fingerprint": fingerprint,
+        "rotated_at": now,
+        "rotated_by": actor,
+        "expires_at": expires_at,
+    }
+    old_key = {"pk": current.get("credential_key", ""), "sk": "CREDENTIAL"}
+    old_pointer = TABLE.get_item(Key=old_key, ConsistentRead=True).get("Item")
+    if not old_pointer:
+        raise PolicyConflict("service identity credential state is incomplete")
+    revoked_pointer = {**old_pointer, "status": "revoked", "revoked_at": now, "ttl": now + 86400}
+    new_pointer = {
+        "pk": _token_key("SERVICE_IDENTITY", token),
+        "sk": "CREDENTIAL",
+        "tenant_id": tenant,
+        "service_identity_id": identity_id,
+        "credential_revision": revision,
+        "status": "active",
+        "expires_at": expires_at,
+        "ttl": expires_at,
+    }
+    payload = {
+        "service_identity_id": identity_id,
+        "expires_at": expires_at,
+        "revision": revision,
+    }
+    audit = _service_identity_audit_record(
+        tenant, "service_identity_rotated", actor, payload, now=now
+    )
+    try:
+        DYNAMODB.transact_write_items(
+            TransactItems=[
+                _transaction_put(
+                    replacement,
+                    condition="#status = :active AND revision = :revision",
+                    names={"#status": "status"},
+                    values={":active": "active", ":revision": expected_revision},
+                ),
+                _transaction_put(
+                    revoked_pointer,
+                    condition="#status = :active AND credential_revision = :revision",
+                    names={"#status": "status"},
+                    values={":active": "active", ":revision": expected_revision},
+                ),
+                _transaction_put(new_pointer, condition="attribute_not_exists(pk)"),
+                _transaction_put(audit, condition="attribute_not_exists(pk)"),
+            ]
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("service identity changed during rotation") from error
+        raise
+    _export_identity_governance_audit(tenant, "service_identity_rotated", actor, payload)
+    return {
+        **_service_identity_view(replacement, now=now),
+        "credential": {
+            "accessToken": token,
+            "tokenType": "Bearer",
+            "expiresAt": expires_at,
+            "fingerprint": fingerprint,
+        },
+    }
+
+
+def _service_identity_revoke(tenant, identity_id, value, actor):
+    """Atomically revoke one service identity and its current bearer."""
+    if not isinstance(value, dict) or set(value) != {"expectedRevision", "reason"}:
+        raise ValueError("service identity revocation has an invalid schema")
+    identity_id = _bounded_identifier(identity_id, "serviceIdentityId")
+    expected_revision = _discovery_integer(
+        value.get("expectedRevision"), "expectedRevision", minimum=1
+    )
+    reason = _bounded_text(value.get("reason"), "reason", 500)
+    current = TABLE.get_item(
+        Key=_item_key(tenant, "SERVICE_IDENTITY", identity_id), ConsistentRead=True
+    ).get("Item")
+    if not current:
+        raise LookupError("service identity not found")
+    if current.get("status") != "active" or int(current.get("revision", 0)) != expected_revision:
+        raise PolicyConflict("service identity is inactive or changed")
+    now = int(time.time())
+    revision = expected_revision + 1
+    revoked = {
+        **current,
+        "status": "revoked",
+        "revision": revision,
+        "revoked_at": now,
+        "revoked_by": actor,
+        "revocation_reason": reason,
+    }
+    pointer_key = {"pk": current.get("credential_key", ""), "sk": "CREDENTIAL"}
+    pointer = TABLE.get_item(Key=pointer_key, ConsistentRead=True).get("Item")
+    if not pointer:
+        raise PolicyConflict("service identity credential state is incomplete")
+    revoked_pointer = {**pointer, "status": "revoked", "revoked_at": now, "ttl": now + 86400}
+    payload = {
+        "service_identity_id": identity_id,
+        "reason_hash": hashlib.sha256(reason.encode()).hexdigest(),
+        "revision": revision,
+    }
+    audit = _service_identity_audit_record(
+        tenant, "service_identity_revoked", actor, payload, now=now
+    )
+    try:
+        DYNAMODB.transact_write_items(
+            TransactItems=[
+                _transaction_put(
+                    revoked,
+                    condition="#status = :active AND revision = :revision",
+                    names={"#status": "status"},
+                    values={":active": "active", ":revision": expected_revision},
+                ),
+                _transaction_put(
+                    revoked_pointer,
+                    condition="#status = :active AND credential_revision = :revision",
+                    names={"#status": "status"},
+                    values={":active": "active", ":revision": expected_revision},
+                ),
+                _transaction_put(audit, condition="attribute_not_exists(pk)"),
+            ]
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("service identity changed during revocation") from error
+        raise
+    _export_identity_governance_audit(tenant, "service_identity_revoked", actor, payload)
+    return _service_identity_view(revoked, now=now)
+
+
+def _machine_route_capability(method, path):
+    """Return the exact machine scope for one versioned canonical route.
+
+    This allowlist is intentionally independent from human routing. Adding a
+    new operator endpoint therefore cannot accidentally expose it to an old
+    service credential.
+    """
+    normalized = path.removeprefix("/api")
+    inventory_paths = {
+        "/enterprise/agents",
+        "/enterprise/deployment-config",
+        "/enterprise/deployment-config/history",
+        "/enterprise/deployments",
+        "/enterprise/drift",
+        "/enterprise/groups",
+        "/enterprise/health",
+        "/enterprise/mcp-servers",
+        "/enterprise/organizations",
+        "/enterprise/policies",
+        "/enterprise/projects",
+        "/enterprise/skills",
+        "/enterprise/slo",
+        "/enterprise/templates",
+    }
+    evidence_paths = {
+        "/enterprise/audit",
+        "/enterprise/discovery",
+        "/enterprise/discovery/export",
+        "/enterprise/evidence",
+        "/enterprise/evidence/export",
+        "/enterprise/reports/auditor",
+        "/enterprise/reports/executive",
+    }
+    if method == "GET" and normalized in inventory_paths:
+        return "inventory_read"
+    if method == "GET" and normalized in evidence_paths:
+        return "evidence_read"
+    if method == "GET" and re.fullmatch(
+        r"/enterprise/policies/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/versions(?:/[1-9][0-9]*)?",
+        normalized,
+    ):
+        return "inventory_read"
+    if method == "POST" and re.fullmatch(
+        r"/enterprise/policies/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/versions/[1-9][0-9]*/simulate",
+        normalized,
+    ):
+        return "policy_simulation"
+    if method == "POST" and (
+        normalized in {"/enterprise/policies", "/enterprise/skills", "/enterprise/mcp-servers"}
+        or re.fullmatch(
+            r"/enterprise/policies/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/versions",
+            normalized,
+        )
+    ):
+        return "policy_draft_write"
+    if method == "POST" and (
+        normalized
+        in {
+            "/enterprise/agents/bootstrap",
+            "/enterprise/agents/register",
+            "/enterprise/deployments",
+            "/enterprise/groups",
+            "/enterprise/projects",
+        }
+        or re.fullmatch(
+            r"/enterprise/groups/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/(?:agents|dynamic-membership|policy)",
+            normalized,
+        )
+        or re.fullmatch(
+            r"/enterprise/groups/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/agents/bulk",
+            normalized,
+        )
+    ):
+        return "fleet_write"
+    if method == "DELETE" and re.fullmatch(
+        r"/enterprise/groups/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/agents/"
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+        normalized,
+    ):
+        return "fleet_write"
+    if method == "POST" and (
+        normalized
+        in {
+            "/enterprise/deployment-config",
+            "/enterprise/deployment-config/batch-rollout",
+            "/enterprise/deployment-config/rollback",
+            "/enterprise/templates",
+        }
+        or re.fullmatch(
+            r"/enterprise/deployment-config/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/pause",
+            normalized,
+        )
+    ):
+        return "runtime_write"
+    return None
+
+
+def _machine_request(event, method, path):
+    """Authenticate and translate one `/machine/v1` request for normal routing."""
+    prefix = "/machine/v1/"
+    if not path.startswith(prefix):
+        raise PermissionError("versioned machine API route is required")
+    canonical_path = "/api/" + path.removeprefix(prefix)
+    required = _machine_route_capability(method, canonical_path)
+    if required is None:
+        raise PermissionError("machine API route is not available")
+    token = _bearer(event)
+    pointer = (
+        TABLE.get_item(
+            Key={"pk": _token_key("SERVICE_IDENTITY", token), "sk": "CREDENTIAL"},
+            ConsistentRead=True,
+        ).get("Item")
+        if token
+        else None
+    )
+    now = int(time.time())
+    if not pointer or pointer.get("status") != "active" or int(pointer.get("expires_at", 0)) <= now:
+        raise PermissionError("active service credential is required")
+    tenant = pointer.get("tenant_id")
+    identity_id = pointer.get("service_identity_id")
+    if not isinstance(tenant, str) or not isinstance(identity_id, str):
+        raise PermissionError("active service credential is required")
+    identity = TABLE.get_item(
+        Key=_item_key(tenant, "SERVICE_IDENTITY", identity_id), ConsistentRead=True
+    ).get("Item")
+    try:
+        capabilities = _service_identity_capability_set(
+            identity.get("capabilities") if identity else None
+        )
+    except ValueError as error:
+        raise PermissionError("active service credential is required") from error
+    revision = int(pointer.get("credential_revision", 0))
+    if (
+        not identity
+        or identity.get("status") != "active"
+        or int(identity.get("expires_at", 0)) <= now
+        or int(identity.get("revision", 0)) != revision
+        or identity.get("credential_key") != pointer.get("pk")
+        or required not in capabilities
+    ):
+        raise PermissionError("service credential does not permit this request")
+    usage_id = f"{now:012d}#{uuid.uuid4()}"
+    usage = {
+        **_item_key(tenant, "SERVICE_IDENTITY_USAGE", usage_id),
+        "tenant_id": tenant,
+        "id": usage_id,
+        "service_identity_id": identity_id,
+        "credential_revision": revision,
+        "method": method,
+        "route": canonical_path.removeprefix("/api"),
+        "capability": required,
+        "occurred_at": now,
+        "ttl": now + _SERVICE_IDENTITY_MAX_SECONDS,
+    }
+    try:
+        DYNAMODB.transact_write_items(
+            TransactItems=[
+                {
+                    "ConditionCheck": {
+                        "TableName": CONTROL_TABLE_NAME,
+                        "Key": _ddb_item(_item_key(tenant, "SERVICE_IDENTITY", identity_id)),
+                        "ConditionExpression": (
+                            "#status = :active AND revision = :revision AND expires_at > :now"
+                        ),
+                        "ExpressionAttributeNames": {"#status": "status"},
+                        "ExpressionAttributeValues": _ddb_item(
+                            {":active": "active", ":revision": revision, ":now": now}
+                        ),
+                    }
+                },
+                _transaction_put(usage, condition="attribute_not_exists(pk)"),
+            ]
+        )
+        TABLE.update_item(
+            Key=_item_key(tenant, "SERVICE_IDENTITY", identity_id),
+            UpdateExpression=(
+                "SET last_used_at = :now, last_used_method = :method, "
+                "last_used_route = :route ADD use_count :one"
+            ),
+            ConditionExpression=(
+                "#status = :active AND revision = :revision AND expires_at > :now"
+            ),
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":active": "active",
+                ":revision": revision,
+                ":now": now,
+                ":method": method,
+                ":route": canonical_path.removeprefix("/api"),
+                ":one": 1,
+            },
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PermissionError("service credential authority changed") from error
+        raise
+    _audit(
+        tenant,
+        "service_identity_request_admitted",
+        f"service:{identity_id}",
+        {
+            "service_identity_id": identity_id,
+            "credential_revision": revision,
+            "method": method,
+            "route": canonical_path.removeprefix("/api"),
+            "capability": required,
+        },
+    )
+    request_context = dict(event.get("requestContext") or {})
+    request_context["http"] = {
+        **dict(request_context.get("http") or {}),
+        "method": method,
+        "path": canonical_path,
+    }
+    request_context["authorizer"] = {
+        "jwt": {
+            "claims": {
+                "custom:tenant_id": tenant,
+                "sub": f"service:{identity_id}",
+                "aai:identity_type": "service",
+                "aai:service_identity_id": identity_id,
+                "aai:service_capabilities": sorted(capabilities),
+            }
+        }
+    }
+    return {
+        **event,
+        "rawPath": canonical_path,
+        "path": canonical_path,
+        "requestContext": request_context,
+        "_aai_machine_authenticated": True,
+    }
 
 
 def _scim_lifecycle(tenant, *, include_operators=False):
@@ -14653,6 +15254,11 @@ def handler(event, context):
         method, path = _method_path(event)
         if method == "OPTIONS":
             return _response(204, {})
+        if path.startswith("/machine/"):
+            # API Gateway does not apply the human JWT authorizer to this
+            # route. Translate it only after a live digest-keyed bearer check,
+            # immutable admission evidence and an explicit v1 allowlist match.
+            return handler(_machine_request(event, method, path), context)
         if path in ("/agent/enroll", "/api/agent/enroll"):
             if method != "POST":
                 return _response(405, {"error": "method not allowed"})
@@ -15017,13 +15623,79 @@ def handler(event, context):
         if path.startswith("/enterprise/") or path.startswith("/api/enterprise/"):
             suffix = path.split("/enterprise/", 1)[1]
             parts = [p for p in suffix.split("/") if p]
+            if parts[:2] == ["identity", "service-identities"]:
+                # Canonical tenant roles may inspect secret-free posture and
+                # usage. Only the platform-admin wildcard may change machine
+                # authority; delegated and emergency grants never qualify.
+                authorized = (
+                    bool(_operator_roles(event))
+                    if method == "GET"
+                    else _operator_authorized(
+                        event,
+                        "identity_admin",
+                        tenant,
+                        include_break_glass=False,
+                        include_delegated=False,
+                    )
+                )
+                if not authorized:
+                    return _response(
+                        403,
+                        {
+                            "error": (
+                                "service identity posture requires a tenant role"
+                                if method == "GET"
+                                else "service identity administration requires platform authority"
+                            )
+                        },
+                    )
+                if method == "GET" and len(parts) == 2:
+                    identities = [
+                        _service_identity_view(item)
+                        for item in _list(tenant, "SERVICE_IDENTITY", consistent_read=True)
+                    ]
+                    identities.sort(key=lambda item: (item["name"].lower(), item["id"]))
+                    return _response(200, {"items": identities, "nextCursor": None})
+                if method == "POST" and len(parts) == 2:
+                    return _response(201, _service_identity_issue(tenant, _body(event), actor))
+                if method == "POST" and len(parts) == 4 and parts[3] == "rotate":
+                    return _response(
+                        201,
+                        _service_identity_rotate(tenant, parts[2], _body(event), actor),
+                    )
+                if method == "POST" and len(parts) == 4 and parts[3] == "revoke":
+                    return _response(
+                        200,
+                        _service_identity_revoke(tenant, parts[2], _body(event), actor),
+                    )
+                if method == "GET" and len(parts) == 4 and parts[3] == "usage":
+                    identity_id = _bounded_identifier(parts[2], "serviceIdentityId")
+                    if not TABLE.get_item(
+                        Key=_item_key(tenant, "SERVICE_IDENTITY", identity_id),
+                        ConsistentRead=True,
+                    ).get("Item"):
+                        raise LookupError("service identity not found")
+                    usage = [
+                        {
+                            "id": item.get("id", ""),
+                            "method": item.get("method", ""),
+                            "route": item.get("route", ""),
+                            "capability": item.get("capability", ""),
+                            "credentialRevision": int(item.get("credential_revision", 0)),
+                            "occurredAt": int(item.get("occurred_at", 0)),
+                        }
+                        for item in _list(tenant, "SERVICE_IDENTITY_USAGE", consistent_read=True)
+                        if item.get("service_identity_id") == identity_id
+                    ]
+                    usage.sort(key=lambda item: (item["occurredAt"], item["id"]), reverse=True)
+                    return _response(200, {"items": usage[:100], "truncated": len(usage) > 100})
             if (
                 method == "GET"
                 and len(parts) == 2
                 and parts[0] == "reports"
                 and parts[1] in {"executive", "auditor"}
             ):
-                if not _operator_roles(event):
+                if not (_operator_roles(event) or _service_capabilities(event)):
                     return _response(
                         403,
                         {"error": "enterprise assurance reports require a tenant role"},
@@ -15234,7 +15906,7 @@ def handler(event, context):
             if method == "GET" and parts == ["capabilities"]:
                 return _response(200, _fleet(tenant)["capabilities"])
             if method == "GET" and parts in (["discovery"], ["discovery", "export"]):
-                if not _operator_roles(event):
+                if not (_operator_roles(event) or _service_capabilities(event)):
                     return _response(
                         403,
                         {"error": "tenant-wide discovery requires a tenant operator role"},
@@ -15602,7 +16274,7 @@ def handler(event, context):
                 if not deployment:
                     return _response(404, {"error": "deployment not found"})
                 scope = _delegated_item_scope(tenant, "DEPLOYMENT", deployment)
-                if not _operator_roles(event) and (
+                if not (_operator_roles(event) or _service_capabilities(event)) and (
                     scope is None
                     or not _delegated_operator_can_read(tenant, event, "DEPLOYMENT", scope)
                 ):
@@ -15932,7 +16604,7 @@ def handler(event, context):
                 if not policy:
                     return _response(404, {"error": "policy not found"})
                 scope = _delegated_item_scope(tenant, "POLICY", policy)
-                if not _operator_roles(event) and (
+                if not (_operator_roles(event) or _service_capabilities(event)) and (
                     scope is None
                     or not _delegated_operator_can_read(tenant, event, "POLICY", scope)
                 ):
@@ -15960,7 +16632,7 @@ def handler(event, context):
                     Key=_item_key(tenant, "POLICY", policy_id), ConsistentRead=True
                 ).get("Item")
                 scope = _delegated_item_scope(tenant, "POLICY", policy or {})
-                if not _operator_roles(event) and (
+                if not (_operator_roles(event) or _service_capabilities(event)) and (
                     scope is None
                     or not _delegated_operator_can_read(tenant, event, "POLICY", scope)
                 ):
