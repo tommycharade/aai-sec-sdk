@@ -7,7 +7,11 @@ import hashlib
 import json
 import re
 import subprocess
+import zipfile
 from pathlib import Path
+
+ASSURANCE_BUNDLE = "customer-assurance-pack.zip"
+ASSURANCE_MANIFEST = "BUNDLE-MANIFEST.json"
 
 
 def digest(path: Path) -> str:
@@ -18,6 +22,51 @@ def digest(path: Path) -> str:
 def fail(message: str) -> None:
     """Raise a consistent fail-closed verification error."""
     raise ValueError(message)
+
+
+def verify_assurance_bundle(path: Path) -> None:
+    """Verify exact bundle membership and every embedded evidence-file digest."""
+    if not path.is_file() or path.stat().st_size == 0:
+        fail(f"missing or empty evidence file: {path.name}")
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        if len(names) != len(set(names)) or ASSURANCE_MANIFEST not in names:
+            fail("assurance bundle has duplicate files or no internal manifest")
+        if any(
+            Path(name).is_absolute() or ".." in Path(name).parts or name.endswith("/")
+            for name in names
+        ):
+            fail("assurance bundle contains an unsafe path")
+        manifest = json.loads(archive.read(ASSURANCE_MANIFEST))
+        if (
+            manifest.get("schema_version") != 1
+            or manifest.get("pack_id") != "aai-security-customer-assurance"
+        ):
+            fail("assurance bundle identity is invalid")
+        entries = manifest.get("files")
+        if not isinstance(entries, list):
+            fail("assurance bundle file manifest is invalid")
+        expected: dict[str, str] = {}
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {"path", "sha256"}:
+                fail("assurance bundle file entry is invalid")
+            name = entry["path"]
+            checksum = entry["sha256"]
+            if (
+                not isinstance(name, str)
+                or name in expected
+                or not isinstance(checksum, str)
+                or re.fullmatch(r"[0-9a-f]{64}", checksum) is None
+            ):
+                fail("assurance bundle file entry is malformed or duplicated")
+            expected[name] = checksum
+        if set(names) != set(expected) | {ASSURANCE_MANIFEST}:
+            fail("assurance bundle membership does not match its manifest")
+        if "assurance/customer-assurance-pack.json" not in expected:
+            fail("assurance bundle omits the canonical pack")
+        for name, expected_digest in expected.items():
+            if hashlib.sha256(archive.read(name)).hexdigest() != expected_digest:
+                fail(f"assurance bundle hash mismatch: {name}")
 
 
 def main() -> int:
@@ -43,6 +92,7 @@ def main() -> int:
     for path in (checksum_file, manifest_file, metadata_file):
         if not path.is_file() or path.stat().st_size == 0:
             fail(f"missing or empty evidence file: {path.name}")
+    verify_assurance_bundle(directory / ASSURANCE_BUNDLE)
 
     checksums: dict[str, str] = {}
     for line in checksum_file.read_text(encoding="utf-8").splitlines():

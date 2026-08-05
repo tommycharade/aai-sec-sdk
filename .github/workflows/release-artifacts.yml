@@ -42,6 +42,8 @@ jobs:
           include-hidden-files: true
       - name: Generate artifact-specific CycloneDX SBOMs
         run: python scripts/build_artifact_sbom.py dist/*.whl dist/*.tar.gz
+      - name: Build customer assurance evidence bundle
+        run: python -m scripts.build_customer_assurance_bundle dist
       - name: Write release metadata
         run: python scripts/write_release_metadata.py dist --commit "$(git rev-parse HEAD)" --tag "$GITHUB_REF_NAME"
       - name: Generate checksums

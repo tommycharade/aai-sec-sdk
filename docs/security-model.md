@@ -1275,6 +1275,19 @@ snapshot but are not signatures, trusted timestamps, compliance certificates
 or substitutes for Object Lock evidence assurance. See
 [Enterprise assurance reports](enterprise-assurance-reports-design.md).
 
+The customer assurance pack is product-governance evidence, not tenant runtime
+evidence or authorization. Its checked-in manifest binds a named technical
+owner, review dates, required documents, vulnerability targets, exact
+guarantee/non-guarantee statements and independent-assurance status. CI rejects
+expired review, undocumented schema expansion, weakened critical/high targets,
+published-table drift and penetration/certification claims without a reviewed
+evidence document. This reduces stale or misleading buyer claims; it does not
+make maintainers an independent assessor, execute a DPA, prove a real incident
+met its SLA or grant any browser/control-plane authority. Legal approval,
+customer-specific deployment evidence and external assessor reports remain
+separate trust boundaries. See [Customer assurance
+pack](customer-assurance-pack.md).
+
 Case export is a separate read authority available only to canonical evidence
 roles. The server, never the browser, assembles a complete bounded snapshot,
 rechecks case and source-alert revisions, removes raw content, credentials and
