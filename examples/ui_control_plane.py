@@ -20,6 +20,7 @@ from agentic_security import (
     ControlPlaneStore,
     EnterpriseFleetApplication,
     EnterpriseFleetStore,
+    FleetConfigurationError,
     FleetIdentity,
     InMemoryAuditSink,
     InMemoryControlPlaneAuthority,
@@ -54,6 +55,67 @@ class ExampleFleetAlertSink:
     def publish(self, alert: Mapping[str, Any]) -> None:
         """Record one already-redacted alert without adding credentials."""
         self.alerts.append(dict(alert))
+
+
+def _ensure_safe_default_policy(
+    fleet: EnterpriseFleetStore,
+    author: FleetIdentity,
+) -> None:
+    """Create and independently activate the local synthetic default policy.
+
+    Group assignment accepts active governed authority only. The reference
+    seed therefore follows the same author/reviewer lifecycle as production
+    instead of inserting or attaching a draft. State-by-state continuation
+    also repairs a prior local process interrupted during initial seeding.
+    """
+    policy_id = "policy-safe-default"
+    try:
+        policy = fleet.create_policy(
+            author,
+            policy_id=policy_id,
+            name="Safe default policy",
+            configuration={
+                "policy": {"provider": "local_allow_list", "denyByDefault": True},
+                # The reference MCP gateway exposes this synthetic read tool;
+                # production deployments must register their reviewed tools.
+                "tools": {"allowed": ["read_repository", "lookup_record"]},
+                "budgets": {"maxActions": 25, "maxConcurrent": 2},
+            },
+        )
+    except FleetConfigurationError as exc:
+        policies = fleet.list_policies(author).items
+        matching = [item for item in policies if item["id"] == policy_id]
+        if not matching:
+            raise exc
+        policy = matching[0]
+    if int(policy["version"]) > 0:
+        return
+
+    version = int(policy["latestVersion"])
+    reviewer = FleetIdentity("local-reviewer", author.organization_id, frozenset({"admin"}))
+    current = fleet.policy_version(author, policy_id, version)
+    if current["state"] == "draft":
+        current = fleet.submit_policy_version(author, policy_id, version)
+    if current["state"] == "review":
+        current = fleet.decide_policy_version(
+            reviewer,
+            policy_id,
+            version,
+            decision="approved",
+            reason="Independent synthetic reference review",
+        )
+    if current["state"] == "approved":
+        current = fleet.stage_policy_version(reviewer, policy_id, version)
+    if current["state"] == "staged":
+        fleet.activate_policy_version(
+            reviewer,
+            policy_id,
+            version,
+            expected_active_version=0,
+        )
+    active = fleet.list_policies(author).items
+    if not any(item["id"] == policy_id and int(item["version"]) > 0 for item in active):
+        raise FleetConfigurationError("safe default policy did not reach active state")
 
 
 def main() -> None:
@@ -125,22 +187,7 @@ def main() -> None:
         )
     except ValueError:
         pass
-    try:
-        fleet.create_policy(
-            fleet_identity,
-            policy_id="policy-safe-default",
-            name="Safe default policy",
-            configuration={
-                "policy": {"provider": "local_allow_list", "denyByDefault": True},
-                # The reference MCP gateway exposes this synthetic read tool;
-                # production deployments should replace the seed with their
-                # own reviewed tool inventory.
-                "tools": {"allowed": ["read_repository", "lookup_record"]},
-                "budgets": {"maxActions": 25, "maxConcurrent": 2},
-            },
-        )
-    except ValueError:
-        pass
+    _ensure_safe_default_policy(fleet, fleet_identity)
     try:
         fleet.create_group(
             fleet_identity,

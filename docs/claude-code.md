@@ -134,8 +134,11 @@ response. Repeat onboarding without a new bootstrap must also supply
 hook and MCP process refuse unsigned, altered, cross-tenant, unknown-key or
 untrusted policy responses before policy is loaded.
 
-The real-device acceptance run for Claude Code 2.1.220 is recorded in
-[real Claude Code acceptance evidence](real-claude-code-acceptance-evidence-2026-07-27.md).
+The manual real-device acceptance run for Claude Code 2.1.220 is recorded in
+[2026-07-27 evidence](real-claude-code-acceptance-evidence-2026-07-27.md). The
+repeatable exact-binary runner, supported-version matrix and current blocked
+rerun are documented in the [real Claude Code acceptance
+harness](real-claude-code-acceptance-harness.md).
 
 The deployment ID determines which organization/project fleet receives the
 agent registration. The enterprise UI can then show the project alongside
@@ -179,12 +182,12 @@ boundaries. Put the `hooks` object in `.claude/settings.json`; put the
 merge them into one file unless the Claude Code version you are using explicitly
 documents that format.
 
-If you are using the optional management UI, open **Integrations → Claude Code**
-to configure the project root, hook command, MCP command, tool allow-lists, and
-command approval rules. Save the configuration, download the generated host
-configuration, then apply the two objects to their respective Claude Code
-files. The UI control plane must be authenticated and connected to a live
-runtime authority; its localhost reference adapter is for development only.
+If you are using the optional management UI, open **Fleet → Connect agents** to
+create a Claude Code enrollment and obtain the deployment-owned installation
+instructions. Configure native tool and command authority in **Policy**, then
+assign the policy through the agent's group. The UI control plane must be
+authenticated and connected to a live runtime authority; its localhost
+reference adapter is for development only.
 
 ## 1. Install the SDK
 
@@ -285,6 +288,26 @@ isolation, durable audit sinks, telemetry and idempotency are explicitly
 reported as runtime controls requiring MCP/GuardedRuntime or deployment tests;
 they are not falsely treated as enforced by a Claude hook.
 
+## 2b. Run repeatable real-host acceptance
+
+The policy coverage harness above deliberately does not invoke Claude. To
+verify the actual installed host, exact supported binary, native hook decisions
+and guarded MCP connection in a disposable synthetic project, authenticate
+Claude and run:
+
+```bash
+claude auth login
+python3 /absolute/path/to/aai-sec-sdk/scripts/test_real_claude_code.py \
+  --report /tmp/aai-real-claude-acceptance.json
+```
+
+Only exit code `0` is a pass. Unsupported binaries exit `2`; an unavailable
+Claude login or service exits `3`. The report contains fixed outcomes and
+digests but no prompts, arguments, model output, credentials or paths. Review
+the narrow [supported-version matrix and safety
+design](real-claude-code-acceptance-harness.md) before using the result as
+rollout evidence.
+
 ## 3. Add SDK-owned application tools through MCP
 
 The MCP example is a separate process that exposes an explicit registered
@@ -313,8 +336,6 @@ project file should be reviewed like source code because it controls which
 external processes Claude can start. [Claude Code MCP configuration](https://code.claude.com/docs/en/mcp)
 describes project, user, and local scopes.
 
-## 5. Choosing hook versus MCP
-
 ## 4. Managed Skills and MCP servers
 
 The enterprise UI can register reviewed Skills and MCP servers. A policy may
@@ -337,6 +358,8 @@ own managed manifest. It validates Skill digests and rejects insecure HTTP
 MCP URLs. Secret values are supplied by the deployment environment, never by
 the UI or policy JSON. This is configuration provisioning, not sandboxing;
 the SDK gateway and host isolation controls remain necessary.
+
+## 5. Choosing hook versus MCP
 
 Use the hook for host-native operations where Claude Code remains the executor:
 

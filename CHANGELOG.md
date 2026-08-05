@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added a bounded real Claude Code host acceptance runner and an exact,
+  default-deny supported-version matrix. The disposable-project runner proves
+  native allow, denial, approval, project scope and guarded MCP behavior,
+  emits a content-free mode-0600 JSON report, and distinguishes unsupported,
+  failed and externally blocked runs. The current 2.1.220 macOS arm64 rerun is
+  honestly recorded as blocked by expired Claude authentication. The local
+  reference server seed now independently approves and activates its safe
+  default before group assignment, repairing fresh-start MCP acceptance.
+
 - Consolidated the enterprise console into seven task-oriented workspaces:
   Overview, Fleet, Rollouts, Incidents, Policy, Evidence and Admin. All prior
   destinations remain reachable as contextual tabs, legacy hash links remain

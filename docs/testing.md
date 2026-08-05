@@ -32,6 +32,17 @@ evidence. The browser smoke path for the live
 reference server is documented in the enterprise fleet runbook and is used
 before release evidence is accepted.
 
+`scripts/test_real_claude_code.py` is the separate live-host compatibility
+gate. It exact-matches the installed Claude Code version, platform,
+architecture and executable digest against a default-deny reviewed matrix,
+onboards only a disposable synthetic project, and exercises real native
+allow/deny/approval/scope behavior plus the localhost guarded MCP tool. Its
+JSON evidence contains no prompts, tool arguments, results, credentials or
+paths. Authentication/service unavailability is `blocked`, never a pass. The
+script can incur bounded Claude model cost and is not part of `make check` or
+CI; see [Real Claude Code acceptance
+harness](real-claude-code-acceptance-harness.md).
+
 The `regional-fault-controller-iac` job synthesizes the coordination-Region
 Step Functions, Lambda and Scheduler stack from synthetic exact resource maps.
 `scripts/verify_regional_fault_controller_stack.py` independently rejects

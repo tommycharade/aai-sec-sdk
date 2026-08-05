@@ -670,6 +670,31 @@ event correlation. A digest is not anonymization and may be susceptible to
 guessing for low-entropy values, so local JSONL permissions, retention and
 replication remain security controls.
 
+### Real-host acceptance boundary
+
+The Claude Code acceptance harness is evidence collection, never execution
+authority. It measures the resolved local executable and admits a run only for
+an exact version, OS, architecture and SHA-256 tuple in the code-reviewed,
+default-deny matrix. It uses project-only settings, strict MCP configuration,
+an explicit tool set and a disposable synthetic root. Unsupported or changed
+binaries, malformed streams, duplicate/missing terminal results, output/time
+bounds, invalid onboarding and unavailable authentication all fail closed.
+
+Prompts, tool arguments, hook payloads, model results, stderr, credentials and
+paths are untrusted and exist only in bounded temporary process storage or
+memory. The persisted report contains fixed result codes and digests. Denial
+uses a disposable marker to prove no side effect; approval uses a synthetic
+Git executable to prove it was not invoked. The runner never uses a shell and
+terminates the complete process group on timeout.
+
+Exact measurement is software evidence from a trusted operator host, not
+hardware attestation. It cannot prevent an administrator changing process
+memory or the executable during a run, and the Claude process is not a
+sandbox. The localhost MCP scenario proves only the checked-in reference
+integration; it cannot satisfy central policy, MDM, credential, isolation,
+durable-audit, resilience or fleet-scale acceptance. See [Real Claude Code
+acceptance harness](real-claude-code-acceptance-harness.md).
+
 Handlers may return arbitrary application values, but the runtime applies the
 optional tool output normalizer, performs key and common-token content
 redaction, and

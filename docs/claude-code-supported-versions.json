@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "host": "claude-code",
+  "defaultStatus": "unsupported",
+  "versions": [
+    {
+      "version": "2.1.220",
+      "operatingSystem": "darwin",
+      "architecture": "arm64",
+      "installMethod": "native",
+      "status": "accepted",
+      "binarySha256": [
+        "8addc857f3fe64d5a0368af9ee50321b50afb4a6918ba3ef018ab84f5dbbe081"
+      ],
+      "acceptedAt": "2026-07-27",
+      "digestMeasuredAt": "2026-08-05",
+      "evidence": "real-claude-code-acceptance-evidence-2026-07-27.md"
+    }
+  ]
+}
