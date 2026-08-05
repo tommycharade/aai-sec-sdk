@@ -876,6 +876,29 @@ pinned canary; native Windows Codex deny-read does not constrain reads made by
 shell subprocesses. A policy expression requested with multiple outcomes
 resolves deny-first and remains a conflict requiring audited operator repair.
 
+Approved runtime release metadata is a separate deployment-owned boundary. The
+operator API projects only manifests whose exact bundle digest, host/version
+identity and independently verified provenance coverage have passed the same
+fail-closed startup validation used by runtime attestation. Neither a browser
+nor an enrolled endpoint can register a release, supply its approval evidence
+or choose the compliance result. Tenant-wide reads require explicit human
+`inventory_read` authority or the exact machine `inventory_read` scope;
+policy-only and approval-only roles are denied.
+
+Version compliance is calculated from tenant-scoped deployment targets and
+fresh active-agent attestation. Missing release authority, an unapproved target,
+missing or expired evidence, quarantine and version mismatch remain explicit
+non-compliant states, with quarantine taking precedence over release setup.
+The server also requires the exact approved SDK revision
+and complete manifest digest, so a stale compliant flag cannot survive a
+package/gateway/hook manifest change. Bounded tenant-bound cursor pages replace
+an all-or-nothing fleet-size ceiling, and an incomplete page is never complete
+fleet posture. An empty page is not counted as compliant. The projection
+contains artifact digests but no executable bytes, source origin,
+paths, commands, prompts or credentials. It is inventory evidence, not an MDM
+delivery or managed-upgrade claim. See
+[Approved runtime releases and version compliance](runtime-release-compliance-design.md).
+
 ## Dynamic group authority boundary
 
 Dynamic membership changes which policy can authorize an agent, so neither the

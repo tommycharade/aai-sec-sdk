@@ -526,6 +526,24 @@ revision and bounded reason codes without returning local paths or file
 content. Recovery requires restoring approved artifacts and re-enrolling; do
 not clear the retained audit history.
 
+After deployment, operators can inspect the exact release authority and
+tenant-scoped adoption without handling artifact bytes:
+
+```text
+GET /api/enterprise/runtime-releases
+GET /api/enterprise/version-compliance?limit=250
+# Continue only with the opaque nextToken returned by the preceding page.
+GET /api/enterprise/version-compliance?limit=250&nextToken=...
+```
+
+The first route projects only manifests with exact provenance coverage. The
+second compares active agents with each deployment's desired SDK version and
+fresh runtime-attestation evidence in bounded tenant-bound pages. Both require
+explicit human inventory-read authority or an `inventory_read` machine
+identity; policy-only roles are denied. They are read-only: the UI cannot
+upload or approve a runtime release. See [Approved runtime releases and
+version compliance](runtime-release-compliance-design.md).
+
 The stack selects Cognito Managed Login version 2 and declares the AAI Security
 branding style in CloudFormation, including the dark/teal form treatment and
 logo asset. This keeps the authentication handoff visually consistent with the

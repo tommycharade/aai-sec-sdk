@@ -321,6 +321,31 @@ request, or prove that an unobserved side effect did not occur. Operators use
 it to verify activation and investigate outcomes; authorization remains at the
 host execution boundary.
 
+### Approved runtime releases and version compliance
+
+`GET /api/enterprise/runtime-releases` returns the deployment-owned approved
+Claude Code and Codex release catalog. Each row binds an SDK version and source
+revision to separate package, MCP gateway and native-hook digests plus the
+independently verified release-evidence identity. The response never contains
+artifact bytes, source URLs, paths or credentials. An empty deployed manifest
+bundle reports `not_configured`.
+
+`GET /api/enterprise/version-compliance` compares active tenant agents with the
+exact SDK target on their server-owned deployment and fresh runtime attestation.
+It distinguishes compliant, unconfigured, unapproved, quarantined, missing,
+expired and mismatched states, then derives page and deployment totals from
+those rows. Responses contain at most 250 stored-agent records and return a
+tenant-bound continuation token when more records exist. Only an initial
+single-page response has `scope: fleet`; every continuation remains
+`scope: page`, including its final fragment, and is never fleet-wide health. A
+caller cannot submit counts or promote heartbeat
+presence into compliance. Both tenant-wide reads require explicit human
+inventory-read authority or the exact machine `inventory_read` capability.
+Policy-only roles are denied.
+
+See [Approved runtime releases and version compliance](runtime-release-compliance-design.md)
+for the trust boundary, UI journey and remaining managed-upgrade work.
+
 Policies are immutable, tenant-scoped configuration records in this reference
 implementation. A group selects one policy, and membership changes affect only
 group assignment; they do not create, rotate, or revoke the agent's session.

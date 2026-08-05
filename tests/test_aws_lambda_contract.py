@@ -2866,6 +2866,14 @@ def test_machine_api_allowlist_covers_each_scope_and_excludes_human_governance(
     module, _table = _load_handler(monkeypatch)
     assert module._machine_route_capability("GET", "/api/enterprise/agents") == "inventory_read"
     assert (
+        module._machine_route_capability("GET", "/api/enterprise/runtime-releases")
+        == "inventory_read"
+    )
+    assert (
+        module._machine_route_capability("GET", "/api/enterprise/version-compliance")
+        == "inventory_read"
+    )
+    assert (
         module._machine_route_capability("GET", "/api/enterprise/reports/auditor")
         == "evidence_read"
     )
@@ -4529,11 +4537,14 @@ def _managed_package_fixture(
 def _set_runtime_manifests(monkeypatch: Any, manifests: list[dict[str, Any]]) -> None:
     """Install synthetic manifests with an exact release-approval binding."""
     raw = json.dumps(manifests)
-    first = manifests[0]
     approval = {
         "schemaVersion": 1,
         "manifestBundleSha256": hashlib.sha256(raw.encode()).hexdigest(),
-        "approvals": [
+        "approvals": [],
+    }
+    if manifests:
+        first = manifests[0]
+        approval["approvals"] = [
             {
                 "hosts": [manifest["host"] for manifest in manifests],
                 "releaseEvidenceSha256": "9" * 64,
@@ -4542,8 +4553,7 @@ def _set_runtime_manifests(monkeypatch: Any, manifests: list[dict[str, Any]]) ->
                 "sdkVersion": first["sdkVersion"],
                 "sourceOriginDigest": first["sourceOriginDigest"],
             }
-        ],
-    }
+        ]
     monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", raw)
     approval_raw = json.dumps(approval)
     monkeypatch.setenv(
@@ -8346,7 +8356,8 @@ def test_runtime_attestation_binds_heartbeat_and_quarantines_tampering(
     module, table = _load_handler(monkeypatch)
     now = 1_900_000_000
     monkeypatch.setattr(module.time, "time", lambda: now)
-    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
+    runtime_manifest = _runtime_manifest()
+    _set_runtime_manifests(monkeypatch, [runtime_manifest])
     tenant = "tenant-attestation"
     token = "synthetic-attested-agent-session-123456"  # noqa: S105
     project_digest = hashlib.sha256(b"/synthetic/project").hexdigest()
@@ -8688,6 +8699,414 @@ def test_runtime_manifest_approvals_fail_closed_for_unbound_release_evidence(
     set_approval(invalid)
     with pytest.raises(RuntimeError, match="revision does not match"):
         module._runtime_manifests()
+
+
+def test_runtime_release_catalog_exposes_only_approved_content_minimised_metadata(
+    monkeypatch: Any,
+) -> None:
+    """Operators can inspect exact release authority without executable bytes or secrets."""
+    module, _table = _load_handler(monkeypatch)
+    manifests = [_runtime_manifest("claude-code"), _runtime_manifest("codex-cli")]
+    _set_runtime_manifests(monkeypatch, manifests)
+
+    catalog = module._runtime_release_catalog()
+
+    assert catalog["status"] == "configured"
+    assert [release["id"] for release in catalog["releases"]] == [
+        "claude-code:1.1.0",
+        "codex-cli:1.1.0",
+    ]
+    assert catalog["releases"][0] == {
+        "id": "claude-code:1.1.0",
+        "host": "claude-code",
+        "sdkVersion": "1.1.0",
+        "sdkRevision": "a" * 40,
+        "releaseTag": "v1.1.0",
+        "manifestSha256": hashlib.sha256(
+            json.dumps(manifests[0], separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest(),
+        "releaseEvidenceSha256": "9" * 64,
+        "packageSha256": "c" * 64,
+        "gatewaySha256": "d" * 64,
+        "hookSha256": "e" * 64,
+    }
+    encoded = json.dumps(catalog)
+    assert "sourceOriginDigest" not in encoded
+    assert "privateKey" not in encoded
+    assert "packageBase64" not in encoded
+
+
+def test_current_attestation_requires_the_exact_complete_release_manifest(
+    monkeypatch: Any,
+) -> None:
+    """A stale compliant flag cannot authorize after release authority changes."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    manifest = _runtime_manifest()
+    _set_runtime_manifests(monkeypatch, [manifest])
+    tenant = "tenant-release-binding"
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {"id": "dep-a", "sdk_version": "1.1.0"}
+    )
+    agent = {
+        "host": "claude-code",
+        "attestation_status": "compliant",
+        "attestation_expires_at": now + 300,
+        "attestation_sdk_version": "1.1.0",
+        "attestation_sdk_revision": "a" * 40,
+        "attestation_manifest_sha256": "0" * 64,
+    }
+
+    with pytest.raises(PermissionError, match="current approved release"):
+        module._require_current_attestation(tenant, "dep-a", agent)
+
+    agent["attestation_manifest_sha256"] = module._runtime_manifest_digest(manifest)
+    module._require_current_attestation(tenant, "dep-a", agent)
+
+
+def test_version_compliance_is_tenant_scoped_and_derived_from_fresh_attestation(
+    monkeypatch: Any,
+) -> None:
+    """Only live exact approved evidence counts as fleet version compliance."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    _set_runtime_manifests(monkeypatch, [_runtime_manifest("claude-code")])
+    tenant = "tenant-version-compliance"
+    other_tenant = "tenant-version-other"
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-approved")
+        | {"id": "dep-approved", "name": "Approved", "sdk_version": "1.1.0"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-unapproved")
+        | {"id": "dep-unapproved", "name": "Unapproved", "sdk_version": "9.9.9"}
+    )
+
+    def put_agent(
+        agent_id: str,
+        deployment_id: str,
+        *,
+        status: str = "connected",
+        attestation_status: str = "compliant",
+        observed_version: str | None = "1.1.0",
+        observed_revision: str = "a" * 40,
+        manifest_digest: str | None = None,
+        expires_at: int = now + 300,
+    ) -> None:
+        item = module._item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}") | {
+            "id": agent_id,
+            "deployment_id": deployment_id,
+            "host": "claude-code",
+            "status": status,
+            "expires_at": now + 300,
+            "lifecycle_state": "active",
+            "attestation_status": attestation_status,
+            "attestation_expires_at": expires_at,
+            "attestation_sdk_revision": observed_revision,
+            "attestation_manifest_sha256": manifest_digest
+            or module._runtime_manifest_digest(_runtime_manifest()),
+            "attestation_reason_codes": [],
+        }
+        if observed_version is not None:
+            item["attestation_sdk_version"] = observed_version
+        table.put_item(Item=item)
+
+    put_agent("agent-current", "dep-approved")
+    put_agent("agent-expired", "dep-approved", expires_at=now)
+    put_agent("agent-mismatch", "dep-approved", observed_version="1.0.1")
+    put_agent("agent-artifact", "dep-approved", manifest_digest="0" * 64)
+    put_agent("agent-missing", "dep-approved", attestation_status="pending", observed_version=None)
+    put_agent(
+        "agent-quarantined",
+        "dep-approved",
+        status="quarantined",
+        attestation_status="quarantined",
+    )
+    put_agent("agent-unapproved", "dep-unapproved", observed_version="9.9.9")
+    for lifecycle_state in ("revoked", "deleted", "corrupt"):
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"dep-approved:agent-{lifecycle_state}")
+            | {
+                "id": f"agent-{lifecycle_state}",
+                "deployment_id": "dep-approved",
+                "host": "claude-code",
+                "status": "connected",
+                "lifecycle_state": lifecycle_state,
+                "attestation_status": "compliant",
+            }
+        )
+    table.put_item(
+        Item=module._item_key(other_tenant, "AGENT", "dep-other:agent-secret")
+        | {
+            "id": "agent-secret",
+            "deployment_id": "dep-other",
+            "host": "claude-code",
+            "status": "connected",
+            "lifecycle_state": "active",
+        }
+    )
+
+    report = module._version_compliance(tenant, now=now)
+
+    assert report["totalAgents"] == 7
+    assert report["compliantAgents"] == 1
+    assert report["attentionAgents"] == 6
+    assert report["scope"] == "fleet"
+    assert report["hasMore"] is False
+    assert report["nextToken"] is None
+    assert {row["agentId"]: row["status"] for row in report["agents"]} == {
+        "agent-current": "compliant",
+        "agent-artifact": "artifact_mismatch",
+        "agent-expired": "evidence_expired",
+        "agent-mismatch": "version_mismatch",
+        "agent-missing": "evidence_missing",
+        "agent-quarantined": "quarantined",
+        "agent-unapproved": "desired_release_unapproved",
+    }
+    assert "agent-secret" not in json.dumps(report)
+    assert "agent-revoked" not in json.dumps(report)
+    assert "agent-deleted" not in json.dumps(report)
+    assert "agent-corrupt" not in json.dumps(report)
+    assert report["deployments"] == [
+        {
+            "deploymentId": "dep-approved",
+            "name": "Approved",
+            "desiredSdkVersion": "1.1.0",
+            "targetApproved": True,
+            "agentCount": 6,
+            "compliantAgents": 1,
+            "attentionAgents": 5,
+            "status": "attention",
+        },
+        {
+            "deploymentId": "dep-unapproved",
+            "name": "Unapproved",
+            "desiredSdkVersion": "9.9.9",
+            "targetApproved": False,
+            "agentCount": 1,
+            "compliantAgents": 0,
+            "attentionAgents": 1,
+            "status": "attention",
+        },
+    ]
+
+
+def test_runtime_release_routes_require_explicit_read_authority(monkeypatch: Any) -> None:
+    """A tenant identifier alone cannot disclose release or fleet compliance posture."""
+    module, table = _load_handler(monkeypatch)
+    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
+    tenant = "tenant-release-route"
+    table.put_item(
+        Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant, "status": "active"}
+    )
+    unprivileged = {"custom:tenant_id": tenant, "sub": "unprivileged-user"}
+    policy_only_roles = ("policy-author", "policy-approver")
+    for path in (
+        "/api/enterprise/runtime-releases",
+        "/api/enterprise/version-compliance",
+    ):
+        denied = _invoke(module, _event(path, "GET", claims=unprivileged))
+        assert denied["statusCode"] == 403
+        for role in policy_only_roles:
+            policy_only = _invoke(
+                module,
+                _event(
+                    path,
+                    "GET",
+                    claims={
+                        "custom:tenant_id": tenant,
+                        "cognito:groups": [role],
+                        "sub": f"synthetic-{role}",
+                    },
+                ),
+            )
+            assert policy_only["statusCode"] == 403
+        for role in ("platform-admin", "security-operator", "fleet-operator", "auditor"):
+            allowed = _invoke(
+                module,
+                _event(
+                    path,
+                    "GET",
+                    claims={
+                        "custom:tenant_id": tenant,
+                        "cognito:groups": [role],
+                        "sub": f"synthetic-{role}",
+                    },
+                ),
+            )
+            assert allowed["statusCode"] == 200
+    invalid_page = _event(
+        "/api/enterprise/version-compliance",
+        "GET",
+        claims={
+            "custom:tenant_id": tenant,
+            "cognito:groups": ["auditor"],
+            "sub": "synthetic-auditor",
+        },
+    )
+    invalid_page["queryStringParameters"] = {"limit": "0"}
+    assert _invoke(module, invalid_page)["statusCode"] == 400
+
+
+def test_version_compliance_quarantine_outranks_empty_release_authority(
+    monkeypatch: Any,
+) -> None:
+    """Containment remains the primary operator signal when releases are absent."""
+    module, table = _load_handler(monkeypatch)
+    _set_runtime_manifests(monkeypatch, [])
+    tenant = "tenant-empty-release"
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {"id": "dep-a", "sdk_version": "1.1.0"}
+    )
+    for agent_id, status in (("agent-contained", "quarantined"), ("agent-open", "connected")):
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"dep-a:{agent_id}")
+            | {
+                "id": agent_id,
+                "deployment_id": "dep-a",
+                "host": "claude-code",
+                "status": status,
+                "lifecycle_state": "active",
+                "attestation_status": status,
+            }
+        )
+
+    report = module._version_compliance(tenant)
+
+    assert report["releaseStatus"] == "not_configured"
+    assert {row["agentId"]: row["status"] for row in report["agents"]} == {
+        "agent-contained": "quarantined",
+        "agent-open": "release_not_configured",
+    }
+
+
+def test_version_compliance_is_bounded_and_cursor_paginated(monkeypatch: Any) -> None:
+    """Large fleets advance by tenant-bound pages instead of failing at 2,000 rows."""
+    module, table = _load_handler(monkeypatch)
+    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
+    tenant = "tenant-version-pages"
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {"id": "dep-a", "sdk_version": "1.1.0"}
+    )
+    manifest_digest = module._runtime_manifest_digest(_runtime_manifest())
+    lifecycle_records = (
+        ("00-revoked", "revoked"),
+        ("01-deleted", "deleted"),
+        ("02-corrupt", "corrupt"),
+        ("10-active", "active"),
+        ("11-active", "active"),
+    )
+    for agent_id, lifecycle_state in lifecycle_records:
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"dep-a:{agent_id}")
+            | {
+                "id": agent_id,
+                "deployment_id": "dep-a",
+                "host": "claude-code",
+                "status": "connected",
+                "lifecycle_state": lifecycle_state,
+                "attestation_status": "compliant",
+                "attestation_expires_at": 2_000_000_000,
+                "attestation_sdk_version": "1.1.0",
+                "attestation_sdk_revision": "a" * 40,
+                "attestation_manifest_sha256": manifest_digest,
+            }
+        )
+    original_query = table.query
+
+    def paged_query(**kwargs: Any) -> dict[str, Any]:
+        result = original_query(**kwargs)
+        condition = kwargs.get("KeyConditionExpression")
+        is_agent_query = isinstance(condition, FakeCondition) and any(
+            operation == "begins_with" and expected == "AGENT#"
+            for _field, operation, expected in condition.predicates
+        )
+        if not is_agent_query:
+            return cast(dict[str, Any], result)
+        items = sorted(result["Items"], key=lambda item: item["sk"])
+        start = kwargs.get("ExclusiveStartKey")
+        if start:
+            items = [item for item in items if item["sk"] > start["sk"]]
+        limit = kwargs["Limit"]
+        page = items[:limit]
+        response: dict[str, Any] = {"Items": page}
+        if len(items) > limit:
+            response["LastEvaluatedKey"] = {"pk": page[-1]["pk"], "sk": page[-1]["sk"]}
+        return response
+
+    monkeypatch.setattr(table, "query", paged_query)
+
+    first = module._version_compliance(tenant, now=1_900_000_000, page_limit=3)
+    second = module._version_compliance(
+        tenant,
+        now=1_900_000_000,
+        page_limit=3,
+        page_token=first["nextToken"],
+    )
+
+    assert first["scope"] == "page"
+    assert first["hasMore"] is True
+    assert first["totalAgents"] == 0
+    assert second["scope"] == "page"
+    assert second["hasMore"] is False
+    assert second["totalAgents"] == 2
+    assert {row["agentId"] for row in first["agents"] + second["agents"]} == {
+        "10-active",
+        "11-active",
+    }
+    assert second["deployments"][0]["status"] == "page_compliant"
+    with pytest.raises(ValueError, match="outside the authorized tenant"):
+        module._tenant_page_cursor("another-tenant", "AGENT", first["nextToken"])
+
+
+def test_runtime_release_machine_routes_require_exact_inventory_scope(
+    monkeypatch: Any,
+) -> None:
+    """Machine posture reads require a live inventory credential, not any service token."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
+    tenant = "tenant-release-machine"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-release-machine",
+    }
+    path = "/api/enterprise/identity/service-identities"
+
+    def create_token(identity: str, capability: str) -> str:
+        response = _invoke(
+            module,
+            _event(
+                path,
+                "POST",
+                claims=platform,
+                body={
+                    "serviceIdentityId": identity,
+                    "name": identity,
+                    "description": "Synthetic release posture contract.",
+                    "purpose": "Prove exact machine route authorization.",
+                    "capabilities": [capability],
+                    "expiresInDays": 1,
+                },
+            ),
+        )
+        assert response["statusCode"] == 201
+        return cast(str, json.loads(response["body"])["credential"]["accessToken"])
+
+    inventory_token = create_token("release-reader", "inventory_read")
+    draft_token = create_token("release-drafter", "policy_draft_write")
+    for suffix in ("runtime-releases", "version-compliance"):
+        route = f"/machine/v1/enterprise/{suffix}"
+        assert _invoke(module, _event(route, "GET", token=inventory_token))["statusCode"] == 200
+        assert _invoke(module, _event(route, "GET", token=draft_token))["statusCode"] == 403
 
 
 def test_checked_in_empty_runtime_bundle_is_bound_but_not_configured(monkeypatch: Any) -> None:
@@ -12253,7 +12672,8 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
     module, table = _load_handler(monkeypatch)
     tenant = "tenant-verify"
     now = int(time.time())
-    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
+    runtime_manifest = _runtime_manifest()
+    _set_runtime_manifests(monkeypatch, [runtime_manifest])
     table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
     table.put_item(
         Item=module._item_key(tenant, "DEPLOYMENT", "dep-a")
@@ -12285,6 +12705,9 @@ def test_agent_verification_requires_every_operational_prerequisite(monkeypatch:
             "attestation_observed_at": now,
             "attestation_expires_at": now + 300,
             "attestation_reason_codes": [],
+            "attestation_sdk_version": runtime_manifest["sdkVersion"],
+            "attestation_sdk_revision": runtime_manifest["sdkRevision"],
+            "attestation_manifest_sha256": module._runtime_manifest_digest(runtime_manifest),
             "managed_configuration_report": {
                 **managed,
                 "source": "endpoint-managed-file",
@@ -12658,7 +13081,8 @@ def test_aws_managed_package_publication_and_drift_repair_route(monkeypatch: Any
     tenant = "tenant-package"
     now = 1_900_000_000
     monkeypatch.setattr(module.time, "time", lambda: now)
-    _set_runtime_manifests(monkeypatch, [_runtime_manifest()])
+    runtime_manifest = _runtime_manifest()
+    _set_runtime_manifests(monkeypatch, [runtime_manifest])
     package, desired = _managed_package_fixture()
     project_root = "/synthetic/project"
     token = "synthetic-managed-package-agent-session"  # noqa: S105
@@ -12696,6 +13120,9 @@ def test_aws_managed_package_publication_and_drift_repair_route(monkeypatch: Any
             "emergencyStop": False,
             "attestation_status": "compliant",
             "attestation_expires_at": now + 300,
+            "attestation_sdk_version": runtime_manifest["sdkVersion"],
+            "attestation_sdk_revision": runtime_manifest["sdkRevision"],
+            "attestation_manifest_sha256": module._runtime_manifest_digest(runtime_manifest),
         }
     )
     table.put_item(

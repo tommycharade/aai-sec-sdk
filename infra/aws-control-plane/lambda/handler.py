@@ -422,13 +422,14 @@ _ROLE_CAPABILITIES = {
             "response_rule_write",
             "evidence_admin",
             "evidence_read",
+            "inventory_read",
         }
     ),
     "policy-author": frozenset({"policy_write", "policy_simulation"}),
     "policy-approver": frozenset({"approval_decision", "policy_approval", "policy_simulation"}),
-    "fleet-operator": frozenset({"fleet_write"}),
+    "fleet-operator": frozenset({"fleet_write", "inventory_read"}),
     "incident-responder": frozenset({"incident_response"}),
-    "auditor": frozenset({"access_certification_read", "evidence_read"}),
+    "auditor": frozenset({"access_certification_read", "evidence_read", "inventory_read"}),
 }
 _DELEGATABLE_OPERATOR_ROLES = frozenset(_CANONICAL_OPERATOR_ROLES - {"platform-admin"})
 _DELEGATED_SCOPE_TYPES = frozenset({"organization", "project", "deployment"})
@@ -479,7 +480,7 @@ _SERVICE_IDENTITY_MAX_SECONDS = 90 * 24 * 60 * 60
 _SERVICE_CAPABILITY_GRANTS = {
     "evidence_read": frozenset({"evidence_read"}),
     "fleet_write": frozenset({"fleet_write"}),
-    "inventory_read": frozenset(),
+    "inventory_read": frozenset({"inventory_read"}),
     "policy_draft_write": frozenset({"policy_write"}),
     "policy_simulation": frozenset({"policy_simulation"}),
     # Runtime configuration currently shares some fleet mutation routes. The
@@ -586,7 +587,12 @@ def _runtime_manifests():
 
 
 def _validate_runtime_manifest_approvals(manifest_bundle, manifests):
-    """Require every approved host/version to bind verified release evidence."""
+    """Require every approved host/version to bind verified release evidence.
+
+    The returned mapping is safe release metadata derived from the
+    deployment-owned approval bundle. Callers must never accept equivalent
+    fields from a browser or enrolled endpoint.
+    """
     raw = os.environ.get("RUNTIME_ATTESTATION_APPROVALS", "")
     encoded = raw.encode("utf-8")
     if raw:
@@ -672,6 +678,173 @@ def _validate_runtime_manifest_approvals(manifest_bundle, manifests):
             manifest["sourceOriginDigest"], approval["sourceOriginDigest"]
         ):
             raise RuntimeError("runtime attestation approval origin does not match manifest")
+    return approved, hashlib.sha256(encoded).hexdigest()
+
+
+def _runtime_release_catalog():
+    """Return content-minimised releases from deployment-owned trust bundles.
+
+    Release approval is a deployment boundary. This projection deliberately
+    excludes executable bytes and cannot be mutated through the operator API.
+    """
+    manifests = _runtime_manifests()
+    manifest_bundle = os.environ.get("RUNTIME_ATTESTATION_MANIFESTS", "").encode("utf-8")
+    if not manifest_bundle:
+        try:
+            manifest_bundle = Path(__file__).with_name("runtime-manifests.json").read_bytes()
+        except OSError as error:
+            raise RuntimeError("runtime attestation manifest bundle is unavailable") from error
+    approvals, approval_bundle_digest = _validate_runtime_manifest_approvals(
+        manifest_bundle, manifests
+    )
+    releases = []
+    for manifest in manifests:
+        identity = (manifest["host"], manifest["sdkVersion"])
+        approval = approvals[identity]
+        manifest_digest = _runtime_manifest_digest(manifest)
+        releases.append(
+            {
+                "id": f"{manifest['host']}:{manifest['sdkVersion']}",
+                "host": manifest["host"],
+                "sdkVersion": manifest["sdkVersion"],
+                "sdkRevision": manifest["sdkRevision"],
+                "releaseTag": approval["releaseTag"],
+                "manifestSha256": manifest_digest,
+                "releaseEvidenceSha256": approval["releaseEvidenceSha256"],
+                "packageSha256": manifest["packageDigest"],
+                "gatewaySha256": manifest["gatewayDigest"],
+                "hookSha256": manifest["hookDigest"],
+            }
+        )
+    releases.sort(key=lambda item: (item["host"], item["sdkVersion"]))
+    return {
+        "schemaVersion": 1,
+        "status": "configured" if releases else "not_configured",
+        "manifestBundleSha256": hashlib.sha256(manifest_bundle).hexdigest(),
+        "approvalBundleSha256": approval_bundle_digest,
+        "releases": releases,
+    }
+
+
+def _runtime_manifest_digest(manifest):
+    """Bind one normalized manifest and every approved artifact digest."""
+    return hashlib.sha256(
+        json.dumps(manifest, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _version_compliance(tenant, *, now=None, page_token=None, page_limit=_LIST_PAGE_ITEM_LIMIT):
+    """Derive one bounded release-compliance page from live tenant state."""
+    checked_at = int(time.time()) if now is None else int(now)
+    catalog = _runtime_release_catalog()
+    approved = {
+        (release["host"], release["sdkVersion"]): release for release in catalog["releases"]
+    }
+    raw_agents, next_token = _tenant_list_page(tenant, "AGENT", token=page_token, limit=page_limit)
+    agents = [agent for agent in raw_agents if _agent_lifecycle_state(agent) == "active"]
+    deployment_ids = {
+        agent.get("deployment_id")
+        for agent in agents
+        if isinstance(agent.get("deployment_id"), str)
+    }
+    deployments = {}
+    for deployment_id in sorted(deployment_ids):
+        deployment = TABLE.get_item(
+            Key=_item_key(tenant, "DEPLOYMENT", deployment_id), ConsistentRead=True
+        ).get("Item")
+        if deployment:
+            deployments[deployment_id] = deployment
+    agent_rows = []
+    for agent in agents:
+        deployment_id = agent.get("deployment_id", "")
+        deployment = deployments.get(deployment_id, {})
+        host = agent.get("host", "")
+        desired_version = deployment.get("sdk_version")
+        observed_version = agent.get("attestation_sdk_version")
+        observed_revision = agent.get("attestation_sdk_revision")
+        observed_manifest_digest = agent.get("attestation_manifest_sha256")
+        release = approved.get((host, desired_version))
+        attestation_status = agent.get("attestation_status", "pending")
+        expires_at = int(agent.get("attestation_expires_at", 0))
+        # Containment always outranks release configuration so the operator
+        # cannot miss an actively quarantined endpoint in a remediation queue.
+        if agent.get("status") == "quarantined" or attestation_status == "quarantined":
+            status = "quarantined"
+        elif catalog["status"] != "configured":
+            status = "release_not_configured"
+        elif release is None:
+            status = "desired_release_unapproved"
+        elif attestation_status != "compliant" or not observed_version:
+            status = "evidence_missing"
+        elif expires_at <= checked_at:
+            status = "evidence_expired"
+        elif observed_version != desired_version:
+            status = "version_mismatch"
+        elif (
+            observed_revision != release["sdkRevision"]
+            or observed_manifest_digest != release["manifestSha256"]
+        ):
+            status = "artifact_mismatch"
+        else:
+            status = "compliant"
+        agent_rows.append(
+            {
+                "agentId": agent.get("id", ""),
+                "deploymentId": deployment_id,
+                "host": host,
+                "desiredSdkVersion": desired_version,
+                "observedSdkVersion": observed_version,
+                "releaseId": release.get("id") if release else None,
+                "status": status,
+                "evidenceExpiresAt": expires_at or None,
+                "reasonCodes": list(agent.get("attestation_reason_codes", []))[:16],
+            }
+        )
+    agent_rows.sort(key=lambda item: (item["deploymentId"], item["agentId"]))
+    deployment_rows = []
+    for deployment_id, deployment in sorted(deployments.items()):
+        scoped = [item for item in agent_rows if item["deploymentId"] == deployment_id]
+        desired_version = deployment.get("sdk_version")
+        hosts = sorted({item["host"] for item in scoped})
+        target_approved = bool(hosts) and all((host, desired_version) in approved for host in hosts)
+        compliant = sum(item["status"] == "compliant" for item in scoped)
+        deployment_rows.append(
+            {
+                "deploymentId": deployment_id,
+                "name": deployment.get("name", deployment_id),
+                "desiredSdkVersion": desired_version,
+                "targetApproved": target_approved,
+                "agentCount": len(scoped),
+                "compliantAgents": compliant,
+                "attentionAgents": len(scoped) - compliant,
+                "status": (
+                    "empty"
+                    if not scoped
+                    else "compliant"
+                    if compliant == len(scoped)
+                    else "attention"
+                ),
+            }
+        )
+    compliant_count = sum(item["status"] == "compliant" for item in agent_rows)
+    fleet_scope = page_token is None and next_token is None
+    for deployment in deployment_rows:
+        if not fleet_scope and deployment["status"] != "empty":
+            deployment["status"] = f"page_{deployment['status']}"
+    return {
+        "schemaVersion": 1,
+        "checkedAt": checked_at,
+        "releaseStatus": catalog["status"],
+        "pageLimit": page_limit,
+        "nextToken": next_token,
+        "hasMore": next_token is not None,
+        "scope": "fleet" if fleet_scope else "page",
+        "totalAgents": len(agent_rows),
+        "compliantAgents": compliant_count,
+        "attentionAgents": len(agent_rows) - compliant_count,
+        "deployments": deployment_rows,
+        "agents": agent_rows,
+    }
 
 
 def _runtime_manifest(tenant, deployment_id, host, manifests=None):
@@ -837,6 +1010,9 @@ def _validate_runtime_attestation(tenant, deployment_id, agent, session, token, 
             "attestation_baseline_digest": existing_baseline or baseline,
             "attestation_sdk_version": value["sdkVersion"],
             "attestation_sdk_revision": value["sdkRevision"],
+            # This binds the compliance flag to the complete current manifest,
+            # including SDK package, MCP gateway and native-hook digests.
+            "attestation_manifest_sha256": _runtime_manifest_digest(manifest),
         }
     )
     _audit(
@@ -865,6 +1041,12 @@ def _require_current_attestation(tenant, deployment_id, agent):
         agent.get("attestation_expires_at", 0)
     ) <= int(time.time()):
         raise PermissionError("runtime attestation is missing, expired, or non-compliant")
+    if (
+        agent.get("attestation_sdk_version") != manifest["sdkVersion"]
+        or agent.get("attestation_sdk_revision") != manifest["sdkRevision"]
+        or agent.get("attestation_manifest_sha256") != _runtime_manifest_digest(manifest)
+    ):
+        raise PermissionError("runtime attestation does not bind the current approved release")
 
 
 def _require_current_managed_configuration(tenant, agent):
@@ -1797,10 +1979,12 @@ def _machine_route_capability(method, path):
         "/enterprise/organizations",
         "/enterprise/policies",
         "/enterprise/projects",
+        "/enterprise/runtime-releases",
         "/enterprise/skills",
         "/enterprise/slo",
         "/enterprise/templates",
         "/enterprise/tenant",
+        "/enterprise/version-compliance",
     }
     evidence_paths = {
         "/enterprise/audit",
@@ -8988,6 +9172,81 @@ def _list(tenant, kind, *, consistent_read=False):
             return items
         if pages >= _MAX_LIST_PAGES:
             raise RuntimeError("Tenant list exceeds the bounded page limit")
+
+
+def _tenant_page_cursor(tenant, kind, token):
+    """Decode one content-free tenant cursor and reject cross-scope replay.
+
+    The token is opaque pagination state, not authority. Its partition and sort
+    key are validated against the authenticated tenant and requested record
+    kind before DynamoDB can consume it.
+    """
+    if token is None:
+        return None
+    if not isinstance(token, str) or not 1 <= len(token) <= 1_024:
+        raise ValueError("pagination token is invalid")
+    try:
+        padding = "=" * (-len(token) % 4)
+        value = json.loads(base64.urlsafe_b64decode(token + padding).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("pagination token is invalid") from error
+    expected_pk = f"TENANT#{tenant}"
+    expected_prefix = f"{kind}#"
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"pk", "sk"}
+        or value.get("pk") != expected_pk
+        or not isinstance(value.get("sk"), str)
+        or not value["sk"].startswith(expected_prefix)
+    ):
+        raise ValueError("pagination token is outside the authorized tenant scope")
+    return {"pk": value["pk"], "sk": value["sk"]}
+
+
+def _encode_tenant_page_cursor(tenant, kind, key):
+    """Encode only a validated tenant record key as bounded pagination state."""
+    if not key:
+        return None
+    value = _tenant_page_cursor(
+        tenant,
+        kind,
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {"pk": key.get("pk"), "sk": key.get("sk")},
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        )
+        .decode("ascii")
+        .rstrip("="),
+    )
+    return (
+        base64.urlsafe_b64encode(
+            json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        )
+        .decode("ascii")
+        .rstrip("=")
+    )
+
+
+def _tenant_list_page(tenant, kind, *, token=None, limit=_LIST_PAGE_ITEM_LIMIT):
+    """Return one bounded tenant page without an all-or-nothing fleet ceiling."""
+    if not isinstance(limit, int) or not 1 <= limit <= _LIST_PAGE_ITEM_LIMIT:
+        raise ValueError(f"page limit must be between 1 and {_LIST_PAGE_ITEM_LIMIT}")
+    arguments = {
+        "KeyConditionExpression": Key("pk").eq(f"TENANT#{tenant}")
+        & Key("sk").begins_with(f"{kind}#"),
+        "Limit": limit,
+        "ConsistentRead": True,
+    }
+    start_key = _tenant_page_cursor(tenant, kind, token)
+    if start_key is not None:
+        arguments["ExclusiveStartKey"] = start_key
+    result = TABLE.query(**arguments)
+    items = result.get("Items", [])
+    if not isinstance(items, list) or len(items) > limit:
+        raise RuntimeError("tenant page exceeded its bounded item limit")
+    return items, _encode_tenant_page_cursor(tenant, kind, result.get("LastEvaluatedKey"))
 
 
 def _assurance_list_page(tenant, kind, *, consistent_read=False):
@@ -18760,6 +19019,10 @@ def _verify_agent(tenant, deployment_id, agent_id):
         and attestation_manifest
         and agent.get("attestation_status") == "compliant"
         and int(agent.get("attestation_expires_at", 0)) > checked_at
+        and agent.get("attestation_sdk_version") == attestation_manifest["sdkVersion"]
+        and agent.get("attestation_sdk_revision") == attestation_manifest["sdkRevision"]
+        and agent.get("attestation_manifest_sha256")
+        == _runtime_manifest_digest(attestation_manifest)
     )
     managed_configuration = (
         _managed_configuration_posture(tenant, agent, now=checked_at) if agent else None
@@ -20814,6 +21077,36 @@ def handler(event, context):
                 if not _operator_roles(event):
                     return _response(403, {"error": "tenant-wide trust posture requires a role"})
                 return _response(200, _policy_trust_convergence(tenant))
+            if method == "GET" and parts in (
+                ["runtime-releases"],
+                ["version-compliance"],
+            ):
+                # This tenant-wide projection exposes no executable bytes or
+                # credentials, but it still reveals fleet/release posture and
+                # therefore requires an explicit tenant role or machine scope.
+                if not _operator_authorized(event, "inventory_read", include_break_glass=False):
+                    return _response(
+                        403,
+                        {"error": "runtime release posture requires inventory-read authority"},
+                    )
+                if parts == ["version-compliance"]:
+                    query = event.get("queryStringParameters") or {}
+                    if not isinstance(query, dict):
+                        return _response(400, {"error": "query parameters are invalid"})
+                    try:
+                        page_limit = int(query.get("limit", _LIST_PAGE_ITEM_LIMIT))
+                        posture = _version_compliance(
+                            tenant,
+                            page_token=query.get("nextToken"),
+                            page_limit=page_limit,
+                        )
+                    except (TypeError, ValueError) as error:
+                        return _response(400, {"error": str(error)})
+                    return _response(200, posture)
+                return _response(
+                    200,
+                    _runtime_release_catalog(),
+                )
             if method == "GET" and parts == ["tenant"]:
                 root = TABLE.get_item(
                     Key=_item_key(tenant, "TENANT", "root"), ConsistentRead=True
