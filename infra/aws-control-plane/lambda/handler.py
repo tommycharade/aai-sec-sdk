@@ -253,6 +253,20 @@ _CASE_EXPORT_ROLES = frozenset(
 )
 _CASE_EXPORT_RECORD_LIMIT = 500
 _CASE_EXPORT_LOOKBACK_SECONDS = 24 * 60 * 60
+_CASE_INVESTIGATION_RECORD_LIMIT = 500
+_CASE_INVESTIGATION_CATEGORIES = frozenset(
+    {
+        "identity",
+        "policy",
+        "tool",
+        "mcp",
+        "approval",
+        "credential",
+        "isolation",
+        "evidence",
+        "operator",
+    }
+)
 _EVIDENCE_RETENTION_MIN_DAYS = 365
 _EVIDENCE_RETENTION_MAX_DAYS = 3_650
 _EVIDENCE_RECORD_LIMIT = 250
@@ -16839,6 +16853,356 @@ def _case_events(tenant, case_id):
     return sorted(events, key=lambda item: (int(item.get("sequence", 0)), str(item.get("id"))))
 
 
+def _case_event_categories(event_type):
+    """Return fixed investigation facets for one server-owned case event.
+
+    Event type is stored control-plane state, but it is still mapped through a
+    closed vocabulary. Unknown historical values remain visible as operator
+    evidence and cannot invent a trusted credential or isolation claim.
+    """
+    if event_type in {"agent_quarantined", "agent_quarantine_released"}:
+        return ["identity", "isolation", "operator"]
+    if event_type in {
+        "agent_credentials_revoked",
+        "agent_credential_authority_restored",
+    }:
+        return ["identity", "credential", "operator"]
+    if event_type == "agent_sessions_revoked":
+        return ["identity", "operator"]
+    if event_type == "case_created":
+        return ["identity", "evidence", "operator"]
+    return ["operator"]
+
+
+def _case_event_title(event_type):
+    """Return bounded human copy without presenting untrusted narrative."""
+    return {
+        "case_created": "Investigation opened",
+        "agent_quarantined": "Agent execution quarantined",
+        "agent_quarantine_released": "Agent quarantine released",
+        "agent_sessions_revoked": "Agent sessions revoked",
+        "agent_credentials_revoked": "Brokered credentials revoked",
+        "agent_credential_authority_restored": "Credential authority restored",
+        "case_resolved": "Investigation resolved",
+        "case_closed": "Investigation closed",
+    }.get(event_type, "Case event recorded")
+
+
+def _case_event_outcome(event_type):
+    """Return one stable outcome for a case lifecycle event."""
+    return {
+        "case_created": "opened",
+        "agent_quarantined": "activated",
+        "agent_quarantine_released": "released",
+        "agent_sessions_revoked": "revoked",
+        "agent_credentials_revoked": "revoked",
+        "agent_credential_authority_restored": "restored",
+        "case_resolved": "resolved",
+        "case_closed": "closed",
+    }.get(event_type, "recorded")
+
+
+def _case_investigation_event(
+    identifier,
+    occurred_at,
+    event_type,
+    title,
+    summary,
+    categories,
+    source_kind,
+    source_id,
+    provenance,
+    *,
+    actor=None,
+    outcome="observed",
+    references=None,
+):
+    """Build one content-minimised event in the unified timeline contract.
+
+    The helper accepts only values already reduced by a source-specific
+    projector. It deliberately has no field for prompts, arguments, results,
+    credentials or free-form operator rationale.
+    """
+    normalized_categories = sorted(set(categories))
+    if not normalized_categories or not set(normalized_categories).issubset(
+        _CASE_INVESTIGATION_CATEGORIES
+    ):
+        raise RuntimeError("investigation timeline category is unsupported")
+    return {
+        "id": identifier,
+        "occurredAt": int(occurred_at),
+        "eventType": event_type,
+        "title": title,
+        "summary": summary,
+        "categories": normalized_categories,
+        "actor": actor,
+        "outcome": outcome,
+        "source": {
+            "kind": source_kind,
+            "id": source_id,
+            "provenance": provenance,
+        },
+        "references": references or {},
+    }
+
+
+def _case_investigation_timeline(
+    case,
+    alert,
+    case_events,
+    decisions,
+    approvals,
+    *,
+    decision_window_truncated,
+    now,
+):
+    """Correlate one bounded, ordered and explicitly complete case timeline.
+
+    Correlation is anchored to the server-captured case binding. Agent reports
+    remain labelled as observations; they cannot become operator or policy
+    authority merely by appearing in this view. Free-form reasons and action
+    content are excluded before this projection leaves the control plane.
+    """
+    binding = _json(case.get("binding", {}))
+    first_observed = int((alert or {}).get("firstObservedAt", case.get("createdAt", 0)))
+    start_at = max(
+        0,
+        min(int(case.get("createdAt", 0)), first_observed) - _CASE_EXPORT_LOOKBACK_SECONDS,
+    )
+    end_at = int(now)
+    events = []
+
+    if alert:
+        alert_source = str(alert.get("source", "endpoint_evidence"))
+        alert_summary = (
+            f"{str(alert.get('severity', 'unknown')).title()} "
+            f"{alert_source.replace('_', ' ')} signal · "
+            f"{alert.get('reasonCode', 'reason unavailable')}"
+        )
+        events.append(
+            _case_investigation_event(
+                f"alert:{alert.get('id', '')}:observed",
+                int(alert.get("firstObservedAt", case.get("createdAt", 0))),
+                "security_alert_observed",
+                "Security signal observed",
+                alert_summary,
+                ["identity", "evidence"],
+                "security_alert",
+                str(alert.get("id", "")),
+                "server_derived",
+                actor="control-plane",
+                outcome=str(alert.get("status", "observed")),
+                references={
+                    "agentKey": binding.get("agentKey"),
+                    "evidenceDigest": binding.get("evidenceDigest"),
+                    "reasonCode": alert.get("reasonCode"),
+                },
+            )
+        )
+
+    if binding.get("policyId"):
+        policy_event_id = (
+            f"policy:{case.get('id', '')}:{binding.get('policyId')}:{binding.get('policyVersion')}"
+        )
+        events.append(
+            _case_investigation_event(
+                policy_event_id,
+                int(case.get("createdAt", 0)),
+                "policy_authority_captured",
+                "Effective policy captured",
+                f"{binding.get('policyId')} · version {int(binding.get('policyVersion', 0))}",
+                ["identity", "policy"],
+                "case_binding",
+                str(case.get("id", "")),
+                "server_derived",
+                actor="control-plane",
+                outcome="captured",
+                references={
+                    "agentKey": binding.get("agentKey"),
+                    "policyId": binding.get("policyId"),
+                    "policyVersion": int(binding.get("policyVersion", 0)),
+                    "bindingDigest": binding.get("bindingDigest"),
+                },
+            )
+        )
+
+    for item in case_events:
+        event_type = str(item.get("eventType", "case_event"))
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        event_references = {
+            "caseId": case.get("id"),
+            "agentKey": payload.get("agentKey"),
+            "payloadHash": item.get("payloadHash"),
+        }
+        for field in ("brokerCount", "controlRevision", "sessionRevision"):
+            value = payload.get(field)
+            if isinstance(value, int) and not isinstance(value, bool):
+                event_references[field] = value
+        events.append(
+            _case_investigation_event(
+                f"case:{item.get('id', '')}",
+                int(item.get("occurredAt", 0)),
+                event_type,
+                _case_event_title(event_type),
+                "Authenticated operator action retained with integrity evidence.",
+                _case_event_categories(event_type),
+                "case_event",
+                str(item.get("id", "")),
+                "operator_action",
+                actor=str(item.get("actor", "unknown-operator")),
+                outcome=_case_event_outcome(event_type),
+                references=event_references,
+            )
+        )
+
+    for item in decisions:
+        observed_at = int(item.get("observed_at", 0))
+        if not start_at <= observed_at <= end_at:
+            continue
+        decision = str(item.get("decision", ""))
+        if decision not in _DECISION_VALUES:
+            raise RuntimeError("correlated decision evidence is malformed")
+        categories = ["identity", "policy", "tool"]
+        if item.get("mcp_server_id"):
+            if item.get("source") != "mcp" and item.get("resource_kind") != "mcp_tool":
+                raise RuntimeError("correlated MCP decision evidence is malformed")
+            categories.append("mcp")
+        tool_name = str(item.get("tool_name", "unknown-tool"))
+        decision_summary = (
+            f"{_DECISION_REASON_LABELS.get(item.get('reason_code'), 'Policy decision recorded')} · "
+            f"{_DECISION_RESOURCE_LABELS.get(item.get('resource_kind'), 'Content redacted')}"
+        )
+        events.append(
+            _case_investigation_event(
+                f"decision:{item.get('id', '')}",
+                observed_at,
+                "tool_decision",
+                f"{tool_name} · {decision.replace('_', ' ')}",
+                decision_summary,
+                categories,
+                "agent_decision",
+                str(item.get("id", "")),
+                "authenticated_agent_report",
+                actor=f"agent:{item.get('deployment_id', '')}:{item.get('agent_id', '')}",
+                outcome=decision,
+                references={
+                    "agentKey": f"{item.get('deployment_id', '')}:{item.get('agent_id', '')}",
+                    "policyId": item.get("policy_id"),
+                    "policyVersion": int(item.get("policy_version", 0)),
+                    "toolName": tool_name,
+                    "mcpServerId": item.get("mcp_server_id"),
+                    "actionDigest": item.get("action_digest"),
+                },
+            )
+        )
+
+    for item in approvals:
+        requested_at = int(item.get("requested_at", item.get("created_at", 0)))
+        if not start_at <= requested_at <= end_at:
+            continue
+        approval_id = str(item.get("id", ""))
+        tool_name = str(item.get("tool_name", "unknown-tool"))
+        references = {
+            "agentKey": item.get("agent_key"),
+            "principalId": item.get("principal_id"),
+            "toolName": tool_name,
+            "actionDigest": item.get("action_hash"),
+            "approvalId": approval_id,
+        }
+        events.append(
+            _case_investigation_event(
+                f"approval:{approval_id}:requested",
+                requested_at,
+                "approval_requested",
+                f"Approval requested · {tool_name}",
+                f"{item.get('risk_class', 'unspecified')} risk · exact action binding retained",
+                ["identity", "tool", "approval"],
+                "approval",
+                approval_id,
+                "server_owned",
+                actor=str(item.get("principal_id", "unknown-principal")),
+                outcome="pending",
+                references=references,
+            )
+        )
+        status = _approval_status(item, end_at)
+        outcome_at = item.get("decided_at")
+        outcome_actor = item.get("decided_by")
+        if status == "expired" and outcome_at is None:
+            outcome_at = item.get("expires_at")
+            outcome_actor = "control-plane"
+        if outcome_at is not None and start_at <= int(outcome_at) <= end_at:
+            events.append(
+                _case_investigation_event(
+                    f"approval:{approval_id}:{status}",
+                    int(outcome_at),
+                    f"approval_{status}",
+                    f"Approval {status} · {tool_name}",
+                    "Outcome retained without free-form approval narrative.",
+                    ["identity", "tool", "approval", "operator"],
+                    "approval",
+                    approval_id,
+                    "server_owned",
+                    actor=str(outcome_actor or "control-plane"),
+                    outcome=status,
+                    references=references,
+                )
+            )
+        consumed_at = item.get("consumed_at")
+        if consumed_at is not None and start_at <= int(consumed_at) <= end_at:
+            events.append(
+                _case_investigation_event(
+                    f"approval:{approval_id}:consumed",
+                    int(consumed_at),
+                    "approval_consumed",
+                    f"Approval consumed · {tool_name}",
+                    "Single-use exact-action approval was consumed.",
+                    ["identity", "tool", "approval"],
+                    "approval",
+                    approval_id,
+                    "server_owned",
+                    actor=str(item.get("principal_id", "unknown-principal")),
+                    outcome="consumed",
+                    references=references,
+                )
+            )
+
+    events.sort(
+        key=lambda item: (
+            int(item.get("occurredAt", 0)),
+            str(item.get("eventType", "")),
+            str(item.get("id", "")),
+        )
+    )
+    reasons = []
+    if decision_window_truncated:
+        reasons.append("tenant_decision_window_truncated")
+    omitted = max(0, len(events) - _CASE_INVESTIGATION_RECORD_LIMIT)
+    if omitted:
+        reasons.append("investigation_record_limit_exceeded")
+        events = events[-_CASE_INVESTIGATION_RECORD_LIMIT:]
+    category_counts = {
+        category: sum(category in item["categories"] for item in events)
+        for category in sorted(_CASE_INVESTIGATION_CATEGORIES)
+    }
+    return {
+        "items": events,
+        "window": {
+            "startAt": start_at,
+            "endAt": end_at,
+            "basis": "24_hours_before_first_alert_observation",
+        },
+        "complete": not reasons,
+        "incompleteReasons": reasons,
+        "omittedEvents": omitted,
+        "recordLimit": _CASE_INVESTIGATION_RECORD_LIMIT,
+        "categoryCounts": category_counts,
+        "rawContentIncluded": False,
+        "credentialsIncluded": False,
+        "freeFormNarrativeIncluded": False,
+    }
+
+
 def _case_view(tenant, case, *, detailed=False):
     """Project one case without raw activity, endpoint payloads or credentials."""
     binding = _json(case.get("binding", {}))
@@ -16879,27 +17243,40 @@ def _case_view(tenant, case, *, detailed=False):
         Key=_item_key(tenant, "ALERT", case.get("alertId", "")), ConsistentRead=True
     ).get("Item")
     agent_key = binding.get("agentKey")
+    current_time = int(time.time())
     decisions, decisions_truncated = _decision_window(tenant)
-    correlated_decisions = [
-        _decision_view(item)
+    correlated_decision_items = [
+        item
         for item in decisions
         if agent_key
         and item.get("deployment_id") == binding.get("deploymentId")
         and item.get("agent_id") == binding.get("agentId")
-    ][:100]
-    approvals = [
-        _approval_view(item, int(time.time()))
+    ]
+    correlated_decisions = [_decision_view(item) for item in correlated_decision_items][:100]
+    correlated_approval_items = [
+        item
         for item in _list(tenant, "APPROVAL", consistent_read=True)
         if agent_key and item.get("agent_key") == agent_key
-    ][:100]
+    ]
+    approvals = [_approval_view(item, current_time) for item in correlated_approval_items][:100]
+    case_events = _case_events(tenant, case["id"])
     alert_source = case.get("alertSource", "endpoint_evidence")
     return {
         **result,
         "alert": _endpoint_alert_view(alert) if alert else None,
-        "timeline": [_json(item) for item in _case_events(tenant, case["id"])],
+        "timeline": [_json(item) for item in case_events],
         "decisions": correlated_decisions,
         "decisionsTruncated": decisions_truncated or len(correlated_decisions) == 100,
         "approvals": approvals,
+        "investigationTimeline": _case_investigation_timeline(
+            case,
+            alert,
+            case_events,
+            correlated_decision_items,
+            correlated_approval_items,
+            decision_window_truncated=decisions_truncated,
+            now=current_time,
+        ),
         "evidence": {
             "endpointReportDigest": (
                 binding.get("evidenceDigest") if alert_source == "endpoint_evidence" else None

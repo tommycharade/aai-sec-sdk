@@ -48,6 +48,12 @@ A case is tenant-scoped, revisioned and content-minimised. It retains:
 - an ordered, append-only timeline of fixed event types and bounded operator
   rationale.
 
+Detailed reads also normalize the case lifecycle with correlated alert,
+policy, decision and approval facts into the content-minimised
+[unified investigation timeline](unified-investigation-timeline-design.md).
+That operational projection declares provenance and completeness; it never
+replaces the append-only case records.
+
 Case statuses are `open`, `investigating`, `contained`, `resolved` and `closed`.
 Creation is deterministic per alert, so concurrent requests cannot create two
 active cases for one detection. Every mutation uses optimistic concurrency.

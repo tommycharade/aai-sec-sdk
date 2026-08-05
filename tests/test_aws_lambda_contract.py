@@ -13944,6 +13944,24 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
         }
     )
     table.put_item(
+        Item=module._item_key(tenant, "DECISION", "decision-mcp")
+        | {
+            "id": "decision-mcp",
+            "deployment_id": "deployment-a",
+            "agent_id": "agent-a",
+            "observed_at": now - 8,
+            "tool_name": "create_issue",
+            "decision": "approval_required",
+            "reason_code": "approval_rule",
+            "resource_kind": "mcp_tool",
+            "source": "mcp",
+            "mcp_server_id": "github",
+            "policy_id": "policy-a",
+            "policy_version": 4,
+            "action_digest": "d" * 64,
+        }
+    )
+    table.put_item(
         Item=module._item_key(tenant, "APPROVAL", "approval-a")
         | {
             "id": "approval-a",
@@ -13966,6 +13984,42 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
             "decision_reason": "Narrative intentionally excluded from portable evidence.",
         }
     )
+    correlated = json.loads(
+        _invoke(
+            module,
+            _event(f"/api/enterprise/cases/{case['id']}", "GET", claims=responder),
+        )["body"]
+    )["investigationTimeline"]
+    assert correlated["complete"] is True
+    assert correlated["incompleteReasons"] == []
+    assert correlated["omittedEvents"] == 0
+    assert correlated["rawContentIncluded"] is False
+    assert correlated["credentialsIncluded"] is False
+    assert correlated["freeFormNarrativeIncluded"] is False
+    assert correlated["categoryCounts"]["policy"] == 2
+    assert correlated["categoryCounts"]["tool"] == 4
+    assert correlated["categoryCounts"]["mcp"] == 1
+    assert correlated["categoryCounts"]["approval"] == 2
+    assert correlated["categoryCounts"]["isolation"] == 1
+    assert [item["occurredAt"] for item in correlated["items"]] == sorted(
+        item["occurredAt"] for item in correlated["items"]
+    )
+    correlated_by_id = {item["id"]: item for item in correlated["items"]}
+    assert correlated_by_id["decision:decision-a"]["source"]["provenance"] == (
+        "authenticated_agent_report"
+    )
+    assert correlated_by_id["decision:decision-a"]["references"] == {
+        "actionDigest": "b" * 64,
+        "agentKey": "deployment-a:agent-a",
+        "mcpServerId": None,
+        "policyId": "policy-a",
+        "policyVersion": 4,
+        "toolName": "Bash",
+    }
+    assert correlated_by_id["decision:decision-mcp"]["references"]["mcpServerId"] == "github"
+    assert correlated_by_id["approval:approval-a:approved"]["actor"] == "approver-a"
+    assert "Narrative intentionally excluded" not in json.dumps(correlated)
+    assert project_root not in json.dumps(correlated)
     auditor = {
         "custom:tenant_id": tenant,
         "cognito:groups": ["auditor"],
@@ -13982,7 +14036,7 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
         "caseId": case["id"],
         "contentHash": artifact["integrity"]["contentHash"],
         "timelineEvents": 3,
-        "decisions": 1,
+        "decisions": 2,
         "approvals": 1,
     }
     assert artifact["content"]["decisions"][0]["id"] == "decision-a"
@@ -14151,6 +14205,82 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
     )
     assert release["statusCode"] == 409
     assert "binding" in json.loads(release["body"])["error"]
+
+
+def test_investigation_timeline_marks_every_incomplete_source(monkeypatch: Any) -> None:
+    """The operator view never presents bounded partial evidence as complete."""
+    module, _table = _load_handler(monkeypatch)
+    now = 2_200_000_000
+    case = {
+        "id": "case-a",
+        "createdAt": now - 30,
+        "binding": {
+            "agentKey": "deployment-a:agent-a",
+            "policyId": "policy-a",
+            "policyVersion": 7,
+            "bindingDigest": "a" * 64,
+        },
+    }
+    alert = {
+        "id": "alert-a",
+        "source": "endpoint_evidence",
+        "severity": "high",
+        "reasonCode": "runtime_attestation_missing",
+        "status": "open",
+        "firstObservedAt": now - 60,
+    }
+    case_events = [
+        {
+            "id": f"event-{index:03d}",
+            "eventType": "historical_case_event",
+            "actor": "responder-a",
+            "occurredAt": now - 20 + index,
+            "payload": {"reason": "Narrative must not enter the normalized view."},
+            "payloadHash": f"{index:064x}"[-64:],
+        }
+        for index in range(module._CASE_INVESTIGATION_RECORD_LIMIT + 1)
+    ]
+
+    result = module._case_investigation_timeline(
+        case,
+        alert,
+        case_events,
+        [],
+        [],
+        decision_window_truncated=True,
+        now=now + module._CASE_INVESTIGATION_RECORD_LIMIT,
+    )
+
+    assert result["complete"] is False
+    assert result["incompleteReasons"] == [
+        "tenant_decision_window_truncated",
+        "investigation_record_limit_exceeded",
+    ]
+    assert result["omittedEvents"] == 3
+    assert len(result["items"]) == module._CASE_INVESTIGATION_RECORD_LIMIT
+    assert "Narrative must not enter" not in json.dumps(result)
+    assert result["items"] == sorted(
+        result["items"],
+        key=lambda item: (item["occurredAt"], item["eventType"], item["id"]),
+    )
+    malformed_decision = {
+        "id": "decision-corrupt",
+        "deployment_id": "deployment-a",
+        "agent_id": "agent-a",
+        "observed_at": now,
+        "tool_name": "Bash",
+        "decision": "allowed_without_policy",
+    }
+    with pytest.raises(RuntimeError, match="decision evidence is malformed"):
+        module._case_investigation_timeline(
+            case,
+            alert,
+            [],
+            [malformed_decision],
+            [],
+            decision_window_truncated=False,
+            now=now,
+        )
 
 
 def test_endpoint_detection_schedule_materializes_stale_health(monkeypatch: Any) -> None:

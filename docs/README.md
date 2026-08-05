@@ -36,6 +36,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Endpoint detection and response](endpoint-detection-response.md)
 - [Incident cases and containment](incident-case-containment-design.md)
 - [Incident-driven credential revocation](incident-credential-revocation-design.md)
+- [Unified investigation timeline](unified-investigation-timeline-design.md)
 - [Audit-ready incident case export](incident-case-export-design.md)
 - [Durable evidence governance](durable-evidence-governance-design.md)
 - [Asynchronous tenant retention](asynchronous-retention-design.md)

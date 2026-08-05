@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added a typed, tenant-scoped incident investigation timeline that correlates
+  identity, policy, tool/MCP, approval, credential, isolation, evidence and
+  operator events with source provenance, fixed redaction and explicit
+  completeness rather than browser-side joins.
+
 - Added case-owned, exact-agent revocation and recovery of brokered cloud
   authority. A machine-only live authority check blocks new mints and
   callback-checked credential use across current and future brokers, while the

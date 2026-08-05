@@ -85,7 +85,9 @@ def test_reconciliation_cannot_finalize_a_live_timed_out_worker() -> None:
         registry,
         AllowListPolicy({"uncertain"}),
         InMemoryAuditSink(),
-        config=RuntimeConfig(execution_timeout_seconds=0.005),
+        # Keep the policy phase well inside the deadline under coverage while
+        # the one-second worker still deterministically crosses the boundary.
+        config=RuntimeConfig(execution_timeout_seconds=0.1),
     )
 
     result = runtime.execute(ActionProposal("uncertain", {}, "proposal:1"))

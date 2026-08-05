@@ -1395,3 +1395,15 @@ read the decision, while only authenticated incident response may create or
 restore it. Missing, malformed, stale, cross-tenant or unavailable checks deny
 mint and use. Credential values never enter case, audit or UI state. See
 [Incident-driven credential revocation](incident-credential-revocation-design.md).
+
+## Investigation correlation boundary
+
+The hosted incident detail route correlates case, alert, policy-binding,
+decision and approval evidence by authenticated tenant and the exact agent
+binding captured by the case. The browser cannot select correlation keys or
+claim completeness. Every source is projected into a fixed, credential-free
+schema with explicit provenance before ordering. Agent decision evidence stays
+an authenticated observation and cannot become policy or operator authority.
+Bounded-source and record-limit omissions are visible fail-safe states, not
+healthy investigations. See
+[Unified investigation timeline](unified-investigation-timeline-design.md).
