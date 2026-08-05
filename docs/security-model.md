@@ -1137,7 +1137,12 @@ redirects or invocation failure deny import before provider content is read.
 Intune is authoritative only for its managed-device population. The collector
 does not infer binary presence, process activity or project roots from device
 enrollment, and it excludes device names, serial numbers, email addresses and
-hardware properties. Reconciliation suppresses all percentages and orphan
+hardware properties. It retains only the canonical Entra device registration
+ID required for future delivery targeting. That value is not treated as the
+directory object ID: a dedicated worker must resolve it by the documented
+alternate key and reproduce the exact registration ID online before group
+membership mutation. Endpoint reports cannot submit or override it.
+Reconciliation suppresses all percentages and orphan
 conclusions until current endpoint evidence contains normalized installation
 observations as well as devices. This avoids upgrading a read-only management
 record into evidence Microsoft Graph cannot provide.
@@ -1163,6 +1168,16 @@ unknown reports, and creates one complete fleet input for atomic publication.
 The HMAC is source authentication, not hardware attestation; MDM administrators,
 endpoint root compromise and stolen device secrets remain deployment risks.
 See [Endpoint evidence publisher](endpoint-evidence-publisher-design.md).
+
+Hosted Intune delivery is a separate privileged boundary. Intune app
+deployment is group-assignment based, so the control plane must derive and own
+an exact rollout cohort rather than treating a managed-device ID as a command
+target. A future worker requires a dedicated role and tenant-tagged delivery
+secret, exact package-app digest binding, transactional outbox, online rollout
+and endpoint reauthorization, bounded unknown-outcome reconciliation and
+independent runtime attestation. The read-only discovery credential cannot be
+silently widened. See
+[Microsoft Intune managed delivery](intune-managed-delivery-design.md).
 The [hosted endpoint evidence channel](hosted-endpoint-evidence.md) stores only
 credential digests, binds reports to current MDM devices, rejects altered,
 stale, replayed and cross-tenant evidence, and derives health server-side.

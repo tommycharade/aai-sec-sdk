@@ -261,6 +261,12 @@ must not invent:
 - a tenant-tagged Secrets Manager resource and dedicated IAM execution role for
   the provider adapter, with no provider credentials exposed to the browser,
   model or enrolled agent;
+- separate read-only discovery and delivery application identities; the
+  discovery credential must not be widened silently;
+- customer-approved AAI-owned assigned-membership Entra device-group authority
+  and the Intune mobile-app IDs whose digests match the package manifests;
+- Graph permission and scope evidence proving the adapter can manage only the
+  intended device identities, AAI-owned groups and approved app assignments;
 - approved privilege, restart, retry and maintenance-window behavior; and
 - retained provider job evidence and a live acceptance window proving that a
   channel success remains `awaiting_attestation` until the governed host emits

@@ -198,6 +198,13 @@ The next tranche may add hosted dispatch only after this authority is deployed:
 The worker must not accept executable bytes, commands, device IDs or package
 IDs from the browser or model.
 
+Microsoft Graph app deployment is group-assignment based rather than a generic
+per-managed-device install action. The provider adapter must therefore resolve
+the Intune `azureADDeviceId` alternate key to an exact Entra directory object
+online and converge only an AAI-owned rollout cohort group. See
+[Microsoft Intune managed delivery](intune-managed-delivery-design.md) and its
+[operator journeys](intune-managed-delivery-user-journeys.md).
+
 ## Threats and controls
 
 | Threat | Control |

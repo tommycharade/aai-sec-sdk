@@ -10415,6 +10415,34 @@ def test_endpoint_delivery_readiness_requires_signed_platform_and_exact_package(
     assert ambiguous["items"][0]["reasonCode"] == "endpoint_binding_missing"
 
 
+def test_endpoint_discovery_requires_canonical_directory_registration_identity(
+    monkeypatch: Any,
+) -> None:
+    """Provider target identity is canonical MDM authority, not arbitrary text."""
+    module, _table = _load_handler(monkeypatch)
+    valid = module._discovery_observation(
+        {
+            "kind": "device",
+            "id": "device-a",
+            "managed": True,
+            "directoryDeviceRegistrationId": ("22222222-2222-4222-8222-222222222222"),
+        },
+        "endpoint",
+    )
+    assert valid["directoryDeviceRegistrationId"] == ("22222222-2222-4222-8222-222222222222")
+    for invalid in ("not-a-uuid", "22222222-2222-4222-8222-22222222222A"):
+        with pytest.raises(ValueError, match="canonical UUID"):
+            module._discovery_observation(
+                {
+                    "kind": "device",
+                    "id": "device-a",
+                    "managed": True,
+                    "directoryDeviceRegistrationId": invalid,
+                },
+                "endpoint",
+            )
+
+
 def test_runtime_remediation_is_machine_scoped_revision_bound_and_attestation_verified(
     monkeypatch: Any,
 ) -> None:
@@ -14522,7 +14550,16 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
         }
     )
     snapshot = _discovery_snapshot(
-        "endpoint", [{"kind": "device", "id": "device-a", "managed": True}], now=now
+        "endpoint",
+        [
+            {
+                "kind": "device",
+                "id": "device-a",
+                "managed": True,
+                "directoryDeviceRegistrationId": ("22222222-2222-4222-8222-222222222222"),
+            }
+        ],
+        now=now,
     )
     assert (
         _invoke(
@@ -14587,6 +14624,7 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
     live_binding = module._endpoint_agent_binding(tenant, "device-a", now=now)
     assert live_binding["operatingSystem"] == "darwin"
     assert live_binding["architecture"] == "arm64"
+    assert live_binding["directoryDeviceRegistrationId"] == ("22222222-2222-4222-8222-222222222222")
     alert_id = "endpoint-alert-a"
     table.put_item(
         Item=module._item_key(tenant, "ALERT", alert_id)

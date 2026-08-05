@@ -91,6 +91,7 @@ def _assembly_inputs(tmp_path: Path, report: dict[str, Any]) -> tuple[Path, Path
                         "id": "device-a",
                         "managed": True,
                         "businessUnit": "Platform",
+                        "directoryDeviceRegistrationId": ("22222222-2222-4222-8222-222222222222"),
                         "userIds": ["user-a"],
                     }
                 ]
@@ -154,6 +155,24 @@ def test_sensor_fails_without_admin_or_complete_process_visibility(tmp_path: Pat
             process_reader=lambda: (_ for _ in ()).throw(
                 module.EndpointEvidenceError("process inspection was incomplete")
             ),
+        )
+
+
+def test_sensor_cannot_supply_directory_target_identity(tmp_path: Path) -> None:
+    """Only MDM discovery, never the endpoint manifest, may bind Entra targeting."""
+    module = _module("collect_endpoint_evidence")
+    manifest, _, _ = _manifest(tmp_path)
+    value = json.loads(manifest.read_text(encoding="utf-8"))
+    value["device"]["directoryDeviceRegistrationId"] = "22222222-2222-4222-8222-222222222222"
+    manifest.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(module.EndpointEvidenceError, match="invalid schema"):
+        module.collect_signed_report(
+            manifest,
+            key_id="key-a",
+            secret="a" * 32,
+            administrator_check=lambda: True,
+            manifest_security_check=lambda _path: None,
+            process_reader=lambda: set(),
         )
 
 
@@ -267,6 +286,7 @@ def test_fleet_assembly_verifies_signature_freshness_and_mdm_identity(
         for key, value in report["payload"]["device"].items()
         if key not in {"operatingSystem", "architecture"}
     }
+    expected_device["directoryDeviceRegistrationId"] = "22222222-2222-4222-8222-222222222222"
     assert result["devices"] == [expected_device]
     assert result["installations"] == report["payload"]["installations"]
 

@@ -15,7 +15,9 @@ DACL. Hardware-backed device identity remains part of P0-05 acceptance.
 ## Trust model
 
 1. A complete, current Intune source establishes the managed-device
-   population.
+   population and its canonical Entra device registration IDs. The latter are
+   provider targeting evidence, not endpoint-supplied identity and not Entra
+   directory object IDs.
 2. A platform administrator issues a credential only for an exact managed
    device. The service stores only its SHA-256 digest; plaintext is returned
    once for protected MDM delivery.
@@ -35,6 +37,13 @@ measured from the local administrator process. The manifest, browser and model
 cannot supply these values. Schema-v1 reports remain valid health evidence for
 backward compatibility, but they are explicitly insufficient for selecting a
 platform-specific delivery package.
+
+The fixed Intune query also collects `azureADDeviceId` and publishes it as the
+provider-neutral `directoryDeviceRegistrationId`. The endpoint manifest and
+sensor schema do not accept that field. A hosted delivery worker must resolve
+the corresponding Entra directory object online and reproduce the registration
+ID before changing an AAI-owned rollout group; see
+[Microsoft Intune managed delivery](intune-managed-delivery-design.md).
 
 The server derives `healthy`, `attention` or `stale` from independent MDM
 inventory, credential state, report freshness, binary measurement and process

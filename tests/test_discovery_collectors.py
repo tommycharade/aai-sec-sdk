@@ -75,11 +75,12 @@ def test_intune_collector_is_path_bounded_and_content_minimised(tmp_path: Path) 
                     {
                         "id": "11111111-1111-4111-8111-111111111111",
                         "userId": "33333333-3333-4333-8333-333333333333",
+                        "azureADDeviceId": "22222222-2222-4222-8222-222222222222",
                     }
                 ],
                 "@odata.nextLink": (
                     "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices"
-                    "?$select=id,userId&$top=100&$skiptoken=synthetic"
+                    "?$select=id,userId,azureADDeviceId&$top=100&$skiptoken=synthetic"
                 ),
             },
             {"value": []},
@@ -95,6 +96,7 @@ def test_intune_collector_is_path_bounded_and_content_minimised(tmp_path: Path) 
             "kind": "device",
             "id": "11111111-1111-4111-8111-111111111111",
             "managed": True,
+            "directoryDeviceRegistrationId": "22222222-2222-4222-8222-222222222222",
             "userIds": ["33333333-3333-4333-8333-333333333333"],
             "businessUnit": "Platform",
         }
@@ -120,7 +122,22 @@ def test_intune_collector_rejects_broader_pagination_and_sensitive_fields() -> N
                     {
                         "id": "11111111-1111-4111-8111-111111111111",
                         "userId": None,
+                        "azureADDeviceId": "22222222-2222-4222-8222-222222222222",
                         "deviceName": "sensitive",
+                    }
+                ]
+            },
+        )
+
+    with pytest.raises(module.DiscoveryCollectionError, match="identity is invalid"):
+        module.collect_intune_devices(
+            "synthetic-graph-token",  # noqa: S106
+            get_json=lambda *_args, **_kwargs: {
+                "value": [
+                    {
+                        "id": "11111111-1111-4111-8111-111111111111",
+                        "userId": None,
+                        "azureADDeviceId": "not-a-uuid",
                     }
                 ]
             },

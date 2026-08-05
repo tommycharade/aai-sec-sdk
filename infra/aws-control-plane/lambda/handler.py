@@ -113,9 +113,7 @@ def _parse_data_boundary_runtime():
             )
         )
         cidrs = json.loads(os.environ.get("DATA_BOUNDARY_OPERATOR_IPV4_CIDRS", "[]"))
-        endpoint_ids = json.loads(
-            os.environ.get("DATA_BOUNDARY_OPERATOR_VPC_ENDPOINT_IDS", "[]")
-        )
+        endpoint_ids = json.loads(os.environ.get("DATA_BOUNDARY_OPERATOR_VPC_ENDPOINT_IDS", "[]"))
     except json.JSONDecodeError as error:
         raise RuntimeError("data-boundary runtime registry is malformed") from error
     if (
@@ -11167,6 +11165,17 @@ def _discovery_optional_identifier(value, field):
     return None if value is None else _bounded_identifier(value, field)
 
 
+def _discovery_uuid(value, field):
+    """Require one canonical lowercase UUID for cross-provider identity binding."""
+    try:
+        normalized = str(uuid.UUID(value))
+    except (ValueError, TypeError, AttributeError) as error:
+        raise ValueError(f"{field} must be a canonical UUID") from error
+    if value != normalized:
+        raise ValueError(f"{field} must be a canonical UUID")
+    return normalized
+
+
 def _discovery_identifier_list(value, field, *, limit=20):
     """Return a unique bounded list of opaque identifiers."""
     if not isinstance(value, list) or len(value) > limit:
@@ -11191,7 +11200,14 @@ def _discovery_observation(value, source_kind):
         ),
         "device": (
             {"kind", "id", "managed"},
-            {"kind", "id", "managed", "businessUnit", "userIds"},
+            {
+                "kind",
+                "id",
+                "managed",
+                "businessUnit",
+                "userIds",
+                "directoryDeviceRegistrationId",
+            },
         ),
         "repository": (
             {"kind", "id", "projectRootDigest", "expectedHosts"},
@@ -11236,6 +11252,11 @@ def _discovery_observation(value, source_kind):
             raise ValueError("device managed must be boolean")
         result["managed"] = value["managed"]
         result["userIds"] = _discovery_identifier_list(value.get("userIds", []), "userIds")
+        if "directoryDeviceRegistrationId" in value:
+            result["directoryDeviceRegistrationId"] = _discovery_uuid(
+                value.get("directoryDeviceRegistrationId"),
+                "directoryDeviceRegistrationId",
+            )
     elif kind == "repository":
         result["projectRootDigest"] = _discovery_digest(value.get("projectRootDigest"))
         hosts = value.get("expectedHosts")
@@ -17549,6 +17570,11 @@ def _endpoint_agent_binding(
         "policyId": policy.get("id") if policy else None,
         "policyVersion": int(policy.get("version", 0)) if policy else None,
     }
+    if device.get("directoryDeviceRegistrationId"):
+        # This provider-derived alternate key is part of the binding. A future
+        # worker still has to resolve and reproduce the Entra object online;
+        # neither the endpoint sensor nor browser may supply that object ID.
+        binding["directoryDeviceRegistrationId"] = device["directoryDeviceRegistrationId"]
     digest_material = {key: value for key, value in binding.items() if key != "bindingDigest"}
     return {
         **binding,
@@ -26241,9 +26267,7 @@ def handler(event, context):
                     if not isinstance(query, dict):
                         return _response(400, {"error": "query parameters are invalid"})
                     try:
-                        posture = _endpoint_delivery_readiness(
-                            tenant, query.get("deploymentId")
-                        )
+                        posture = _endpoint_delivery_readiness(tenant, query.get("deploymentId"))
                     except (TypeError, ValueError, DeliveryPackageError) as error:
                         return _response(400, {"error": str(error)})
                     except LookupError as error:

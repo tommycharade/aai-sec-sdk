@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Documented the provider-correct Microsoft Intune delivery architecture:
+  Graph app delivery is group-assignment based, so hosted rollout requires an
+  exact AAI-owned cohort rather than a browser-selected managed device. Intune
+  collectors now retain the canonical Entra device registration ID as
+  authoritative targeting evidence; endpoint sensors cannot submit it, and a
+  future worker must resolve and reproduce the directory object online before
+  mutation. Hosted Graph writes remain disabled by default.
+
 - Added the first managed endpoint-delivery authority gates for Claude Code
   and Codex. Deployment-owned package and approval bundles now bind exact
   runtime release, OS, architecture, immutable S3 object version and evidence

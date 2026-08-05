@@ -653,7 +653,9 @@ per-device signed installation/process report and
 authoritative MDM device inventory before producing one complete endpoint
 export. The `intune` mode of `collect_discovery_inventory.py` obtains that
 device file from the fixed Microsoft Graph v1.0 managed-devices query with only
-opaque device/user IDs and optional reviewed business-unit mappings.
+opaque managed-device/user IDs, the canonical Entra device registration ID
+needed for later online target resolution, and optional reviewed business-unit
+mappings. Endpoint reports cannot submit that registration identity.
 `publish_discovery_generation.py` performs the bounded three-phase upload. See
 [Endpoint evidence publisher](endpoint-evidence-publisher-design.md) for the
 manifest, key, privilege and freshness boundaries, and
@@ -678,6 +680,10 @@ bytes, installation command, signing material or provider credential. The
 route is read-only and is not Intune dispatch authority. See
 [Managed endpoint delivery authority](managed-endpoint-delivery-authority-design.md)
 and [managed endpoint delivery user journeys](managed-endpoint-delivery-user-journeys.md).
+The provider-specific group-assignment and online identity-resolution boundary
+is documented in
+[Microsoft Intune managed delivery](intune-managed-delivery-design.md); no
+hosted provider mutation API is enabled yet.
 
 `GET /enterprise/alerts` reconciles and returns content-minimised endpoint,
 explainable behavior and independently derived repository/configuration
