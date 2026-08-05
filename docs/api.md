@@ -161,6 +161,23 @@ endpoint evidence matches the complete desired bundle.
 
 ::: agentic_security.managed_configuration.reconcile_effective_authority
 
+### Codex process-loaded effective controls
+
+`CodexAppServerEffectiveControlProbe` invokes an exact release-pinned Codex
+binary directly and reads the supported app-server configuration endpoints. It
+returns only a content-minimised projection. Raw configuration can contain
+credentials and is never returned, logged, or included in errors. A successful
+probe can still return `deployment_required` when Codex does not expose enough
+runtime detail to prove every requested control.
+
+::: agentic_security.codex_effective_controls.CodexAppServerEffectiveControlProbe
+
+::: agentic_security.codex_effective_controls.CodexEffectiveControlEvidence
+
+::: agentic_security.codex_effective_controls.CodexRequirementProjection
+
+::: agentic_security.codex_effective_controls.codex_effective_control_evidence_from_wire
+
 ## Managed endpoint deployment packages
 
 Packages are canonical, credential-free and digest-bound, but they are not

@@ -44,6 +44,11 @@ import certifi
 from ._command_patterns import compile_command_patterns
 from .agent_sessions import AgentSessionCredential, AgentSessionStore
 from .audit import AuditEvent, AuditSink
+from .codex_effective_controls import (
+    CodexEffectiveControlEvidence,
+    codex_effective_control_evidence_from_wire,
+)
+from .errors import SecurityConfigurationError
 from .integrations import AgentHost
 from .managed_configuration import ManagedConfigurationEvidence, ManagedPlatform
 from .managed_deployment import ManagedDeploymentPackage
@@ -993,6 +998,7 @@ class ControlPlaneAgentClient:
         session_store: AgentSessionStore | None = None,
         attestor: RuntimeAttestor | None = None,
         managed_configuration_provider: Callable[[], ManagedConfigurationEvidence] | None = None,
+        effective_controls_provider: Callable[[], CodexEffectiveControlEvidence] | None = None,
         policy_trust_store: PolicyTrustStore | None = None,
         tenant_id: str | None = None,
         host: AgentHost | str = AgentHost.CLAUDE_CODE,
@@ -1008,6 +1014,9 @@ class ControlPlaneAgentClient:
         ``managed_configuration_provider`` must be a deployment-owned callback
         that re-measures administrator-owned host files for every heartbeat.
         The client accepts only typed evidence for its bound host identity.
+        ``effective_controls_provider`` is the separate process-loaded Codex
+        observation. It is accepted only for an AWS Codex session and never
+        substitutes for protected-file evidence.
         ``policy_trust_store`` and ``tenant_id`` are deployment-owned trust
         context used to verify AWS policy bundles before they become runtime
         authority. They are required when :meth:`effective_policy` is called
@@ -1051,6 +1060,10 @@ class ControlPlaneAgentClient:
             raise ValueError("runtime attestation requires an AWS agent session")
         if managed_configuration_provider is not None and not aws_agent_session:
             raise ValueError("managed configuration evidence requires an AWS agent session")
+        if effective_controls_provider is not None and (
+            not aws_agent_session or self.host is not AgentHost.CODEX_CLI
+        ):
+            raise ValueError("effective-control evidence requires an AWS Codex session")
         if (policy_trust_store is None) != (tenant_id is None):
             raise ValueError("policy trust store and tenant ID must be supplied together")
         if policy_trust_store is not None and not aws_agent_session:
@@ -1065,6 +1078,7 @@ class ControlPlaneAgentClient:
         self.session_store = session_store
         self.attestor = attestor
         self.managed_configuration_provider = managed_configuration_provider
+        self.effective_controls_provider = effective_controls_provider
         self.policy_trust_store = policy_trust_store
         self.tenant_id = tenant_id
         self.timeout_seconds = timeout_seconds
@@ -1118,6 +1132,21 @@ class ControlPlaneAgentClient:
                     "managed configuration evidence does not match the agent host"
                 )
             body["managedConfiguration"] = evidence.to_wire()
+        if self.effective_controls_provider is not None:
+            effective = self.effective_controls_provider()
+            if not isinstance(effective, CodexEffectiveControlEvidence):
+                raise ControlPlaneConfigurationError(
+                    "effective-control provider returned invalid evidence"
+                )
+            try:
+                normalized_effective = codex_effective_control_evidence_from_wire(
+                    effective.to_wire()
+                )
+            except SecurityConfigurationError:
+                raise ControlPlaneConfigurationError(
+                    "effective-control provider returned invalid evidence"
+                ) from None
+            body["nativeEffectiveControls"] = normalized_effective.to_wire()
         if self.attestor is not None:
             challenge = self._request(self._agent_path("attestation/challenge"), {})
             nonce = challenge.get("nonce")

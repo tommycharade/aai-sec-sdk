@@ -358,6 +358,14 @@ bounded metrics for one host and clearly labels heartbeat-only agents as not
 reporting performance data. CPU, token-use, raw tool content, and tool names
 are not part of this contract and are never represented as guessed values.
 
+For Codex agents, the inspector also separates protected-file delivery from
+**process-loaded controls**. The latter shows effective approval and sandbox
+modes, managed-hook proof, approved MCP names, freshness, and fixed mismatch or
+observability-gap codes. Missing, stale, conflicting, and partially observable
+states are visually blocked and never presented as effective authority. Raw
+Codex configuration, paths, hook commands, MCP URLs, headers, environment
+variables, and host error messages do not enter the browser contract.
+
 If a live fleet request fails, the fleet-dependent screens show an explicit
 recovery state with the error context, access guidance, and a **Retry
 connection** action. The UI never replaces missing enterprise state with demo

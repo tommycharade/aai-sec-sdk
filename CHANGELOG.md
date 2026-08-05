@@ -1,5 +1,8 @@
 # Changelog
 
+- Added release-pinned, bounded Codex app-server effective-control evidence
+  with deny-first reconciliation and a credential-free heartbeat projection.
+
 - Added a least-privilege runtime remediation coordination contract for
   managed Claude Code and Codex upgrades. The control plane derives exact,
   executable-free instructions from live rollout authority, leases them only

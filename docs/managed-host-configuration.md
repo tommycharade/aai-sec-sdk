@@ -203,3 +203,30 @@ assigned, the control plane blocks effective-policy and other governed agent
 routes until exact fresh evidence arrives. The UI must continue to label the
 deployment blocked until live action probes additionally prove that the host
 loaded and enforced the managed source.
+
+For Codex, use `CodexAppServerEffectiveControlProbe` after protected-file
+measurement. The probe requires the approved SHA-256 of the exact Codex
+executable and the target project root, then compares Codex's process-loaded
+administrator requirements and effective security settings with the compiled
+bundle. Treat `missing`, `conflict`, and `deployment_required` as closed states.
+The last state means the API did not expose enough information to prove every
+requested control; it is not partial authorization.
+
+```python
+from agentic_security import CodexAppServerEffectiveControlProbe
+
+probe = CodexAppServerEffectiveControlProbe(
+    executable="/Applications/Codex.app/Contents/MacOS/codex",
+    # Obtain this from reviewed deployment/release metadata, not from the model.
+    executable_sha256="0" * 64,
+)
+evidence = probe.inspect(compiled_bundle, project_root="/Users/example/project")
+if not evidence.allowed_actions:
+    # Export only the content-minimised wire projection to the control plane.
+    raise RuntimeError(f"Codex authority unavailable: {evidence.reason}")
+```
+
+The zero digest is a placeholder and intentionally fails against a real binary;
+replace it with independently approved release metadata. See
+[Codex effective-control evidence](codex-effective-controls-design.md) for the
+threat model and known observability limits.

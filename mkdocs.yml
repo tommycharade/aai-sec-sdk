@@ -104,6 +104,7 @@ nav:
   - Measured runtime-release rollouts: runtime-release-rollout-design.md
   - Runtime remediation coordination: runtime-remediation-coordination-design.md
   - Managed host configuration: managed-host-configuration.md
+  - Codex effective-control evidence: codex-effective-controls-design.md
   - Managed endpoint deployment design: managed-endpoint-deployment-design.md
   - Managed package distribution design: managed-package-distribution-design.md
   - Measured managed-configuration rollout design: measured-managed-rollout-design.md
