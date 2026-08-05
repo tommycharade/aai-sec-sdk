@@ -74,6 +74,15 @@
   read-only preflight; hosted Microsoft Intune dispatch remains explicitly
   disabled pending customer credentials, enablement approval and live
   post-install attestation acceptance.
+- Added a machine-validated customer assurance pack for P0-12 with technical
+  ownership, a maximum-120-day review clock, public vulnerability
+  acknowledgement/assessment/notification/remediation targets, evidence-linked
+  guarantees and explicit non-guarantees, data-processing/subprocessor
+  disclosure, and an honest SOC 2/ISO/penetration-test roadmap. CI rejects
+  stale packs, weakened critical/high commitments and certification claims
+  without reviewed evidence.
+- Tagged releases now attach a deterministic, internally hashed customer
+  assurance archive covered by the release checksum manifest.
 
 - Separated deterministic UI simulation from the HTTP-only production client,
   added emitted-asset purity and raw/gzip budget gates with adversarial tests,

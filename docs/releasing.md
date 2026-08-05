@@ -23,6 +23,14 @@ latest supported release line.
 - [ ] `CHANGELOG.md` describes user-visible and security-relevant changes.
 - [ ] Public API and migration notes are up to date.
 - [ ] Security regressions and known limitations are documented.
+- [ ] `make assurance-check` confirms the buyer assurance pack has current
+      technical approval, a non-expired review date, bounded vulnerability
+      targets and evidence-backed independent-assurance labels.
+- [ ] `customer-assurance-pack.zip` is built deterministically, internally
+      hash-verified, covered by `SHA256SUMS` and attached to the GitHub release.
+- [ ] Every critical/high vulnerability since the prior release has retained
+      acknowledgement, assessment, notification and remediation/exception
+      evidence against the published targets.
 - [ ] The release is tagged from a clean, reviewed commit.
 - [ ] The package is published through trusted CI credentials, not a developer workstation token.
 - [ ] Release artifacts and checksums are retained.

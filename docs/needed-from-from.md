@@ -356,6 +356,11 @@ types and test tenant must be approved explicitly.
 
 ## Customer-readiness inputs
 
+- Legal contracting entity, registered address, privacy/security contact and
+  authority to approve the DPA and final subprocessor terms.
+- Independent penetration-test provider, approved scope and remediation budget.
+- Named security-assurance owner for annual critical/high vulnerability
+  tabletop evidence and framework-readiness review.
 - Target customer size, regulated sector and expected managed-agent count.
 - Pilot size, such as 25, 100 or 1,000 installations.
 - Commercial packaging decision. The recommended model is the Apache-2.0 SDK

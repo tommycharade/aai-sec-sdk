@@ -149,6 +149,8 @@ Before production approval, retain:
 - remote audit replication and corruption-recovery tests;
 - worker saturation and emergency-stop tabletop evidence;
 - release checksums, SBOM, and provenance verification output;
+- a current, technically approved customer assurance pack and vulnerability
+  response evidence for any critical/high report in the release period;
 - incident contacts, escalation rules, retention requirements, and rollback plan.
 
 Passing repository checks does not replace these deployment acceptance artifacts.
