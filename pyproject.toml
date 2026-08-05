@@ -33,6 +33,7 @@ dev = [
   "mkdocs-material==9.7.7",
   "mkdocstrings[python]==0.30.1",
   "build==1.5.0",
+  "cvss==3.6",
   "twine==6.2.0",
   "pip-audit==2.10.1",
   "mutmut==3.6.0",
@@ -81,7 +82,7 @@ warn_unused_configs = true
 [[tool.mypy.overrides]]
 # These providers are intentionally optional deployment adapters. Their imports
 # are checked when installed, while a core-only SDK environment remains valid.
-module = ["boto3", "boto3.*", "psutil", "psutil.*", "psycopg", "psycopg.*"]
+module = ["boto3", "boto3.*", "cvss", "cvss.*", "psutil", "psutil.*", "psycopg", "psycopg.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -134,8 +135,10 @@ also_copy = [
   "infra/aws-control-plane/lambda/",
   "infra/aws-control-plane/lib/",
   "scripts/",
+  "security/",
   "AGENTS.md",
   "CONTRIBUTING.md",
+  "SECURITY.md",
   "README.md",
   "docs/",
   "Makefile",

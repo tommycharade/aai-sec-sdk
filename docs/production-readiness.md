@@ -110,6 +110,7 @@ make check
 make mutation
 make package-check
 make security-check
+python scripts/verify_vulnerability_management.py
 ```
 
 Expected evidence includes passing tests and coverage, a successful bounded
@@ -121,6 +122,11 @@ provenance bound to the release tag, and a clean reviewed release commit/tag.
 The exact published GitHub Release bundle is independently downloaded and
 verified after publication; the artifact build and clean post-publication
 verification are separate release steps.
+
+The vulnerability verifier proves that the public policy is current and that
+the checked synthetic critical-incident record meets every machine-readable
+deadline. It does not prove a live team's response time. Retain a real exercise
+or incident record before making that operational claim.
 
 `make check` validates the mutation contract and normal quality gates. The
 actual mutation score is established only by a successful `make mutation` run.

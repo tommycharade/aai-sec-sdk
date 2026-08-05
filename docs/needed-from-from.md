@@ -18,7 +18,8 @@ The latest published `aws-cdk-lib@2.263.0` bundle contains
 `GHSA-rgw5-rvv9-x895` as high severity and requires `5.0.9`. The package is a
 build/deployment-only dependency and is absent from the SDK, UI and Lambda
 runtime, but the previous dated exception covers a different advisory and must
-not be silently widened.
+not be silently widened. [GitHub issue #146](https://github.com/tommycharade/aai-sec-sdk/issues/146)
+tracks the exact affected path, enforcement and exit criteria.
 
 Choose one of these paths:
 
@@ -49,7 +50,7 @@ Do not paste the issued bearer into this document, source control, chat or a
 ticket. The UI reveals it once; the target secret manager is the only approved
 destination.
 
-### Current `p1` Regional deployment preflight (2026-08-04)
+### Current `p1` Regional deployment preflight (2026-08-05)
 
 A read-only AWS inspection found the following state. Resource identifiers are
 intentionally omitted from this public document; the provider remains the
@@ -57,7 +58,7 @@ source of truth.
 
 | Boundary | Observed state | Deployment consequence |
 | --- | --- | --- |
-| Primary control plane | Stable stack exists; termination protection is off; Entra, SCIM and runtime attestation report `not-configured`; the deployed revision predates Regional fault-target outputs | Update only after identity/release authority is real; enable termination protection and independently verify the new template |
+| Primary control plane | Stable stack is `UPDATE_COMPLETE`; termination protection is off; Entra, SCIM and runtime attestation report `not-configured`; Regional fault-target outputs and bootstrap assurance-signing authority are deployed | Do not represent bootstrap identity/release authority as enterprise acceptance; enable termination protection and independently verify any Regional activation template |
 | Recovery storage/signing | Audit replica and staged multi-Region signing replica exist | Foundation only; this does not create a serving recovery cell |
 | Recovery identity | No recovery-Region Cognito pool exists | Passive/active recovery runtime deployment is denied |
 | Regional certificates | No ACM certificate exists in either application Region | Regional ingress deployment is denied |
@@ -286,6 +287,16 @@ types and test tenant must be approved explicitly.
 - Required assurance targets, such as SOC 2, ISO 27001, Cyber Essentials or
   GDPR.
 - Pricing assumptions or authority for the product team to propose pricing.
+
+The technical enterprise trust pack, vulnerability SLA, synthetic critical-
+incident rehearsal, data-processing inventory, subprocessor register and
+SOC 2/ISO 27001 roadmap are now maintained in the repository. They do not
+replace owner selection of an independent penetration-testing provider, legal
+approval of a customer-specific DPA or an auditor's certification opinion.
+Production support also requires a second authenticated vulnerability-intake
+route, a named escalation roster with calendar-time coverage, legal/privacy
+approval of the trust statements and a release workflow that binds the final
+pack to the `1.1.0` tag, commit, artifact digests, SBOMs and provenance.
 
 ## Work that can continue without owner input
 

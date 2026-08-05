@@ -37,10 +37,13 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Security model: security-model.md
-  - Temporary CDK risk acceptance: risk-acceptance-cdk-brace-expansion-2026-07-29.md
+  - Historical CDK risk acceptance: risk-acceptance-cdk-brace-expansion-2026-07-29.md
   - Operational runbooks: runbooks.md
   - Testing and assurance: testing.md
   - Production readiness: production-readiness.md
+  - Enterprise trust pack: enterprise-trust-pack.md
+  - Vulnerability management: vulnerability-management.md
+  - Data processing and subprocessors: data-processing-and-subprocessors.md
   - Architecture: architecture.md
   - Agent integrations: integrations.md
   - Claude Code example: claude-code.md
