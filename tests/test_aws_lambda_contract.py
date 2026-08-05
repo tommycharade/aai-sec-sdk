@@ -15942,6 +15942,53 @@ def test_intune_delivery_outbox_is_idempotent_and_authority_bound(monkeypatch: A
     view = module._endpoint_delivery_commands(tenant, "kratos")
     assert view["dispatchEnabled"] is False
     assert view["items"][0]["dispatchEnabled"] is False
+    assert view["items"][0]["attemptCount"] == 0
+    assert view["items"][0]["failureCode"] is None
+    assert view["items"][0]["providerEvidence"] is None
+
+
+def test_endpoint_delivery_command_view_is_content_minimised_and_fails_closed(
+    monkeypatch: Any,
+) -> None:
+    """Operators receive fixed evidence, while malformed worker state is denied."""
+    module, _table = _load_handler(monkeypatch)
+    provider_evidence: dict[str, Any] = {
+        "groupReferenceSha256": "c" * 64,
+        "appReferenceSha256": "d" * 64,
+        "assignmentReferenceSha256": "e" * 64,
+        "targetCount": 3,
+    }
+    record: dict[str, Any] = {
+        "id": "a" * 64,
+        "provider": "intune",
+        "deployment_id": "deployment-1",
+        "host": "claude-code",
+        "release_id": "release-1",
+        "package_id": "package-1",
+        "provider_version": 1,
+        "rollout_revision": 2,
+        "target_count": 3,
+        "cohort_digest": "b" * 64,
+        "status": "assigned_reported",
+        "attempt_count": 2,
+        "failure_code": None,
+        "provider_evidence": provider_evidence,
+        "instruction_digest": "f" * 64,
+        "created_at": 1_800_000_000,
+        "updated_at": 1_800_000_010,
+    }
+
+    view = module._endpoint_delivery_command_view(record)
+
+    assert view["attemptCount"] == 2
+    assert view["providerEvidence"] == record["provider_evidence"]
+    assert "groupId" not in json.dumps(view)
+    with pytest.raises(RuntimeError, match="provider evidence is invalid"):
+        module._endpoint_delivery_command_view(
+            {**record, "provider_evidence": {**provider_evidence, "groupId": "raw"}}
+        )
+    with pytest.raises(RuntimeError, match="failure code is invalid"):
+        module._endpoint_delivery_command_view({**record, "failure_code": "raw URL"})
 
 
 def test_intune_delivery_dispatch_is_gated_and_latest_authority_bound(

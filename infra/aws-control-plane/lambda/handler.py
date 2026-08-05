@@ -18183,6 +18183,33 @@ def _endpoint_delivery_readiness(tenant, deployment_id, *, now=None):
 
 def _endpoint_delivery_command_view(record):
     """Project one dormant delivery command without provider or object locators."""
+    provider_evidence = record.get("provider_evidence")
+    if provider_evidence is not None:
+        expected_evidence_keys = {
+            "groupReferenceSha256",
+            "appReferenceSha256",
+            "assignmentReferenceSha256",
+            "targetCount",
+        }
+        if (
+            not isinstance(provider_evidence, dict)
+            or set(provider_evidence) != expected_evidence_keys
+            or any(
+                not re.fullmatch(r"[0-9a-f]{64}", str(provider_evidence.get(key, "")))
+                for key in expected_evidence_keys - {"targetCount"}
+            )
+            or not isinstance(provider_evidence.get("targetCount"), int)
+            or provider_evidence["targetCount"] < 1
+        ):
+            raise RuntimeError("endpoint delivery provider evidence is invalid")
+        # Only stable hashes and the reproduced target count cross the operator
+        # boundary. Raw Graph object IDs and response bodies remain worker-only.
+        provider_evidence = {key: provider_evidence[key] for key in sorted(expected_evidence_keys)}
+    failure_code = record.get("failure_code")
+    if failure_code is not None and (
+        not isinstance(failure_code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{2,79}", failure_code)
+    ):
+        raise RuntimeError("endpoint delivery failure code is invalid")
     return {
         "id": record.get("id"),
         "provider": record.get("provider"),
@@ -18195,6 +18222,9 @@ def _endpoint_delivery_command_view(record):
         "targetCount": int(record.get("target_count", 0)),
         "cohortDigest": record.get("cohort_digest"),
         "status": record.get("status"),
+        "attemptCount": int(record.get("attempt_count", 0)),
+        "failureCode": failure_code,
+        "providerEvidence": provider_evidence,
         "dispatchEnabled": _ENDPOINT_DELIVERY_DISPATCH_ENABLED,
         "instructionDigest": record.get("instruction_digest"),
         "createdAt": int(record.get("created_at", 0)),

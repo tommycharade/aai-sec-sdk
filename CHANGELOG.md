@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Expose fixed Intune delivery attempt, failure and hashed convergence evidence
+  to authorized operators without returning Graph object IDs or provider
+  payloads.
+
 - Added a deployment-disabled Microsoft Intune delivery worker with encrypted
   FIFO/DLQ dispatch, scheduled outbox repair and a dedicated least-privilege
   credential boundary. It reconstructs current endpoint-to-agent bindings,

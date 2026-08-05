@@ -32,9 +32,10 @@ No secret value, package byte or Graph request body is pasted into the UI.
 7. Activate one non-production deployment and leave all others outside the
    explicit configuration scope.
 
-The API lifecycle is implemented; this Integrations workspace is the next UI
-slice. Activation enables outbox creation only. Graph dispatch remains a
-separate deployment-owned cutover with reviewed enablement evidence.
+The API lifecycle and typed Integrations workspace are implemented. Activation
+enables outbox creation only. Graph dispatch remains a separate
+deployment-owned cutover with reviewed enablement evidence; the browser has no
+enablement switch and never receives a provider secret value.
 
 Editing the configuration invalidates approval and returns it to draft.
 

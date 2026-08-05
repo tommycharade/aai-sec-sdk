@@ -699,8 +699,11 @@ control-plane APIs are available:
 - `POST .../{version}/activate` requires `provider_approval`, the expected
   active version and a still-valid tenant/KMS/tag-bound secret.
 - `GET /api/enterprise/endpoint-delivery/commands?deploymentId=...` returns a
-  locator-free outbox view. `dispatchEnabled` reflects immutable deployment
-  state; it is not browser-controlled.
+  locator-free outbox view. Each command includes its bounded attempt count,
+  fixed failure code and, after provider convergence, only hashed group, app
+  and assignment references plus the reproduced target count. Raw Graph IDs,
+  provider payloads and credentials are excluded. `dispatchEnabled` reflects
+  immutable deployment state; it is not browser-controlled.
 
 The five-minute reconciler creates an outbox command automatically from exact
 live provider, rollout, deployment, agent, endpoint-evidence and package
