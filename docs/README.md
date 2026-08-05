@@ -58,6 +58,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Scoped service identities and machine API](service-identities-design.md)
 - [Terraform provider and declarative management](terraform-provider-design.md)
 - [Secure webhooks](secure-webhooks-design.md)
+- [Governed incident workflow integrations](incident-workflow-integrations-design.md)
 - [Policy change assurance live acceptance — 2026-08-01](policy-change-assurance-acceptance-2026-08-01.md)
 - [Signed policy bundles](signed-policy-bundles-design.md)
 - [Signed policy bundle acceptance — 2026-08-01](signed-policy-acceptance-2026-08-01.md)

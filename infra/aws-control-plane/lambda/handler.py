@@ -481,6 +481,13 @@ _WEBHOOK_EVENT_TYPES = frozenset(
 _WEBHOOK_DESTINATION_LIMIT = 20
 _WEBHOOK_ROTATION_MIN_SECONDS = 60 * 60
 _WEBHOOK_ROTATION_MAX_SECONDS = 7 * 24 * 60 * 60
+_WORKFLOW_PROVIDERS = frozenset({"servicenow", "jira", "pagerduty"})
+_WORKFLOW_EVENT_TYPES = frozenset(
+    {"case.opened", "case.contained", "case.resolved", "case.closed"}
+)
+_WORKFLOW_CONNECTION_LIMIT = 20
+_WORKFLOW_OUTBOX_INDEX = "WorkflowOutbox"
+_WORKFLOW_DELIVERY_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _CREDENTIAL_BROKER_PROVIDERS = frozenset(
     {"aws_sts", "azure_workload_identity", "gcp_workload_identity"}
 )
@@ -2958,6 +2965,10 @@ def _required_mutation_capability(path):
         # credential boundary. Only the platform-administration wildcard owns
         # this capability; it is intentionally absent from delegated grants,
         # break glass, and machine credentials.
+        return "integration_admin"
+    if normalized.startswith("/enterprise/workflow-integrations"):
+        # Provider credentials and case egress are platform-owned boundaries.
+        # Delegated roles and external workflow state cannot establish them.
         return "integration_admin"
     if normalized.startswith("/enterprise/discovery/sources/"):
         # Population evidence can lower measured coverage and create leaver or
@@ -6090,6 +6101,572 @@ def _webhook_dispatch_cycle():
             raise RuntimeError("webhook outbox exceeds its per-tenant dispatch bound")
         for delivery in pending:
             if _dispatch_webhook_delivery(delivery):
+                dispatched += 1
+    return {"processedTenants": len(registrations), "dispatchedDeliveries": dispatched}
+
+
+def _workflow_events(value):
+    """Validate one non-empty exact workflow event subscription."""
+    if (
+        not isinstance(value, list)
+        or not value
+        or len(value) > len(_WORKFLOW_EVENT_TYPES)
+        or any(not isinstance(item, str) for item in value)
+    ):
+        raise ValueError("workflow eventTypes must be a bounded non-empty list")
+    events = frozenset(value)
+    if len(events) != len(value) or not events <= _WORKFLOW_EVENT_TYPES:
+        raise ValueError("workflow eventTypes contain duplicates or unsupported values")
+    return sorted(events)
+
+
+def _workflow_origin(value, provider):
+    """Validate one provider-owned public HTTPS origin without a secret path."""
+    endpoint = _webhook_endpoint(value)
+    parsed = urlsplit(endpoint)
+    if parsed.path not in {"", "/"}:
+        raise ValueError("workflow provider URL must be an HTTPS origin without a path")
+    host = (parsed.hostname or "").lower()
+    expected_suffix = ".service-now.com" if provider == "servicenow" else ".atlassian.net"
+    if not host.endswith(expected_suffix) or host == expected_suffix[1:]:
+        raise ValueError(f"{provider} URL must use the provider-owned SaaS domain")
+    return f"https://{host}"
+
+
+def _workflow_configuration(provider, value):
+    """Normalize the closed non-secret configuration for one provider."""
+    if not isinstance(value, dict):
+        raise ValueError("workflow provider configuration must be an object")
+    if provider == "servicenow":
+        if set(value) != {"baseUrl", "assignmentGroup"}:
+            raise ValueError("ServiceNow configuration has an invalid schema")
+        assignment = value.get("assignmentGroup", "")
+        if not isinstance(assignment, str) or len(assignment.strip()) > 120:
+            raise ValueError("ServiceNow assignmentGroup must be bounded text")
+        return {
+            "baseUrl": _workflow_origin(value.get("baseUrl"), provider),
+            "assignmentGroup": assignment.strip(),
+        }
+    if provider == "jira":
+        if set(value) != {"baseUrl", "projectKey", "issueType"}:
+            raise ValueError("Jira configuration has an invalid schema")
+        project = value.get("projectKey")
+        if not isinstance(project, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,19}", project):
+            raise ValueError("Jira projectKey must be an uppercase project key")
+        issue_type = _bounded_text(value.get("issueType"), "issueType", 80)
+        return {
+            "baseUrl": _workflow_origin(value.get("baseUrl"), provider),
+            "projectKey": project,
+            "issueType": issue_type,
+        }
+    if provider == "pagerduty":
+        if set(value) != {"serviceLabel"}:
+            raise ValueError("PagerDuty configuration has an invalid schema")
+        return {"serviceLabel": _bounded_text(value.get("serviceLabel"), "serviceLabel", 120)}
+    raise ValueError("workflow provider is unsupported")
+
+
+def _workflow_secret_arn(tenant, value):
+    """Require a deployment-owned secret inside the exact tenant namespace."""
+    if not isinstance(value, str) or len(value) > 512:
+        raise ValueError("credentialSecretArn must be a bounded Secrets Manager ARN")
+    prefix = os.environ.get("WORKFLOW_SECRET_PREFIX", "")
+    if not prefix or not prefix.endswith("/") or len(prefix) > 256:
+        raise RuntimeError("workflow credential namespace is not configured")
+    parts = value.split(":", 6)
+    expected_resource = f"{prefix}{tenant}/"
+    if (
+        len(parts) != 7
+        or parts[0] != "arn"
+        or parts[2] != "secretsmanager"
+        or not parts[3]
+        or not parts[4]
+        or parts[5] != "secret"
+        or not parts[6].startswith(expected_resource)
+        or len(parts[6]) <= len(expected_resource)
+    ):
+        raise ValueError("credentialSecretArn is outside the tenant workflow namespace")
+    return value
+
+
+def _workflow_connection_view(item, *, health=None):
+    """Project a workflow connection without credential identity or content."""
+    posture = health if isinstance(health, dict) else {}
+    return {
+        "id": item.get("id", ""),
+        "name": item.get("name", ""),
+        "description": item.get("description", ""),
+        "provider": item.get("provider", ""),
+        "configuration": _json(item.get("configuration", {})),
+        "eventTypes": sorted(item.get("event_types", [])),
+        "status": item.get("status", "pending_verification"),
+        "revision": int(item.get("revision", 0)),
+        "credentialConfigured": bool(item.get("credential_secret_arn")),
+        "createdAt": int(item.get("created_at", 0)),
+        "createdBy": item.get("created_by", ""),
+        "updatedAt": int(item.get("updated_at", 0)),
+        "updatedBy": item.get("updated_by", ""),
+        "lastVerificationAt": posture.get("last_verification_at"),
+        "lastVerificationStatus": posture.get("last_verification_status", "never"),
+        "verifiedRevision": posture.get("verified_revision"),
+        "lastDeliveryAt": posture.get("last_delivery_at"),
+        "lastDeliveryStatus": posture.get("last_delivery_status", "never"),
+        "lastExternalReference": posture.get("last_external_reference"),
+    }
+
+
+def _workflow_connection(tenant, connection_id):
+    """Strongly read one tenant-scoped workflow connection."""
+    return TABLE.get_item(
+        Key=_item_key(
+            tenant,
+            "WORKFLOW_CONNECTION",
+            _bounded_identifier(connection_id, "connectionId"),
+        ),
+        ConsistentRead=True,
+    ).get("Item")
+
+
+def _workflow_health(tenant, connection_id):
+    """Read the worker-owned, secret-free connection health projection."""
+    return TABLE.get_item(
+        Key=_item_key(
+            tenant,
+            "WORKFLOW_HEALTH",
+            _bounded_identifier(connection_id, "connectionId"),
+        ),
+        ConsistentRead=True,
+    ).get("Item")
+
+
+def _create_workflow_connection(tenant, value, actor):
+    """Register non-secret workflow authority pending provider verification."""
+    expected_fields = {
+        "name",
+        "description",
+        "provider",
+        "configuration",
+        "credentialSecretArn",
+        "eventTypes",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise ValueError("workflow connection request has an invalid schema")
+    if (
+        len(_list(tenant, "WORKFLOW_CONNECTION", consistent_read=True))
+        >= _WORKFLOW_CONNECTION_LIMIT
+    ):
+        raise PolicyConflict("workflow connection limit reached")
+    provider = value.get("provider")
+    if provider not in _WORKFLOW_PROVIDERS:
+        raise ValueError("workflow provider is unsupported")
+    connection_id = str(uuid.uuid4())
+    description = value.get("description", "")
+    if not isinstance(description, str) or len(description.strip()) > 500:
+        raise ValueError("description must be bounded text")
+    now = int(time.time())
+    record = {
+        **_item_key(tenant, "WORKFLOW_CONNECTION", connection_id),
+        "tenant_id": tenant,
+        "id": connection_id,
+        "name": _bounded_text(value.get("name"), "name", 120),
+        "description": description.strip(),
+        "provider": provider,
+        "configuration": _workflow_configuration(provider, value.get("configuration")),
+        "credential_secret_arn": _workflow_secret_arn(
+            tenant, value.get("credentialSecretArn")
+        ),
+        "event_types": _workflow_events(value.get("eventTypes")),
+        "status": "pending_verification",
+        "revision": 1,
+        "created_at": now,
+        "created_by": actor,
+        "updated_at": now,
+        "updated_by": actor,
+    }
+    TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+    _audit(
+        tenant,
+        "workflow_connection_created",
+        actor,
+        {
+            "connection_id": connection_id,
+            "provider": provider,
+            "event_types": record["event_types"],
+            "revision": 1,
+        },
+    )
+    return _workflow_connection_view(record)
+
+
+def _workflow_delivery_view(item):
+    """Return content-minimised provider delivery evidence."""
+    return {
+        "id": item.get("id", ""),
+        "connectionId": item.get("connection_id", ""),
+        "provider": item.get("provider", ""),
+        "eventType": item.get("event_type", ""),
+        "caseId": item.get("case_id"),
+        "caseRevision": item.get("case_revision"),
+        "verification": item.get("verification") is True,
+        "status": item.get("status", "pending"),
+        "attemptCount": int(item.get("attempt_count", 0)),
+        "createdAt": int(item.get("created_at", 0)),
+        "updatedAt": int(item.get("updated_at", item.get("created_at", 0))),
+        "responseStatus": item.get("response_status"),
+        "failureCode": item.get("failure_code"),
+        "externalReference": item.get("external_reference"),
+    }
+
+
+def _workflow_case_payload(case, event_type, occurred_at):
+    """Build the fixed content boundary shared by every provider adapter."""
+    binding = case.get("binding") if isinstance(case.get("binding"), dict) else {}
+    return {
+        "schemaVersion": 1,
+        "eventType": event_type,
+        "occurredAt": int(occurred_at),
+        "case": {
+            "id": case.get("id", ""),
+            "revision": int(case.get("revision", 0)),
+            "status": case.get("status", ""),
+            "severity": case.get("severity", ""),
+            "title": str(case.get("title", ""))[:240],
+            "source": case.get("alertSource", ""),
+            "reasonCode": case.get("reasonCode", ""),
+            "host": binding.get("host"),
+            "agentId": binding.get("agentId"),
+        },
+    }
+
+
+def _workflow_delivery_records(tenant, case, event_type, *, now):
+    """Materialize deterministic records for subscribed active connections."""
+    if event_type not in _WORKFLOW_EVENT_TYPES:
+        raise ValueError("workflow event type is unsupported")
+    records = []
+    for connection in _list(tenant, "WORKFLOW_CONNECTION", consistent_read=True):
+        if connection.get("status") != "active" or event_type not in connection.get(
+            "event_types", []
+        ):
+            continue
+        identity = (
+            f"aai-workflow:{tenant}:{connection.get('id')}:{case.get('id')}:"
+            f"{int(case.get('revision', 0))}:{event_type}"
+        )
+        delivery_id = str(uuid.uuid5(uuid.NAMESPACE_URL, identity))
+        records.append(
+            {
+                **_item_key(tenant, "WORKFLOW_DELIVERY", delivery_id),
+                "tenant_id": tenant,
+                "id": delivery_id,
+                "connection_id": connection.get("id"),
+                "connection_revision": int(connection.get("revision", 0)),
+                "provider": connection.get("provider"),
+                "event_type": event_type,
+                "case_id": case.get("id"),
+                "case_revision": int(case.get("revision", 0)),
+                "verification": False,
+                "payload": _workflow_case_payload(case, event_type, now),
+                "status": "pending",
+                "attempt_count": 0,
+                "created_at": int(now),
+                "updated_at": int(now),
+                "workflow_outbox_pk": f"WORKFLOW_OUTBOX#{tenant}",
+                "workflow_outbox_sk": f"{int(now):010d}#{delivery_id}",
+                "ttl": int(now) + _WORKFLOW_DELIVERY_RETENTION_SECONDS,
+            }
+        )
+    if len(records) > _WORKFLOW_CONNECTION_LIMIT:
+        raise RuntimeError("workflow fan-out exceeds its safe bound")
+    return records
+
+
+def _dispatch_workflow_delivery(record):
+    """Queue one persisted delivery identity; DynamoDB remains authoritative."""
+    queue_url = os.environ.get("WORKFLOW_QUEUE_URL", "")
+    if not queue_url:
+        return False
+    try:
+        SQS.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(
+                {"tenantId": record["tenant_id"], "deliveryId": record["id"]},
+                separators=(",", ":"),
+            ),
+            MessageGroupId=f"workflow:{record['tenant_id']}:{record['connection_id']}",
+            MessageDeduplicationId=record["id"],
+        )
+        TABLE.update_item(
+            Key=_item_key(record["tenant_id"], "WORKFLOW_DELIVERY", record["id"]),
+            UpdateExpression=(
+                "SET #status = :queued REMOVE workflow_outbox_pk, workflow_outbox_sk"
+            ),
+            ConditionExpression="#status = :pending",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={":pending": "pending", ":queued": "queued"},
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _dispatch_workflow_deliveries(records):
+    """Best-effort dispatch after the case/outbox transaction commits."""
+    for record in records:
+        _dispatch_workflow_delivery(record)
+
+
+def _test_workflow_connection(tenant, connection_id, value, actor):
+    """Queue one synthetic provider incident without accepting arbitrary content."""
+    if not isinstance(value, dict) or set(value) != {"expectedRevision"}:
+        raise ValueError("workflow verification request has an invalid schema")
+    connection = _workflow_connection(tenant, connection_id)
+    if not connection or connection.get("status") == "retired":
+        raise LookupError("workflow connection not found")
+    expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision", minimum=1)
+    if int(connection.get("revision", 0)) != expected:
+        raise PolicyConflict("workflow connection revision is stale")
+    now = int(time.time())
+    delivery_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"aai-workflow-verify:{tenant}:{connection_id}:{expected}:{now}",
+        )
+    )
+    synthetic_case = {
+        "id": f"verification-{delivery_id}",
+        "revision": 1,
+        "status": "open",
+        "severity": "low",
+        "title": "AAI Security workflow verification",
+        "alertSource": "workflow_verification",
+        "reasonCode": "synthetic_verification",
+        "binding": {},
+    }
+    record = {
+        **_item_key(tenant, "WORKFLOW_DELIVERY", delivery_id),
+        "tenant_id": tenant,
+        "id": delivery_id,
+        "connection_id": connection_id,
+        "connection_revision": expected,
+        "provider": connection.get("provider"),
+        "event_type": "case.opened",
+        "case_id": synthetic_case["id"],
+        "case_revision": 1,
+        "verification": True,
+        "payload": _workflow_case_payload(synthetic_case, "case.opened", now),
+        "status": "pending",
+        "attempt_count": 0,
+        "created_at": now,
+        "updated_at": now,
+        "workflow_outbox_pk": f"WORKFLOW_OUTBOX#{tenant}",
+        "workflow_outbox_sk": f"{now:010d}#{delivery_id}",
+        "ttl": now + _WORKFLOW_DELIVERY_RETENTION_SECONDS,
+    }
+    TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+    _dispatch_workflow_delivery(record)
+    _audit(
+        tenant,
+        "workflow_verification_queued",
+        actor,
+        {"connection_id": connection_id, "delivery_id": delivery_id, "revision": expected},
+    )
+    return _workflow_delivery_view(record)
+
+
+def _set_workflow_connection_status(tenant, connection_id, action, value, actor):
+    """Activate, pause, resume or retire one verified connection."""
+    if action not in {"activate", "pause", "resume", "retire"}:
+        raise ValueError("workflow connection action is unsupported")
+    if not isinstance(value, dict) or set(value) != {"expectedRevision", "reason"}:
+        raise ValueError("workflow connection status request has an invalid schema")
+    connection = _workflow_connection(tenant, connection_id)
+    if not connection:
+        raise LookupError("workflow connection not found")
+    expected = _discovery_integer(value.get("expectedRevision"), "expectedRevision", minimum=1)
+    reason = _bounded_text(value.get("reason"), "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("workflow connection reason must contain at least 20 characters")
+    if int(connection.get("revision", 0)) != expected:
+        raise PolicyConflict("workflow connection revision is stale")
+    if connection.get("status") == "retired":
+        raise PolicyConflict("retired workflow connections cannot be changed")
+    target = {
+        "activate": "active",
+        "pause": "paused",
+        "resume": "active",
+        "retire": "retired",
+    }[action]
+    if action in {"activate", "resume"}:
+        health = _workflow_health(tenant, connection_id)
+        if (
+            not health
+            or health.get("last_verification_status") != "delivered"
+            or int(health.get("verified_revision", 0)) != expected
+        ):
+            raise PolicyConflict("current workflow connection revision is not verified")
+    allowed = {
+        "activate": {"pending_verification"},
+        "pause": {"active"},
+        "resume": {"paused"},
+        "retire": {"pending_verification", "active", "paused"},
+    }[action]
+    if connection.get("status") not in allowed:
+        raise PolicyConflict("workflow connection cannot make that status transition")
+    now = int(time.time())
+    updated = {
+        **connection,
+        "status": target,
+        "revision": expected + 1,
+        "updated_at": now,
+        "updated_by": actor,
+        "status_reason": reason,
+    }
+    try:
+        TABLE.put_item(
+            Item=updated,
+            ConditionExpression="revision = :revision AND #status = :status",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":revision": expected,
+                ":status": connection.get("status"),
+            },
+        )
+    except Exception as error:
+        if _is_conditional_conflict(error):
+            raise PolicyConflict("workflow connection changed during status update") from error
+        raise
+    _audit(
+        tenant,
+        f"workflow_connection_{target}",
+        actor,
+        {"connection_id": connection_id, "revision": expected + 1, "reason": reason},
+    )
+    return _workflow_connection_view(updated, health=_workflow_health(tenant, connection_id))
+
+
+def _retry_workflow_delivery(tenant, connection_id, delivery_id, value, actor):
+    """Create a new retry identity from one terminal failed delivery."""
+    if not isinstance(value, dict) or set(value) != {"expectedAttemptCount", "reason"}:
+        raise ValueError("workflow delivery retry request has an invalid schema")
+    connection = _workflow_connection(tenant, connection_id)
+    if not connection or connection.get("status") != "active":
+        raise PolicyConflict("workflow connection must be active before retry")
+    failed = TABLE.get_item(
+        Key=_item_key(
+            tenant,
+            "WORKFLOW_DELIVERY",
+            _bounded_identifier(delivery_id, "deliveryId"),
+        ),
+        ConsistentRead=True,
+    ).get("Item")
+    if not failed or failed.get("connection_id") != connection.get("id"):
+        raise LookupError("workflow delivery not found")
+    expected_attempt = _discovery_integer(
+        value.get("expectedAttemptCount"), "expectedAttemptCount", minimum=1, maximum=5
+    )
+    if failed.get("status") != "failed" or int(failed.get("attempt_count", 0)) != expected_attempt:
+        raise PolicyConflict("workflow delivery is not the expected terminal failure")
+    reason = _bounded_text(value.get("reason"), "reason", 500)
+    if len(reason) < 20:
+        raise ValueError("workflow delivery retry reason must contain at least 20 characters")
+    if int(failed.get("connection_revision", 0)) != int(connection.get("revision", 0)):
+        raise PolicyConflict("workflow connection changed after the failed delivery")
+    payload = failed.get("payload")
+    case_payload = payload.get("case") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"schemaVersion", "eventType", "occurredAt", "case"}
+        or payload.get("schemaVersion") != 1
+        or payload.get("eventType") != failed.get("event_type")
+        or not isinstance(case_payload, dict)
+        or set(case_payload)
+        != {
+            "id",
+            "revision",
+            "status",
+            "severity",
+            "title",
+            "source",
+            "reasonCode",
+            "host",
+            "agentId",
+        }
+        or len(json.dumps(payload, separators=(",", ":")).encode()) > 4_096
+    ):
+        raise RuntimeError("failed workflow delivery payload is not retry-safe")
+    now = int(time.time())
+    retry_id = str(uuid.uuid4())
+    record = {
+        **_item_key(tenant, "WORKFLOW_DELIVERY", retry_id),
+        "tenant_id": tenant,
+        "id": retry_id,
+        "connection_id": connection.get("id"),
+        "connection_revision": int(connection.get("revision", 0)),
+        "provider": connection.get("provider"),
+        "event_type": failed.get("event_type"),
+        "case_id": failed.get("case_id"),
+        "case_revision": failed.get("case_revision"),
+        "verification": failed.get("verification") is True,
+        "payload": _json(payload),
+        "retry_of": failed.get("id"),
+        "status": "pending",
+        "attempt_count": 0,
+        "created_at": now,
+        "updated_at": now,
+        "workflow_outbox_pk": f"WORKFLOW_OUTBOX#{tenant}",
+        "workflow_outbox_sk": f"{now:010d}#{retry_id}",
+        "ttl": now + _WORKFLOW_DELIVERY_RETENTION_SECONDS,
+    }
+    TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+    _dispatch_workflow_delivery(record)
+    _audit(
+        tenant,
+        "workflow_delivery_retried",
+        actor,
+        {
+            "connection_id": connection_id,
+            "delivery_id": retry_id,
+            "retry_of": failed.get("id"),
+            "reason": reason,
+        },
+    )
+    return _workflow_delivery_view(record)
+
+
+def _workflow_dispatch_cycle():
+    """Repair bounded workflow outbox records not accepted by the FIFO queue."""
+    registrations = []
+    for shard in range(_ENDPOINT_DETECTION_SHARDS):
+        result = TABLE.query(
+            IndexName=_ENDPOINT_DETECTION_INDEX,
+            KeyConditionExpression=Key("endpoint_detection_pk").eq(
+                f"ENDPOINT_DETECTION#{shard:02d}"
+            ),
+            Limit=250,
+        )
+        if result.get("LastEvaluatedKey"):
+            raise RuntimeError("workflow tenant shard exceeds its safe bound")
+        registrations.extend(result.get("Items", []))
+        if len(registrations) > _ENDPOINT_DETECTION_TENANT_LIMIT:
+            raise RuntimeError("workflow tenant inventory exceeds its safe bound")
+    dispatched = 0
+    for registration in registrations:
+        tenant = registration.get("endpoint_detection_sk")
+        if not isinstance(tenant, str) or registration.get("pk") != f"TENANT#{tenant}":
+            raise RuntimeError("workflow tenant registration is invalid")
+        result = TABLE.query(
+            IndexName=_WORKFLOW_OUTBOX_INDEX,
+            KeyConditionExpression=Key("workflow_outbox_pk").eq(
+                f"WORKFLOW_OUTBOX#{tenant}"
+            ),
+            Limit=101,
+        )
+        pending = result.get("Items", [])
+        if result.get("LastEvaluatedKey") or len(pending) > 100:
+            raise RuntimeError("workflow outbox exceeds its per-tenant dispatch bound")
+        for delivery in pending:
+            if _dispatch_workflow_delivery(delivery):
                 dispatched += 1
     return {"processedTenants": len(registrations), "dispatchedDeliveries": dispatched}
 
@@ -20211,6 +20788,9 @@ def _create_case(tenant, body, actor):
         now=now,
         sequence=1,
     )
+    workflow_records = _workflow_delivery_records(
+        tenant, case, "case.opened", now=now
+    )
     _transact_incident_response(
         [
             _transaction_put(case, condition="attribute_not_exists(pk)"),
@@ -20220,8 +20800,13 @@ def _create_case(tenant, body, actor):
                 condition="revision = :revision AND attribute_not_exists(caseId)",
                 values={":revision": expected},
             ),
+            *[
+                _transaction_put(record, condition="attribute_not_exists(pk)")
+                for record in workflow_records
+            ],
         ]
     )
+    _dispatch_workflow_deliveries(workflow_records)
     _audit(
         tenant,
         "incident_case_created",
@@ -20323,6 +20908,9 @@ def _contain_case(tenant, case_id, body, actor):
         now=now,
         sequence=expected + 1,
     )
+    workflow_records = _workflow_delivery_records(
+        tenant, updated_case, "case.contained", now=now
+    )
     containment_condition = (
         "revision = :revision AND active = :false" if existing else "attribute_not_exists(pk)"
     )
@@ -20347,8 +20935,13 @@ def _contain_case(tenant, case_id, body, actor):
                 values=containment_values,
             ),
             _transaction_put(event, condition="attribute_not_exists(pk)"),
+            *[
+                _transaction_put(record, condition="attribute_not_exists(pk)")
+                for record in workflow_records
+            ],
         ]
     )
+    _dispatch_workflow_deliveries(workflow_records)
     _audit(
         tenant, "incident_agent_quarantined", actor, {"case_id": case["id"], "agent_key": agent_key}
     )
@@ -20893,14 +21486,22 @@ def _transition_case(tenant, case_id, body, actor, target):
         now=now,
         sequence=expected + 1,
     )
+    workflow_records = _workflow_delivery_records(
+        tenant, updated, f"case.{target}", now=now
+    )
     _transact_incident_response(
         [
             _transaction_put(
                 updated, condition="revision = :revision", values={":revision": expected}
             ),
             _transaction_put(event, condition="attribute_not_exists(pk)"),
+            *[
+                _transaction_put(record, condition="attribute_not_exists(pk)")
+                for record in workflow_records
+            ],
         ]
     )
+    _dispatch_workflow_deliveries(workflow_records)
     _audit(tenant, f"incident_case_{target}", actor, {"case_id": case["id"]})
     return _case_view(tenant, updated, detailed=True)
 
@@ -23645,6 +24246,10 @@ def handler(event, context):
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("webhook dispatch schedule event is invalid")
         return _webhook_dispatch_cycle()
+    if isinstance(event, dict) and event.get("source") == "aai.workflow-dispatch":
+        if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
+            raise ValueError("workflow dispatch schedule event is invalid")
+        return _workflow_dispatch_cycle()
     if isinstance(event, dict) and event.get("source") == "aai.evidence-assurance":
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("evidence assurance schedule event is invalid")
@@ -25009,6 +25614,97 @@ def handler(event, context):
                         200,
                         _revoke_isolation_profile(tenant, parts[1], _body(event), actor),
                     )
+            if parts and parts[0] == "workflow-integrations":
+                # Reads expose only configuration and content-free delivery
+                # evidence. Mutations are integration_admin-only above.
+                if not _operator_roles(event):
+                    return _response(
+                        403, {"error": "workflow integration posture requires a tenant role"}
+                    )
+                if method == "GET" and len(parts) == 1:
+                    health_by_connection = {
+                        item.get("connection_id"): item
+                        for item in _list(tenant, "WORKFLOW_HEALTH", consistent_read=True)
+                    }
+                    connections = [
+                        _workflow_connection_view(
+                            item, health=health_by_connection.get(item.get("id"))
+                        )
+                        for item in _list(
+                            tenant, "WORKFLOW_CONNECTION", consistent_read=True
+                        )
+                    ]
+                    connections.sort(key=lambda item: (item["name"].lower(), item["id"]))
+                    return _response(
+                        200,
+                        {
+                            "items": connections,
+                            "supportedProviders": sorted(_WORKFLOW_PROVIDERS),
+                            "supportedEventTypes": sorted(_WORKFLOW_EVENT_TYPES),
+                            "nextCursor": None,
+                        },
+                    )
+                if method == "POST" and len(parts) == 1:
+                    return _response(
+                        201, _create_workflow_connection(tenant, _body(event), actor)
+                    )
+                if method == "GET" and len(parts) == 2:
+                    connection = _workflow_connection(tenant, parts[1])
+                    if not connection:
+                        return _response(404, {"error": "workflow connection not found"})
+                    return _response(
+                        200,
+                        _workflow_connection_view(
+                            connection, health=_workflow_health(tenant, parts[1])
+                        ),
+                    )
+                if method == "GET" and len(parts) == 3 and parts[2] == "deliveries":
+                    connection = _workflow_connection(tenant, parts[1])
+                    if not connection:
+                        return _response(404, {"error": "workflow connection not found"})
+                    deliveries = [
+                        _workflow_delivery_view(item)
+                        for item in _list(
+                            tenant, "WORKFLOW_DELIVERY", consistent_read=True
+                        )
+                        if item.get("connection_id") == connection.get("id")
+                    ]
+                    deliveries.sort(
+                        key=lambda item: (item["createdAt"], item["id"]), reverse=True
+                    )
+                    return _response(200, {"items": deliveries[:100], "nextCursor": None})
+                if (
+                    method == "POST"
+                    and len(parts) == 5
+                    and parts[2] == "deliveries"
+                    and parts[4] == "retry"
+                ):
+                    return _response(
+                        202,
+                        _retry_workflow_delivery(
+                            tenant,
+                            parts[1],
+                            parts[3],
+                            _body(event),
+                            actor,
+                        ),
+                    )
+                if method == "POST" and len(parts) == 3:
+                    if parts[2] == "verify":
+                        return _response(
+                            202,
+                            _test_workflow_connection(
+                                tenant, parts[1], _body(event), actor
+                            ),
+                        )
+                    if parts[2] in {"activate", "pause", "resume", "retire"}:
+                        return _response(
+                            200,
+                            _set_workflow_connection_status(
+                                tenant, parts[1], parts[2], _body(event), actor
+                            ),
+                        )
+                return _response(404, {"error": "workflow integration route not found"})
             if parts and parts[0] == "webhooks":
                 # Secret-free posture is visible to authenticated tenant roles;
                 # all mutations were already restricted to platform authority

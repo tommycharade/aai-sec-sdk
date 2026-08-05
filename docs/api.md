@@ -977,3 +977,38 @@ Secrets Manager names, versions, ARNs and key bytes are never returned by a
 read. Event payloads cannot be supplied by an operator. See
 [Secure webhooks](secure-webhooks-design.md) for signature headers, replay,
 retry and receiver requirements.
+
+## Governed incident workflows
+
+Authenticated tenant roles may read secret-free connection and delivery
+posture. Only `integration_admin` authority may create, verify, activate,
+pause, resume, retire or retry. Provider credential values are not accepted by
+any API route; administrators create an AWS Secrets Manager value separately
+and submit only its exact tenant-namespaced ARN.
+
+- `GET /api/enterprise/workflow-integrations` lists connections plus the exact
+  supported providers and lifecycle events.
+- `POST /api/enterprise/workflow-integrations` accepts exactly `name`,
+  `description`, `provider`, `configuration`, `credentialSecretArn` and
+  `eventTypes`. New connections are `pending_verification`.
+- `GET /api/enterprise/workflow-integrations/{connectionId}` returns one
+  secret-free connection and worker-derived verification/delivery posture.
+- `GET /api/enterprise/workflow-integrations/{connectionId}/deliveries`
+  returns at most 100 content-minimised delivery records.
+- `POST /api/enterprise/workflow-integrations/{connectionId}/verify` accepts
+  only `expectedRevision` and queues a server-owned synthetic incident.
+- `POST /api/enterprise/workflow-integrations/{connectionId}/{action}` accepts
+  `expectedRevision` and a 20–500-character `reason`; action is `activate`,
+  `pause`, `resume` or `retire`. Activation/resume require successful proof of
+  the exact pre-transition revision.
+- `POST /api/enterprise/workflow-integrations/{connectionId}/deliveries/{deliveryId}/retry`
+  accepts `expectedAttemptCount` and a 20–500-character `reason`. It requires a
+  terminal failed delivery and unchanged active connection revision, then
+  creates a new linked queue identity.
+
+ServiceNow accepts exactly `baseUrl` and `assignmentGroup`; Jira accepts
+`baseUrl`, `projectKey` and `issueType`; PagerDuty accepts only `serviceLabel`.
+Supported events are `case.opened`, `case.contained`, `case.resolved` and
+`case.closed`. See [Governed incident workflow
+integrations](incident-workflow-integrations-design.md) for queue semantics,
+credential schemas, provider mappings and residual risks.
