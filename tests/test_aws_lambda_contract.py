@@ -5110,6 +5110,283 @@ def test_cloud_credential_broker_registration_rejects_unsafe_authority(
     assert module._list(tenant, "CREDENTIAL_BROKER", consistent_read=True) == []
 
 
+def test_isolation_profile_authority_is_machine_evidenced_and_live_revocable(
+    monkeypatch: Any,
+) -> None:
+    """A registered profile stays blocked until exact runtime evidence is current."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-isolation-authority"
+    other_tenant = "tenant-isolation-other"
+    now = 1_800_100_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    for tenant_id in (tenant, other_tenant):
+        table.put_item(Item=module._item_key(tenant_id, "TENANT", "root") | {"id": tenant_id})
+    table.put_item(
+        Item=module._item_key(tenant, "ORG", "org-isolation")
+        | {"id": "org-isolation", "name": "Isolation org"}
+    )
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-isolation-admin",
+    }
+    constraints = {
+        "filesystemReadOnly": True,
+        "networkMode": "none",
+        "allowedNetworkDestinations": [],
+        "processNamespace": True,
+        "maxMemoryMib": 256,
+        "maxPids": 64,
+        "cpuLimitMillicores": 1000,
+        "maxDurationSeconds": 30,
+        "credentialMode": "none",
+        "noNewPrivileges": True,
+        "capabilitiesDropped": True,
+    }
+    request = {
+        "profileId": "docker-hostile-code",
+        "name": "Docker hostile code",
+        "provider": "docker_engine",
+        "boundary": "container",
+        "workloadRef": "sha256:" + "a" * 64,
+        "allowedTools": ["compile_untrusted"],
+        "constraints": constraints,
+    }
+    created_response = _invoke(
+        module,
+        _event("/api/enterprise/isolation-profiles", "POST", claims=platform, body=request),
+    )
+    assert created_response["statusCode"] == 201
+    created = json.loads(created_response["body"])
+    assert created["verificationStatus"] == "unverified"
+    assert created["executionAllowed"] is False
+    assert "signature" not in created and "credential" not in created
+
+    policy_response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/policies",
+            "POST",
+            claims=platform,
+            body={
+                "policyId": "policy-attested-code",
+                "organizationId": "org-isolation",
+                "name": "Attested code execution",
+                "configuration": {
+                    "tools": {"allowed": ["compile_untrusted"]},
+                    "isolation": {
+                        "verifier": "deployment_attested",
+                        "requiredForHighRisk": True,
+                        "mode": "required",
+                        "acceptedProfiles": [created["id"]],
+                    },
+                },
+            },
+        ),
+    )
+    assert policy_response["statusCode"] == 201, policy_response["body"]
+    unavailable_policy = _invoke(
+        module,
+        _event(
+            "/api/enterprise/policies",
+            "POST",
+            claims=platform,
+            body={
+                "policyId": "policy-unknown-isolation",
+                "organizationId": "org-isolation",
+                "name": "Unknown isolation",
+                "configuration": {"isolation": {"acceptedProfiles": ["profile-does-not-exist"]}},
+            },
+        ),
+    )
+    assert unavailable_policy["statusCode"] == 400
+
+    integrations = json.loads(
+        _invoke(module, _event("/api/enterprise/integrations", "GET", claims=platform))["body"]
+    )
+    assert integrations["isolationProfiles"] == [created]
+    other = {
+        "custom:tenant_id": other_tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "other-admin",
+    }
+    assert (
+        json.loads(
+            _invoke(module, _event("/api/enterprise/integrations", "GET", claims=other))["body"]
+        )["isolationProfiles"]
+        == []
+    )
+
+    service_identity = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/identity/service-identities",
+                "POST",
+                claims=platform,
+                body={
+                    "serviceIdentityId": "isolation-runtime",
+                    "name": "Isolation runtime",
+                    "description": "Reports exact synthetic sandbox evidence.",
+                    "purpose": "Bind runtime evidence to reviewed isolation profiles.",
+                    "capabilities": ["isolation_runtime"],
+                    "expiresInDays": 30,
+                },
+            ),
+        )["body"]
+    )
+    token = service_identity["credential"]["accessToken"]
+    evidence = {
+        "schemaVersion": 1,
+        "expectedRevision": created["revision"],
+        "provider": created["provider"],
+        "boundary": created["boundary"],
+        "workloadRef": created["workloadRef"],
+        "allowedTools": created["allowedTools"],
+        "constraints": created["constraints"],
+        "configurationHash": created["configurationHash"],
+        "observedAt": now,
+        "expiresAt": now + 900,
+        "checks": {
+            "boundaryCreated": True,
+            "workloadDigestVerified": True,
+            "filesystemEnforced": True,
+            "networkEnforced": True,
+            "processEnforced": True,
+            "resourcesEnforced": True,
+            "credentialIsolationEnforced": True,
+            "escapeProbePassed": True,
+        },
+        "evidenceDigest": "b" * 64,
+    }
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/isolation-profiles/docker-hostile-code/evidence",
+                "POST",
+                claims=platform,
+                body=evidence,
+            ),
+        )["statusCode"]
+        == 403
+    )
+    for invalid in (
+        {**evidence, "observedAt": now + 1},
+        {**evidence, "constraints": {**constraints, "maxPids": 65}},
+        {**evidence, "checks": {**evidence["checks"], "escapeProbePassed": False}},
+    ):
+        assert (
+            _invoke(
+                module,
+                _event(
+                    "/machine/v1/enterprise/isolation-profiles/docker-hostile-code/evidence",
+                    "POST",
+                    token=token,
+                    body=invalid,
+                ),
+            )["statusCode"]
+            == 400
+        )
+
+    verified = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/machine/v1/enterprise/isolation-profiles/docker-hostile-code/evidence",
+                "POST",
+                token=token,
+                body=evidence,
+            ),
+        )["body"]
+    )
+    assert verified["executionAllowed"] is True
+    authority_path = "/machine/v1/enterprise/isolation-profiles/docker-hostile-code/authority"
+    authority = json.loads(_invoke(module, _event(authority_path, "GET", token=token))["body"])
+    assert authority == {
+        "profileId": "docker-hostile-code",
+        "executionAllowed": True,
+        "verificationStatus": "verified",
+        "revision": 1,
+        "revocationEpoch": 1,
+        "configurationHash": created["configurationHash"],
+    }
+
+    monkeypatch.setattr(module.time, "time", lambda: now + 901)
+    stale = json.loads(_invoke(module, _event(authority_path, "GET", token=token))["body"])
+    assert stale["executionAllowed"] is False
+    assert stale["verificationStatus"] == "stale"
+    revoked = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/isolation-profiles/docker-hostile-code/revoke",
+                "POST",
+                claims=platform,
+                body={"expectedRevision": 1, "reason": "Synthetic escape review."},
+            ),
+        )["body"]
+    )
+    assert revoked["status"] == "revoked"
+    assert revoked["revocationEpoch"] == 2
+    assert revoked["executionAllowed"] is False
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"provider": "unsupported"},
+        {"boundary": "microvm"},
+        {"workloadRef": "worker:latest"},
+        {"allowedTools": ["compile", "compile"]},
+        {"constraints": {"filesystemReadOnly": True}},
+        {"constraints": {"networkMode": "none", "allowedNetworkDestinations": ["*"]}},
+        {"secret": "synthetic-value"},  # noqa: S106 - rejected test input
+    ],
+)
+def test_isolation_profile_registration_rejects_unsafe_authority(
+    monkeypatch: Any, override: dict[str, Any]
+) -> None:
+    """Mutable, weaker, wildcard, secret-bearing, or malformed profiles never persist."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-isolation-invalid"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-isolation-admin",
+    }
+    constraints = {
+        "filesystemReadOnly": True,
+        "networkMode": "none",
+        "allowedNetworkDestinations": [],
+        "processNamespace": True,
+        "maxMemoryMib": 256,
+        "maxPids": 64,
+        "cpuLimitMillicores": 1000,
+        "maxDurationSeconds": 30,
+        "credentialMode": "none",
+        "noNewPrivileges": True,
+        "capabilitiesDropped": True,
+    }
+    request = {
+        "profileId": "invalid-profile",
+        "name": "Invalid profile",
+        "provider": "docker_engine",
+        "boundary": "container",
+        "workloadRef": "sha256:" + "a" * 64,
+        "allowedTools": ["compile"],
+        "constraints": constraints,
+        **override,
+    }
+    response = _invoke(
+        module,
+        _event("/api/enterprise/isolation-profiles", "POST", claims=platform, body=request),
+    )
+    assert response["statusCode"] == 400
+    assert module._list(tenant, "ISOLATION_PROFILE", consistent_read=True) == []
+
+
 def test_entra_pre_token_trigger_uses_only_cognito_federation_identity(
     monkeypatch: Any,
 ) -> None:

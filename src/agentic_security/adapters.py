@@ -10,7 +10,7 @@ import re
 import selectors
 import stat
 import subprocess
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -27,7 +27,16 @@ except ImportError:  # pragma: no cover - Windows deployments use remote audit
 from .approvals import ApprovalConsumption, ApprovalOutcome, ApprovalProvider
 from .audit import AuditEvent, AuditExporter, redact
 from .http import JsonHttpClient
+from .isolation import (
+    IsolationAttestation,
+    IsolationBoundary,
+    IsolationConstraints,
+    IsolationCredentialMode,
+    IsolationNetworkMode,
+    IsolationProfile,
+)
 from .policy_adapters import CedarPolicyEngine, OpaPolicyEngine
+from .types import ExecutionContext, Resource
 
 
 class HttpOpaPolicyEngine(OpaPolicyEngine):
@@ -229,6 +238,21 @@ class DockerSandboxToolHandler:
     max_output_bytes: int = 1_000_000
     memory_limit: str = "256m"
     pids_limit: int = 64
+    cpu_limit_millicores: int = 1_000
+    isolation_profile: IsolationProfile | None = None
+    attestation_provider: (
+        Callable[
+            [
+                IsolationProfile,
+                ExecutionContext,
+                str,
+                tuple[Resource, ...],
+                str,
+            ],
+            IsolationAttestation,
+        ]
+        | None
+    ) = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Reject image names and resource settings that make isolation ambiguous."""
@@ -241,10 +265,55 @@ class DockerSandboxToolHandler:
             not math.isfinite(self.timeout_seconds)
             or self.pids_limit <= 0
             or self.max_output_bytes <= 0
+            or self.cpu_limit_millicores <= 0
         ):
             raise ValueError("sandbox limits must be positive")
         if not self.memory_limit or any(character.isspace() for character in self.memory_limit):
             raise ValueError("sandbox memory limit must be a single Docker value")
+        memory_mib = _docker_memory_mib(self.memory_limit)
+        if (self.isolation_profile is None) != (self.attestation_provider is None):
+            raise ValueError("attested Docker isolation requires both profile and provider")
+        if self.isolation_profile is not None:
+            profile = self.isolation_profile
+            image_digest = self.image.rsplit("@", maxsplit=1)[-1]
+            expected = IsolationConstraints(
+                filesystem_read_only=True,
+                network_mode=IsolationNetworkMode.NONE,
+                allowed_network_destinations=(),
+                process_namespace=True,
+                max_memory_mib=memory_mib,
+                max_pids=self.pids_limit,
+                cpu_limit_millicores=self.cpu_limit_millicores,
+                max_duration_seconds=math.ceil(self.timeout_seconds),
+                credential_mode=IsolationCredentialMode.NONE,
+                no_new_privileges=True,
+                capabilities_dropped=True,
+            )
+            if (
+                profile.boundary is not IsolationBoundary.CONTAINER
+                or profile.workload_ref != image_digest
+                or profile.constraints != expected
+            ):
+                raise ValueError("Docker launch controls do not match the isolation profile")
+
+    def get_isolation_attestation(
+        self,
+        context: ExecutionContext,
+        tool_name: str,
+        resources: tuple[Resource, ...],
+        nonce: str,
+    ) -> IsolationAttestation:
+        """Request action-bound evidence from the deployment-owned provider.
+
+        This method runs before policy authorization. It never launches the
+        worker and never accepts evidence from model output. Missing provider
+        configuration raises so the runtime denies the action.
+        """
+        if self.isolation_profile is None or self.attestation_provider is None:
+            raise RuntimeError("Docker isolation attestation provider is not configured")
+        return self.attestation_provider(
+            self.isolation_profile, context, tool_name, resources, nonce
+        )
 
     def __call__(self, context: Any, arguments: Any) -> Any:
         """Invoke the pinned image with fixed isolation flags and no shell."""
@@ -263,6 +332,7 @@ class DockerSandboxToolHandler:
             "--user=65532:65532",
             f"--memory={self.memory_limit}",
             f"--pids-limit={self.pids_limit}",
+            f"--cpus={self.cpu_limit_millicores / 1000:.3f}",
             "--tmpfs=/tmp:rw,noexec,nosuid,size=64m",
             self.image,
         )
@@ -272,6 +342,18 @@ class DockerSandboxToolHandler:
             max_output_bytes=self.max_output_bytes,
             environment={},
         )(context, arguments)
+
+
+def _docker_memory_mib(value: str) -> int:
+    """Parse the deliberately small Docker memory syntax accepted by this adapter."""
+    match = re.fullmatch(r"([1-9][0-9]*)([mMgG])", value)
+    if match is None:
+        raise ValueError("Docker memory limit must use a positive m or g value")
+    amount = int(match.group(1))
+    memory_mib = amount if match.group(2).lower() == "m" else amount * 1024
+    if memory_mib > 262_144:
+        raise ValueError("Docker memory limit exceeds the supported safety bound")
+    return memory_mib
 
 
 class JsonlAuditSink:

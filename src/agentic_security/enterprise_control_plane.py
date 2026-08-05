@@ -58,6 +58,31 @@ _CLOUD_BROKER_REGISTRATION_FIELDS = frozenset(
         "maxTtlSeconds",
     }
 )
+_ISOLATION_PROVIDERS = frozenset({"docker_engine", "firecracker", "wasmtime", "endpoint_sandbox"})
+_ISOLATION_PROVIDER_BOUNDARY = {
+    "docker_engine": "container",
+    "firecracker": "microvm",
+    "wasmtime": "wasm",
+    "endpoint_sandbox": "endpoint_sandbox",
+}
+_ISOLATION_REGISTRATION_FIELDS = frozenset(
+    {"profileId", "name", "provider", "boundary", "workloadRef", "allowedTools", "constraints"}
+)
+_ISOLATION_CONSTRAINT_FIELDS = frozenset(
+    {
+        "filesystemReadOnly",
+        "networkMode",
+        "allowedNetworkDestinations",
+        "processNamespace",
+        "maxMemoryMib",
+        "maxPids",
+        "cpuLimitMillicores",
+        "maxDurationSeconds",
+        "credentialMode",
+        "noNewPrivileges",
+        "capabilitiesDropped",
+    }
+)
 _COMMAND_PATTERN_FIELDS = frozenset(
     {"allowedCommandPatterns", "deniedCommandPatterns", "approvalCommandPatterns"}
 )
@@ -100,7 +125,7 @@ _FLEET_GOVERNANCE_KEYS: dict[str, frozenset[str]] = {
         }
     ),
     "credentials": frozenset({"enabled", "brokerEndpoint", "scopes", "mode"}),
-    "isolation": frozenset({"verifier", "requiredForHighRisk", "mode"}),
+    "isolation": frozenset({"verifier", "requiredForHighRisk", "mode", "acceptedProfiles"}),
     "audit": frozenset(
         {"provider", "path", "replicaEndpoint", "redactSensitiveData", "captureToolContent"}
     ),
@@ -796,6 +821,21 @@ def validate_fleet_configuration(configuration: Mapping[str, Any]) -> dict[str, 
                     section[field] = [
                         _command_pattern(pattern, f"claudeCode.{field}") for pattern in patterns
                     ]
+            elif key_text == "isolation" and "acceptedProfiles" in section:
+                profiles = section["acceptedProfiles"]
+                if (
+                    not isinstance(profiles, list)
+                    or len(profiles) > 50
+                    or any(
+                        not isinstance(profile_id, str)
+                        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", profile_id) is None
+                        for profile_id in profiles
+                    )
+                    or len(set(profiles)) != len(profiles)
+                ):
+                    raise FleetConfigurationError(
+                        "isolation.acceptedProfiles must be unique bounded identifiers"
+                    )
             elif key_text == "managedHost":
                 section = _normalize_managed_host(section)
             normalized[key_text] = section
@@ -1157,6 +1197,234 @@ class EnterpriseFleetStore:
             "allowedTools": configuration["allowedTools"],
             "resourceIds": configuration["resourceIds"],
             "maxTtlSeconds": configuration["maxTtlSeconds"],
+            "status": status,
+            "verificationStatus": "revoked" if status == "revoked" else "unverified",
+            "executionAllowed": False,
+            "revision": configuration["revision"],
+            "revocationEpoch": configuration["revocationEpoch"],
+            "configurationHash": digest,
+            "createdAt": row["created_at"],
+            "createdBy": row["created_by"],
+            "verifiedAt": None,
+            "verificationExpiresAt": None,
+            "evidenceDigest": None,
+            "revokedAt": row["revoked_at"],
+            "revokedBy": row["revoked_by"],
+        }
+
+    def create_isolation_profile(
+        self, identity: FleetIdentity, request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Register secret-free desired isolation without claiming live verification."""
+        if frozenset(request) != _ISOLATION_REGISTRATION_FIELDS:
+            raise FleetConfigurationError("isolation profile registration schema is invalid")
+        profile_id = _text(request.get("profileId"), "profileId")
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", profile_id) is None:
+            raise FleetConfigurationError("isolation profile ID is invalid")
+        provider = request.get("provider")
+        boundary = request.get("boundary")
+        if (
+            provider not in _ISOLATION_PROVIDERS
+            or _ISOLATION_PROVIDER_BOUNDARY.get(str(provider)) != boundary
+        ):
+            raise FleetConfigurationError("isolation provider or boundary is unsupported")
+        workload_ref = request.get("workloadRef")
+        if (
+            not isinstance(workload_ref, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", workload_ref) is None
+        ):
+            raise FleetConfigurationError(
+                "isolation workload must use an immutable sha256 reference"
+            )
+        tools = self._cloud_broker_values(request.get("allowedTools"), "allowedTools", 50)
+        constraints = self._local_isolation_constraints(request.get("constraints"))
+        now = self._now()
+        with self._lock:
+            try:
+                self._connection.execute(
+                    "INSERT INTO isolation_profiles(organization_id,id,name,provider,boundary,"
+                    "workload_ref,allowed_tools,constraints,status,revision,revocation_epoch,"
+                    "created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        identity.organization_id,
+                        profile_id,
+                        _text(request.get("name"), "name"),
+                        provider,
+                        boundary,
+                        workload_ref,
+                        json.dumps(tools, separators=(",", ":")),
+                        json.dumps(constraints, sort_keys=True, separators=(",", ":")),
+                        "active",
+                        1,
+                        1,
+                        now,
+                        identity.subject,
+                    ),
+                )
+                self._connection.commit()
+            except sqlite3.IntegrityError as exc:
+                raise FleetConfigurationError("isolation profile already exists") from exc
+        result = self.isolation_profile(identity, profile_id)
+        self._audit(
+            "isolation_profile_registered",
+            identity.subject,
+            {
+                "profileId": profile_id,
+                "boundary": boundary,
+                "configurationHash": result["configurationHash"],
+            },
+            identity.organization_id,
+        )
+        return result
+
+    def list_isolation_profiles(self, identity: FleetIdentity) -> list[dict[str, Any]]:
+        """Return tenant-bound local profile lifecycle and honest unverified posture."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM isolation_profiles WHERE organization_id=? ORDER BY name,id",
+                (identity.organization_id,),
+            ).fetchall()
+        return [self._local_isolation_view(row) for row in rows]
+
+    def isolation_profile(self, identity: FleetIdentity, profile_id: str) -> dict[str, Any]:
+        """Load one isolation profile from only the caller's tenant."""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM isolation_profiles WHERE organization_id=? AND id=?",
+                (identity.organization_id, _text(profile_id, "profileId")),
+            ).fetchone()
+        if row is None:
+            raise FleetNotFoundError("isolation profile not found")
+        return self._local_isolation_view(row)
+
+    def revoke_isolation_profile(
+        self,
+        identity: FleetIdentity,
+        profile_id: str,
+        expected_revision: int,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Revoke local profile authority with optimistic concurrency."""
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+            raise FleetConfigurationError("isolation profile revision must be an integer")
+        rationale = _text(reason, "reason")
+        now = self._now()
+        with self._lock:
+            cursor = self._connection.execute(
+                "UPDATE isolation_profiles SET status='revoked',revision=revision+1,"
+                "revocation_epoch=revocation_epoch+1,revoked_at=?,revoked_by=? "
+                "WHERE organization_id=? AND id=? AND status='active' AND revision=?",
+                (
+                    now,
+                    identity.subject,
+                    identity.organization_id,
+                    _text(profile_id, "profileId"),
+                    expected_revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                self._connection.rollback()
+                raise FleetConflictError("isolation profile authority changed")
+            self._connection.commit()
+        result = self.isolation_profile(identity, profile_id)
+        self._audit(
+            "isolation_profile_revoked",
+            identity.subject,
+            {
+                "profileId": profile_id,
+                "revision": result["revision"],
+                "revocationEpoch": result["revocationEpoch"],
+                "reason": rationale,
+            },
+            identity.organization_id,
+        )
+        return result
+
+    @staticmethod
+    def _local_isolation_constraints(value: object) -> dict[str, Any]:
+        """Validate local profile controls with hosted-control-plane parity."""
+        if not isinstance(value, Mapping) or frozenset(value) != _ISOLATION_CONSTRAINT_FIELDS:
+            raise FleetConfigurationError("isolation constraint fields are invalid")
+        network_mode = value.get("networkMode")
+        credential_mode = value.get("credentialMode")
+        if network_mode not in {"none", "allowlist"}:
+            raise FleetConfigurationError("isolation network mode is unsupported")
+        if credential_mode not in {"none", "brokered"}:
+            raise FleetConfigurationError("isolation credential mode is unsupported")
+        for field in (
+            "filesystemReadOnly",
+            "processNamespace",
+            "noNewPrivileges",
+            "capabilitiesDropped",
+        ):
+            if value.get(field) is not True:
+                raise FleetConfigurationError(
+                    "production isolation requires all mandatory boundary controls"
+                )
+        destinations = value.get("allowedNetworkDestinations")
+        if (
+            not isinstance(destinations, list)
+            or len(destinations) > 50
+            or any(
+                not isinstance(item, str)
+                or not item.strip()
+                or any(character.isspace() for character in item)
+                or "*" in item
+                for item in destinations
+            )
+        ):
+            raise FleetConfigurationError("isolation network destinations are invalid")
+        normalized_destinations = sorted(item.strip().lower() for item in destinations)
+        if len(set(normalized_destinations)) != len(normalized_destinations):
+            raise FleetConfigurationError("isolation network destinations contain duplicates")
+        if (network_mode == "none" and normalized_destinations) or (
+            network_mode == "allowlist" and not normalized_destinations
+        ):
+            raise FleetConfigurationError("isolation network destinations do not match mode")
+        ranges = {
+            "maxMemoryMib": (16, 262_144),
+            "maxPids": (1, 32_768),
+            "cpuLimitMillicores": (10, 64_000),
+            "maxDurationSeconds": (1, 86_400),
+        }
+        for field, (minimum, maximum) in ranges.items():
+            number = value.get(field)
+            if (
+                not isinstance(number, int)
+                or isinstance(number, bool)
+                or not minimum <= number <= maximum
+            ):
+                raise FleetConfigurationError(f"{field} exceeds supported isolation bounds")
+        return {
+            field: (
+                normalized_destinations if field == "allowedNetworkDestinations" else value[field]
+            )
+            for field in sorted(_ISOLATION_CONSTRAINT_FIELDS)
+        }
+
+    @staticmethod
+    def _local_isolation_view(row: Mapping[str, Any]) -> dict[str, Any]:
+        """Derive profile identity while refusing to fake platform evidence locally."""
+        configuration = {
+            "provider": row["provider"],
+            "boundary": row["boundary"],
+            "workloadRef": row["workload_ref"],
+            "allowedTools": json.loads(row["allowed_tools"]),
+            "constraints": json.loads(row["constraints"]),
+            "revision": int(row["revision"]),
+            "revocationEpoch": int(row["revocation_epoch"]),
+        }
+        digest = hashlib.sha256(
+            json.dumps(configuration, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        status = str(row["status"])
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            **{
+                key: configuration[key]
+                for key in ("provider", "boundary", "workloadRef", "allowedTools", "constraints")
+            },
             "status": status,
             "verificationStatus": "revoked" if status == "revoked" else "unverified",
             "executionAllowed": False,
@@ -2308,6 +2576,19 @@ class EnterpriseFleetStore:
                 raise FleetConfigurationError("agent belongs to groups with conflicting policies")
             policy = self._policy(next(iter(policy_ids)))
             configuration = json.loads(json.dumps(policy["configuration"]))
+            isolation_value = configuration.get("isolation")
+            if isinstance(isolation_value, Mapping):
+                isolation = dict(isolation_value)
+                configuration["isolation"] = isolation
+                resolved_profiles = []
+                for profile_id in isolation.get("acceptedProfiles", []):
+                    profile = self.isolation_profile(identity, _text(profile_id, "profileId"))
+                    if profile["status"] != "active":
+                        raise FleetConfigurationError(
+                            "policy references a revoked isolation profile"
+                        )
+                    resolved_profiles.append(profile)
+                isolation["managedProfiles"] = resolved_profiles
             claude_value = configuration.get("claudeCode")
             if isinstance(claude_value, Mapping):
                 claude = dict(claude_value)
@@ -3583,6 +3864,17 @@ class EnterpriseFleetStore:
                     revoked_at REAL, revoked_by TEXT,
                     PRIMARY KEY(organization_id,id),
                     UNIQUE(organization_id,name));
+                CREATE TABLE IF NOT EXISTS isolation_profiles(
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    id TEXT NOT NULL, name TEXT NOT NULL, provider TEXT NOT NULL,
+                    boundary TEXT NOT NULL, workload_ref TEXT NOT NULL,
+                    allowed_tools TEXT NOT NULL, constraints TEXT NOT NULL,
+                    status TEXT NOT NULL, revision INTEGER NOT NULL,
+                    revocation_epoch INTEGER NOT NULL,
+                    created_at REAL NOT NULL, created_by TEXT NOT NULL,
+                    revoked_at REAL, revoked_by TEXT,
+                    PRIMARY KEY(organization_id,id),
+                    UNIQUE(organization_id,name));
                 CREATE TABLE IF NOT EXISTS agent_groups(
                     id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
                     name TEXT NOT NULL, policy_id TEXT NOT NULL REFERENCES policies(id),
@@ -3954,6 +4246,19 @@ class EnterpriseFleetStore:
         effective_configuration = result_json["configuration"]
         if not isinstance(effective_configuration, Mapping):
             raise FleetConfigurationError("effective policy must be an object")
+        isolation = effective_configuration.get("isolation")
+        if isinstance(isolation, Mapping):
+            accepted_profiles = isolation.get("acceptedProfiles", [])
+            if isinstance(accepted_profiles, list):
+                for profile_id in accepted_profiles:
+                    row = self._connection.execute(
+                        "SELECT status FROM isolation_profiles WHERE organization_id=? AND id=?",
+                        (organization_id, profile_id),
+                    ).fetchone()
+                    if row is None or row["status"] != "active":
+                        raise FleetConfigurationError(
+                            "policy references an unavailable isolation profile"
+                        )
         effective_json = self._configuration_json(effective_configuration)
         return {
             "configurationJson": effective_json,
@@ -4804,6 +5109,16 @@ class EnterpriseFleetApplication:
                             "nextCursor": None,
                         },
                     )
+                if resource == "isolation-profiles":
+                    self._authorize(identity, "read")
+                    return self._respond(
+                        start_response,
+                        200,
+                        {
+                            "items": self.store.list_isolation_profiles(identity),
+                            "nextCursor": None,
+                        },
+                    )
                 if resource.startswith("policies/imports/"):
                     self._authorize(identity, "read")
                     parts = resource.split("/")
@@ -5073,6 +5388,13 @@ class EnterpriseFleetApplication:
                     201,
                     self.store.create_credential_broker(identity, body),
                 )
+            if method == "POST" and path == "/api/enterprise/isolation-profiles":
+                self._authorize(identity, "manage_configuration")
+                return self._respond(
+                    start_response,
+                    201,
+                    self.store.create_isolation_profile(identity, body),
+                )
             broker_prefix = "/api/enterprise/credential-brokers/"
             if method == "POST" and path.startswith(broker_prefix) and path.endswith("/revoke"):
                 self._authorize(identity, "manage_configuration")
@@ -5093,6 +5415,25 @@ class EnterpriseFleetApplication:
                         broker_id,
                         expected_revision,
                         reason,
+                    ),
+                )
+            isolation_prefix = "/api/enterprise/isolation-profiles/"
+            if method == "POST" and path.startswith(isolation_prefix) and path.endswith("/revoke"):
+                self._authorize(identity, "manage_configuration")
+                if frozenset(body) != {"expectedRevision", "reason"}:
+                    raise FleetConfigurationError("isolation profile revocation schema is invalid")
+                expected_revision = body.get("expectedRevision")
+                reason = body.get("reason")
+                if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+                    raise FleetConfigurationError("isolation profile revision must be an integer")
+                if not isinstance(reason, str):
+                    raise FleetConfigurationError("isolation profile reason must be text")
+                profile_id = path[len(isolation_prefix) : -len("/revoke")].strip("/")
+                return self._respond(
+                    start_response,
+                    200,
+                    self.store.revoke_isolation_profile(
+                        identity, profile_id, expected_revision, reason
                     ),
                 )
             if method == "POST" and path == "/api/enterprise/templates/validate":
@@ -5628,6 +5969,9 @@ class EnterpriseFleetApplication:
             "credentialBrokers": self.store.list_credential_brokers(identity),
             "credentialBrokerProviders": sorted(_CLOUD_BROKER_PROVIDERS),
             "credentialBrokerEvidenceTtlSeconds": 900,
+            "isolationProfiles": self.store.list_isolation_profiles(identity),
+            "isolationProviders": sorted(_ISOLATION_PROVIDERS),
+            "isolationEvidenceTtlSeconds": 900,
         }
 
     def _authorize_any(self, identity: FleetIdentity, actions: set[str]) -> None:

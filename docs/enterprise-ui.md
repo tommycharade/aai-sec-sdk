@@ -105,6 +105,14 @@ requires an accountable human revocation. Only a machine identity scoped to
 registrations remain visibly blocked because SQLite cannot verify a cloud
 identity.
 
+The adjacent **Isolation profiles** workspace implements production-boundary
+desired state and posture. Operators select a platform, immutable workload,
+exact protected tools, network mode, credential mode and resource ceilings;
+read-only filesystem, process namespace, no-new-privileges and dropped
+capabilities remain immutable. Only `isolation_runtime` machine authority can
+submit short-lived exact-configuration evidence. The policy editor selects
+registered profile IDs and labels profiles as verified or blocked.
+
 ## Assurance workspace
 
 **Assurance** is the reporting surface for leadership and assessors. It is not

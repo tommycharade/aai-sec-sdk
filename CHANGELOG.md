@@ -1,5 +1,16 @@
 # Changelog
 
+- Added production isolation authority foundations: immutable reviewed
+  profiles, exact action-bound signed evidence, live revocation, structured
+  permit/audit identity, and an attested Docker launch contract whose
+  filesystem, network, process, CPU, memory, PID, credential, privilege and
+  timeout controls must match the profile. The hosted control plane separates
+  human profile lifecycle from `isolation_runtime` machine evidence, policy
+  composition intersects accepted profiles, and the enterprise UI provides a
+  typed profile workspace and policy selector. P0-10 remains Partial pending a
+  selected customer boundary, live hostile-code acceptance and independent
+  host/runtime assessment.
+
 - Added provider-neutral Azure and GCP workload-identity credential brokers,
   live AWS STS and cloud-grant revocation checks, and a secret-free hosted
   credential-authority lifecycle. Human registration remains blocked until a

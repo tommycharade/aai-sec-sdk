@@ -502,6 +502,67 @@ _CREDENTIAL_BROKER_EVIDENCE_FIELDS = frozenset(
         "evidenceDigest",
     }
 )
+_ISOLATION_PROVIDERS = frozenset(
+    {"docker_engine", "firecracker", "wasmtime", "endpoint_sandbox"}
+)
+_ISOLATION_BOUNDARIES = frozenset({"container", "microvm", "wasm", "endpoint_sandbox"})
+_ISOLATION_PROVIDER_BOUNDARY = {
+    "docker_engine": "container",
+    "firecracker": "microvm",
+    "wasmtime": "wasm",
+    "endpoint_sandbox": "endpoint_sandbox",
+}
+_ISOLATION_PROFILE_LIMIT = 50
+_ISOLATION_TOOL_LIMIT = 50
+_ISOLATION_DESTINATION_LIMIT = 50
+_ISOLATION_EVIDENCE_MAX_AGE_SECONDS = 5 * 60
+_ISOLATION_EVIDENCE_MAX_TTL_SECONDS = 15 * 60
+_ISOLATION_CONSTRAINT_FIELDS = frozenset(
+    {
+        "filesystemReadOnly",
+        "networkMode",
+        "allowedNetworkDestinations",
+        "processNamespace",
+        "maxMemoryMib",
+        "maxPids",
+        "cpuLimitMillicores",
+        "maxDurationSeconds",
+        "credentialMode",
+        "noNewPrivileges",
+        "capabilitiesDropped",
+    }
+)
+_ISOLATION_REGISTRATION_FIELDS = frozenset(
+    {"profileId", "name", "provider", "boundary", "workloadRef", "allowedTools", "constraints"}
+)
+_ISOLATION_EVIDENCE_CHECKS = frozenset(
+    {
+        "boundaryCreated",
+        "workloadDigestVerified",
+        "filesystemEnforced",
+        "networkEnforced",
+        "processEnforced",
+        "resourcesEnforced",
+        "credentialIsolationEnforced",
+        "escapeProbePassed",
+    }
+)
+_ISOLATION_EVIDENCE_FIELDS = frozenset(
+    {
+        "schemaVersion",
+        "expectedRevision",
+        "provider",
+        "boundary",
+        "workloadRef",
+        "allowedTools",
+        "constraints",
+        "configurationHash",
+        "observedAt",
+        "expiresAt",
+        "checks",
+        "evidenceDigest",
+    }
+)
 
 # Machine identities are deliberately narrower than human roles. They can
 # automate bounded operational work but can never approve their own policy,
@@ -510,6 +571,7 @@ _SERVICE_IDENTITY_CAPABILITIES = frozenset(
     {
         "evidence_read",
         "credential_broker_runtime",
+        "isolation_runtime",
         "fleet_write",
         "inventory_read",
         "policy_draft_write",
@@ -521,6 +583,7 @@ _SERVICE_IDENTITY_CAPABILITIES = frozenset(
 _SERVICE_IDENTITY_MAX_SECONDS = 90 * 24 * 60 * 60
 _SERVICE_CAPABILITY_GRANTS = {
     "credential_broker_runtime": frozenset({"credential_broker_runtime"}),
+    "isolation_runtime": frozenset({"isolation_runtime"}),
     "evidence_read": frozenset({"evidence_read"}),
     "fleet_write": frozenset({"fleet_write"}),
     "inventory_read": frozenset({"inventory_read"}),
@@ -2818,6 +2881,10 @@ def _required_mutation_capability(path):
         return "credential_broker_runtime"
     if normalized.startswith("/enterprise/credential-brokers"):
         return "integration_admin"
+    if re.fullmatch(r"/enterprise/isolation-profiles/[^/]+/evidence", normalized):
+        return "isolation_runtime"
+    if normalized.startswith("/enterprise/isolation-profiles"):
+        return "integration_admin"
     if normalized.startswith("/enterprise/identity/service-identities"):
         return "identity_admin"
     if normalized == "/enterprise/identity/break-glass/requests":
@@ -3556,6 +3623,19 @@ def _machine_route_capability(method, path):
         )
     ):
         return "credential_broker_runtime"
+    if (
+        method in {"GET", "POST"}
+        and re.fullmatch(
+            r"/enterprise/isolation-profiles/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/"
+            r"(?:authority|evidence)",
+            normalized,
+        )
+        and (
+            (method == "GET" and normalized.endswith("/authority"))
+            or (method == "POST" and normalized.endswith("/evidence"))
+        )
+    ):
+        return "isolation_runtime"
     inventory_paths = {
         "/enterprise/agents",
         "/enterprise/deployment-config",
@@ -4703,6 +4783,11 @@ def _enterprise_integrations(tenant):
         for item in _list(tenant, "CREDENTIAL_BROKER", consistent_read=True)
     ]
     brokers.sort(key=lambda item: (item["name"].lower(), item["id"]))
+    isolation_profiles = [
+        _isolation_profile_view(item)
+        for item in _list(tenant, "ISOLATION_PROFILE", consistent_read=True)
+    ]
+    isolation_profiles.sort(key=lambda item: (item["name"].lower(), item["id"]))
     return {
         "splunk": {
             "provider": "splunk_hec",
@@ -4715,6 +4800,9 @@ def _enterprise_integrations(tenant):
         "credentialBrokers": brokers,
         "credentialBrokerProviders": sorted(_CREDENTIAL_BROKER_PROVIDERS),
         "credentialBrokerEvidenceTtlSeconds": _CREDENTIAL_BROKER_EVIDENCE_MAX_TTL_SECONDS,
+        "isolationProfiles": isolation_profiles,
+        "isolationProviders": sorted(_ISOLATION_PROVIDERS),
+        "isolationEvidenceTtlSeconds": _ISOLATION_EVIDENCE_MAX_TTL_SECONDS,
     }
 
 
@@ -5019,6 +5107,311 @@ def _revoke_credential_broker(tenant, broker_id, body, actor):
         },
     )
     return _credential_broker_view(revoked, now=now)
+
+
+def _isolation_destinations(value, network_mode):
+    """Normalize exact network destinations without accepting wildcard egress."""
+    if not isinstance(value, list) or len(value) > _ISOLATION_DESTINATION_LIMIT:
+        raise ValueError("allowedNetworkDestinations must be a bounded list")
+    if any(
+        not isinstance(item, str)
+        or not item.strip()
+        or len(item) > 253
+        or any(character.isspace() for character in item)
+        or "*" in item
+        for item in value
+    ):
+        raise ValueError("isolation network destinations must be exact non-wildcard values")
+    normalized = sorted(item.strip().lower() for item in value)
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("isolation network destinations must not contain duplicates")
+    if network_mode == "none" and normalized:
+        raise ValueError("network-disabled isolation cannot declare destinations")
+    if network_mode == "allowlist" and not normalized:
+        raise ValueError("allowlisted isolation requires destinations")
+    return normalized
+
+
+def _isolation_constraints(value):
+    """Validate controls that a platform adapter must independently evidence."""
+    if not isinstance(value, dict) or set(value) != _ISOLATION_CONSTRAINT_FIELDS:
+        raise ValueError("isolation constraint fields are invalid")
+    network_mode = value.get("networkMode")
+    credential_mode = value.get("credentialMode")
+    if network_mode not in {"none", "allowlist"}:
+        raise ValueError("isolation network mode is unsupported")
+    if credential_mode not in {"none", "brokered"}:
+        raise ValueError("isolation credential mode is unsupported")
+    required_booleans = {
+        "filesystemReadOnly": value.get("filesystemReadOnly"),
+        "processNamespace": value.get("processNamespace"),
+        "noNewPrivileges": value.get("noNewPrivileges"),
+        "capabilitiesDropped": value.get("capabilitiesDropped"),
+    }
+    if any(setting is not True for setting in required_booleans.values()):
+        raise ValueError("production isolation requires all mandatory boundary controls")
+    ranges = {
+        "maxMemoryMib": (16, 262_144),
+        "maxPids": (1, 32_768),
+        "cpuLimitMillicores": (10, 64_000),
+        "maxDurationSeconds": (1, 86_400),
+    }
+    normalized_limits = {}
+    for field, (minimum, maximum) in ranges.items():
+        number = value.get(field)
+        if (
+            not isinstance(number, int)
+            or isinstance(number, bool)
+            or not minimum <= number <= maximum
+        ):
+            raise ValueError(f"{field} exceeds supported isolation bounds")
+        normalized_limits[field] = number
+    return {
+        **required_booleans,
+        **normalized_limits,
+        "networkMode": network_mode,
+        "allowedNetworkDestinations": _isolation_destinations(
+            value.get("allowedNetworkDestinations"), network_mode
+        ),
+        "credentialMode": credential_mode,
+    }
+
+
+def _isolation_configuration(body):
+    """Normalize one browser-submitted, secret-free isolation profile."""
+    if not isinstance(body, dict) or set(body) != _ISOLATION_REGISTRATION_FIELDS:
+        raise ValueError("isolation profile registration fields are invalid")
+    provider = body.get("provider")
+    boundary = body.get("boundary")
+    if provider not in _ISOLATION_PROVIDERS or boundary not in _ISOLATION_BOUNDARIES:
+        raise ValueError("isolation provider or boundary is unsupported")
+    if _ISOLATION_PROVIDER_BOUNDARY.get(provider) != boundary:
+        raise ValueError("isolation provider does not implement the selected boundary")
+    workload_ref = body.get("workloadRef")
+    if not isinstance(workload_ref, str) or not re.fullmatch(
+        r"sha256:[0-9a-f]{64}", workload_ref
+    ):
+        raise ValueError("isolation workload must use an immutable sha256 reference")
+    return {
+        "provider": provider,
+        "boundary": boundary,
+        "workload_ref": workload_ref,
+        "allowed_tools": _credential_broker_values(
+            body.get("allowedTools"), "allowedTools", _ISOLATION_TOOL_LIMIT
+        ),
+        "constraints": _isolation_constraints(body.get("constraints")),
+    }
+
+
+def _isolation_configuration_hash(item):
+    """Bind every execution-affecting profile field and revocation generation."""
+    payload = {
+        "provider": item.get("provider"),
+        "boundary": item.get("boundary"),
+        "workloadRef": item.get("workload_ref"),
+        "allowedTools": sorted(item.get("allowed_tools", [])),
+        "constraints": item.get("constraints", {}),
+        "revision": int(item.get("revision", 0)),
+        "revocationEpoch": int(item.get("revocation_epoch", 0)),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _isolation_profile_view(item, *, now=None):
+    """Project server-derived profile posture without evidence signatures."""
+    current = int(time.time()) if now is None else int(now)
+    status = item.get("status", "disabled")
+    revision = int(item.get("revision", 0))
+    evidence_revision = int(item.get("evidence_revision", 0))
+    evidence_expires = int(item.get("evidence_expires_at", 0))
+    if status != "active":
+        posture = "revoked" if status == "revoked" else "disabled"
+    elif not item.get("evidence_digest"):
+        posture = "unverified"
+    elif evidence_revision != revision or evidence_expires <= current:
+        posture = "stale"
+    else:
+        posture = "verified"
+    return {
+        "id": item.get("id", ""),
+        "name": item.get("name", ""),
+        "provider": item.get("provider", ""),
+        "boundary": item.get("boundary", ""),
+        "workloadRef": item.get("workload_ref", ""),
+        "allowedTools": sorted(item.get("allowed_tools", [])),
+        "constraints": item.get("constraints", {}),
+        "status": status,
+        "verificationStatus": posture,
+        "executionAllowed": status == "active" and posture == "verified",
+        "revision": revision,
+        "revocationEpoch": int(item.get("revocation_epoch", 0)),
+        "configurationHash": _isolation_configuration_hash(item),
+        "createdAt": int(item.get("created_at", 0)),
+        "createdBy": item.get("created_by", ""),
+        "verifiedAt": int(item.get("evidence_observed_at", 0)) or None,
+        "verificationExpiresAt": evidence_expires or None,
+        "evidenceDigest": item.get("evidence_digest"),
+        "revokedAt": int(item.get("revoked_at", 0)) or None,
+        "revokedBy": item.get("revoked_by"),
+    }
+
+
+def _create_isolation_profile(tenant, body, actor):
+    """Register reviewed desired authority while keeping execution blocked."""
+    if len(_list(tenant, "ISOLATION_PROFILE", consistent_read=True)) >= _ISOLATION_PROFILE_LIMIT:
+        raise ValueError("isolation profile registration limit reached")
+    profile_id = _bounded_identifier(body.get("profileId"), "profileId")
+    name = _bounded_text(body.get("name"), "name", 160)
+    configuration = _isolation_configuration(body)
+    now = int(time.time())
+    item = {
+        **_item_key(tenant, "ISOLATION_PROFILE", profile_id),
+        "tenant_id": tenant,
+        "id": profile_id,
+        "name": name,
+        **configuration,
+        "status": "active",
+        "revision": 1,
+        "revocation_epoch": 1,
+        "created_at": now,
+        "created_by": actor,
+    }
+    TABLE.put_item(Item=item, ConditionExpression="attribute_not_exists(pk)")
+    _audit(
+        tenant,
+        "isolation_profile_registered",
+        actor,
+        {
+            "profile_id": profile_id,
+            "boundary": configuration["boundary"],
+            "configuration_hash": _isolation_configuration_hash(item),
+        },
+    )
+    return _isolation_profile_view(item, now=now)
+
+
+def _attest_isolation_profile(tenant, profile_id, body, actor):
+    """Accept exact short-lived machine evidence for a current profile revision."""
+    if not isinstance(body, dict) or set(body) != _ISOLATION_EVIDENCE_FIELDS:
+        raise ValueError("isolation evidence fields are invalid")
+    identifier = _bounded_identifier(profile_id, "profileId")
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "ISOLATION_PROFILE", identifier), ConsistentRead=True
+    ).get("Item")
+    if not item:
+        raise LookupError("isolation profile not found")
+    expected_revision = body.get("expectedRevision")
+    if body.get("schemaVersion") != 1 or expected_revision != int(item.get("revision", 0)):
+        raise PolicyConflict("isolation profile authority changed")
+    checks = body.get("checks")
+    if (
+        not isinstance(checks, dict)
+        or set(checks) != _ISOLATION_EVIDENCE_CHECKS
+        or any(checks.get(check) is not True for check in _ISOLATION_EVIDENCE_CHECKS)
+    ):
+        raise ValueError("isolation evidence checks are incomplete")
+    now = int(time.time())
+    observed_at = body.get("observedAt")
+    expires_at = body.get("expiresAt")
+    digest = body.get("evidenceDigest")
+    if (
+        not isinstance(observed_at, int)
+        or isinstance(observed_at, bool)
+        or not now - _ISOLATION_EVIDENCE_MAX_AGE_SECONDS <= observed_at <= now
+        or not isinstance(expires_at, int)
+        or isinstance(expires_at, bool)
+        or not now < expires_at <= now + _ISOLATION_EVIDENCE_MAX_TTL_SECONDS
+    ):
+        raise ValueError("isolation evidence lifetime is invalid")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("isolation evidence digest is invalid")
+    expected = {
+        "provider": item.get("provider"),
+        "boundary": item.get("boundary"),
+        "workloadRef": item.get("workload_ref"),
+        "allowedTools": sorted(item.get("allowed_tools", [])),
+        "constraints": item.get("constraints", {}),
+        "configurationHash": _isolation_configuration_hash(item),
+    }
+    observed = {
+        "provider": body.get("provider"),
+        "boundary": body.get("boundary"),
+        "workloadRef": body.get("workloadRef"),
+        "allowedTools": _credential_broker_values(
+            body.get("allowedTools"), "allowedTools", _ISOLATION_TOOL_LIMIT
+        ),
+        "constraints": _isolation_constraints(body.get("constraints")),
+        "configurationHash": body.get("configurationHash"),
+    }
+    if observed != expected:
+        raise ValueError("isolation evidence does not match current authority")
+    attested = {
+        **item,
+        "evidence_revision": int(expected_revision),
+        "evidence_observed_at": observed_at,
+        "evidence_expires_at": expires_at,
+        "evidence_digest": digest,
+        "evidence_actor": actor,
+    }
+    TABLE.put_item(
+        Item=attested,
+        ConditionExpression="#status = :active AND revision = :revision",
+        ExpressionAttributeNames={"#status": "status"},
+        ExpressionAttributeValues={":active": "active", ":revision": expected_revision},
+    )
+    _audit(
+        tenant,
+        "isolation_profile_verified",
+        actor,
+        {"profile_id": identifier, "revision": expected_revision, "evidence_digest": digest},
+    )
+    return _isolation_profile_view(attested, now=now)
+
+
+def _revoke_isolation_profile(tenant, profile_id, body, actor):
+    """Revoke profile authority and advance its live revocation generation."""
+    if not isinstance(body, dict) or set(body) != {"expectedRevision", "reason"}:
+        raise ValueError("isolation profile revocation fields are invalid")
+    identifier = _bounded_identifier(profile_id, "profileId")
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "ISOLATION_PROFILE", identifier), ConsistentRead=True
+    ).get("Item")
+    if not item:
+        raise LookupError("isolation profile not found")
+    expected_revision = body.get("expectedRevision")
+    if not isinstance(expected_revision, int) or isinstance(expected_revision, bool):
+        raise ValueError("expectedRevision must be an integer")
+    reason = _bounded_text(body.get("reason"), "reason", 500)
+    now = int(time.time())
+    revoked = {
+        **item,
+        "status": "revoked",
+        "revision": expected_revision + 1,
+        "revocation_epoch": int(item.get("revocation_epoch", 0)) + 1,
+        "revoked_at": now,
+        "revoked_by": actor,
+        "revocation_reason": reason,
+    }
+    TABLE.put_item(
+        Item=revoked,
+        ConditionExpression="#status = :active AND revision = :revision",
+        ExpressionAttributeNames={"#status": "status"},
+        ExpressionAttributeValues={":active": "active", ":revision": expected_revision},
+    )
+    _audit(
+        tenant,
+        "isolation_profile_revoked",
+        actor,
+        {
+            "profile_id": identifier,
+            "revision": revoked["revision"],
+            "revocation_epoch": revoked["revocation_epoch"],
+            "reason": reason,
+        },
+    )
+    return _isolation_profile_view(revoked, now=now)
 
 
 def _webhook_endpoint(value):
@@ -7535,6 +7928,13 @@ def _semantic_policy_diff(base_configuration, candidate_configuration):
     set_changes("approvals", "requiredFor", "approval", "approval_added", "approval_removed")
     set_changes(
         "credentials", "scopes", "credential_scope", "authority_expanded", "authority_restricted"
+    )
+    set_changes(
+        "isolation",
+        "acceptedProfiles",
+        "isolation_profile",
+        "authority_expanded",
+        "authority_restricted",
     )
 
     limits = [
@@ -21427,6 +21827,28 @@ def _managed_policy_configuration(tenant, configuration):
     # DynamoDB returns numeric values as Decimal. Normalize through the same
     # boundary used by API responses before resolving managed resources.
     value = _json(configuration)
+    isolation = value.get("isolation")
+    if isinstance(isolation, dict):
+        profiles = []
+        accepted = isolation.get("acceptedProfiles", [])
+        if not isinstance(accepted, list) or len(accepted) > _ISOLATION_PROFILE_LIMIT:
+            raise ValueError("policy isolation profiles must be a bounded list")
+        if any(not isinstance(profile_id, str) for profile_id in accepted) or len(
+            set(accepted)
+        ) != len(accepted):
+            raise ValueError("policy isolation profiles must be unique identifiers")
+        for profile_id in accepted:
+            item = TABLE.get_item(
+                Key=_item_key(
+                    tenant,
+                    "ISOLATION_PROFILE",
+                    _bounded_identifier(profile_id, "profileId"),
+                )
+            ).get("Item")
+            if not item or item.get("status") != "active":
+                raise ValueError("policy references an unavailable isolation profile")
+            profiles.append(_isolation_profile_view(item))
+        isolation["managedProfiles"] = profiles
     claude = value.get("claudeCode")
     if not isinstance(claude, dict):
         return value
@@ -23372,6 +23794,72 @@ def handler(event, context):
                     return _response(
                         200,
                         _revoke_credential_broker(tenant, parts[1], _body(event), actor),
+                    )
+            if parts and parts[0] == "isolation-profiles":
+                machine_capabilities = _service_capabilities(event)
+                if method == "GET" and len(parts) == 1:
+                    if not _operator_roles(event):
+                        return _response(
+                            403, {"error": "isolation posture requires a tenant role"}
+                        )
+                    profiles = [
+                        _isolation_profile_view(item)
+                        for item in _list(tenant, "ISOLATION_PROFILE", consistent_read=True)
+                    ]
+                    profiles.sort(key=lambda item: (item["name"].lower(), item["id"]))
+                    return _response(200, {"items": profiles, "nextCursor": None})
+                if method == "POST" and len(parts) == 1:
+                    if machine_capabilities:
+                        return _response(
+                            403, {"error": "machine identity cannot register isolation authority"}
+                        )
+                    return _response(201, _create_isolation_profile(tenant, _body(event), actor))
+                if method == "POST" and len(parts) == 3 and parts[2] == "evidence":
+                    if "isolation_runtime" not in machine_capabilities:
+                        return _response(
+                            403,
+                            {"error": "isolation evidence requires machine runtime authority"},
+                        )
+                    return _response(
+                        200,
+                        _attest_isolation_profile(tenant, parts[1], _body(event), actor),
+                    )
+                if method == "GET" and len(parts) == 3 and parts[2] == "authority":
+                    if "isolation_runtime" not in machine_capabilities:
+                        return _response(
+                            403,
+                            {"error": "isolation authority requires machine runtime authority"},
+                        )
+                    item = TABLE.get_item(
+                        Key=_item_key(
+                            tenant,
+                            "ISOLATION_PROFILE",
+                            _bounded_identifier(parts[1], "profileId"),
+                        ),
+                        ConsistentRead=True,
+                    ).get("Item")
+                    if not item:
+                        return _response(404, {"error": "isolation profile not found"})
+                    view = _isolation_profile_view(item)
+                    return _response(
+                        200,
+                        {
+                            "profileId": view["id"],
+                            "executionAllowed": view["executionAllowed"],
+                            "verificationStatus": view["verificationStatus"],
+                            "revision": view["revision"],
+                            "revocationEpoch": view["revocationEpoch"],
+                            "configurationHash": view["configurationHash"],
+                        },
+                    )
+                if method == "POST" and len(parts) == 3 and parts[2] == "revoke":
+                    if machine_capabilities:
+                        return _response(
+                            403, {"error": "machine identity cannot revoke isolation authority"}
+                        )
+                    return _response(
+                        200,
+                        _revoke_isolation_profile(tenant, parts[1], _body(event), actor),
                     )
             if parts and parts[0] == "webhooks":
                 # Secret-free posture is visible to authenticated tenant roles;

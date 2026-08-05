@@ -23,6 +23,15 @@ secret use. The capability limits exposure inside the SDK but does not revoke
 provider work already in flight. See [Cloud credential
 authority](cloud-credential-authority-design.md).
 
+Production isolation authority is likewise host-owned. Policy accepts exact
+reviewed profile digests and boundary kinds; evidence binds the live principal,
+tenant, agent, task, purpose, tool, resources and nonce. Missing, stale,
+overlong, unsigned, mismatched or revoked evidence denies before handler
+execution. The permit and audit event retain immutable profile/workload
+identity without retaining signatures. This verifies authority evidence, not
+the security of an unassessed host or sandbox implementation. See [Production
+isolation authority](production-isolation-authority-design.md).
+
 Bounded provider and handler waits are admitted through
 `BoundedOperationTracker`. A timeout retains its worker slot until completion;
 `BoundedOperationExecutor` emits the typed timeout phase, while

@@ -11,7 +11,8 @@
     "idempotency claim and terminal persistence",
     "timeout and reconciliation",
     "audit replication failure",
-    "native hook fail-closed decisions and command-pattern availability"
+    "native hook fail-closed decisions and command-pattern availability",
+    "production isolation profile, action-binding, freshness, signature, and revocation authority"
   ],
   "source_scope": [
     "src/agentic_security/_command_patterns.py",

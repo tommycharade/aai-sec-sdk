@@ -43,6 +43,7 @@ nav:
   - Production readiness: production-readiness.md
   - Architecture: architecture.md
   - Cloud credential authority: cloud-credential-authority-design.md
+  - Production isolation authority: production-isolation-authority-design.md
   - Agent integrations: integrations.md
   - Claude Code example: claude-code.md
   - Codex CLI example: codex-cli.md

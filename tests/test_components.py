@@ -217,9 +217,14 @@ def test_isolation_preparation_passes_the_complete_live_binding_to_verifier() ->
 
     handler = Handler()
     tool = replace(_tool(handler), requires_isolation=True)
-    assert ActionPreparation.verify_isolation(
+    verification = ActionPreparation.verify_isolation(
         tool, context, resources, CallbackIsolationVerifier(verify), nonce
     )
+    assert verification.verified is True
+    assert verification.reason == "deployment callback accepted legacy isolation evidence"
+    assert verification.evidence_id == attestation.workload_id
+    assert verification.provider == attestation.provider
+    assert verification.expires_at == attestation.expires_at
     assert seen == [(attestation, context, "component_action", resources, nonce)]
     assert handler.seen == [(context, "component_action", resources, nonce)]
     with pytest.raises(PreExecutionAuthorizationError, match="verifier-backed"):
