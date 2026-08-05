@@ -73,9 +73,10 @@ not expose it to existing machine credentials.
 | `policy_draft_write` | Create policies, draft versions, Skills and MCP registrations | No submission, approval, staging, activation, exception or package publication |
 | `policy_simulation` | Run the bounded historical simulation route for an exact draft version | No action execution or policy activation |
 | `fleet_write` | Create projects, groups and deployments; bootstrap/register agents; manage bounded group membership | No emergency stop, identity lifecycle or incident containment |
-| `runtime_write` | Create templates and start, pause or roll back measured deployment-configuration rollouts | No managed-package publication, signing-key governance or emergency authority |
+| `runtime_write` | Create templates and start, pause or roll back measured deployment-configuration and runtime-release rollouts | No endpoint remediation report, managed-package publication, signing-key governance or emergency authority |
+| `runtime_remediation` | Read an exact server-selected instruction when paired with `inventory_read`, then claim it and report one bounded channel outcome | No rollout authoring, member selection, executable delivery, provider credential, installation authority or verification claim |
 
-The control plane advertises exactly these six values. Unsupported, duplicated,
+The control plane advertises exactly these seven values. Unsupported, duplicated,
 empty or oversized capability lists are rejected. A service identity with
 multiple capabilities receives their union only on the routes listed above.
 

@@ -396,6 +396,22 @@ are bounded to 4096 bytes before decoding.
 
 ::: agentic_security.ControlPlaneAgentClient
 
+## Runtime remediation coordination
+
+`RuntimeRemediationClient` is for an administrator-owned external endpoint
+workflow, never a model process or normal agent session. Give its service
+identity only `inventory_read` and `runtime_remediation`. The client reads
+exact rollout-selected release digests, leases work and reports a fixed channel
+outcome. It has no download, command, install or elevation method, and an
+`installed` result remains unverified until fresh runtime attestation exists.
+See [Runtime remediation coordination](runtime-remediation-coordination-design.md).
+
+::: agentic_security.RuntimeRemediationClient
+
+::: agentic_security.RuntimeRemediationInstruction
+
+::: agentic_security.RuntimeRemediationPage
+
 Pass a deployment-owned `managed_configuration_provider` when an enrolled AWS
 agent has an assigned managed-host bundle. The callback must re-measure the
 administrator-owned files and return `ManagedConfigurationEvidence`; the

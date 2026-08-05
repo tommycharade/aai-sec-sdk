@@ -473,6 +473,7 @@ _SERVICE_IDENTITY_CAPABILITIES = frozenset(
         "inventory_read",
         "policy_draft_write",
         "policy_simulation",
+        "runtime_remediation",
         "runtime_write",
     }
 )
@@ -483,6 +484,10 @@ _SERVICE_CAPABILITY_GRANTS = {
     "inventory_read": frozenset({"inventory_read"}),
     "policy_draft_write": frozenset({"policy_write"}),
     "policy_simulation": frozenset({"policy_simulation"}),
+    # Endpoint-management automation may claim and report only exact
+    # server-derived remediation instructions. The versioned route allowlist
+    # keeps this grant separate from rollout authoring and normal fleet writes.
+    "runtime_remediation": frozenset({"endpoint_remediation_observe"}),
     # Runtime configuration currently shares some fleet mutation routes. The
     # versioned machine allowlist below keeps this grant on those exact paths.
     "runtime_write": frozenset({"fleet_write", "runtime_admin"}),
@@ -1060,6 +1065,641 @@ def _runtime_release_for_agent(tenant, deployment, agent, *, catalog=None, rollo
     return release
 
 
+_RUNTIME_REMEDIATION_TASK_KEYS = {
+    "pk",
+    "sk",
+    "tenant_id",
+    "schemaVersion",
+    "deploymentId",
+    "agentId",
+    "instructionId",
+    "rolloutRevision",
+    "releaseId",
+    "revision",
+    "attempts",
+    "status",
+    "claimRequestId",
+    "claimedAt",
+    "leaseExpiresAt",
+    "claimedBy",
+    "reportRequestId",
+    "reportedAt",
+    "outcome",
+    "reasonCode",
+    "updatedAt",
+}
+_RUNTIME_REMEDIATION_FAILURE_REASONS = frozenset(
+    {
+        "channel_timeout",
+        "digest_mismatch",
+        "host_unsupported",
+        "installation_failed",
+        "package_unavailable",
+        "preflight_failed",
+        "privilege_unavailable",
+        "restart_failed",
+    }
+)
+_RUNTIME_REMEDIATION_MAX_ATTEMPTS = 5
+_RUNTIME_REMEDIATION_LEASE_SECONDS = 15 * 60
+
+
+def _runtime_agent_attests_release(agent, release, now, *, not_before=0):
+    """Return whether fresh endpoint evidence proves one exact release.
+
+    Installation-channel reports are deliberately excluded. Only the existing
+    challenge-bound runtime attestation can establish rollout convergence.
+    """
+    return bool(
+        release
+        and agent.get("host") == release.get("host")
+        and agent.get("attestation_status") == "compliant"
+        and isinstance(agent.get("attestation_observed_at"), int)
+        and not isinstance(agent.get("attestation_observed_at"), bool)
+        and max(1, int(not_before)) <= int(agent["attestation_observed_at"]) <= now
+        and int(agent.get("attestation_expires_at", 0)) > now
+        and agent.get("attestation_sdk_version") == release.get("sdkVersion")
+        and agent.get("attestation_sdk_revision") == release.get("sdkRevision")
+        and agent.get("attestation_manifest_sha256") == release.get("manifestSha256")
+    )
+
+
+def _runtime_remediation_instruction(tenant, rollout, agent):
+    """Derive one executable-free endpoint-management instruction.
+
+    The rollout and approved release binding are server-owned authority. The
+    instruction contains only immutable release identities and digests; it does
+    not contain a URL, command, path, credential, executable byte or model data.
+    """
+    rollout = _validated_runtime_rollout(
+        rollout,
+        tenant,
+        deployment_id=agent.get("deployment_id"),
+        host=agent.get("host"),
+    )
+    if rollout["state"] not in {"canary", "active", "paused", "rolling_back"}:
+        return None
+    if not _runtime_rollout_agent_selected(tenant, rollout, agent):
+        return None
+    release_field = (
+        "currentReleaseBinding" if rollout["state"] == "rolling_back" else "targetReleaseBinding"
+    )
+    release_id_field = (
+        "currentReleaseId" if rollout["state"] == "rolling_back" else "targetReleaseId"
+    )
+    release = _validated_runtime_release_binding(
+        rollout.get(release_field), rollout.get(release_id_field), rollout["host"]
+    )
+    instruction = {
+        "schemaVersion": 1,
+        "deploymentId": rollout["deploymentId"],
+        "agentId": agent.get("id", ""),
+        "host": rollout["host"],
+        "rolloutRevision": int(rollout["revision"]),
+        "rolloutState": rollout["state"],
+        "releaseId": release["id"],
+        "releaseTag": release["releaseTag"],
+        "sdkVersion": release["sdkVersion"],
+        "sdkRevision": release["sdkRevision"],
+        "manifestSha256": release["manifestSha256"],
+        "releaseEvidenceSha256": release["releaseEvidenceSha256"],
+        "packageSha256": release["packageSha256"],
+        "gatewaySha256": release["gatewaySha256"],
+        "hookSha256": release["hookSha256"],
+    }
+    instruction_id = hashlib.sha256(
+        json.dumps(instruction, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {**instruction, "instructionId": instruction_id}
+
+
+def _validated_runtime_remediation_task(value, tenant, deployment_id, agent_id):
+    """Fail closed unless persisted endpoint-channel state has one exact shape."""
+    value = _json(value) if isinstance(value, dict) else value
+    if not isinstance(value, dict) or set(value) != _RUNTIME_REMEDIATION_TASK_KEYS:
+        raise RuntimeError("runtime remediation task has an invalid schema")
+    if (
+        value.get("tenant_id") != tenant
+        or value.get("deploymentId") != deployment_id
+        or value.get("agentId") != agent_id
+        or {"pk": value.get("pk"), "sk": value.get("sk")}
+        != _item_key(tenant, "RUNTIME_REMEDIATION", f"{deployment_id}:{agent_id}")
+        or value.get("schemaVersion") != 1
+    ):
+        raise RuntimeError("runtime remediation task identity is invalid")
+    for field in ("instructionId",):
+        if not re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))):
+            raise RuntimeError("runtime remediation task digest is invalid")
+    if not isinstance(value.get("releaseId"), str) or not value["releaseId"]:
+        raise RuntimeError("runtime remediation task release is invalid")
+    for field in ("rolloutRevision", "revision", "attempts", "updatedAt"):
+        number = value.get(field)
+        minimum = 0 if field == "attempts" else 1
+        if isinstance(number, bool) or not isinstance(number, int) or number < minimum:
+            raise RuntimeError("runtime remediation task revision is invalid")
+    if value["attempts"] > _RUNTIME_REMEDIATION_MAX_ATTEMPTS:
+        raise RuntimeError("runtime remediation task attempt bound is invalid")
+    if value.get("status") not in {"claimed", "installed", "failed"}:
+        raise RuntimeError("runtime remediation task status is invalid")
+    for field in ("claimRequestId", "claimedBy"):
+        if not isinstance(value.get(field), str) or not value[field]:
+            raise RuntimeError("runtime remediation task claim is invalid")
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}", value["claimRequestId"])
+        or len(value["claimedBy"]) > 256
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}", value["claimedBy"])
+    ):
+        raise RuntimeError("runtime remediation task claim identity is invalid")
+    for field in ("claimedAt", "leaseExpiresAt"):
+        number = value.get(field)
+        if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+            raise RuntimeError("runtime remediation task lease is invalid")
+    if value["leaseExpiresAt"] <= value["claimedAt"]:
+        raise RuntimeError("runtime remediation task lease interval is invalid")
+    if value["status"] == "claimed":
+        if any(
+            value.get(field) is not None
+            for field in ("reportRequestId", "reportedAt", "outcome", "reasonCode")
+        ):
+            raise RuntimeError("unreported runtime remediation task has report state")
+    else:
+        if (
+            not isinstance(value.get("reportRequestId"), str)
+            or not value["reportRequestId"]
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}", value["reportRequestId"])
+            or isinstance(value.get("reportedAt"), bool)
+            or not isinstance(value.get("reportedAt"), int)
+            or value["reportedAt"] < value["claimedAt"]
+            or value.get("outcome") not in {"installed", "failed"}
+            or value.get("outcome") != value.get("status")
+        ):
+            raise RuntimeError("runtime remediation task report is invalid")
+        if value["status"] == "installed" and value.get("reasonCode") is not None:
+            raise RuntimeError("successful runtime remediation retained a failure reason")
+        if value["status"] == "failed" and value.get("reasonCode") not in (
+            _RUNTIME_REMEDIATION_FAILURE_REASONS
+        ):
+            raise RuntimeError("runtime remediation failure reason is invalid")
+    return value
+
+
+def _runtime_remediation_task(tenant, deployment_id, agent_id):
+    """Strongly read one endpoint-channel attempt without creating authority."""
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "RUNTIME_REMEDIATION", f"{deployment_id}:{agent_id}"),
+        ConsistentRead=True,
+    ).get("Item")
+    return (
+        _validated_runtime_remediation_task(item, tenant, deployment_id, agent_id) if item else None
+    )
+
+
+def _runtime_remediation_item(tenant, rollout, agent, *, now=None):
+    """Project one remediation state while treating attestation as sole proof."""
+    current = int(time.time()) if now is None else int(now)
+    instruction = _runtime_remediation_instruction(tenant, rollout, agent)
+    if instruction is None:
+        return None
+    release = (
+        rollout["currentReleaseBinding"]
+        if rollout["state"] == "rolling_back"
+        else rollout["targetReleaseBinding"]
+    )
+    task = _runtime_remediation_task(tenant, rollout["deploymentId"], agent.get("id", ""))
+    blocked = (
+        agent.get("status") == "quarantined" or agent.get("attestation_status") == "quarantined"
+    )
+    if (
+        task
+        and task["instructionId"] == instruction["instructionId"]
+        and (
+            task["rolloutRevision"] != instruction["rolloutRevision"]
+            or task["releaseId"] != instruction["releaseId"]
+        )
+    ):
+        raise RuntimeError("runtime remediation task contradicts its live instruction")
+    task_matches = bool(
+        task
+        and task["instructionId"] == instruction["instructionId"]
+        and task["rolloutRevision"] == instruction["rolloutRevision"]
+        and task["releaseId"] == instruction["releaseId"]
+    )
+    if not task_matches:
+        channel_status = "not_started"
+    elif task["status"] == "claimed" and task["leaseExpiresAt"] > current:
+        channel_status = "in_progress"
+    elif task["status"] == "installed":
+        channel_status = "installed_reported"
+    elif task["status"] == "failed":
+        channel_status = "failed"
+    else:
+        channel_status = "not_started"
+    if blocked:
+        runtime_verification = "blocked"
+        status = "blocked"
+    elif _runtime_agent_attests_release(
+        agent, release, current, not_before=rollout.get("startedAt", 0)
+    ):
+        runtime_verification = "verified"
+        status = "verified"
+    else:
+        runtime_verification = "not_verified"
+    if not blocked and runtime_verification != "verified" and not task_matches:
+        status = "pending"
+    elif not blocked and runtime_verification != "verified" and channel_status == "in_progress":
+        status = "in_progress"
+    elif (
+        not blocked
+        and runtime_verification != "verified"
+        and channel_status == "installed_reported"
+    ):
+        status = "awaiting_attestation"
+    elif not blocked and runtime_verification != "verified" and channel_status == "failed":
+        status = "failed"
+    elif not blocked and runtime_verification != "verified":
+        status = "pending"
+    attempts = int(task["attempts"]) if task_matches else 0
+    return {
+        **instruction,
+        "status": status,
+        "channelStatus": channel_status,
+        "runtimeVerification": runtime_verification,
+        "eligible": status in {"pending", "failed"}
+        and attempts < _RUNTIME_REMEDIATION_MAX_ATTEMPTS,
+        "taskRevision": int(task["revision"]) if task else 0,
+        "attempts": attempts,
+        "claimedAt": int(task["claimedAt"]) if task_matches else None,
+        "leaseExpiresAt": int(task["leaseExpiresAt"]) if task_matches else None,
+        "reportedAt": (
+            int(task["reportedAt"]) if task_matches and task.get("reportedAt") else None
+        ),
+        "reasonCode": task.get("reasonCode") if task_matches else None,
+        "evidenceObservedAt": int(agent.get("attestation_observed_at", 0)) or None,
+        "evidenceExpiresAt": int(agent.get("attestation_expires_at", 0)) or None,
+    }
+
+
+def _runtime_remediation_cursor(deployment_id, token):
+    """Decode a bounded deployment-bound read cursor; it grants no authority."""
+    if token is None:
+        return None
+    if not isinstance(token, str) or not 1 <= len(token) <= 512:
+        raise ValueError("runtime remediation pagination token is invalid")
+    try:
+        padding = "=" * (-len(token) % 4)
+        value = json.loads(base64.urlsafe_b64decode(token + padding).decode())
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("runtime remediation pagination token is invalid") from error
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"deploymentId", "agentId"}
+        or value.get("deploymentId") != deployment_id
+        or not isinstance(value.get("agentId"), str)
+        or not value["agentId"]
+    ):
+        raise ValueError("runtime remediation pagination token is outside its deployment")
+    return value["agentId"]
+
+
+def _runtime_remediation_next_cursor(deployment_id, agent_id):
+    """Encode the last returned agent identity as opaque read pagination state."""
+    return (
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {"deploymentId": deployment_id, "agentId": agent_id},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
+
+
+def _runtime_remediations(tenant, deployment_id, *, now=None, limit=100, next_token=None):
+    """Return a bounded deployment queue derived from live rollout authority."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 250:
+        raise ValueError("runtime remediation limit must be between 1 and 250")
+    current = int(time.time()) if now is None else int(now)
+    deployment_id = _bounded_identifier(deployment_id, "deploymentId")
+    rollout = _runtime_rollout_record(tenant, deployment_id)
+    if not rollout:
+        raise LookupError("runtime rollout not found")
+    rollout = _reconcile_runtime_rollout_current(tenant, rollout, now=current)
+    rollout = _validated_runtime_rollout(rollout, tenant, deployment_id=deployment_id)
+    agents = sorted(
+        _runtime_rollout_active_agents(tenant, deployment_id), key=lambda item: item.get("id", "")
+    )
+    rows = [
+        row
+        for agent in agents
+        if (row := _runtime_remediation_item(tenant, rollout, agent, now=current)) is not None
+    ]
+    after = _runtime_remediation_cursor(deployment_id, next_token)
+    remaining = [row for row in rows if after is None or row["agentId"] > after]
+    page = remaining[:limit]
+    has_more = len(remaining) > len(page)
+    statuses = {
+        status: sum(row["status"] == status for row in rows)
+        for status in (
+            "pending",
+            "in_progress",
+            "awaiting_attestation",
+            "failed",
+            "verified",
+            "blocked",
+        )
+    }
+    channel_statuses = {
+        status: sum(row["channelStatus"] == status for row in rows)
+        for status in ("not_started", "in_progress", "installed_reported", "failed")
+    }
+    runtime_verifications = {
+        status: sum(row["runtimeVerification"] == status for row in rows)
+        for status in ("not_verified", "verified", "blocked")
+    }
+    return {
+        "schemaVersion": 1,
+        "deploymentId": deployment_id,
+        "rolloutRevision": int(rollout["revision"]),
+        "rolloutState": rollout["state"],
+        "measuredAt": current,
+        "totalItems": len(rows),
+        "statusCounts": statuses,
+        "channelStatusCounts": channel_statuses,
+        "runtimeVerificationCounts": runtime_verifications,
+        "items": page,
+        "nextToken": (
+            _runtime_remediation_next_cursor(deployment_id, page[-1]["agentId"])
+            if has_more and page
+            else None
+        ),
+        "hasMore": has_more,
+    }
+
+
+def _runtime_remediation_current_instruction(tenant, deployment_id, agent_id):
+    """Resolve one exact live instruction and deny stale or unselected agents."""
+    rollout = _runtime_rollout_record(tenant, deployment_id)
+    agent = TABLE.get_item(
+        Key=_item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}"), ConsistentRead=True
+    ).get("Item")
+    if not rollout or not agent or _agent_lifecycle_state(agent) != "active":
+        raise LookupError("runtime remediation instruction not found")
+    rollout = _validated_runtime_rollout(
+        rollout, tenant, deployment_id=deployment_id, host=agent.get("host")
+    )
+    item = _runtime_remediation_item(tenant, rollout, agent)
+    if item is None:
+        raise PolicyConflict("agent is not selected for runtime remediation")
+    return rollout, agent, item
+
+
+def _runtime_remediation_write(tenant, current, replacement, event_type, actor, *, rollout, agent):
+    """Atomically store endpoint-channel state and content-minimised evidence."""
+    expected_revision = int(current["revision"]) if current else 0
+    _validated_runtime_remediation_task(
+        replacement, tenant, replacement["deploymentId"], replacement["agentId"]
+    )
+    payload = {
+        "deployment_id": replacement["deploymentId"],
+        "agent_identity_sha256": hashlib.sha256(
+            f"{tenant}:{replacement['deploymentId']}:{replacement['agentId']}".encode()
+        ).hexdigest(),
+        "instruction_id": replacement["instructionId"],
+        "rollout_revision": replacement["rolloutRevision"],
+        "release_id": replacement["releaseId"],
+        "task_revision": replacement["revision"],
+        "status": replacement["status"],
+        "attempts": replacement["attempts"],
+        "reason_code": replacement.get("reasonCode"),
+        "task_sha256": hashlib.sha256(
+            json.dumps(
+                {
+                    key: value
+                    for key, value in replacement.items()
+                    if key not in {"pk", "sk", "tenant_id"}
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest(),
+    }
+    audit = _configuration_audit_record(
+        tenant, event_type, actor, payload, now=int(replacement["updatedAt"])
+    )
+    try:
+        DYNAMODB.transact_write_items(
+            TransactItems=[
+                _transaction_condition(
+                    _item_key(tenant, "RUNTIME_ROLLOUT", replacement["deploymentId"]),
+                    condition=(
+                        "revision = :rollout_revision AND #state = :rollout_state "
+                        "AND currentReleaseId = :current_release "
+                        "AND targetReleaseId = :target_release"
+                    ),
+                    names={"#state": "state"},
+                    values={
+                        ":rollout_revision": rollout["revision"],
+                        ":rollout_state": rollout["state"],
+                        ":current_release": rollout["currentReleaseId"],
+                        ":target_release": rollout.get("targetReleaseId"),
+                    },
+                ),
+                _transaction_condition(
+                    _item_key(
+                        tenant,
+                        "AGENT",
+                        f"{replacement['deploymentId']}:{replacement['agentId']}",
+                    ),
+                    condition=(
+                        "lifecycle_state = :active AND #status = :agent_status "
+                        "AND attestation_status = :attestation_status"
+                    ),
+                    names={"#status": "status"},
+                    values={
+                        ":active": "active",
+                        ":agent_status": agent.get("status"),
+                        ":attestation_status": agent.get("attestation_status"),
+                    },
+                ),
+                _transaction_put(
+                    replacement,
+                    condition=(
+                        "attribute_not_exists(pk)"
+                        if current is None
+                        else "attribute_exists(pk) AND revision = :revision"
+                    ),
+                    values=(None if current is None else {":revision": expected_revision}),
+                ),
+                _transaction_put(audit, condition="attribute_not_exists(pk)"),
+            ]
+        )
+    except Exception as error:
+        if (
+            _is_conditional_conflict(error)
+            or getattr(error, "response", {}).get("Error", {}).get("Code")
+            == "TransactionCanceledException"
+        ):
+            raise PolicyConflict("runtime remediation task revision changed") from error
+        raise
+    _export_configuration_audit(tenant, event_type, actor, payload)
+    return replacement
+
+
+def _claim_runtime_remediation(tenant, deployment_id, agent_id, body, actor):
+    """Lease one exact live instruction to a scoped endpoint-management worker."""
+    if not isinstance(body, dict) or set(body) != {
+        "instructionId",
+        "expectedTaskRevision",
+        "requestId",
+    }:
+        raise ValueError("runtime remediation claim request has an invalid schema")
+    instruction_id = str(body.get("instructionId", ""))
+    if not re.fullmatch(r"[0-9a-f]{64}", instruction_id):
+        raise ValueError("runtime remediation instructionId is invalid")
+    expected_revision = _managed_integer(
+        body.get("expectedTaskRevision"), "runtime remediation expected task revision"
+    )
+    request_id = _bounded_identifier(body.get("requestId"), "requestId")
+    rollout, _agent, item = _runtime_remediation_current_instruction(
+        tenant, deployment_id, agent_id
+    )
+    if item["instructionId"] != instruction_id:
+        raise PolicyConflict("runtime remediation instruction changed")
+    current = _runtime_remediation_task(tenant, deployment_id, agent_id)
+    if current and current["claimRequestId"] == request_id:
+        if current["instructionId"] != instruction_id:
+            raise PolicyConflict("runtime remediation request ID was reused")
+        return _runtime_remediation_item(tenant, rollout, _agent)
+    if item["status"] in {"blocked", "verified"} or not item["eligible"]:
+        raise PolicyConflict("runtime remediation instruction is not claimable")
+    actual_revision = int(current["revision"]) if current else 0
+    if expected_revision != actual_revision:
+        raise PolicyConflict("runtime remediation task revision changed")
+    now = int(time.time())
+    if (
+        current
+        and current["instructionId"] == instruction_id
+        and current["status"] in {"claimed", "installed"}
+        and current["leaseExpiresAt"] > now
+    ):
+        raise PolicyConflict("runtime remediation instruction already has an active lease")
+    attempts = (
+        int(current["attempts"]) if current and current["instructionId"] == instruction_id else 0
+    )
+    if attempts >= _RUNTIME_REMEDIATION_MAX_ATTEMPTS:
+        raise PolicyConflict("runtime remediation attempt limit reached")
+    replacement = {
+        **_item_key(tenant, "RUNTIME_REMEDIATION", f"{deployment_id}:{agent_id}"),
+        "tenant_id": tenant,
+        "schemaVersion": 1,
+        "deploymentId": deployment_id,
+        "agentId": agent_id,
+        "instructionId": instruction_id,
+        "rolloutRevision": int(rollout["revision"]),
+        "releaseId": item["releaseId"],
+        "revision": actual_revision + 1,
+        "attempts": attempts + 1,
+        "status": "claimed",
+        "claimRequestId": request_id,
+        "claimedAt": now,
+        "leaseExpiresAt": now + _RUNTIME_REMEDIATION_LEASE_SECONDS,
+        "claimedBy": actor,
+        "reportRequestId": None,
+        "reportedAt": None,
+        "outcome": None,
+        "reasonCode": None,
+        "updatedAt": now,
+    }
+    _runtime_remediation_write(
+        tenant,
+        current,
+        replacement,
+        "runtime_remediation_claimed",
+        actor,
+        rollout=rollout,
+        agent=_agent,
+    )
+    return _runtime_remediation_item(tenant, rollout, _agent, now=now)
+
+
+def _report_runtime_remediation(tenant, deployment_id, agent_id, body, actor):
+    """Record a bounded channel result without treating it as execution proof."""
+    if not isinstance(body, dict) or set(body) != {
+        "instructionId",
+        "expectedTaskRevision",
+        "requestId",
+        "outcome",
+        "reasonCode",
+    }:
+        raise ValueError("runtime remediation report request has an invalid schema")
+    instruction_id = str(body.get("instructionId", ""))
+    if not re.fullmatch(r"[0-9a-f]{64}", instruction_id):
+        raise ValueError("runtime remediation instructionId is invalid")
+    expected_revision = _managed_integer(
+        body.get("expectedTaskRevision"), "runtime remediation expected task revision"
+    )
+    request_id = _bounded_identifier(body.get("requestId"), "requestId")
+    outcome = body.get("outcome")
+    reason_code = body.get("reasonCode")
+    if outcome not in {"installed", "failed"}:
+        raise ValueError("runtime remediation outcome is invalid")
+    if outcome == "installed" and reason_code is not None:
+        raise ValueError("installed runtime remediation cannot include a failure reason")
+    if outcome == "failed" and reason_code not in _RUNTIME_REMEDIATION_FAILURE_REASONS:
+        raise ValueError("runtime remediation failure reason is invalid")
+    rollout, agent, item = _runtime_remediation_current_instruction(tenant, deployment_id, agent_id)
+    if item["instructionId"] != instruction_id:
+        raise PolicyConflict("runtime remediation instruction changed")
+    current = _runtime_remediation_task(tenant, deployment_id, agent_id)
+    if current and current.get("reportRequestId") == request_id:
+        if (
+            current["instructionId"] != instruction_id
+            or current.get("outcome") != outcome
+            or current.get("reasonCode") != reason_code
+        ):
+            raise PolicyConflict("runtime remediation report request ID was reused")
+        return _runtime_remediation_item(tenant, rollout, agent)
+    now = int(time.time())
+    if (
+        not current
+        or current["revision"] != expected_revision
+        or current["instructionId"] != instruction_id
+        or current["status"] != "claimed"
+        or current["leaseExpiresAt"] <= now
+        or current["claimedBy"] != actor
+        or current["rolloutRevision"] != item["rolloutRevision"]
+        or current["releaseId"] != item["releaseId"]
+    ):
+        raise PolicyConflict("active runtime remediation lease is required")
+    replacement = {
+        **current,
+        "revision": current["revision"] + 1,
+        "status": outcome,
+        "reportRequestId": request_id,
+        "reportedAt": now,
+        "outcome": outcome,
+        "reasonCode": reason_code,
+        "updatedAt": now,
+    }
+    event_type = (
+        "runtime_remediation_install_reported"
+        if outcome == "installed"
+        else "runtime_remediation_failure_reported"
+    )
+    _runtime_remediation_write(
+        tenant,
+        current,
+        replacement,
+        event_type,
+        actor,
+        rollout=rollout,
+        agent=agent,
+    )
+    return _runtime_remediation_item(tenant, rollout, agent, now=now)
+
+
 def _runtime_rollout_convergence(tenant, record, *, now=None, catalog=None):
     """Measure exact target-release evidence for a server-selected rollout ring."""
     record = _validated_runtime_rollout(record, tenant)
@@ -1091,14 +1731,8 @@ def _runtime_rollout_convergence(tenant, record, *, now=None, catalog=None):
         connected = agent.get("status") == "connected" and int(agent.get("expires_at", 0)) > current
         if not connected:
             unavailable.append(agent)
-        elif (
-            expected
-            and agent.get("host") == expected.get("host")
-            and agent.get("attestation_status") == "compliant"
-            and int(agent.get("attestation_expires_at", 0)) > current
-            and agent.get("attestation_sdk_version") == expected.get("sdkVersion")
-            and agent.get("attestation_sdk_revision") == expected.get("sdkRevision")
-            and agent.get("attestation_manifest_sha256") == expected.get("manifestSha256")
+        elif _runtime_agent_attests_release(
+            agent, expected, current, not_before=record.get("startedAt", 0)
         ):
             compliant.append(agent)
         else:
@@ -2198,6 +2832,11 @@ def _required_mutation_capability(path):
         return "policy_simulation"
     if normalized.startswith("/enterprise/policies"):
         return "policy_write"
+    if normalized.startswith("/enterprise/runtime-remediations/"):
+        # The route itself additionally requires a machine-authenticated
+        # remediation capability. Human fleet authority cannot forge endpoint
+        # installation results through this broad classifier.
+        return "endpoint_remediation_observe"
     if normalized.startswith("/enterprise/deployments/") and normalized.endswith(
         "/managed-package"
     ):
@@ -2366,6 +3005,19 @@ def _mutation_resource_scope(tenant, event, path):
         in {
             "pause",
             "rollback",
+        }
+    ):
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", parts[1])
+        except (ValueError, LookupError):
+            return None
+    if (
+        len(parts) == 4
+        and parts[0] == "runtime-remediations"
+        and parts[3]
+        in {
+            "claim",
+            "report",
         }
     ):
         try:
@@ -2851,6 +3503,7 @@ def _machine_route_capability(method, path):
         "/enterprise/policies",
         "/enterprise/projects",
         "/enterprise/runtime-releases",
+        "/enterprise/runtime-remediations",
         "/enterprise/runtime-rollouts",
         "/enterprise/skills",
         "/enterprise/slo",
@@ -2942,6 +3595,13 @@ def _machine_route_capability(method, path):
         )
     ):
         return "runtime_write"
+    if method == "POST" and re.fullmatch(
+        r"/enterprise/runtime-remediations/"
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/"
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/(?:claim|report)",
+        normalized,
+    ):
+        return "runtime_remediation"
     return None
 
 
@@ -21972,6 +22632,7 @@ def handler(event, context):
                 ["runtime-releases"],
                 ["version-compliance"],
                 ["runtime-rollouts"],
+                ["runtime-remediations"],
             ):
                 # This tenant-wide projection exposes no executable bytes or
                 # credentials, but it still reveals fleet/release posture and
@@ -21995,6 +22656,22 @@ def handler(event, context):
                     except (TypeError, ValueError) as error:
                         return _response(400, {"error": str(error)})
                     return _response(200, posture)
+                if parts == ["runtime-remediations"]:
+                    query = event.get("queryStringParameters") or {}
+                    if not isinstance(query, dict):
+                        return _response(400, {"error": "query parameters are invalid"})
+                    try:
+                        posture = _runtime_remediations(
+                            tenant,
+                            query.get("deploymentId"),
+                            limit=int(query.get("limit", 100)),
+                            next_token=query.get("nextToken"),
+                        )
+                    except (TypeError, ValueError) as error:
+                        return _response(400, {"error": str(error)})
+                    except LookupError as error:
+                        return _response(404, {"error": str(error)})
+                    return _response(200, posture)
                 if parts == ["runtime-rollouts"]:
                     return _response(200, {"items": _runtime_rollouts(tenant), "nextCursor": None})
                 return _response(
@@ -22014,6 +22691,32 @@ def handler(event, context):
                     _pause_runtime_rollout if parts[2] == "pause" else _rollback_runtime_rollout
                 )
                 return _response(200, operation(tenant, deployment_id, _body(event), actor))
+            if (
+                method == "POST"
+                and len(parts) == 4
+                and parts[0] == "runtime-remediations"
+                and parts[3] in {"claim", "report"}
+            ):
+                # Endpoint-channel reports are machine observations, not human
+                # assertions. Even a platform administrator must use a scoped,
+                # expiring service identity so the source is independently
+                # attributable and cannot author rollout authority.
+                if "runtime_remediation" not in _service_capabilities(event):
+                    return _response(
+                        403,
+                        {"error": "runtime remediation requires endpoint-channel authority"},
+                    )
+                deployment_id = _bounded_identifier(parts[1], "deploymentId")
+                agent_id = _bounded_identifier(parts[2], "agentId")
+                operation = (
+                    _claim_runtime_remediation
+                    if parts[3] == "claim"
+                    else _report_runtime_remediation
+                )
+                return _response(
+                    200,
+                    operation(tenant, deployment_id, agent_id, _body(event), actor),
+                )
             if method == "GET" and parts == ["tenant"]:
                 root = TABLE.get_item(
                     Key=_item_key(tenant, "TENANT", "root"), ConsistentRead=True

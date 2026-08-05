@@ -9162,6 +9162,492 @@ def test_runtime_release_machine_routes_require_exact_inventory_scope(
         )
 
 
+def test_runtime_remediation_is_machine_scoped_revision_bound_and_attestation_verified(
+    monkeypatch: Any,
+) -> None:
+    """An MDM worker can report delivery, but only fresh exact attestation proves success."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_050_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    current_manifest = _runtime_manifest("claude-code", "1.1.0", "a" * 40)
+    target_manifest = _runtime_manifest("claude-code", "1.2.0", "f" * 40)
+    _set_runtime_manifests(monkeypatch, [current_manifest, target_manifest])
+    tenant = "tenant-runtime-remediation"
+    deployment_id = "deployment-remediation"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", deployment_id)
+        | {
+            "id": deployment_id,
+            "organization_id": "organization-remediation",
+            "project_id": "project-remediation",
+            "sdk_version": "1.1.0",
+        }
+    )
+    current_digest = module._runtime_manifest_digest(current_manifest)
+    target_digest = module._runtime_manifest_digest(target_manifest)
+    for index in range(20):
+        agent_id = f"agent-{index:02d}"
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}")
+            | {
+                "id": agent_id,
+                "deployment_id": deployment_id,
+                "host": "claude-code",
+                "status": "connected",
+                "expires_at": now + 3_600,
+                "lifecycle_state": "active",
+                "lifecycle_revision": 1,
+                "session_revision": 1,
+                "attestation_status": "compliant",
+                "attestation_observed_at": now - 30,
+                "attestation_expires_at": now + 300,
+                "attestation_sdk_version": "1.1.0",
+                "attestation_sdk_revision": "a" * 40,
+                "attestation_manifest_sha256": current_digest,
+            }
+        )
+    fleet_operator = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-remediation-operator",
+    }
+    rollout = _invoke(
+        module,
+        _event(
+            "/api/enterprise/runtime-rollouts",
+            "POST",
+            claims=fleet_operator,
+            body={
+                "deploymentId": deployment_id,
+                "expectedRevision": 0,
+                "targetReleaseId": "claude-code:1.2.0",
+                "targetState": "canary",
+                "percentage": 25,
+                "healthCriteria": {
+                    "maxUnavailablePercent": 10,
+                    "maxDriftPercent": 10,
+                    "minSampleSize": 1,
+                    "gracePeriodSeconds": 300,
+                },
+                "reason": "Deliver an approved release through the bounded endpoint channel.",
+            },
+        ),
+    )
+    assert rollout["statusCode"] == 201, rollout
+    queue_event = _event("/api/enterprise/runtime-remediations", "GET", claims=fleet_operator)
+    queue_event["queryStringParameters"] = {
+        "deploymentId": deployment_id,
+        "limit": "2",
+    }
+    queue_response = _invoke(module, queue_event)
+    assert queue_response["statusCode"] == 200, queue_response
+    queue = json.loads(queue_response["body"])
+    assert queue["totalItems"] > 2
+    assert queue["hasMore"] is True
+    assert queue["nextToken"]
+    assert queue["statusCounts"]["pending"] == queue["totalItems"]
+    assert queue["channelStatusCounts"]["not_started"] == queue["totalItems"]
+    assert queue["runtimeVerificationCounts"]["not_verified"] == queue["totalItems"]
+    instruction = queue["items"][0]
+    assert instruction["status"] == "pending"
+    assert instruction["taskRevision"] == 0
+    serialized = json.dumps(instruction).lower()
+    assert all(
+        value not in serialized for value in ("https://", "command", "projectroot", "base64")
+    )
+
+    next_event = _event("/api/enterprise/runtime-remediations", "GET", claims=fleet_operator)
+    next_event["queryStringParameters"] = {
+        "deploymentId": deployment_id,
+        "limit": "2",
+        "nextToken": queue["nextToken"],
+    }
+    next_page = json.loads(_invoke(module, next_event)["body"])
+    assert {item["agentId"] for item in queue["items"]}.isdisjoint(
+        {item["agentId"] for item in next_page["items"]}
+    )
+    cross_deployment = _event("/api/enterprise/runtime-remediations", "GET", claims=fleet_operator)
+    cross_deployment["queryStringParameters"] = {
+        "deploymentId": "another-deployment",
+        "nextToken": queue["nextToken"],
+    }
+    assert _invoke(module, cross_deployment)["statusCode"] in {400, 404}
+
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-remediation-admin",
+    }
+
+    def service_token(identity: str, capabilities: list[str]) -> str:
+        response = _invoke(
+            module,
+            _event(
+                "/api/enterprise/identity/service-identities",
+                "POST",
+                claims=platform,
+                body={
+                    "serviceIdentityId": identity,
+                    "name": identity,
+                    "description": "Synthetic endpoint-management channel.",
+                    "purpose": "Prove exact runtime remediation authority.",
+                    "capabilities": capabilities,
+                    "expiresInDays": 1,
+                },
+            ),
+        )
+        assert response["statusCode"] == 201, response
+        return cast(str, json.loads(response["body"])["credential"]["accessToken"])
+
+    worker_token = service_token(
+        "runtime-remediation-worker", ["inventory_read", "runtime_remediation"]
+    )
+    runtime_token = service_token("runtime-rollout-writer", ["runtime_write"])
+    claim_path = (
+        f"/machine/v1/enterprise/runtime-remediations/{deployment_id}/"
+        f"{instruction['agentId']}/claim"
+    )
+    claim_body = {
+        "instructionId": instruction["instructionId"],
+        "expectedTaskRevision": 0,
+        "requestId": "claim-runtime-remediation-001",
+    }
+    rollout_key = module._item_key(tenant, "RUNTIME_ROLLOUT", deployment_id)
+    agent_key_shape = module._item_key(tenant, "AGENT", f"{deployment_id}:{instruction['agentId']}")
+    original_rollout = dict(table.items[(rollout_key["pk"], rollout_key["sk"])])
+    original_agent = dict(table.items[(agent_key_shape["pk"], agent_key_shape["sk"])])
+
+    def race_rollout() -> None:
+        table.items[(rollout_key["pk"], rollout_key["sk"])].update(
+            {"revision": original_rollout["revision"] + 1, "state": "paused"}
+        )
+
+    module.DYNAMODB.before_transaction = race_rollout
+    with pytest.raises(module.PolicyConflict, match="revision changed"):
+        module._claim_runtime_remediation(
+            tenant, deployment_id, instruction["agentId"], claim_body, "service:worker"
+        )
+    assert module._runtime_remediation_task(tenant, deployment_id, instruction["agentId"]) is None
+    table.items[(rollout_key["pk"], rollout_key["sk"])] = dict(original_rollout)
+
+    def race_quarantine() -> None:
+        table.items[(agent_key_shape["pk"], agent_key_shape["sk"])].update(
+            {"status": "quarantined", "attestation_status": "quarantined"}
+        )
+
+    module.DYNAMODB.before_transaction = race_quarantine
+    with pytest.raises(module.PolicyConflict, match="revision changed"):
+        module._claim_runtime_remediation(
+            tenant,
+            deployment_id,
+            instruction["agentId"],
+            {**claim_body, "requestId": "claim-runtime-remediation-race-agent"},
+            "service:worker",
+        )
+    assert module._runtime_remediation_task(tenant, deployment_id, instruction["agentId"]) is None
+    table.items[(agent_key_shape["pk"], agent_key_shape["sk"])] = dict(original_agent)
+    assert (
+        _invoke(
+            module,
+            _event(
+                claim_path,
+                "POST",
+                body=claim_body,
+                token="synthetic-agent-session-token-123456",  # noqa: S106 - synthetic fixture.
+            ),
+        )["statusCode"]
+        == 403
+    )
+    assert (
+        _invoke(module, _event(claim_path, "POST", body=claim_body, token=runtime_token))[
+            "statusCode"
+        ]
+        == 403
+    )
+    human_claim = _invoke(
+        module,
+        _event(
+            claim_path.replace("/machine/v1", "/api"),
+            "POST",
+            body=claim_body,
+            claims=platform,
+        ),
+    )
+    assert human_claim["statusCode"] == 403
+    claimed_response = _invoke(
+        module, _event(claim_path, "POST", body=claim_body, token=worker_token)
+    )
+    assert claimed_response["statusCode"] == 200, claimed_response
+    claimed = json.loads(claimed_response["body"])
+    assert claimed["status"] == "in_progress"
+    assert claimed["channelStatus"] == "in_progress"
+    assert claimed["runtimeVerification"] == "not_verified"
+    assert claimed["taskRevision"] == 1
+    assert claimed["attempts"] == 1
+    duplicate_claim_response = _invoke(
+        module, _event(claim_path, "POST", body=claim_body, token=worker_token)
+    )
+    assert duplicate_claim_response["statusCode"] == 200, duplicate_claim_response
+    duplicate_claim = json.loads(duplicate_claim_response["body"])
+    assert duplicate_claim["taskRevision"] == 1
+    conflicting_claim = _invoke(
+        module,
+        _event(
+            claim_path,
+            "POST",
+            body={
+                **claim_body,
+                "requestId": "claim-runtime-remediation-002",
+                "expectedTaskRevision": 1,
+            },
+            token=worker_token,
+        ),
+    )
+    assert conflicting_claim["statusCode"] == 409
+
+    worker_actor = module._runtime_remediation_task(tenant, deployment_id, instruction["agentId"])[
+        "claimedBy"
+    ]
+    module.DYNAMODB.before_transaction = race_rollout
+    with pytest.raises(module.PolicyConflict, match="revision changed"):
+        module._report_runtime_remediation(
+            tenant,
+            deployment_id,
+            instruction["agentId"],
+            {
+                "instructionId": instruction["instructionId"],
+                "expectedTaskRevision": 1,
+                "requestId": "report-runtime-remediation-race",
+                "outcome": "installed",
+                "reasonCode": None,
+            },
+            worker_actor,
+        )
+    table.items[(rollout_key["pk"], rollout_key["sk"])] = dict(original_rollout)
+    assert (
+        module._runtime_remediation_task(tenant, deployment_id, instruction["agentId"])["status"]
+        == "claimed"
+    )
+
+    report_path = claim_path.removesuffix("claim") + "report"
+    invalid_report = _invoke(
+        module,
+        _event(
+            report_path,
+            "POST",
+            body={
+                "instructionId": instruction["instructionId"],
+                "expectedTaskRevision": 1,
+                "requestId": "report-runtime-remediation-invalid",
+                "outcome": "failed",
+                "reasonCode": "raw_shell_error",
+            },
+            token=worker_token,
+        ),
+    )
+    assert invalid_report["statusCode"] == 400
+    installed_body = {
+        "instructionId": instruction["instructionId"],
+        "expectedTaskRevision": 1,
+        "requestId": "report-runtime-remediation-001",
+        "outcome": "installed",
+        "reasonCode": None,
+    }
+    installed_response = _invoke(
+        module, _event(report_path, "POST", body=installed_body, token=worker_token)
+    )
+    assert installed_response["statusCode"] == 200, installed_response
+    installed = json.loads(installed_response["body"])
+    assert installed["status"] == "awaiting_attestation"
+    assert installed["channelStatus"] == "installed_reported"
+    assert installed["runtimeVerification"] == "not_verified"
+    assert installed["taskRevision"] == 2
+    rollout_record = module._runtime_rollout_record(tenant, deployment_id)
+    assert (
+        module._runtime_rollout_convergence(tenant, rollout_record, now=now)["canaryConverged"]
+        is False
+    )
+
+    agent_key = (f"TENANT#{tenant}", f"AGENT#{deployment_id}:{instruction['agentId']}")
+    table.items[agent_key].update(
+        {
+            "attestation_sdk_version": "1.2.0",
+            "attestation_sdk_revision": "f" * 40,
+            "attestation_manifest_sha256": target_digest,
+        }
+    )
+    stale_observation = module._runtime_remediations(tenant, deployment_id, now=now)
+    stale_item = next(
+        item for item in stale_observation["items"] if item["agentId"] == instruction["agentId"]
+    )
+    assert stale_item["runtimeVerification"] == "not_verified"
+    table.items[agent_key]["attestation_observed_at"] = now
+    verified = module._runtime_remediations(tenant, deployment_id, now=now)
+    verified_item = next(
+        item for item in verified["items"] if item["agentId"] == instruction["agentId"]
+    )
+    assert verified_item["status"] == "verified"
+    assert verified_item["channelStatus"] == "installed_reported"
+    assert verified_item["runtimeVerification"] == "verified"
+    assert verified["channelStatusCounts"]["installed_reported"] >= 1
+    assert verified["runtimeVerificationCounts"]["verified"] >= 1
+    assert verified_item["taskRevision"] == 2
+    assert any(
+        item.get("event_type") == "runtime_remediation_install_reported"
+        and item["payload"]["instruction_id"] == instruction["instructionId"]
+        and re.fullmatch(r"[0-9a-f]{64}", item["payload"]["task_sha256"])
+        for item in table.items.values()
+    )
+
+
+def test_runtime_remediation_malformed_state_and_stale_instruction_fail_closed(
+    monkeypatch: Any,
+) -> None:
+    """Persisted task corruption and rollout changes cannot be reported as success."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_060_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    manifests = [
+        _runtime_manifest("codex-cli", "1.1.0", "a" * 40),
+        _runtime_manifest("codex-cli", "1.2.0", "f" * 40),
+    ]
+    _set_runtime_manifests(monkeypatch, manifests)
+    tenant = "tenant-runtime-remediation-closed"
+    deployment_id = "deployment-remediation-closed"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", deployment_id)
+        | {"id": deployment_id, "sdk_version": "1.1.0"}
+    )
+    agent_id = next(
+        f"agent-{index}"
+        for index in range(1_000)
+        if module._rollout_agent_selected(tenant, f"{deployment_id}:agent-{index}", 25)
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}")
+        | {
+            "id": agent_id,
+            "deployment_id": deployment_id,
+            "host": "codex-cli",
+            "status": "connected",
+            "expires_at": now + 300,
+            "lifecycle_state": "active",
+            "attestation_status": "compliant",
+            "attestation_expires_at": now + 300,
+            "attestation_sdk_version": "1.1.0",
+            "attestation_sdk_revision": "a" * 40,
+            "attestation_manifest_sha256": module._runtime_manifest_digest(manifests[0]),
+        }
+    )
+    catalog = module._runtime_release_catalog()
+    releases = module._runtime_release_map(catalog)
+    module._put_runtime_rollout(
+        tenant,
+        None,
+        {
+            "schemaVersion": 1,
+            "deploymentId": deployment_id,
+            "host": "codex-cli",
+            "state": "canary",
+            "currentReleaseId": "codex-cli:1.1.0",
+            "currentReleaseBinding": module._runtime_release_binding(
+                catalog, releases["codex-cli:1.1.0"]
+            ),
+            "targetReleaseId": "codex-cli:1.2.0",
+            "targetReleaseBinding": module._runtime_release_binding(
+                catalog, releases["codex-cli:1.2.0"]
+            ),
+            "percentage": 25,
+            "healthCriteria": {
+                "maxUnavailablePercent": 10,
+                "maxDriftPercent": 10,
+                "minSampleSize": 1,
+                "gracePeriodSeconds": 300,
+            },
+            "reason": "Exercise malformed endpoint remediation evidence.",
+            "startedAt": now,
+            "startedBy": "operator-a",
+            "pausedAt": None,
+            "pauseReason": None,
+            "selectedMemberDigests": [],
+        },
+        "runtime_release_rollout_started",
+        "operator-a",
+        "Exercise malformed endpoint remediation evidence.",
+    )
+    instruction = module._runtime_remediations(tenant, deployment_id, now=now)["items"][0]
+    claimed = module._claim_runtime_remediation(
+        tenant,
+        deployment_id,
+        agent_id,
+        {
+            "instructionId": instruction["instructionId"],
+            "expectedTaskRevision": 0,
+            "requestId": "claim-before-authority-change",
+        },
+        "service:worker",
+    )
+    assert claimed["status"] == "in_progress"
+    task_key = module._item_key(tenant, "RUNTIME_REMEDIATION", f"{deployment_id}:{agent_id}")
+    task_snapshot = dict(table.items[(task_key["pk"], task_key["sk"])])
+    table.items[(task_key["pk"], task_key["sk"])]["releaseId"] = "codex-cli:9.9.9"
+    with pytest.raises(RuntimeError, match="contradicts its live instruction"):
+        module._runtime_remediations(tenant, deployment_id, now=now)
+    table.items[(task_key["pk"], task_key["sk"])] = task_snapshot
+    rollout = module._runtime_rollout_record(tenant, deployment_id)
+    module._pause_runtime_rollout(
+        tenant,
+        deployment_id,
+        {
+            "expectedRevision": rollout["revision"],
+            "reason": "Freeze dispatch while endpoint evidence is investigated.",
+        },
+        "operator-a",
+    )
+    with pytest.raises(module.PolicyConflict, match="instruction changed"):
+        module._report_runtime_remediation(
+            tenant,
+            deployment_id,
+            agent_id,
+            {
+                "instructionId": instruction["instructionId"],
+                "expectedTaskRevision": claimed["taskRevision"],
+                "requestId": "report-after-authority-change",
+                "outcome": "installed",
+                "reasonCode": None,
+            },
+            "service:worker",
+        )
+    table.put_item(
+        Item=module._item_key(tenant, "RUNTIME_REMEDIATION", f"{deployment_id}:{agent_id}")
+        | {
+            "tenant_id": tenant,
+            "schemaVersion": 1,
+            "deploymentId": deployment_id,
+            "agentId": agent_id,
+            "instructionId": instruction["instructionId"],
+            "rolloutRevision": 1,
+            "releaseId": instruction["releaseId"],
+            "revision": 1,
+            "attempts": 1,
+            "status": "installed",
+            "claimRequestId": "claim-corrupt",
+            "claimedAt": now,
+            "leaseExpiresAt": now + 900,
+            "claimedBy": "service:worker",
+            "reportRequestId": "report-corrupt",
+            "reportedAt": now,
+            "outcome": "installed",
+            "reasonCode": "installation_failed",
+            "updatedAt": now,
+        }
+    )
+    with pytest.raises(RuntimeError, match="successful runtime remediation"):
+        module._runtime_remediations(tenant, deployment_id, now=now)
+
+
 def test_runtime_release_rollout_admits_only_current_and_selected_target_versions(
     monkeypatch: Any,
 ) -> None:
@@ -9366,6 +9852,7 @@ def test_runtime_release_rollout_admits_only_current_and_selected_target_version
                     "attestation_sdk_version": "1.2.0",
                     "attestation_sdk_revision": "f" * 40,
                     "attestation_manifest_sha256": target_digest,
+                    "attestation_observed_at": now,
                 }
             )
         else:
@@ -9397,6 +9884,7 @@ def test_runtime_release_rollout_admits_only_current_and_selected_target_version
                 "attestation_sdk_version": "1.2.0",
                 "attestation_sdk_revision": "f" * 40,
                 "attestation_manifest_sha256": target_digest,
+                "attestation_observed_at": now,
             }
         )
     completed = json.loads(
@@ -9613,6 +10101,7 @@ def test_runtime_release_rollout_rejects_switches_and_supports_measured_rollback
                     "attestation_sdk_version": "1.2.0",
                     "attestation_sdk_revision": "f" * 40,
                     "attestation_manifest_sha256": target_digest,
+                    "attestation_observed_at": now,
                 }
             )
     insufficient = module._runtime_rollout_convergence(

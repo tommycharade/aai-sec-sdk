@@ -1,5 +1,13 @@
 # Changelog
 
+- Added a least-privilege runtime remediation coordination contract for
+  managed Claude Code and Codex upgrades. The control plane derives exact,
+  executable-free instructions from live rollout authority, leases them only
+  to a scoped machine capability, accepts only bounded channel outcomes and
+  requires fresh exact runtime attestation before showing verification. The
+  public SDK includes a typed non-executing worker client. Hosted Intune/Jamf
+  dispatch and physical MDM acceptance remain explicitly open.
+
 - Added revision-bound, dual-version runtime release rollouts for Claude Code
   and Codex deployments. The AWS control plane now selects deterministic
   canaries, admits only exact approved current/target manifests, blocks broad

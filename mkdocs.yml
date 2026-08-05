@@ -102,6 +102,7 @@ nav:
   - Runtime attestation design: runtime-attestation-design.md
   - Approved runtime releases and version compliance: runtime-release-compliance-design.md
   - Measured runtime-release rollouts: runtime-release-rollout-design.md
+  - Runtime remediation coordination: runtime-remediation-coordination-design.md
   - Managed host configuration: managed-host-configuration.md
   - Managed endpoint deployment design: managed-endpoint-deployment-design.md
   - Managed package distribution design: managed-package-distribution-design.md
