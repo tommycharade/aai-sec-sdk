@@ -108,6 +108,20 @@ every package, rollout and fresh endpoint report. The
 proved the safe empty-fleet state and unchanged active signer. Physical endpoint
 installation and convergence are deliberately not claimed.
 
+The real Claude Code compatibility gap now has a repeatable, bounded host
+harness and an exact default-deny version matrix. It invokes only a disposable
+synthetic project and records content-free allow, deny, approval, project-scope
+and guarded-MCP observations. Thirteen focused contract/adversarial tests cover
+exact digest admission, changed binaries, malformed and oversized host output,
+authentication blocking, no-side-effect scenarios, report minimisation and the
+documented CLI path. The 2026-08-05 installed-host run accepted the measured
+Claude Code 2.1.220 macOS arm64 executable and verified onboarding, then
+correctly returned `blocked` when the local OAuth session was unavailable. The
+real model/tool observations therefore remain open until an authenticated
+rerun exits zero; see [Real Claude Code acceptance
+harness](real-claude-code-acceptance-harness.md) and [current
+evidence](real-claude-code-acceptance-evidence-2026-08-05.md).
+
 ## P1 ledger
 
 | Workstream | Status | Implemented foundation | Major remaining work |

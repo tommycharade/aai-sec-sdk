@@ -1,6 +1,7 @@
 # Enterprise Claude Code rollout plan
 
-**Status:** next delivery goal
+**Status:** in progress; repeatable host harness implemented, authenticated
+real-host rerun pending
 **Scope:** real Claude Code deployment on the operator's device, followed by
 enterprise-readiness evidence
 **Deferred:** SIEM, PagerDuty and external SOC alert integration
@@ -32,6 +33,13 @@ runtime authority, credential scope, isolation, resilience, scale and audit
 requirements are evidenced.
 
 ## Work plan
+
+The repeatable runner and exact default-deny version matrix are implemented;
+see [real Claude Code acceptance harness](real-claude-code-acceptance-harness.md).
+The 2026-08-05 run passed exact binary attestation and disposable-project
+onboarding but correctly stopped as blocked because the local Claude OAuth
+session had expired. No model/tool check was counted as passed. Authenticate
+Claude and rerun the documented command before treating step 3 as complete.
 
 ### 1. Prepare the device test environment
 
@@ -73,9 +81,12 @@ Execute a safe, synthetic test matrix through the real Claude Code session:
 | Budget or timeout boundary | Admission stops at the configured limit | Runtime result and audit event |
 | Missing or expired identity/policy | Fails closed | Host and control-plane evidence |
 
-The test runner should produce a machine-readable report and a redacted human
-summary. Each result must identify the policy version, agent, action category,
-expected result, observed result and evidence reference.
+The local host runner produces a machine-readable, content-free report with
+the host/SDK version, exact binary measurement, action category, expected and
+observed fixed outcomes and evidence digest. Central policy version, enrolled
+agent identity and durable evidence references belong to the separate hosted
+control-plane exercise because placing those identifiers or credentials into
+the local compatibility report would conflate two trust boundaries.
 
 ### 4. Prove central management
 

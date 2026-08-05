@@ -11,6 +11,14 @@ No production repository, credential, destructive command or unredacted
 personal data was used. SIEM/PagerDuty/SOC integration was intentionally
 deferred for the rollout goal.
 
+This page is a retained manual acceptance snapshot. It is not a repeatable
+runner result. The subsequently implemented [real-host acceptance
+harness](real-claude-code-acceptance-harness.md) uses an exact default-deny
+binary matrix and content-free machine report. Its [2026-08-05
+rerun](real-claude-code-acceptance-evidence-2026-08-05.md) was blocked by an
+expired local Claude login and therefore does not supersede the successful
+manual observations below.
+
 ## Results
 
 | Capability | Result | Evidence |
