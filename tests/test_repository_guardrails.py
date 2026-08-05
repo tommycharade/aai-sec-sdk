@@ -49,6 +49,13 @@ def test_quality_gate_propagates_coverage_failure() -> None:
     assert "fail_under = 90\nprecision = 2" in project
 
 
+def test_mutation_workspace_copies_vulnerability_evidence_inputs() -> None:
+    """Mutation's isolated checkout must retain files read by repository tests."""
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"security/",' in project
+    assert '"SECURITY.md",' in project
+
+
 def test_license_policy_is_explicit() -> None:
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
     docs_text = (ROOT / "docs/license.md").read_text(encoding="utf-8")
