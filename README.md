@@ -121,6 +121,9 @@ Approved runtime-release inventory separately projects deployment-owned SDK,
 gateway and hook evidence, while server-derived version compliance identifies
 unapproved, missing, expired, mismatched and quarantined agents; see [Approved
 runtime releases and version compliance](docs/runtime-release-compliance-design.md).
+Runtime upgrades add a separate revision-bound current/target authority,
+deterministic canaries and exact-evidence expansion, pause and rollback; see
+[Measured runtime-release rollouts](docs/runtime-release-rollout-design.md).
 AWS policy activation freezes registry-resolved Skills and MCP servers and
 signs the exact tenant, policy version and effective configuration with a
 non-exportable asymmetric KMS key. Claude Code and Codex verify that bundle

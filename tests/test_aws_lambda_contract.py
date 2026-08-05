@@ -802,12 +802,16 @@ def _discovery_snapshot(
     }
 
 
-def _runtime_manifest(host: str = "claude-code") -> dict[str, Any]:
+def _runtime_manifest(
+    host: str = "claude-code",
+    sdk_version: str = "1.1.0",
+    sdk_revision: str = "a" * 40,
+) -> dict[str, Any]:
     """Return one synthetic deployment-owned approved runtime manifest."""
     return {
         "schemaVersion": 1,
-        "sdkVersion": "1.1.0",
-        "sdkRevision": "a" * 40,
+        "sdkVersion": sdk_version,
+        "sdkRevision": sdk_revision,
         "sourceOriginDigest": "b" * 64,
         "packageDigest": "c" * 64,
         "gatewayDigest": "d" * 64,
@@ -2895,6 +2899,16 @@ def test_machine_api_allowlist_covers_each_scope_and_excludes_human_governance(
         module._machine_route_capability("POST", "/api/enterprise/deployment-config")
         == "runtime_write"
     )
+    assert (
+        module._machine_route_capability("POST", "/api/enterprise/runtime-rollouts")
+        == "runtime_write"
+    )
+    assert (
+        module._machine_route_capability(
+            "POST", "/api/enterprise/runtime-rollouts/deployment-a/rollback"
+        )
+        == "runtime_write"
+    )
     for method, path in (
         ("POST", "/api/enterprise/policies/policy-a/versions/1/activate"),
         ("POST", "/api/enterprise/approvals/approval-a/decision"),
@@ -4543,16 +4557,16 @@ def _set_runtime_manifests(monkeypatch: Any, manifests: list[dict[str, Any]]) ->
         "approvals": [],
     }
     if manifests:
-        first = manifests[0]
         approval["approvals"] = [
             {
-                "hosts": [manifest["host"] for manifest in manifests],
+                "hosts": [manifest["host"]],
                 "releaseEvidenceSha256": "9" * 64,
-                "releaseTag": "v1.1.0",
-                "sdkRevision": first["sdkRevision"],
-                "sdkVersion": first["sdkVersion"],
-                "sourceOriginDigest": first["sourceOriginDigest"],
+                "releaseTag": f"v{manifest['sdkVersion']}",
+                "sdkRevision": manifest["sdkRevision"],
+                "sdkVersion": manifest["sdkVersion"],
+                "sourceOriginDigest": manifest["sourceOriginDigest"],
             }
+            for manifest in manifests
         ]
     monkeypatch.setenv("RUNTIME_ATTESTATION_MANIFESTS", raw)
     approval_raw = json.dumps(approval)
@@ -8875,6 +8889,10 @@ def test_version_compliance_is_tenant_scoped_and_derived_from_fresh_attestation(
             "deploymentId": "dep-approved",
             "name": "Approved",
             "desiredSdkVersion": "1.1.0",
+            "currentReleaseId": "claude-code:1.1.0",
+            "targetReleaseId": None,
+            "runtimeRolloutState": None,
+            "runtimeRolloutPercentage": 0,
             "targetApproved": True,
             "agentCount": 6,
             "compliantAgents": 1,
@@ -8885,6 +8903,10 @@ def test_version_compliance_is_tenant_scoped_and_derived_from_fresh_attestation(
             "deploymentId": "dep-unapproved",
             "name": "Unapproved",
             "desiredSdkVersion": "9.9.9",
+            "currentReleaseId": "claude-code:9.9.9",
+            "targetReleaseId": None,
+            "runtimeRolloutState": None,
+            "runtimeRolloutPercentage": 0,
             "targetApproved": False,
             "agentCount": 1,
             "compliantAgents": 0,
@@ -8906,6 +8928,7 @@ def test_runtime_release_routes_require_explicit_read_authority(monkeypatch: Any
     policy_only_roles = ("policy-author", "policy-approver")
     for path in (
         "/api/enterprise/runtime-releases",
+        "/api/enterprise/runtime-rollouts",
         "/api/enterprise/version-compliance",
     ):
         denied = _invoke(module, _event(path, "GET", claims=unprivileged))
@@ -9103,10 +9126,648 @@ def test_runtime_release_machine_routes_require_exact_inventory_scope(
 
     inventory_token = create_token("release-reader", "inventory_read")
     draft_token = create_token("release-drafter", "policy_draft_write")
-    for suffix in ("runtime-releases", "version-compliance"):
+    fleet_token = create_token("release-fleet-writer", "fleet_write")
+    runtime_token = create_token("release-runtime-writer", "runtime_write")
+    for suffix in ("runtime-releases", "runtime-rollouts", "version-compliance"):
         route = f"/machine/v1/enterprise/{suffix}"
         assert _invoke(module, _event(route, "GET", token=inventory_token))["statusCode"] == 200
         assert _invoke(module, _event(route, "GET", token=draft_token))["statusCode"] == 403
+    mutation = {
+        "deploymentId": "missing-deployment",
+        "expectedRevision": 0,
+        "targetReleaseId": "claude-code:1.1.0",
+        "targetState": "canary",
+        "percentage": 10,
+        "healthCriteria": {
+            "maxUnavailablePercent": 10,
+            "maxDriftPercent": 10,
+            "minSampleSize": 1,
+            "gracePeriodSeconds": 300,
+        },
+        "reason": "Synthetic exact machine runtime-write authorization contract.",
+    }
+    machine_route = "/machine/v1/enterprise/runtime-rollouts"
+    assert (
+        _invoke(module, _event(machine_route, "POST", body=mutation, token=runtime_token))[
+            "statusCode"
+        ]
+        == 404
+    )
+    for denied_token in (inventory_token, draft_token, fleet_token):
+        assert (
+            _invoke(module, _event(machine_route, "POST", body=mutation, token=denied_token))[
+                "statusCode"
+            ]
+            == 403
+        )
+
+
+def test_runtime_release_rollout_admits_only_current_and_selected_target_versions(
+    monkeypatch: Any,
+) -> None:
+    """A deterministic canary may move from one exact approved release to another."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_100_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    current_manifest = _runtime_manifest("claude-code", "1.1.0", "a" * 40)
+    target_manifest = _runtime_manifest("claude-code", "1.2.0", "f" * 40)
+    _set_runtime_manifests(monkeypatch, [current_manifest, target_manifest])
+    tenant = "tenant-runtime-canary"
+    deployment_id = "dep-runtime"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", deployment_id)
+        | {"id": deployment_id, "name": "Runtime canary", "sdk_version": "1.1.0"}
+    )
+    agent_ids = [f"agent-{index}" for index in range(12)]
+    current_digest = module._runtime_manifest_digest(current_manifest)
+    target_digest = module._runtime_manifest_digest(target_manifest)
+    for agent_id in agent_ids:
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}")
+            | {
+                "id": agent_id,
+                "deployment_id": deployment_id,
+                "host": "claude-code",
+                "status": "connected",
+                "expires_at": now + 3_600,
+                "lifecycle_state": "active",
+                "attestation_status": "compliant",
+                "attestation_expires_at": now + 300,
+                "attestation_sdk_version": "1.1.0",
+                "attestation_sdk_revision": "a" * 40,
+                "attestation_manifest_sha256": current_digest,
+            }
+        )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "runtime-operator",
+    }
+    request = {
+        "deploymentId": deployment_id,
+        "expectedRevision": 0,
+        "targetReleaseId": "claude-code:1.2.0",
+        "targetState": "canary",
+        "percentage": 25,
+        "healthCriteria": {
+            "maxUnavailablePercent": 10,
+            "maxDriftPercent": 10,
+            "minSampleSize": 1,
+            "gracePeriodSeconds": 300,
+        },
+        "reason": "Move the approved SDK release through a deterministic production canary.",
+    }
+    started = _invoke(
+        module,
+        _event("/enterprise/runtime-rollouts", "POST", body=request, claims=claims),
+    )
+    assert started["statusCode"] == 201, started
+    canary = json.loads(started["body"])
+    assert canary["state"] == "canary"
+    assert canary["revision"] == 1
+    assert 0 < canary["convergence"]["selectedAgents"] < len(agent_ids)
+
+    def ddb_resource_shape(value: Any) -> Any:
+        if isinstance(value, bool) or value is None or isinstance(value, str):
+            return value
+        if isinstance(value, int):
+            return Decimal(value)
+        if isinstance(value, list):
+            return [ddb_resource_shape(item) for item in value]
+        if isinstance(value, dict):
+            return {key: ddb_resource_shape(item) for key, item in value.items()}
+        return value
+
+    rollout_key = (f"TENANT#{tenant}", f"RUNTIME_ROLLOUT#{deployment_id}")
+    table.items[rollout_key] = ddb_resource_shape(table.items[rollout_key])
+    assert isinstance(table.items[rollout_key]["revision"], Decimal)
+    assert isinstance(
+        table.items[rollout_key]["targetReleaseBinding"]["attestationManifest"]["schemaVersion"],
+        Decimal,
+    )
+    assert (
+        module._runtime_manifest(
+            tenant,
+            deployment_id,
+            "claude-code",
+            agent=table.items[(f"TENANT#{tenant}", f"AGENT#{deployment_id}:{agent_ids[0]}")],
+        )
+        is not None
+    )
+    assert (
+        _invoke(module, _event("/enterprise/runtime-rollouts", "GET", claims=claims))["statusCode"]
+        == 200
+    )
+    selected = {
+        agent_id
+        for agent_id in agent_ids
+        if module._rollout_agent_selected(
+            tenant, f"{deployment_id}:{agent_id}", canary["percentage"]
+        )
+    }
+    stored_open = table.items[(f"TENANT#{tenant}", f"RUNTIME_ROLLOUT#{deployment_id}")]
+    target_id = stored_open["targetReleaseId"]
+    target_binding = stored_open["targetReleaseBinding"]
+    stored_open["targetReleaseId"] = None
+    stored_open["targetReleaseBinding"] = None
+    unselected_agent = table.items[
+        (
+            f"TENANT#{tenant}",
+            f"AGENT#{deployment_id}:{next(agent for agent in agent_ids if agent not in selected)}",
+        )
+    ]
+    with pytest.raises(RuntimeError, match="release binding is malformed"):
+        module._require_current_attestation(tenant, deployment_id, unselected_agent)
+    stored_open["targetReleaseId"] = target_id
+    stored_open["targetReleaseBinding"] = target_binding
+    paused_response = _invoke(
+        module,
+        _event(
+            f"/enterprise/runtime-rollouts/{deployment_id}/pause",
+            "POST",
+            body={
+                "expectedRevision": canary["revision"],
+                "reason": "Freeze the exact canary cohort while evidence is investigated.",
+            },
+            claims=claims,
+        ),
+    )
+    assert paused_response["statusCode"] == 200
+    paused = json.loads(paused_response["body"])
+    newcomer_id = next(
+        f"new-agent-{index}"
+        for index in range(1_000)
+        if module._rollout_agent_selected(
+            tenant, f"{deployment_id}:new-agent-{index}", canary["percentage"]
+        )
+    )
+    newcomer = module._item_key(tenant, "AGENT", f"{deployment_id}:{newcomer_id}") | {
+        "id": newcomer_id,
+        "deployment_id": deployment_id,
+        "host": "claude-code",
+        "status": "connected",
+        "expires_at": now + 3_600,
+        "lifecycle_state": "active",
+        "attestation_status": "compliant",
+        "attestation_expires_at": now + 300,
+        "attestation_sdk_version": "1.1.0",
+        "attestation_sdk_revision": "a" * 40,
+        "attestation_manifest_sha256": current_digest,
+    }
+    table.put_item(Item=newcomer)
+    assert (
+        module._runtime_manifest(tenant, deployment_id, "claude-code", agent=newcomer)["sdkVersion"]
+        == "1.1.0"
+    )
+    replacement_target = _runtime_manifest("claude-code", "1.2.0", "e" * 40)
+    _set_runtime_manifests(monkeypatch, [current_manifest, replacement_target])
+    original_selected = table.items[
+        (f"TENANT#{tenant}", f"AGENT#{deployment_id}:{next(iter(selected))}")
+    ]
+    assert (
+        module._runtime_manifest(tenant, deployment_id, "claude-code", agent=original_selected)[
+            "sdkRevision"
+        ]
+        == "f" * 40
+    )
+    _set_runtime_manifests(monkeypatch, [])
+    assert (
+        module._runtime_manifest(tenant, deployment_id, "claude-code", agent=original_selected)[
+            "sdkRevision"
+        ]
+        == "f" * 40
+    )
+    with pytest.raises(PermissionError, match="current approved release"):
+        module._require_current_attestation(tenant, deployment_id, original_selected)
+    _set_runtime_manifests(monkeypatch, [current_manifest, replacement_target])
+    resumed_response = _invoke(
+        module,
+        _event(
+            "/enterprise/runtime-rollouts",
+            "POST",
+            body={**request, "expectedRevision": paused["revision"]},
+            claims=claims,
+        ),
+    )
+    assert resumed_response["statusCode"] == 201
+    canary = json.loads(resumed_response["body"])
+    agent_ids.append(newcomer_id)
+    selected.add(newcomer_id)
+    for agent_id in agent_ids:
+        agent = table.items[(f"TENANT#{tenant}", f"AGENT#{deployment_id}:{agent_id}")]
+        manifest = module._runtime_manifest(tenant, deployment_id, "claude-code", agent=agent)
+        assert manifest["sdkVersion"] == ("1.2.0" if agent_id in selected else "1.1.0")
+        if agent_id in selected:
+            with pytest.raises(PermissionError, match="current approved release"):
+                module._require_current_attestation(tenant, deployment_id, agent)
+            agent.update(
+                {
+                    "attestation_sdk_version": "1.2.0",
+                    "attestation_sdk_revision": "f" * 40,
+                    "attestation_manifest_sha256": target_digest,
+                }
+            )
+        else:
+            module._require_current_attestation(tenant, deployment_id, agent)
+    canary_read = json.loads(
+        _invoke(module, _event("/enterprise/runtime-rollouts", "GET", claims=claims))["body"]
+    )["items"][0]
+    assert canary_read["convergence"]["canaryConverged"] is True
+    expanded = _invoke(
+        module,
+        _event(
+            "/enterprise/runtime-rollouts",
+            "POST",
+            body={
+                **request,
+                "expectedRevision": canary_read["revision"],
+                "targetState": "active",
+                "percentage": 100,
+            },
+            claims=claims,
+        ),
+    )
+    assert expanded["statusCode"] == 201, expanded
+    assert json.loads(expanded["body"])["state"] == "active"
+    for agent_id in agent_ids:
+        agent = table.items[(f"TENANT#{tenant}", f"AGENT#{deployment_id}:{agent_id}")]
+        agent.update(
+            {
+                "attestation_sdk_version": "1.2.0",
+                "attestation_sdk_revision": "f" * 40,
+                "attestation_manifest_sha256": target_digest,
+            }
+        )
+    completed = json.loads(
+        _invoke(module, _event("/enterprise/runtime-rollouts", "GET", claims=claims))["body"]
+    )["items"][0]
+    assert completed["state"] == "converged"
+    assert completed["currentReleaseId"] == "claude-code:1.2.0"
+    assert completed["convergence"]["fullConverged"] is True
+    compliance = module._version_compliance(tenant, now=now)
+    assert compliance["compliantAgents"] == len(agent_ids)
+    assert compliance["deployments"][0]["currentReleaseId"] == "claude-code:1.2.0"
+    assert compliance["deployments"][0]["runtimeRolloutState"] == "converged"
+    stored_rollout = table.items[(f"TENANT#{tenant}", f"RUNTIME_ROLLOUT#{deployment_id}")]
+    authority_document = {
+        key: module._json(value)
+        for key, value in stored_rollout.items()
+        if key not in {"pk", "sk", "tenant_id"}
+    }
+    authority_sha256 = hashlib.sha256(
+        json.dumps(authority_document, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    convergence_audit = next(
+        item
+        for item in table.items.values()
+        if item.get("event_type") == "runtime_release_rollout_converged"
+    )
+    assert convergence_audit["payload"]["authority_sha256"] == authority_sha256
+    assert convergence_audit["payload"]["state"] == "converged"
+    assert convergence_audit["payload"]["health_criteria"] == request["healthCriteria"]
+    stored_rollout["state"] = "browser_claimed_healthy"
+    with pytest.raises(RuntimeError, match="state is invalid"):
+        module._runtime_manifest(
+            tenant,
+            deployment_id,
+            "claude-code",
+            agent=table.items[(f"TENANT#{tenant}", f"AGENT#{deployment_id}:{agent_ids[0]}")],
+        )
+    stored_rollout["state"] = "converged"
+    stored_rollout.pop("currentReleaseBinding")
+    with pytest.raises(RuntimeError, match="record has an invalid schema"):
+        module._runtime_manifest(
+            tenant,
+            deployment_id,
+            "claude-code",
+            agent=table.items[(f"TENANT#{tenant}", f"AGENT#{deployment_id}:{agent_ids[0]}")],
+        )
+
+
+def test_runtime_release_rollout_rejects_switches_and_supports_measured_rollback(
+    monkeypatch: Any,
+) -> None:
+    """Target switching, premature expansion and stale writes fail closed."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_200_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    manifests = [
+        _runtime_manifest("codex-cli", "1.1.0", "a" * 40),
+        _runtime_manifest("codex-cli", "1.2.0", "f" * 40),
+        _runtime_manifest("codex-cli", "1.3.0", "e" * 40),
+    ]
+    _set_runtime_manifests(monkeypatch, manifests)
+    tenant = "tenant-runtime-rollback"
+    deployment_id = "dep-codex"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", deployment_id)
+        | {
+            "id": deployment_id,
+            "organization_id": "org-runtime",
+            "project_id": "project-runtime",
+            "sdk_version": "1.1.0",
+        }
+    )
+    current_digest = module._runtime_manifest_digest(manifests[0])
+    for index in range(8):
+        agent_id = f"agent-{index}"
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}")
+            | {
+                "id": agent_id,
+                "deployment_id": deployment_id,
+                "host": "codex-cli",
+                "status": "connected",
+                "expires_at": now + 3_600,
+                "lifecycle_state": "active",
+                "attestation_status": "compliant",
+                "attestation_expires_at": now + 300,
+                "attestation_sdk_version": "1.1.0",
+                "attestation_sdk_revision": "a" * 40,
+                "attestation_manifest_sha256": current_digest,
+            }
+        )
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "runtime-operator",
+    }
+    base = {
+        "deploymentId": deployment_id,
+        "expectedRevision": 0,
+        "targetReleaseId": "codex-cli:1.2.0",
+        "targetState": "canary",
+        "percentage": 25,
+        "healthCriteria": {
+            "maxUnavailablePercent": 10,
+            "maxDriftPercent": 10,
+            "minSampleSize": 100,
+            "gracePeriodSeconds": 300,
+        },
+        "reason": "Validate the approved Codex runtime release on a bounded canary ring.",
+    }
+    for denied_role in (
+        "security-operator",
+        "policy-author",
+        "policy-approver",
+        "incident-responder",
+        "auditor",
+    ):
+        denied_role_response = _invoke(
+            module,
+            _event(
+                "/enterprise/runtime-rollouts",
+                "POST",
+                body=base,
+                claims={
+                    "custom:tenant_id": tenant,
+                    "cognito:groups": [denied_role],
+                    "sub": f"denied-{denied_role}",
+                },
+            ),
+        )
+        assert denied_role_response["statusCode"] == 403
+    cross_tenant = _invoke(
+        module,
+        _event(
+            "/enterprise/runtime-rollouts",
+            "POST",
+            body=base,
+            claims={
+                "custom:tenant_id": "tenant-runtime-other",
+                "cognito:groups": ["fleet-operator"],
+                "sub": "other-tenant-operator",
+            },
+        ),
+    )
+    assert cross_tenant["statusCode"] == 403
+    assert module._runtime_rollout_record("tenant-runtime-other", deployment_id) is None
+    table.put_item(
+        Item=module._item_key(tenant, "DELEGATED_GRANT", "other-deployment-only")
+        | {
+            "id": "other-deployment-only",
+            "principal_id": "delegated-runtime-operator",
+            "role": "fleet-operator",
+            "scope_type": "deployment",
+            "scope_id": "other-deployment",
+            "status": "active",
+            "expires_at": now + 300,
+            "revision": 1,
+        }
+    )
+    delegated_denied = _invoke(
+        module,
+        _event(
+            "/enterprise/runtime-rollouts",
+            "POST",
+            body=base,
+            claims={
+                "custom:tenant_id": tenant,
+                "sub": "delegated-runtime-operator",
+                "aai:delegated": "true",
+            },
+        ),
+    )
+    assert delegated_denied["statusCode"] == 403
+    undersized_broad = _invoke(
+        module,
+        _event(
+            "/enterprise/runtime-rollouts",
+            "POST",
+            body={**base, "targetState": "active", "percentage": 25},
+            claims=claims,
+        ),
+    )
+    assert undersized_broad["statusCode"] == 400
+    started = _invoke(
+        module, _event("/enterprise/runtime-rollouts", "POST", body=base, claims=claims)
+    )
+    assert started["statusCode"] == 201
+    canary = json.loads(started["body"])
+    for changed in (
+        {"targetState": "active", "percentage": 100},
+        {"targetReleaseId": "codex-cli:1.3.0"},
+    ):
+        denied = _invoke(
+            module,
+            _event(
+                "/enterprise/runtime-rollouts",
+                "POST",
+                body={**base, "expectedRevision": canary["revision"], **changed},
+                claims=claims,
+            ),
+        )
+        assert denied["statusCode"] == 409
+    target_digest = module._runtime_manifest_digest(manifests[1])
+    selected_agents = []
+    for index in range(8):
+        agent = table.items[(f"TENANT#{tenant}", f"AGENT#{deployment_id}:agent-{index}")]
+        if module._rollout_agent_selected(
+            tenant, f"{deployment_id}:{agent['id']}", canary["percentage"]
+        ):
+            selected_agents.append(agent)
+            agent.update(
+                {
+                    "attestation_sdk_version": "1.2.0",
+                    "attestation_sdk_revision": "f" * 40,
+                    "attestation_manifest_sha256": target_digest,
+                }
+            )
+    insufficient = module._runtime_rollout_convergence(
+        tenant, module._runtime_rollout_record(tenant, deployment_id), now=now
+    )
+    assert selected_agents
+    assert insufficient["compliantAgents"] == insufficient["selectedAgents"]
+    assert insufficient["canaryConverged"] is False
+    assert "minimum_sample_not_met" in insufficient["blockers"]
+    sample_bypass = _invoke(
+        module,
+        _event(
+            "/enterprise/runtime-rollouts",
+            "POST",
+            body={
+                **base,
+                "expectedRevision": canary["revision"],
+                "targetState": "active",
+                "percentage": 100,
+            },
+            claims=claims,
+        ),
+    )
+    assert sample_bypass["statusCode"] == 409
+    stale = _invoke(
+        module,
+        _event(
+            f"/enterprise/runtime-rollouts/{deployment_id}/pause",
+            "POST",
+            body={
+                "expectedRevision": 0,
+                "reason": "Pause the canary while release evidence is investigated.",
+            },
+            claims=claims,
+        ),
+    )
+    assert stale["statusCode"] == 409
+    rollback = _invoke(
+        module,
+        _event(
+            f"/enterprise/runtime-rollouts/{deployment_id}/rollback",
+            "POST",
+            body={
+                "expectedRevision": canary["revision"],
+                "reason": "Return selected endpoints to the retained approved Codex release.",
+            },
+            claims=claims,
+        ),
+    )
+    assert rollback["statusCode"] == 200, rollback
+    rolling_back = json.loads(rollback["body"])
+    assert rolling_back["state"] == "rolling_back"
+    for agent in selected_agents:
+        agent.update(
+            {
+                "attestation_sdk_version": "1.1.0",
+                "attestation_sdk_revision": "a" * 40,
+                "attestation_manifest_sha256": current_digest,
+            }
+        )
+    rolled_back = json.loads(
+        _invoke(module, _event("/enterprise/runtime-rollouts", "GET", claims=claims))["body"]
+    )["items"][0]
+    assert rolled_back["state"] == "rolled_back"
+    assert rolled_back["targetReleaseId"] is None
+    assert rolled_back["percentage"] == 0
+
+
+def test_runtime_rollout_authority_and_primary_audit_commit_atomically(
+    monkeypatch: Any,
+) -> None:
+    """S3 replication may fail, but authority never exists without primary evidence."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-runtime-audit"
+    deployment_id = "deployment-runtime-audit"
+    manifests = [
+        _runtime_manifest("claude-code", "1.1.0", "a" * 40),
+        _runtime_manifest("claude-code", "1.2.0", "f" * 40),
+    ]
+    _set_runtime_manifests(monkeypatch, manifests)
+    catalog = module._runtime_release_catalog()
+    releases = module._runtime_release_map(catalog)
+    updated = {
+        "schemaVersion": 1,
+        "deploymentId": deployment_id,
+        "host": "claude-code",
+        "state": "canary",
+        "currentReleaseId": "claude-code:1.1.0",
+        "currentReleaseBinding": module._runtime_release_binding(
+            catalog, releases["claude-code:1.1.0"]
+        ),
+        "targetReleaseId": "claude-code:1.2.0",
+        "targetReleaseBinding": module._runtime_release_binding(
+            catalog, releases["claude-code:1.2.0"]
+        ),
+        "percentage": 10,
+        "healthCriteria": {
+            "maxUnavailablePercent": 10,
+            "maxDriftPercent": 10,
+            "minSampleSize": 1,
+            "gracePeriodSeconds": 300,
+        },
+        "reason": "Run an approved bounded runtime release canary.",
+        "startedAt": 1_900_000_000,
+        "startedBy": "operator-a",
+        "pausedAt": None,
+        "pauseReason": None,
+        "selectedMemberDigests": [],
+    }
+
+    def deny_replication(**_value: Any) -> dict[str, str]:
+        raise RuntimeError("synthetic audit replica outage")
+
+    monkeypatch.setattr(module.S3, "put_object", deny_replication)
+    stored = module._put_runtime_rollout(
+        tenant,
+        None,
+        updated,
+        "runtime_release_rollout_started",
+        "operator-a",
+        updated["reason"],
+    )
+    assert stored["revision"] == 1
+    primary = [
+        item
+        for item in table.items.values()
+        if str(item.get("sk", "")).startswith("CONFIGURATION_AUDIT#")
+        and item.get("event_type") == "runtime_release_rollout_started"
+    ]
+    assert len(primary) == 1
+    assert primary[0]["payload"]["runtime_rollout_revision"] == 1
+
+    second_tenant = "tenant-runtime-audit-conflict"
+    module.DYNAMODB.before_transaction = lambda: table.put_item(
+        Item={
+            **module._item_key(second_tenant, "RUNTIME_ROLLOUT", deployment_id),
+            **updated,
+            "tenant_id": second_tenant,
+            "revision": 1,
+        }
+    )
+    with pytest.raises(module.PolicyConflict, match="revision changed"):
+        module._put_runtime_rollout(
+            second_tenant,
+            None,
+            updated,
+            "runtime_release_rollout_started",
+            "operator-a",
+            updated["reason"],
+        )
+    assert not any(
+        item.get("tenant_id") == second_tenant
+        and str(item.get("sk", "")).startswith("CONFIGURATION_AUDIT#")
+        for item in table.items.values()
+    )
 
 
 def test_checked_in_empty_runtime_bundle_is_bound_but_not_configured(monkeypatch: Any) -> None:

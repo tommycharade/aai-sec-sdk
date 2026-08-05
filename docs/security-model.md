@@ -25,6 +25,19 @@ handler from a proposal without a permit. This is an in-process architectural
 guarantee, not a sandbox claim: trusted application code can still call its
 own handler directly outside the SDK.
 
+Runtime-release transitions are server-owned authority between two immutable
+release bindings. Each binding includes the exact closed attestation manifest,
+source revision, artifact identities and manifest/approval bundle identities.
+Pause and rollback snapshot only SHA-256 digests of the selected active agent
+identities, preventing population churn from silently expanding authority.
+Missing or malformed rollout state never falls back to deployment metadata.
+Persisted rollout authority is evaluated before the development-only empty
+catalog path, so catalog removal cannot disable attestation. A single closed,
+state-specific validator gates admission, convergence, mutation,
+reconciliation and projection.
+Every transition transaction also commits primary audit evidence binding the
+complete resulting authority-document hash and exact health criteria.
+
 ## Required decision inputs
 
 An authorization decision should include, at minimum:
@@ -898,6 +911,17 @@ contains artifact digests but no executable bytes, source origin,
 paths, commands, prompts or credentials. It is inventory evidence, not an MDM
 delivery or managed-upgrade claim. See
 [Approved runtime releases and version compliance](runtime-release-compliance-design.md).
+
+Runtime upgrades are separate revision-bound authority. A deployment may admit
+only its retained approved current release and one approved same-host target.
+The server deterministically selects canary members from tenant, deployment and
+agent identity; neither the browser nor endpoint supplies membership. New
+transitions are limited to 1–25 percent. Broad selection must exceed 25 percent
+and requires every selected canary to provide fresh exact version, revision and
+manifest attestation. Target switching, percentage decreases and stale
+revisions fail closed. Runtime authority and content-minimised primary audit
+evidence commit in one DynamoDB transaction. See
+[Measured runtime-release rollouts](runtime-release-rollout-design.md).
 
 ## Dynamic group authority boundary
 

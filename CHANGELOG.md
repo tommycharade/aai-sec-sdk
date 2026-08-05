@@ -1,5 +1,18 @@
 # Changelog
 
+- Added revision-bound, dual-version runtime release rollouts for Claude Code
+  and Codex deployments. The AWS control plane now selects deterministic
+  canaries, admits only exact approved current/target manifests, blocks broad
+  expansion until the configured sample and exact target attestation converge,
+  automatically pauses on measured health thresholds, freezes content-free
+  cohort membership on pause/rollback, and supports target-attested measured
+  rollback. Open transitions retain complete immutable release and approval
+  bundle bindings even if the live catalog changes. Runtime authority and a
+  complete authority-document audit hash commit atomically. The enterprise UI
+  adds a typed, closed-schema, keyboard-accessible release workspace with
+  bounded inputs, explicit resume and safe accepted-mutation refresh handling,
+  while keeping binary delivery an explicit MDM/deployment-owned boundary.
+
 - Added a read-only deployment-owned runtime-release catalog and tenant-scoped
   version-compliance report for Claude Code and Codex. The API reuses exact
   manifest/provenance validation, exposes separate SDK package, MCP gateway and
