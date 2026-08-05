@@ -11015,6 +11015,16 @@ def test_agent_decisions_are_authenticated_content_minimised_and_dashboard_visib
     assert stored["action_digest"] == "d" * 64
     assert stored["timeline_pk"] == f"TENANT#{tenant}#DECISION"
     assert stored["timeline_sk"].endswith(f"#dep-a:agent-a:{'a' * 64}")
+    assert stored["behavior_pk"] == f"TENANT#{tenant}#AGENT#dep-a:agent-a"
+    assert stored["behavior_sk"].endswith(f"#decision#dep-a:agent-a:{'a' * 64}")
+    assert stored["behavior_kind"] == "decision"
+    migration = table.items[
+        (
+            f"TENANT#{tenant}",
+            f"BEHAVIOR_MIGRATION#{module._BEHAVIOR_AGENT_INDEX_MIGRATION_ID}",
+        )
+    ]
+    assert migration["schema_version"] == 1
     assert "command" not in stored and "path" not in stored and "prompt" not in stored
 
     duplicate = _invoke(
@@ -12997,6 +13007,200 @@ def test_behavior_baseline_fails_closed_and_rejects_authority_widening(
         invalid_configuration: dict[str, Any] = copy.deepcopy(configuration)
         invalid_configuration["baseline"]["sensitivityMultiplier"] = float("nan")
         module._response_rule_configuration(invalid_configuration)
+
+
+def test_behavior_baselines_are_exact_agent_partitioned_paginated_and_redacted(
+    monkeypatch: Any,
+) -> None:
+    """A noisy agent cannot truncate another agent's baseline or leak action content."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-agent-baselines"
+    other_tenant = "tenant-other"
+    now = 2_166_500_000
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    for agent_id in ("target", "noisy"):
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"dep-a:{agent_id}")
+            | {
+                "id": agent_id,
+                "deployment_id": "dep-a",
+                "host": "claude-code",
+                "lifecycle_state": "active",
+            }
+        )
+    table.put_item(
+        Item=module._item_key(other_tenant, "AGENT", "dep-x:foreign")
+        | {
+            "id": "foreign",
+            "deployment_id": "dep-x",
+            "host": "codex",
+            "lifecycle_state": "active",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(
+            tenant, "BEHAVIOR_MIGRATION", module._BEHAVIOR_AGENT_INDEX_MIGRATION_ID
+        )
+        | {
+            "id": module._BEHAVIOR_AGENT_INDEX_MIGRATION_ID,
+            "started_at": now - module._BEHAVIOR_AGENT_INDEX_MIGRATION_SECONDS - 1,
+            "schema_version": 1,
+        }
+    )
+    configuration = module._response_rule_configuration(
+        {
+            "match": {
+                "source": "agent_activity",
+                "signalTypes": ["decision_volume_spike"],
+                "hosts": ["claude-code"],
+                "severity": "high",
+            },
+            "action": {"type": "create_alert"},
+            "baseline": {
+                "lookbackDays": 7,
+                "currentWindowMinutes": 15,
+                "minimumBaselineEvents": 5,
+                "minimumCurrentEvents": 3,
+                "sensitivityMultiplier": 3.0,
+            },
+            "priority": 100,
+        }
+    )
+    content_hash = module._configuration_hash(configuration)
+    table.put_item(
+        Item=module._item_key(tenant, "RESPONSE_RULE", "volume-rule")
+        | {
+            "id": "volume-rule",
+            "name": "Decision volume",
+            "configuration": configuration,
+            "content_hash": content_hash,
+            "active_version": 1,
+            "enabled": True,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(
+            tenant,
+            "RESPONSE_RULE_VERSION",
+            module._response_rule_version_identifier("volume-rule", 1),
+        )
+        | {
+            "id": module._response_rule_version_identifier("volume-rule", 1),
+            "rule_id": "volume-rule",
+            "version": 1,
+            "state": "active",
+            "content_hash": content_hash,
+            "configuration": configuration,
+        }
+    )
+
+    def indexed_decision(agent_id: str, index: int) -> None:
+        observed_at = now - 86_400 + index
+        record_id = f"{agent_id}-{index:04d}"
+        agent_key = f"dep-a:{agent_id}"
+        table.put_item(
+            Item=module._item_key(tenant, "DECISION", record_id)
+            | {
+                "id": record_id,
+                "deployment_id": "dep-a",
+                "agent_id": agent_id,
+                "tool_name": "sensitive-tool-name",
+                "decision": "allowed",
+                "observed_at": observed_at,
+                "behavior_pk": f"TENANT#{tenant}#AGENT#{agent_key}",
+                "behavior_sk": f"{observed_at:010d}#decision#{record_id}",
+                "behavior_kind": "decision",
+            }
+        )
+
+    for index in range(5):
+        indexed_decision("target", index)
+    for index in range(module._BEHAVIOR_HISTORY_LIMIT + 1):
+        indexed_decision("noisy", index)
+
+    page = module._behavior_baseline_page(tenant, now=now, page_limit=50)
+    by_agent = {item["agentId"]: item for item in page["items"]}
+    assert page["scope"] == "fleet"
+    assert page["hasMore"] is False
+    assert page["readConsistency"] == "eventually_consistent_index"
+    assert page["summary"] == {
+        "agents": 2,
+        "ready": 1,
+        "warming": 0,
+        "incomplete": 1,
+        "not_configured": 0,
+    }
+    assert by_agent["target"]["status"] == "ready"
+    assert by_agent["target"]["historyTruncated"] is False
+    assert by_agent["target"]["signals"][0]["baselineCount"] == 5
+    assert by_agent["noisy"]["status"] == "incomplete"
+    assert by_agent["noisy"]["historyTruncated"] is True
+    assert page["contentBoundary"] == {
+        "rawPromptsIncluded": False,
+        "toolArgumentsIncluded": False,
+        "toolResultsIncluded": False,
+        "credentialsIncluded": False,
+        "projectPathsIncluded": False,
+    }
+    assert "sensitive-tool-name" not in json.dumps(page)
+    assert "foreign" not in json.dumps(page)
+
+    # A just-written observation may not be visible through the eventually
+    # consistent GSI yet. The evaluator receives that server-owned item
+    # directly and must merge it without accepting a mismatched partition.
+    current = {
+        **module._item_key(tenant, "DECISION", "current-target"),
+        "id": "current-target",
+        "deployment_id": "dep-a",
+        "agent_id": "target",
+        "decision": "denied",
+        "observed_at": now,
+        "behavior_pk": f"TENANT#{tenant}#AGENT#dep-a:target",
+        "behavior_sk": f"{now:010d}#decision#current-target",
+        "behavior_kind": "decision",
+    }
+    immediate = module._behavior_agent_history(
+        tenant, "dep-a:target", now=now, current_observation=current
+    )
+    assert immediate["eventCount"] == 6
+    assert immediate["currentObservationMerged"] is True
+    mismatched = module._behavior_agent_history(
+        tenant,
+        "dep-a:target",
+        now=now,
+        current_observation={**current, "behavior_pk": "TENANT#foreign#AGENT#dep-a:target"},
+    )
+    assert mismatched["eventCount"] == 5
+    assert mismatched["currentObservationMerged"] is False
+
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "operator-a",
+    }
+    route = _event("/api/enterprise/behavior-baselines", "GET", claims=claims)
+    route["queryStringParameters"] = {"limit": "50"}
+    response = _invoke(module, route)
+    assert response["statusCode"] == 200
+    unauthorized = _invoke(
+        module,
+        _event(
+            "/api/enterprise/behavior-baselines",
+            "GET",
+            claims={"custom:tenant_id": tenant, "sub": "no-role"},
+        ),
+    )
+    assert unauthorized["statusCode"] == 403
+
+
+def test_behavior_agent_timeline_is_declared_in_aws_iac() -> None:
+    """The scalable exact-agent read boundary is part of the deployed table schema."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text()
+    assert 'indexName: "BehaviorAgentTimeline"' in stack
+    assert 'partitionKey: { name: "behavior_pk"' in stack
+    assert 'sortKey: { name: "behavior_sk"' in stack
 
 
 def test_repository_and_configuration_integrity_rules_are_exact_and_explainable(
@@ -16472,6 +16676,14 @@ def test_operator_approval_queue_is_action_bound_audited_and_fail_closed(
     assert created_body["status"] == "pending"
     assert created_body["agentKey"] == agent_key
     assert created_body["resourceIds"] == ["artifact:synthetic-report"]
+    retained_request = table.items[(f"TENANT#{tenant}", "APPROVAL#approval-pending-a")]
+    assert retained_request["behavior_pk"] == f"TENANT#{tenant}#AGENT#{agent_key}"
+    assert retained_request["behavior_kind"] == "approval"
+    assert retained_request["behavior_sk"].endswith("#approval#approval-pending-a")
+    assert retained_request["ttl"] == (
+        retained_request["requested_at"] + module._BEHAVIOR_OBSERVATION_RETENTION_SECONDS
+    )
+    assert retained_request["expires_at"] < retained_request["ttl"]
     duplicate = _invoke(
         module,
         _event(
@@ -16528,6 +16740,11 @@ def test_operator_approval_queue_is_action_bound_audited_and_fail_closed(
     )
     assert approved["statusCode"] == 200
     assert json.loads(approved["body"])["status"] == "approved"
+    approved_record = table.items[(f"TENANT#{tenant}", "APPROVAL#approval-pending-a")]
+    assert approved_record["ttl"] == (
+        approved_record["requested_at"] + module._BEHAVIOR_OBSERVATION_RETENTION_SECONDS
+    )
+    assert approved_record["expires_at"] < approved_record["ttl"]
     assert (
         json.loads(_invoke(module, _event("/dashboard", "GET", claims=operator_claims))["body"])[
             "approvalQueue"

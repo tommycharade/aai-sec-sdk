@@ -334,8 +334,8 @@ Engineering can continue autonomously on:
 - managed SDK, gateway and hook upgrades with approved drift remediation;
 - live customer acceptance of implemented expiring exceptions, policy
   composition, scheduled rollout and signed bundles;
-- credential-revocation workflows, repository/configuration anomaly response
-  and fleet-scale behavior baseline storage;
+- live-provider credential-revocation acceptance and customer-specific load
+  proof for the implemented exact-agent behavior baseline storage;
 - external assurance-report delivery and reviewed framework mappings; signed,
   scheduled in-product retention and verification are implemented without
   customer delivery authority;

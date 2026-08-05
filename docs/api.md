@@ -923,6 +923,12 @@ closed trust boundaries:
 - `GET /enterprise/response-executions` returns idempotent `alerted`,
   `contained` and safely skipped outcomes without prompts, arguments, results,
   credentials or raw endpoint payloads.
+- `GET /enterprise/behavior-baselines?limit=50&nextToken=...` returns a
+  tenant-scoped, paginated readiness view for active agents. Each row contains
+  exact-agent event bounds, migration/completeness state and rule-by-rule
+  sample progress. The response declares
+  `readConsistency=eventually_consistent_index`; raw prompts, tool arguments,
+  results, credentials, project paths and tool identities are excluded.
 
 The endpoint schema permits server-derived reason codes,
 medium/high/critical severity, `claude-code`/`codex` host scope, fixed

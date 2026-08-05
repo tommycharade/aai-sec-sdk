@@ -20,11 +20,11 @@ deduplicated alert that explains:
 - whether the baseline was complete enough to evaluate; and
 - the rule version and content hash that produced the result.
 
-The first catalogue covers newly observed tools, newly observed MCP servers,
-denied-action spikes, approval-request spikes and overall decision-volume
-spikes. Repository and configuration anomaly signals remain follow-on work;
-their current evidence is not sufficiently action-specific to make a credible
-baseline claim.
+The catalogue covers newly observed tools, newly observed MCP servers,
+denied-action spikes, approval-request spikes, overall decision-volume spikes,
+outside-project activity and configuration errors. Independently derived
+repository and configuration integrity signals use their own alert-only trust
+boundary rather than being mixed with agent-reported behavior.
 
 ## Trust boundaries
 
@@ -66,12 +66,32 @@ values fail closed.
 
 ## Baseline and evaluation
 
-The evaluator reads at most 2,000 recent tenant decisions from the dedicated
-timeline index. It uses server receipt time and splits evidence into a current
+The evaluator reads at most 2,000 observations from a DynamoDB
+`BehaviorAgentTimeline` partition whose key is the exact tenant and enrolled
+agent. One noisy agent therefore cannot consume another agent's history bound.
+Decision and agent approval-request observations share the partition and are
+retained for the maximum 30-day behavior lookback; approval capability expiry
+continues to use the separate `expires_at` authority field.
+
+The secondary index is eventually consistent. When an authenticated report
+causes an evaluation, the handler merges the just-persisted, server-derived
+observation directly into that evaluation so index propagation cannot omit the
+triggering action. Earlier observations can still take a short time to appear.
+This can delay an alert but cannot grant authority: behavior rules are
+alert-only, and the fleet readiness API labels this consistency model.
+
+Existing records do not contain the sparse-index keys. A conditional,
+tenant-owned migration marker starts a 30-day safety window in which each
+exact-agent index result is merged with the bounded legacy tenant timeline.
+Any index, legacy or combined truncation marks that agent incomplete and
+produces no anomaly claim. After the maximum retention window, only the
+exact-agent index is authoritative.
+
+The evaluator uses server receipt time and splits evidence into a current
 window and an immediately preceding historical window. A truncated history,
-missing active rule version, malformed retained evidence or insufficient
-historical sample produces a content-minimised `baseline_insufficient` outcome
-and no alert.
+missing or hash-invalid active rule version, malformed retained evidence or
+insufficient historical sample produces a content-minimised
+`baseline_insufficient` outcome and no alert.
 
 For volume signals, the expected current count is the historical matching
 count normalized to the current-window duration. The threshold is the larger
@@ -103,6 +123,14 @@ then shows only controls valid for that trust boundary. The preview reports
 baseline readiness, matches and thresholds without creating alerts or changing
 agent authority. Every control includes contextual help.
 
+The Incidents workspace also provides a paginated **Behavior baselines** view.
+The control plane, not the browser, returns each active agent's `ready`,
+`warming`, `incomplete` or `not_configured` posture, event bounds, migration
+state and rule-by-rule minimum sample progress. The response deliberately
+excludes prompts, arguments, results, credentials, project paths and tool
+identities. Operators are warned about incomplete history and eventual index
+consistency instead of being shown false reassurance.
+
 ## Alert, case and delivery behavior
 
 Behavior alerts use the same open, acknowledged and case-owned lifecycle as
@@ -125,6 +153,9 @@ occurrence. Splunk remains `deliveryVerified: false`.
   threshold; it does not prove malicious intent.
 - A missing or incomplete baseline yields no alert and an explicit degraded
   result; the system never fabricates normal behavior.
+- The readiness view may briefly trail newly reported activity because its
+  exact-agent secondary-index reads are eventually consistent. The triggering
+  action is merged synchronously only in the alert evaluator.
 - Alert-only rules do not widen or automatically remove agent authority.
 - The first catalogue does not close repository/configuration anomaly,
   third-party credential revocation, MDM/EDR isolation or SIEM delivery.

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Replaced tenant-wide behavior baseline reads with bounded exact-agent
+  DynamoDB partitions so a noisy agent cannot hide another agent's readiness.
+  A 30-day fail-closed legacy migration, synchronous merge of the triggering
+  observation, explicit eventual-consistency metadata and a paginated,
+  content-minimised fleet readiness API/UI expose ready, warming, incomplete
+  and unconfigured rule posture without granting automatic response authority.
+
 - Added a typed, tenant-scoped incident investigation timeline that correlates
   identity, policy, tool/MCP, approval, credential, isolation, evidence and
   operator events with source provenance, fixed redaction and explicit
