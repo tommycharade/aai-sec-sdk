@@ -20924,6 +20924,12 @@ def _verify_agent(tenant, deployment_id, agent_id):
             or native_effective_controls.get("status") == "enforced"
         )
     )
+    response_controls_clear = bool(
+        agent
+        and control_state
+        and not control_state["activeStopScopes"]
+        and control_state["quarantine"] is None
+    )
     ownership = _agent_ownership_view(agent, now=checked_at) if agent else None
     ownership_current = bool(ownership and ownership.get("status") == "current")
     if not agent:
@@ -21012,10 +21018,10 @@ def _verify_agent(tenant, deployment_id, agent_id):
             "detail": policy_detail,
         },
         "emergencyStop": {
-            "passed": bool(agent and control_state and control_state["executionAllowed"]),
+            "passed": response_controls_clear,
             "detail": (
                 "No emergency stop or incident quarantine is active."
-                if agent and control_state and control_state["executionAllowed"]
+                if response_controls_clear
                 else "A server-owned response control withholds execution authority."
             ),
         },

@@ -4704,6 +4704,21 @@ def test_native_effective_controls_are_content_minimised_and_freshness_derived(
     assert module._agent_control_state(tenant, agent)["authorityBlockers"] == [
         "native_effective_controls"
     ]
+    table.put_item(Item=module._item_key(tenant, "AGENT", "dep-a:codex-a") | agent)
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-safe") | {"id": "policy-safe", "version": 1}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-safe")
+        | {
+            "id": "group-safe",
+            "policyId": "policy-safe",
+            "agent_keys": ["dep-a:codex-a"],
+        }
+    )
+    verification = module._verify_agent(tenant, "dep-a", "codex-a")
+    assert verification["checks"]["nativeEffectiveControls"]["passed"] is False
+    assert verification["checks"]["emergencyStop"]["passed"] is True
     assert (
         module._native_effective_control_posture(tenant, agent, now=now + 61)["status"] == "stale"
     )
