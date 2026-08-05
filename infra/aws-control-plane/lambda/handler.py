@@ -93,6 +93,152 @@ ASSURANCE_REPORT_VERIFICATION_KEY_ARNS = _parse_assurance_key_registry(
 )
 POLICY_SOURCE_VERIFIER_ARN = os.environ.get("POLICY_SOURCE_VERIFIER_ARN", "")
 
+
+def _parse_data_boundary_runtime():
+    """Load immutable deployment posture and reject contradictory authority."""
+    status = os.environ.get("DATA_BOUNDARY_STATUS", "not-configured")
+    home_region = os.environ.get(
+        "DATA_BOUNDARY_HOME_REGION", os.environ.get("AWS_REGION", "eu-west-2")
+    )
+    key_arn = os.environ.get("DATA_BOUNDARY_KEY_ARN", "")
+    key_ownership = os.environ.get("DATA_BOUNDARY_KEY_OWNERSHIP", "service-managed")
+    access_mode = os.environ.get("DATA_BOUNDARY_OPERATOR_ACCESS_MODE", "public-authenticated")
+    try:
+        regions = json.loads(
+            os.environ.get(
+                "DATA_BOUNDARY_APPROVED_REGIONS",
+                json.dumps([home_region or "eu-west-2"]),
+            )
+        )
+        cidrs = json.loads(os.environ.get("DATA_BOUNDARY_OPERATOR_IPV4_CIDRS", "[]"))
+    except json.JSONDecodeError as error:
+        raise RuntimeError("data-boundary runtime registry is malformed") from error
+    if (
+        status not in {"configured", "not-configured"}
+        or key_ownership not in {"customer-managed", "service-managed"}
+        or access_mode not in {"ip-restricted", "public-authenticated"}
+        or not isinstance(regions, list)
+        or not 1 <= len(regions) <= 4
+        or len(regions) != len(set(regions))
+        or regions != sorted(regions)
+        or any(
+            not isinstance(region, str) or not re.fullmatch(r"[a-z]{2}(?:-gov)?-[a-z]+-\d", region)
+            for region in regions
+        )
+        or home_region not in regions
+        or not isinstance(cidrs, list)
+        or len(cidrs) > 32
+        or any(not isinstance(cidr, str) for cidr in cidrs)
+        or cidrs != sorted(set(cidrs))
+    ):
+        raise RuntimeError("data-boundary runtime registry is malformed")
+    networks = []
+    for cidr in cidrs:
+        try:
+            network = ipaddress.ip_network(cidr, strict=True)
+        except ValueError as error:
+            raise RuntimeError("data-boundary operator network is malformed") from error
+        if (
+            network.version != 4
+            or network.is_private
+            or network.is_loopback
+            or network.is_link_local
+            or network.is_multicast
+            or network.is_reserved
+            or network.is_unspecified
+            or str(network) != cidr
+        ):
+            raise RuntimeError("data-boundary operator network is unsafe")
+        networks.append(network)
+    if status == "configured" and (
+        key_ownership != "customer-managed"
+        or access_mode != "ip-restricted"
+        or not key_arn
+        or not networks
+        or os.environ.get("DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_CONFIGURED") != "true"
+        or os.environ.get("DATA_BOUNDARY_APPROVAL_EVIDENCE_CONFIGURED") != "true"
+    ):
+        raise RuntimeError("configured data boundary is incomplete")
+    if status == "not-configured" and (access_mode != "public-authenticated" or networks):
+        raise RuntimeError("unconfigured data boundary cannot restrict operator authority")
+    return {
+        "status": status,
+        "home_region": home_region,
+        "approved_regions": tuple(regions),
+        "key_arn": key_arn,
+        "key_ownership": key_ownership,
+        "access_mode": access_mode,
+        "operator_networks": tuple(networks),
+        "conditional_access_evidence": (
+            os.environ.get("DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_CONFIGURED") == "true"
+        ),
+        "approval_evidence": (
+            os.environ.get("DATA_BOUNDARY_APPROVAL_EVIDENCE_CONFIGURED") == "true"
+        ),
+    }
+
+
+DATA_BOUNDARY = _parse_data_boundary_runtime()
+
+
+def _operator_network_allowed(event):
+    """Trust only API Gateway source context for configured human access."""
+    if DATA_BOUNDARY["status"] != "configured":
+        return True
+    try:
+        source = event["requestContext"]["http"]["sourceIp"]
+        address = ipaddress.ip_address(source)
+    except (KeyError, TypeError, ValueError):
+        return False
+    return address.version == 4 and any(
+        address in network for network in DATA_BOUNDARY["operator_networks"]
+    )
+
+
+def _data_boundary_posture():
+    """Return a fixed secret-free description of deployment-owned guarantees."""
+    key_identity = DATA_BOUNDARY["key_arn"].rsplit("/", 1)[-1]
+    return {
+        "status": DATA_BOUNDARY["status"],
+        "homeRegion": DATA_BOUNDARY["home_region"],
+        "approvedDataRegions": list(DATA_BOUNDARY["approved_regions"]),
+        "encryption": {
+            "ownership": DATA_BOUNDARY["key_ownership"],
+            "keyFingerprint": key_identity[-8:] if key_identity else None,
+            "scope": "retained-tenant-data-and-durable-queues",
+            "rotationRequired": True,
+        },
+        "operatorAccess": {
+            "mode": DATA_BOUNDARY["access_mode"],
+            "allowedNetworkCount": len(DATA_BOUNDARY["operator_networks"]),
+            "conditionalAccessEvidenceConfigured": DATA_BOUNDARY["conditional_access_evidence"],
+            "privateLinkConfigured": False,
+        },
+        "deletionClasses": [
+            {"dataClass": "operational_state", "behavior": "retained-protected-offboarding"},
+            {"dataClass": "expiring_capabilities", "behavior": "asynchronous-ttl"},
+            {"dataClass": "immutable_evidence", "behavior": "object-lock-and-legal-hold"},
+            {
+                "dataClass": "provider_credentials",
+                "behavior": "provider-revocation-and-secret-deletion",
+            },
+            {"dataClass": "static_ui_assets", "behavior": "replaceable-no-tenant-records"},
+        ],
+        "evidence": {
+            "deploymentApprovalConfigured": DATA_BOUNDARY["approval_evidence"],
+            "liveAcceptance": False,
+        },
+        "limitations": [
+            "IP restriction is not AWS PrivateLink.",
+            (
+                "Approved Regions cover retained application data, not global identity "
+                "or CDN processing."
+            ),
+            "Customer deletion and key-revocation exercises remain required.",
+        ],
+    }
+
+
 # Tenant list reads are deliberately finite. Callers that require complete
 # security state fail closed once either bound is reached; they never authorize
 # from a silently truncated result or let one request drain an unbounded table.
@@ -482,9 +628,7 @@ _WEBHOOK_DESTINATION_LIMIT = 20
 _WEBHOOK_ROTATION_MIN_SECONDS = 60 * 60
 _WEBHOOK_ROTATION_MAX_SECONDS = 7 * 24 * 60 * 60
 _WORKFLOW_PROVIDERS = frozenset({"servicenow", "jira", "pagerduty"})
-_WORKFLOW_EVENT_TYPES = frozenset(
-    {"case.opened", "case.contained", "case.resolved", "case.closed"}
-)
+_WORKFLOW_EVENT_TYPES = frozenset({"case.opened", "case.contained", "case.resolved", "case.closed"})
 _WORKFLOW_CONNECTION_LIMIT = 20
 _WORKFLOW_OUTBOX_INDEX = "WorkflowOutbox"
 _WORKFLOW_DELIVERY_RETENTION_SECONDS = 30 * 24 * 60 * 60
@@ -6272,9 +6416,7 @@ def _create_workflow_connection(tenant, value, actor):
         "description": description.strip(),
         "provider": provider,
         "configuration": _workflow_configuration(provider, value.get("configuration")),
-        "credential_secret_arn": _workflow_secret_arn(
-            tenant, value.get("credentialSecretArn")
-        ),
+        "credential_secret_arn": _workflow_secret_arn(tenant, value.get("credentialSecretArn")),
         "event_types": _workflow_events(value.get("eventTypes")),
         "status": "pending_verification",
         "revision": 1,
@@ -6657,9 +6799,7 @@ def _workflow_dispatch_cycle():
             raise RuntimeError("workflow tenant registration is invalid")
         result = TABLE.query(
             IndexName=_WORKFLOW_OUTBOX_INDEX,
-            KeyConditionExpression=Key("workflow_outbox_pk").eq(
-                f"WORKFLOW_OUTBOX#{tenant}"
-            ),
+            KeyConditionExpression=Key("workflow_outbox_pk").eq(f"WORKFLOW_OUTBOX#{tenant}"),
             Limit=101,
         )
         pending = result.get("Items", [])
@@ -20788,9 +20928,7 @@ def _create_case(tenant, body, actor):
         now=now,
         sequence=1,
     )
-    workflow_records = _workflow_delivery_records(
-        tenant, case, "case.opened", now=now
-    )
+    workflow_records = _workflow_delivery_records(tenant, case, "case.opened", now=now)
     _transact_incident_response(
         [
             _transaction_put(case, condition="attribute_not_exists(pk)"),
@@ -20908,9 +21046,7 @@ def _contain_case(tenant, case_id, body, actor):
         now=now,
         sequence=expected + 1,
     )
-    workflow_records = _workflow_delivery_records(
-        tenant, updated_case, "case.contained", now=now
-    )
+    workflow_records = _workflow_delivery_records(tenant, updated_case, "case.contained", now=now)
     containment_condition = (
         "revision = :revision AND active = :false" if existing else "attribute_not_exists(pk)"
     )
@@ -21486,9 +21622,7 @@ def _transition_case(tenant, case_id, body, actor, target):
         now=now,
         sequence=expected + 1,
     )
-    workflow_records = _workflow_delivery_records(
-        tenant, updated, f"case.{target}", now=now
-    )
+    workflow_records = _workflow_delivery_records(tenant, updated, f"case.{target}", now=now)
     _transact_incident_response(
         [
             _transaction_put(
@@ -24643,6 +24777,16 @@ def handler(event, context):
                     raise
             return _response(404, {"error": "agent route not found"})
 
+        # Human JWT authority remains insufficient outside the deployment-owned
+        # network boundary. Forwarded headers are deliberately ignored.
+        if not _operator_network_allowed(event):
+            return _response(
+                403,
+                {
+                    "error": "operator source is outside the configured data boundary",
+                    "requiredBoundary": "ip-restricted",
+                },
+            )
         tenant = _tenant(event)
         _seed(tenant)
         actor = _bounded_text(_claims(event).get("sub", "cognito-operator"), "actor", 256)
@@ -24690,6 +24834,10 @@ def handler(event, context):
         if path.startswith("/enterprise/") or path.startswith("/api/enterprise/"):
             suffix = path.split("/enterprise/", 1)[1]
             parts = [p for p in suffix.split("/") if p]
+            if method == "GET" and parts == ["data-boundary"]:
+                if not _operator_roles(event):
+                    return _response(403, {"error": "data-boundary posture requires a tenant role"})
+                return _response(200, _data_boundary_posture())
             if parts[:2] == ["identity", "service-identities"]:
                 # Canonical tenant roles may inspect secret-free posture and
                 # usage. Only the platform-admin wildcard may change machine
@@ -25630,9 +25778,7 @@ def handler(event, context):
                         _workflow_connection_view(
                             item, health=health_by_connection.get(item.get("id"))
                         )
-                        for item in _list(
-                            tenant, "WORKFLOW_CONNECTION", consistent_read=True
-                        )
+                        for item in _list(tenant, "WORKFLOW_CONNECTION", consistent_read=True)
                     ]
                     connections.sort(key=lambda item: (item["name"].lower(), item["id"]))
                     return _response(
@@ -25645,9 +25791,7 @@ def handler(event, context):
                         },
                     )
                 if method == "POST" and len(parts) == 1:
-                    return _response(
-                        201, _create_workflow_connection(tenant, _body(event), actor)
-                    )
+                    return _response(201, _create_workflow_connection(tenant, _body(event), actor))
                 if method == "GET" and len(parts) == 2:
                     connection = _workflow_connection(tenant, parts[1])
                     if not connection:
@@ -25664,14 +25808,10 @@ def handler(event, context):
                         return _response(404, {"error": "workflow connection not found"})
                     deliveries = [
                         _workflow_delivery_view(item)
-                        for item in _list(
-                            tenant, "WORKFLOW_DELIVERY", consistent_read=True
-                        )
+                        for item in _list(tenant, "WORKFLOW_DELIVERY", consistent_read=True)
                         if item.get("connection_id") == connection.get("id")
                     ]
-                    deliveries.sort(
-                        key=lambda item: (item["createdAt"], item["id"]), reverse=True
-                    )
+                    deliveries.sort(key=lambda item: (item["createdAt"], item["id"]), reverse=True)
                     return _response(200, {"items": deliveries[:100], "nextCursor": None})
                 if (
                     method == "POST"
@@ -25693,9 +25833,7 @@ def handler(event, context):
                     if parts[2] == "verify":
                         return _response(
                             202,
-                            _test_workflow_connection(
-                                tenant, parts[1], _body(event), actor
-                            ),
+                            _test_workflow_connection(tenant, parts[1], _body(event), actor),
                         )
                     if parts[2] in {"activate", "pause", "resume", "retire"}:
                         return _response(

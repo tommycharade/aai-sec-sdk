@@ -1446,3 +1446,18 @@ an authenticated observation and cannot become policy or operator authority.
 Bounded-source and record-limit omissions are visible fail-safe states, not
 healthy investigations. See
 [Unified investigation timeline](unified-investigation-timeline-design.md).
+
+## Enterprise data-boundary authority
+
+Encryption keys, approved retained-data Regions and operator source networks
+are deployment authority. Browser state, token claims, model output and
+ambient shell variables cannot select them. A strict manifest is verified,
+persisted in encrypted Parameter Store and reloaded for deployment; once a
+stack reports a configured boundary, loss of that manifest blocks deployment.
+
+Configured operator requests trust only API Gateway's source-IP context and
+fail closed before tenant lookup when it is missing or outside the allow-list.
+This is an IP restriction, not PrivateLink. Customer-key scope also excludes
+CloudWatch logs, static UI assets, dedicated signing keys and provider secrets;
+those remain separate boundaries and must never be described as covered by the
+tenant data key. See [Enterprise data boundary](enterprise-data-boundary-design.md).

@@ -311,6 +311,71 @@ export class AwsControlPlaneStack extends cdk.Stack {
       throw new Error("GitHub App policy repositories must share one installation owner");
     }
 
+    const dataBoundaryHomeRegion = process.env.DATA_BOUNDARY_HOME_REGION?.trim() ?? "";
+    const dataBoundaryKeyArn = process.env.DATA_BOUNDARY_KMS_KEY_ARN?.trim() ?? "";
+    const dataBoundaryAccessMode =
+      process.env.DATA_BOUNDARY_OPERATOR_ACCESS_MODE?.trim() ?? "";
+    const dataBoundaryConditionalAccessEvidenceRef =
+      process.env.DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_REF?.trim() ?? "";
+    const dataBoundaryApprovalEvidenceRef =
+      process.env.DATA_BOUNDARY_APPROVAL_EVIDENCE_REF?.trim() ?? "";
+    let dataBoundaryApprovedRegions: string[] = [];
+    let dataBoundaryOperatorCidrs: string[] = [];
+    try {
+      const regions = JSON.parse(process.env.DATA_BOUNDARY_APPROVED_REGIONS ?? "[]") as unknown;
+      const cidrs = JSON.parse(process.env.DATA_BOUNDARY_OPERATOR_IPV4_CIDRS ?? "[]") as unknown;
+      if (!Array.isArray(regions) || !Array.isArray(cidrs)) throw new Error("invalid arrays");
+      dataBoundaryApprovedRegions = regions as string[];
+      dataBoundaryOperatorCidrs = cidrs as string[];
+    } catch {
+      throw new Error("data-boundary Region or network registry is malformed");
+    }
+    const dataBoundaryValues = [
+      dataBoundaryHomeRegion,
+      dataBoundaryKeyArn,
+      dataBoundaryAccessMode,
+      dataBoundaryConditionalAccessEvidenceRef,
+      dataBoundaryApprovalEvidenceRef,
+    ];
+    const dataBoundaryConfigured = dataBoundaryValues.every(Boolean);
+    if (dataBoundaryValues.some(Boolean) !== dataBoundaryConfigured) {
+      throw new Error("data-boundary deployment fields must be configured together");
+    }
+    const deploymentRegion = process.env.CDK_DEFAULT_REGION ?? "eu-west-2";
+    if (dataBoundaryConfigured) {
+      if (
+        dataBoundaryHomeRegion !== deploymentRegion
+        || dataBoundaryAccessMode !== "ip-restricted"
+        || !/^arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:key\/[0-9a-f-]{36}$/i.test(dataBoundaryKeyArn)
+        || !dataBoundaryApprovedRegions.includes(dataBoundaryHomeRegion)
+        || dataBoundaryApprovedRegions.length < 1
+        || dataBoundaryApprovedRegions.length > 4
+        || dataBoundaryApprovedRegions.join(",") !== [...new Set(dataBoundaryApprovedRegions)].sort().join(",")
+        || dataBoundaryOperatorCidrs.length < 1
+        || dataBoundaryOperatorCidrs.length > 32
+        || dataBoundaryOperatorCidrs.join(",") !== [...new Set(dataBoundaryOperatorCidrs)].sort().join(",")
+        || dataBoundaryOperatorCidrs.some((cidr) => !/^(?:\d{1,3}\.){3}\d{1,3}\/(?:[0-9]|[12][0-9]|3[0-2])$/.test(cidr))
+      ) {
+        throw new Error("data-boundary deployment authority is invalid");
+      }
+      const recoveryRegion = process.env.AUDIT_REPLICA_REGION?.trim();
+      if (recoveryRegion && !dataBoundaryApprovedRegions.includes(recoveryRegion)) {
+        throw new Error("audit replica Region is outside the approved data boundary");
+      }
+    } else if (dataBoundaryApprovedRegions.length || dataBoundaryOperatorCidrs.length) {
+      throw new Error("data-boundary arrays require complete deployment authority");
+    }
+    // One deployment-owned key encrypts tenant records and transport queues.
+    // Signing and provider-secret keys stay isolated to prevent authority reuse.
+    const dataProtectionKey: kms.IKey = dataBoundaryConfigured
+      ? kms.Key.fromKeyArn(this, "CustomerManagedDataKey", dataBoundaryKeyArn)
+      : new kms.Key(this, "ServiceManagedDataKey", {
+        alias: "alias/aai-sec-control-plane-data",
+        description: "Encrypts AAI Security retained tenant data and durable queues",
+        enableKeyRotation: true,
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
+      });
+
     const table = new dynamodb.Table(this, "ControlPlaneTable", {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "sk", type: dynamodb.AttributeType.STRING },
@@ -318,7 +383,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       timeToLiveAttribute: "ttl",
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      encryption: dynamodb.TableEncryption.CUSTOMER_MANAGED,
+      encryptionKey: dataProtectionKey,
       deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
@@ -385,7 +451,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       timeToLiveAttribute: "ttl",
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      encryption: dynamodb.TableEncryption.CUSTOMER_MANAGED,
+      encryptionKey: dataProtectionKey,
       deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
@@ -396,7 +463,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       timeToLiveAttribute: "ttl",
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      encryption: dynamodb.TableEncryption.CUSTOMER_MANAGED,
+      encryptionKey: dataProtectionKey,
       deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
@@ -410,7 +478,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      encryption: dynamodb.TableEncryption.CUSTOMER_MANAGED,
+      encryptionKey: dataProtectionKey,
       deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
@@ -419,7 +488,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       versioned: true,
       objectLockEnabled: true,
       objectLockDefaultRetention: s3.ObjectLockRetention.compliance(cdk.Duration.days(365)),
-      encryption: s3.BucketEncryption.S3_MANAGED,
+      encryption: s3.BucketEncryption.KMS,
+      encryptionKey: dataProtectionKey,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -430,7 +500,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
     // inventory jobs never recursively inventory their own output.
     const evidenceReports = new s3.Bucket(this, "EvidenceReportBucket", {
       versioned: true,
-      encryption: s3.BucketEncryption.S3_MANAGED,
+      encryption: s3.BucketEncryption.KMS,
+      encryptionKey: dataProtectionKey,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
       lifecycleRules: [{ expiration: cdk.Duration.days(30), noncurrentVersionExpiration: cdk.Duration.days(7) }],
@@ -442,7 +513,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
     // immutable S3 version committed alongside the discovery generation.
     const integrityBaselines = new s3.Bucket(this, "IntegrityBaselineBucket", {
       versioned: true,
-      encryption: s3.BucketEncryption.S3_MANAGED,
+      encryption: s3.BucketEncryption.KMS,
+      encryptionKey: dataProtectionKey,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -453,7 +525,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
     // versioned bucket and commit only exact version/digest references.
     const discoveryPages = new s3.Bucket(this, "DiscoveryPageBucket", {
       versioned: true,
-      encryption: s3.BucketEncryption.S3_MANAGED,
+      encryption: s3.BucketEncryption.KMS,
+      encryptionKey: dataProtectionKey,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -562,6 +635,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     const securityAlerts = new sns.Topic(this, "SecurityAlerts", {
       displayName: "AAI Security control-plane alerts",
       enforceSSL: true,
+      masterKey: dataProtectionKey,
     });
     if (auditReplicaArn) {
       // Replication metrics make these object-level failure events available.
@@ -578,24 +652,28 @@ export class AwsControlPlaneStack extends cdk.Stack {
       );
     }
     const securityAlertsDlq = new sqs.Queue(this, "SecurityAlertsDlq", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const securityAlertsQueue = new sqs.Queue(this, "SecurityAlertsQueue", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       visibilityTimeout: cdk.Duration.seconds(60),
       retentionPeriod: cdk.Duration.days(14),
       deadLetterQueue: { queue: securityAlertsDlq, maxReceiveCount: 5 },
       enforceSSL: true,
     });
     const endpointDetectionDlq = new sqs.Queue(this, "EndpointDetectionDlq", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const rolloutReconciliationDlq = new sqs.Queue(this, "RolloutReconciliationDlq", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
@@ -603,21 +681,24 @@ export class AwsControlPlaneStack extends cdk.Stack {
       this,
       "DynamicGroupReconciliationDlq",
       {
-        encryption: sqs.QueueEncryption.SQS_MANAGED,
+        encryption: sqs.QueueEncryption.KMS,
+        encryptionMasterKey: dataProtectionKey,
         retentionPeriod: cdk.Duration.days(14),
         enforceSSL: true,
       },
     );
     const webhookDeliveryDlq = new sqs.Queue(this, "WebhookDeliveryDlq", {
       fifo: true,
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const webhookDeliveryQueue = new sqs.Queue(this, "WebhookDeliveryQueue", {
       fifo: true,
       contentBasedDeduplication: false,
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       visibilityTimeout: cdk.Duration.seconds(60),
       retentionPeriod: cdk.Duration.days(4),
       deadLetterQueue: { queue: webhookDeliveryDlq, maxReceiveCount: 5 },
@@ -625,39 +706,45 @@ export class AwsControlPlaneStack extends cdk.Stack {
     });
     const workflowDeliveryDlq = new sqs.Queue(this, "WorkflowDeliveryDlq", {
       fifo: true,
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const workflowDeliveryQueue = new sqs.Queue(this, "WorkflowDeliveryQueue", {
       fifo: true,
       contentBasedDeduplication: false,
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       visibilityTimeout: cdk.Duration.seconds(60),
       retentionPeriod: cdk.Duration.days(4),
       deadLetterQueue: { queue: workflowDeliveryDlq, maxReceiveCount: 5 },
       enforceSSL: true,
     });
     const workflowDispatchDlq = new sqs.Queue(this, "WorkflowDispatchDlq", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const webhookDispatchDlq = new sqs.Queue(this, "WebhookDispatchDlq", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const evidenceWorkerDlq = new sqs.Queue(this, "EvidenceWorkerDlq", {
       fifo: true,
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const evidenceWorkerQueue = new sqs.Queue(this, "EvidenceWorkerQueue", {
       fifo: true,
       contentBasedDeduplication: false,
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       // Six times the worker timeout leaves room for Lambda throttling and
       // event-source backoff without exposing the same page concurrently.
       visibilityTimeout: cdk.Duration.minutes(6),
@@ -666,12 +753,14 @@ export class AwsControlPlaneStack extends cdk.Stack {
       enforceSSL: true,
     });
     const assuranceReportWorkerDlq = new sqs.Queue(this, "AssuranceReportWorkerDlq", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const assuranceReportWorkerQueue = new sqs.Queue(this, "AssuranceReportWorkerQueue", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       visibilityTimeout: cdk.Duration.seconds(120),
       retentionPeriod: cdk.Duration.days(4),
       deadLetterQueue: { queue: assuranceReportWorkerDlq, maxReceiveCount: 3 },
@@ -679,14 +768,16 @@ export class AwsControlPlaneStack extends cdk.Stack {
     });
     const evidenceRetentionWorkerDlq = new sqs.Queue(this, "EvidenceRetentionWorkerDlq", {
       fifo: true,
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const evidenceRetentionWorkerQueue = new sqs.Queue(this, "EvidenceRetentionWorkerQueue", {
       fifo: true,
       contentBasedDeduplication: false,
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       visibilityTimeout: cdk.Duration.minutes(6),
       retentionPeriod: cdk.Duration.days(4),
       deadLetterQueue: { queue: evidenceRetentionWorkerDlq, maxReceiveCount: 3 },
@@ -695,22 +786,26 @@ export class AwsControlPlaneStack extends cdk.Stack {
     // Fault canaries never enter production evidence queues. This content-free
     // queue exists solely to prove the exact handler role's SQS boundary.
     const regionalFaultCanaryQueue = new sqs.Queue(this, "RegionalFaultCanaryQueue", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       enforceSSL: true,
       retentionPeriod: cdk.Duration.days(1),
     });
     const evidenceScheduleDlq = new sqs.Queue(this, "EvidenceScheduleDlq", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const assuranceReportScheduleDlq = new sqs.Queue(this, "AssuranceReportScheduleDlq", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
     const evidenceRetentionScheduleDlq = new sqs.Queue(this, "EvidenceRetentionScheduleDlq", {
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
       enforceSSL: true,
     });
@@ -968,6 +1063,19 @@ export class AwsControlPlaneStack extends cdk.Stack {
       WEBHOOK_SECRET_KMS_KEY_ARN: webhookSecretKey.keyArn,
       WORKFLOW_QUEUE_URL: workflowDeliveryQueue.queueUrl,
       WORKFLOW_SECRET_PREFIX: "aai-sec/workflows/",
+      DATA_BOUNDARY_STATUS: dataBoundaryConfigured ? "configured" : "not-configured",
+      DATA_BOUNDARY_HOME_REGION: dataBoundaryHomeRegion || deploymentRegion,
+      DATA_BOUNDARY_APPROVED_REGIONS: JSON.stringify(
+        dataBoundaryConfigured ? dataBoundaryApprovedRegions : [deploymentRegion],
+      ),
+      DATA_BOUNDARY_KEY_ARN: dataProtectionKey.keyArn,
+      DATA_BOUNDARY_KEY_OWNERSHIP: dataBoundaryConfigured ? "customer-managed" : "service-managed",
+      DATA_BOUNDARY_OPERATOR_ACCESS_MODE: dataBoundaryAccessMode || "public-authenticated",
+      DATA_BOUNDARY_OPERATOR_IPV4_CIDRS: JSON.stringify(dataBoundaryOperatorCidrs),
+      DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_CONFIGURED:
+        dataBoundaryConditionalAccessEvidenceRef ? "true" : "false",
+      DATA_BOUNDARY_APPROVAL_EVIDENCE_CONFIGURED:
+        dataBoundaryApprovalEvidenceRef ? "true" : "false",
       INTEGRITY_BASELINE_BUCKET: integrityBaselines.bucketName,
       DISCOVERY_PAGE_BUCKET: discoveryPages.bucketName,
       RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
@@ -1495,7 +1603,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
     const discoveryCollectorDlq = new sqs.Queue(this, "DiscoveryCollectorDlq", {
-      encryption: sqs.QueueEncryption.KMS_MANAGED,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
       enforceSSL: true,
       retentionPeriod: cdk.Duration.days(14),
     });
@@ -1784,6 +1893,20 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "UiUrl", { value: `https://${distribution.domainName}` });
     new cdk.CfnOutput(this, "UiBucketName", { value: uiBucket.bucketName });
     new cdk.CfnOutput(this, "AuditBucketName", { value: audit.bucketName });
+    new cdk.CfnOutput(this, "DataBoundaryStatus", {
+      value: dataBoundaryConfigured ? "configured" : "not-configured",
+    });
+    new cdk.CfnOutput(this, "DataBoundaryHomeRegion", { value: dataBoundaryHomeRegion || deploymentRegion });
+    new cdk.CfnOutput(this, "DataBoundaryApprovedRegions", {
+      value: JSON.stringify(dataBoundaryConfigured ? dataBoundaryApprovedRegions : [deploymentRegion]),
+    });
+    new cdk.CfnOutput(this, "DataBoundaryKeyArn", { value: dataProtectionKey.keyArn });
+    new cdk.CfnOutput(this, "DataBoundaryKeyOwnership", {
+      value: dataBoundaryConfigured ? "customer-managed" : "service-managed",
+    });
+    new cdk.CfnOutput(this, "DataBoundaryOperatorAccessMode", {
+      value: dataBoundaryAccessMode || "public-authenticated",
+    });
     new cdk.CfnOutput(this, "ControlTableName", { value: table.tableName });
     new cdk.CfnOutput(this, "PresenceTableName", { value: presence.tableName });
     new cdk.CfnOutput(this, "IdempotencyTableName", { value: idempotency.tableName });

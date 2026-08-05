@@ -103,6 +103,7 @@ nav:
   - Terraform provider and declarative management: terraform-provider-design.md
   - Secure webhooks: secure-webhooks-design.md
   - Incident workflow integrations: incident-workflow-integrations-design.md
+  - Enterprise data boundary: enterprise-data-boundary-design.md
   - Enterprise integration design: enterprise-integration-design.md
   - Runtime attestation design: runtime-attestation-design.md
   - Approved runtime releases and version compliance: runtime-release-compliance-design.md

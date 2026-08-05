@@ -9,6 +9,7 @@ operator shell omitted ephemeral environment variables.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -69,6 +70,19 @@ _ASSURANCE_SIGNER_MANIFEST_FIELDS = {
     "recoveryRegion",
     "approvalEvidenceRef",
 }
+_DATA_BOUNDARY_MANIFEST_FIELDS = {
+    "schemaVersion",
+    "homeRegion",
+    "approvedDataRegions",
+    "customerManagedDataKeyArn",
+    "operatorAccessMode",
+    "operatorAllowedIpv4Cidrs",
+    "keyPolicyEvidenceRef",
+    "residencyEvidenceRef",
+    "deletionEvidenceRef",
+    "conditionalAccessEvidenceRef",
+    "approvalEvidenceRef",
+}
 _AWS_SECRET_NAME = re.compile(r"^[A-Za-z0-9/_+=.@-]{1,512}$")
 _AAI_TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _EVIDENCE_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,511}$")
@@ -76,6 +90,11 @@ _AWS_PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@/+-]{0,127}$")
 _AWS_REGION = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
 _MRK_ARN = re.compile(
     r"^arn:(aws|aws-us-gov|aws-cn):kms:([a-z]{2}(?:-gov)?-[a-z]+-\d):(\d{12}):key/(mrk-[0-9a-f]{32})$"
+)
+_KMS_KEY_ARN = re.compile(
+    r"^arn:(aws|aws-us-gov|aws-cn):kms:([a-z]{2}(?:-gov)?-[a-z]+-\d):(\d{12}):key/"
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$",
+    re.IGNORECASE,
 )
 _ENTRA_ENVIRONMENT_FIELDS = (
     "ENTRA_TENANT_ID",
@@ -475,6 +494,148 @@ class AssuranceSignerDeploymentManifest:
         }
 
 
+@dataclass(frozen=True)
+class DataBoundaryDeploymentManifest:
+    """Deployment-owned encryption, residency and operator-network authority."""
+
+    home_region: str
+    approved_data_regions: tuple[str, ...]
+    customer_managed_data_key_arn: str
+    operator_allowed_ipv4_cidrs: tuple[str, ...]
+    key_policy_evidence_ref: str
+    residency_evidence_ref: str
+    deletion_evidence_ref: str
+    conditional_access_evidence_ref: str
+    approval_evidence_ref: str
+
+    @classmethod
+    def parse(cls, payload: str) -> DataBoundaryDeploymentManifest:
+        """Parse one exact secret-free boundary and reject unsafe network aliases."""
+        if len(payload.encode("utf-8")) > 16_384:
+            raise DeploymentConfigurationError("data-boundary manifest exceeds 16 KiB")
+        try:
+            value = json.loads(payload, object_pairs_hook=_strict_object)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise DeploymentConfigurationError("data-boundary manifest is invalid") from error
+        if (
+            not isinstance(value, dict)
+            or set(value) != _DATA_BOUNDARY_MANIFEST_FIELDS
+            or value.get("schemaVersion") != 1
+            or value.get("operatorAccessMode") != "ip-restricted"
+        ):
+            raise DeploymentConfigurationError("data-boundary manifest schema is invalid")
+        home_region = _bounded_string(value.get("homeRegion"), "homeRegion", maximum=32)
+        regions = value.get("approvedDataRegions")
+        if (
+            not _AWS_REGION.fullmatch(home_region)
+            or not isinstance(regions, list)
+            or not 1 <= len(regions) <= 4
+            or any(
+                not isinstance(region, str) or not _AWS_REGION.fullmatch(region)
+                for region in regions
+            )
+            or regions != sorted(set(regions))
+            or home_region not in regions
+        ):
+            raise DeploymentConfigurationError("approved data Regions are invalid")
+        key_arn = value.get("customerManagedDataKeyArn")
+        key_match = _KMS_KEY_ARN.fullmatch(key_arn) if isinstance(key_arn, str) else None
+        if key_match is None or key_match.group(2) != home_region:
+            raise DeploymentConfigurationError("customer-managed data key is invalid")
+        cidrs = value.get("operatorAllowedIpv4Cidrs")
+        if (
+            not isinstance(cidrs, list)
+            or not 1 <= len(cidrs) <= 32
+            or any(not isinstance(cidr, str) for cidr in cidrs)
+        ):
+            raise DeploymentConfigurationError("operator IPv4 CIDRs are invalid")
+        canonical_cidrs: list[str] = []
+        for cidr in cidrs:
+            try:
+                network = ipaddress.ip_network(cidr, strict=True)
+            except ValueError as error:
+                raise DeploymentConfigurationError("operator IPv4 CIDRs are invalid") from error
+            if (
+                network.version != 4
+                or network.is_private
+                or network.is_loopback
+                or network.is_link_local
+                or network.is_multicast
+                or network.is_reserved
+                or network.is_unspecified
+                or str(network) != cidr
+            ):
+                raise DeploymentConfigurationError(
+                    "operator IPv4 CIDRs must be canonical public networks"
+                )
+            canonical_cidrs.append(cidr)
+        if canonical_cidrs != sorted(set(canonical_cidrs)):
+            raise DeploymentConfigurationError("operator IPv4 CIDRs must be sorted and unique")
+        references = []
+        for field in (
+            "keyPolicyEvidenceRef",
+            "residencyEvidenceRef",
+            "deletionEvidenceRef",
+            "conditionalAccessEvidenceRef",
+            "approvalEvidenceRef",
+        ):
+            reference = _bounded_string(value.get(field), field, maximum=512)
+            if not _EVIDENCE_REFERENCE.fullmatch(reference):
+                raise DeploymentConfigurationError(f"{field} is invalid")
+            references.append(reference)
+        assert isinstance(key_arn, str)
+        return cls(
+            home_region,
+            tuple(regions),
+            key_arn,
+            tuple(canonical_cidrs),
+            *references,
+        )
+
+    @property
+    def account_id(self) -> str:
+        """Return the exact AWS account encoded by the validated key ARN."""
+        match = _KMS_KEY_ARN.fullmatch(self.customer_managed_data_key_arn)
+        assert match is not None
+        return match.group(3)
+
+    def canonical_json(self) -> str:
+        """Return stable secret-free deployment authority for Parameter Store."""
+        return json.dumps(
+            {
+                "approvalEvidenceRef": self.approval_evidence_ref,
+                "approvedDataRegions": list(self.approved_data_regions),
+                "conditionalAccessEvidenceRef": self.conditional_access_evidence_ref,
+                "customerManagedDataKeyArn": self.customer_managed_data_key_arn,
+                "deletionEvidenceRef": self.deletion_evidence_ref,
+                "homeRegion": self.home_region,
+                "keyPolicyEvidenceRef": self.key_policy_evidence_ref,
+                "operatorAccessMode": "ip-restricted",
+                "operatorAllowedIpv4Cidrs": list(self.operator_allowed_ipv4_cidrs),
+                "residencyEvidenceRef": self.residency_evidence_ref,
+                "schemaVersion": 1,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def deployment_environment(self) -> dict[str, str]:
+        """Return reviewed non-secret values consumed by CDK and Lambda."""
+        return {
+            "DATA_BOUNDARY_HOME_REGION": self.home_region,
+            "DATA_BOUNDARY_APPROVED_REGIONS": json.dumps(
+                self.approved_data_regions, separators=(",", ":")
+            ),
+            "DATA_BOUNDARY_KMS_KEY_ARN": self.customer_managed_data_key_arn,
+            "DATA_BOUNDARY_OPERATOR_ACCESS_MODE": "ip-restricted",
+            "DATA_BOUNDARY_OPERATOR_IPV4_CIDRS": json.dumps(
+                self.operator_allowed_ipv4_cidrs, separators=(",", ":")
+            ),
+            "DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_REF": (self.conditional_access_evidence_ref),
+            "DATA_BOUNDARY_APPROVAL_EVIDENCE_REF": self.approval_evidence_ref,
+        }
+
+
 def _aws(
     arguments: Sequence[str],
     *,
@@ -529,6 +690,13 @@ def assurance_signer_parameter_name(stack_name: str) -> str:
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack_name):
         raise DeploymentConfigurationError("stack name is invalid")
     return f"/aai-sec/{stack_name}/assurance-signer"
+
+
+def data_boundary_parameter_name(stack_name: str) -> str:
+    """Return the persistent deployment-owned data-boundary path."""
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack_name):
+        raise DeploymentConfigurationError("stack name is invalid")
+    return f"/aai-sec/{stack_name}/data-boundary"
 
 
 def stack_outputs(
@@ -716,6 +884,45 @@ def load_persisted_assurance_signer_manifest(
     if not isinstance(payload, str):
         raise DeploymentConfigurationError("persisted assurance signer manifest is not text")
     return AssuranceSignerDeploymentManifest.parse(payload)
+
+
+def load_persisted_data_boundary_manifest(
+    stack_name: str, *, profile: str, region: str, runner: Runner = subprocess.run
+) -> DataBoundaryDeploymentManifest | None:
+    """Load data-boundary authority, returning None only before configuration."""
+    result = runner(
+        [
+            "aws",
+            "ssm",
+            "get-parameter",
+            "--name",
+            data_boundary_parameter_name(stack_name),
+            "--with-decryption",
+            "--profile",
+            profile,
+            "--region",
+            region,
+            "--output",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        if "ParameterNotFound" in result.stderr:
+            return None
+        raise DeploymentConfigurationError((result.stderr.strip() or "SSM lookup failed")[-500:])
+    try:
+        payload = json.loads(result.stdout)["Parameter"]["Value"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise DeploymentConfigurationError(
+            "persisted data-boundary manifest is malformed"
+        ) from error
+    if not isinstance(payload, str):
+        raise DeploymentConfigurationError("persisted data-boundary manifest is not text")
+    return DataBoundaryDeploymentManifest.parse(payload)
 
 
 def _secret_value(name: str, *, profile: str, region: str, runner: Runner = subprocess.run) -> str:
@@ -1071,6 +1278,87 @@ def persist_assurance_signer_manifest(
     )
 
 
+def verify_data_boundary(
+    manifest: DataBoundaryDeploymentManifest,
+    *,
+    profile: str,
+    region: str,
+    recovery: AuditRecoveryManifest | None = None,
+    runner: Runner = subprocess.run,
+) -> None:
+    """Verify exact account, Region and KMS posture without changing AWS."""
+    if manifest.home_region != region:
+        raise DeploymentConfigurationError(
+            "data-boundary homeRegion differs from deployment Region"
+        )
+    if recovery is not None and recovery.replica_region not in manifest.approved_data_regions:
+        raise DeploymentConfigurationError("audit replica Region is outside approved data Regions")
+    caller = _aws(["sts", "get-caller-identity"], profile=profile, region=region, runner=runner)
+    if caller.get("Account") != manifest.account_id:
+        raise DeploymentConfigurationError("customer-managed data key belongs to another account")
+    response = _aws(
+        ["kms", "describe-key", "--key-id", manifest.customer_managed_data_key_arn],
+        profile=profile,
+        region=region,
+        runner=runner,
+    )
+    metadata = response.get("KeyMetadata")
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("Arn") != manifest.customer_managed_data_key_arn
+        or metadata.get("AWSAccountId") != manifest.account_id
+        or metadata.get("KeyManager") != "CUSTOMER"
+        or metadata.get("KeyState") != "Enabled"
+        or metadata.get("Enabled") is not True
+        or metadata.get("KeyUsage") != "ENCRYPT_DECRYPT"
+        or metadata.get("KeySpec") != "SYMMETRIC_DEFAULT"
+        or metadata.get("Origin") != "AWS_KMS"
+    ):
+        raise DeploymentConfigurationError("customer-managed data key posture is invalid")
+    rotation = _aws(
+        [
+            "kms",
+            "get-key-rotation-status",
+            "--key-id",
+            manifest.customer_managed_data_key_arn,
+        ],
+        profile=profile,
+        region=region,
+        runner=runner,
+    )
+    if rotation.get("KeyRotationEnabled") is not True:
+        raise DeploymentConfigurationError("customer-managed data key rotation is not enabled")
+
+
+def persist_data_boundary_manifest(
+    manifest: DataBoundaryDeploymentManifest,
+    stack_name: str,
+    *,
+    profile: str,
+    region: str,
+    runner: Runner = subprocess.run,
+) -> None:
+    """Persist only reviewed, secret-free data-boundary authority."""
+    _aws(
+        [
+            "ssm",
+            "put-parameter",
+            "--name",
+            data_boundary_parameter_name(stack_name),
+            "--type",
+            "SecureString",
+            "--overwrite",
+            "--value",
+            manifest.canonical_json(),
+            "--description",
+            "Persistent AAI Security encryption, residency and access boundary",
+        ],
+        profile=profile,
+        region=region,
+        runner=runner,
+    )
+
+
 def deploy(
     stack_name: str,
     *,
@@ -1088,6 +1376,9 @@ def deploy(
         stack_name, profile=profile, region=region, runner=runner
     )
     assurance_signer = load_persisted_assurance_signer_manifest(
+        stack_name, profile=profile, region=region, runner=runner
+    )
+    data_boundary = load_persisted_data_boundary_manifest(
         stack_name, profile=profile, region=region, runner=runner
     )
     outputs = stack_outputs(
@@ -1115,6 +1406,10 @@ def deploy(
     ):
         raise DeploymentConfigurationError(
             "stack uses a rotated assurance signer but its persistent manifest is missing"
+        )
+    if data_boundary is None and outputs.get("DataBoundaryStatus") == "configured":
+        raise DeploymentConfigurationError(
+            "stack has a data boundary configured but its persistent manifest is missing"
         )
     if assurance_signer is not None and outputs:
         deployed_current = outputs.get("AssuranceReportSigningKeyArn")
@@ -1158,6 +1453,13 @@ def deploy(
         *_POLICY_GITHUB_ENVIRONMENT_FIELDS,
         "ASSURANCE_REPORT_SIGNING_KEY_ARN",
         "ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS",
+        "DATA_BOUNDARY_HOME_REGION",
+        "DATA_BOUNDARY_APPROVED_REGIONS",
+        "DATA_BOUNDARY_KMS_KEY_ARN",
+        "DATA_BOUNDARY_OPERATOR_ACCESS_MODE",
+        "DATA_BOUNDARY_OPERATOR_IPV4_CIDRS",
+        "DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_REF",
+        "DATA_BOUNDARY_APPROVAL_EVIDENCE_REF",
     ):
         environment.pop(field, None)
     environment.update({"AWS_PROFILE": profile, "AWS_REGION": region})
@@ -1182,6 +1484,15 @@ def deploy(
         if assurance_signer.current_signer_arn.split(":")[3] != region:
             raise DeploymentConfigurationError("assurance signer belongs to another region")
         environment.update(assurance_signer.deployment_environment())
+    if data_boundary is not None:
+        verify_data_boundary(
+            data_boundary,
+            profile=profile,
+            region=region,
+            recovery=recovery,
+            runner=runner,
+        )
+        environment.update(data_boundary.deployment_environment())
     root = Path(__file__).resolve().parents[1]
     infrastructure = root / "infra" / "aws-control-plane"
     for command in (
@@ -1213,6 +1524,15 @@ def deploy(
         != json.dumps(assurance_signer.historical_verification_key_arns, separators=(",", ":"))
     ):
         raise DeploymentConfigurationError("deployed assurance signer posture is incomplete")
+    if data_boundary is not None and (
+        post.get("DataBoundaryStatus") != "configured"
+        or post.get("DataBoundaryHomeRegion") != data_boundary.home_region
+        or post.get("DataBoundaryApprovedRegions")
+        != json.dumps(data_boundary.approved_data_regions, separators=(",", ":"))
+        or post.get("DataBoundaryKeyArn") != data_boundary.customer_managed_data_key_arn
+        or post.get("DataBoundaryOperatorAccessMode") != "ip-restricted"
+    ):
+        raise DeploymentConfigurationError("deployed data-boundary posture is incomplete")
     return manifest
 
 
@@ -1228,6 +1548,8 @@ def _parser() -> argparse.ArgumentParser:
             "configure-recovery",
             "check-policy-github",
             "configure-policy-github",
+            "check-data-boundary",
+            "configure-data-boundary",
             "deploy",
             "status",
         ),
@@ -1250,6 +1572,11 @@ def _parser() -> argparse.ArgumentParser:
         "--confirm-recovery-controls",
         action="store_true",
         help="Confirm the recovery evidence reference records an approved cross-region review",
+    )
+    parser.add_argument(
+        "--confirm-data-boundary-review",
+        action="store_true",
+        help="Confirm encryption, residency, deletion, network and Conditional Access evidence",
     )
     return parser
 
@@ -1336,6 +1663,38 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"GitHub policy-source {arguments.command} passed for stack "
                 f"{arguments.stack_name}; no credential values were emitted."
             )
+        elif arguments.command in {"check-data-boundary", "configure-data-boundary"}:
+            if arguments.config is None:
+                raise DeploymentConfigurationError("--config is required")
+            candidate_data_boundary = DataBoundaryDeploymentManifest.parse(
+                arguments.config.read_text(encoding="utf-8")
+            )
+            persisted_recovery = load_persisted_recovery_manifest(
+                arguments.stack_name,
+                profile=arguments.profile,
+                region=arguments.region,
+            )
+            verify_data_boundary(
+                candidate_data_boundary,
+                profile=arguments.profile,
+                region=arguments.region,
+                recovery=persisted_recovery,
+            )
+            if arguments.command == "configure-data-boundary":
+                if not arguments.confirm_data_boundary_review:
+                    raise DeploymentConfigurationError(
+                        "--confirm-data-boundary-review is required before persistence"
+                    )
+                persist_data_boundary_manifest(
+                    candidate_data_boundary,
+                    arguments.stack_name,
+                    profile=arguments.profile,
+                    region=arguments.region,
+                )
+            print(
+                f"Data-boundary {arguments.command} passed for stack "
+                f"{arguments.stack_name}; no CIDRs or key policy content were emitted."
+            )
         elif arguments.command == "deploy":
             active_manifest = deploy(
                 arguments.stack_name, profile=arguments.profile, region=arguments.region
@@ -1350,6 +1709,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.stack_name, profile=arguments.profile, region=arguments.region
             )
             deployed_policy_github = load_persisted_policy_github_manifest(
+                arguments.stack_name, profile=arguments.profile, region=arguments.region
+            )
+            deployed_data_boundary = load_persisted_data_boundary_manifest(
                 arguments.stack_name, profile=arguments.profile, region=arguments.region
             )
             outputs = stack_outputs(
@@ -1367,6 +1729,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "auditRecovery": ("configured" if deployed_recovery else "not-configured"),
                         "policyGitHub": (
                             "configured" if deployed_policy_github else "not-configured"
+                        ),
+                        "dataBoundary": (
+                            "configured" if deployed_data_boundary else "not-configured"
                         ),
                     },
                     sort_keys=True,

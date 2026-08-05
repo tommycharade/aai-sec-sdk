@@ -101,6 +101,101 @@ def _policy_github_app_manifest(**updates: Any) -> dict[str, Any]:
     return value
 
 
+def _data_boundary_manifest(**updates: Any) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "schemaVersion": 1,
+        "homeRegion": "eu-west-2",
+        "approvedDataRegions": ["eu-west-1", "eu-west-2"],
+        "customerManagedDataKeyArn": (
+            "arn:aws:kms:eu-west-2:111111111111:key/11111111-1111-4111-8111-111111111111"
+        ),
+        "operatorAccessMode": "ip-restricted",
+        "operatorAllowedIpv4Cidrs": ["93.184.216.34/32"],
+        "keyPolicyEvidenceRef": "SEC-KMS-1234",
+        "residencyEvidenceRef": "LEGAL-RESIDENCY-1234",
+        "deletionEvidenceRef": "PRIVACY-DELETION-1234",
+        "conditionalAccessEvidenceRef": "ENTRA-CA-1234",
+        "approvalEvidenceRef": "CHANGE-1234",
+    }
+    value.update(updates)
+    return value
+
+
+def test_data_boundary_manifest_is_exact_secret_free_and_network_safe() -> None:
+    module = _load()
+    manifest = module.DataBoundaryDeploymentManifest.parse(json.dumps(_data_boundary_manifest()))
+    assert manifest.home_region == "eu-west-2"
+    assert manifest.operator_allowed_ipv4_cidrs == ("93.184.216.34/32",)
+    assert "operatorAllowedIpv4Cidrs" in manifest.canonical_json()
+    assert manifest.deployment_environment()["DATA_BOUNDARY_OPERATOR_ACCESS_MODE"] == (
+        "ip-restricted"
+    )
+    for unsafe in ("10.0.0.0/8", "127.0.0.1/32", "93.184.216.35/24"):
+        with pytest.raises(module.DeploymentConfigurationError, match="IPv4 CIDRs"):
+            module.DataBoundaryDeploymentManifest.parse(
+                json.dumps(_data_boundary_manifest(operatorAllowedIpv4Cidrs=[unsafe]))
+            )
+    with pytest.raises(module.DeploymentConfigurationError, match="schema"):
+        module.DataBoundaryDeploymentManifest.parse(
+            json.dumps(_data_boundary_manifest(untrustedBrowserOverride=True))
+        )
+    duplicate = json.dumps(_data_boundary_manifest())[:-1] + ',"homeRegion":"eu-west-2"}'
+    with pytest.raises(module.DeploymentConfigurationError, match="duplicate"):
+        module.DataBoundaryDeploymentManifest.parse(duplicate)
+
+
+def test_data_boundary_preflight_requires_exact_customer_key_and_rotation() -> None:
+    module = _load()
+    manifest = module.DataBoundaryDeploymentManifest.parse(json.dumps(_data_boundary_manifest()))
+
+    def runner(command: list[str], **_: Any) -> Any:
+        if "get-caller-identity" in command:
+            return _completed(json.dumps({"Account": "111111111111"}))
+        if "describe-key" in command:
+            return _completed(
+                json.dumps(
+                    {
+                        "KeyMetadata": {
+                            "Arn": manifest.customer_managed_data_key_arn,
+                            "AWSAccountId": "111111111111",
+                            "KeyManager": "CUSTOMER",
+                            "KeyState": "Enabled",
+                            "Enabled": True,
+                            "KeyUsage": "ENCRYPT_DECRYPT",
+                            "KeySpec": "SYMMETRIC_DEFAULT",
+                            "Origin": "AWS_KMS",
+                        }
+                    }
+                )
+            )
+        if "get-key-rotation-status" in command:
+            return _completed(json.dumps({"KeyRotationEnabled": True}))
+        raise AssertionError(command)
+
+    module.verify_data_boundary(
+        manifest,
+        profile="synthetic",
+        region="eu-west-2",
+        recovery=module.AuditRecoveryManifest.parse(json.dumps(_recovery_manifest())),
+        runner=runner,
+    )
+
+    def no_rotation(command: list[str], **kwargs: Any) -> Any:
+        response = runner(command, **kwargs)
+        if "get-key-rotation-status" in command:
+            return _completed(json.dumps({"KeyRotationEnabled": False}))
+        return response
+
+    with pytest.raises(module.DeploymentConfigurationError, match="rotation"):
+        module.verify_data_boundary(
+            manifest, profile="synthetic", region="eu-west-2", runner=no_rotation
+        )
+    with pytest.raises(module.DeploymentConfigurationError, match="homeRegion"):
+        module.verify_data_boundary(
+            manifest, profile="synthetic", region="eu-west-1", runner=runner
+        )
+
+
 def _completed(stdout: str = "{}", *, returncode: int = 0, stderr: str = "") -> Any:
     return subprocess.CompletedProcess([], returncode, stdout, stderr)
 
@@ -484,12 +579,46 @@ def test_configured_stack_cannot_be_deployed_after_manifest_loss(monkeypatch: An
         module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
+        module, "load_persisted_data_boundary_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
         module,
         "stack_outputs",
         lambda *_args, **_kwargs: {"MicrosoftEntraIdStatus": "configured"},
     )
     with pytest.raises(module.DeploymentConfigurationError, match="manifest is missing"):
         module.deploy("AaiSecControlPlane", profile="synthetic", region="eu-west-2")
+
+
+def test_configured_data_boundary_cannot_be_deployed_after_manifest_loss(
+    monkeypatch: Any,
+) -> None:
+    module = _load()
+    monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_data_boundary_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module,
+        "stack_outputs",
+        lambda *_args, **_kwargs: {"DataBoundaryStatus": "configured"},
+    )
+    calls: list[Any] = []
+    with pytest.raises(module.DeploymentConfigurationError, match="data boundary.*missing"):
+        module.deploy(
+            "AaiSecControlPlane",
+            profile="synthetic",
+            region="eu-west-2",
+            runner=lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+    assert calls == []
 
 
 def test_configured_replication_cannot_be_deployed_after_manifest_loss(monkeypatch: Any) -> None:
@@ -501,6 +630,9 @@ def test_configured_replication_cannot_be_deployed_after_manifest_loss(monkeypat
     )
     monkeypatch.setattr(
         module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_data_boundary_manifest", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
         module,
@@ -523,6 +655,9 @@ def test_rotated_signer_cannot_be_deployed_after_manifest_loss(monkeypatch: Any)
     )
     monkeypatch.setattr(
         module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_data_boundary_manifest", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
         module,
@@ -551,6 +686,9 @@ def test_stale_signer_manifest_cannot_roll_back_outside_rotation(monkeypatch: An
     )
     monkeypatch.setattr(
         module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: signer
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_data_boundary_manifest", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
         module,
@@ -597,6 +735,9 @@ def test_stale_historical_signer_registry_fails_before_deploy(
         module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: signer
     )
     monkeypatch.setattr(
+        module, "load_persisted_data_boundary_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
         module,
         "stack_outputs",
         lambda *_args, **_kwargs: {
@@ -637,6 +778,7 @@ def test_explicit_signer_cutover_accepts_exact_old_current_and_older_history(
     monkeypatch.setattr(
         module, "load_persisted_assurance_signer_manifest", lambda *_a, **_k: signer
     )
+    monkeypatch.setattr(module, "load_persisted_data_boundary_manifest", lambda *_a, **_k: None)
     outputs = iter(
         [
             {
@@ -695,6 +837,7 @@ def test_explicit_cutover_rejects_changed_older_history_before_deploy(
     monkeypatch.setattr(
         module, "load_persisted_assurance_signer_manifest", lambda *_a, **_k: signer
     )
+    monkeypatch.setattr(module, "load_persisted_data_boundary_manifest", lambda *_a, **_k: None)
     monkeypatch.setattr(
         module,
         "stack_outputs",
@@ -728,6 +871,9 @@ def test_deploy_injects_only_manifest_references_and_verifies_posture(monkeypatc
     )
     monkeypatch.setattr(
         module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_data_boundary_manifest", lambda *_args, **_kwargs: None
     )
     output_sequence = iter(
         [
@@ -791,6 +937,9 @@ def test_deploy_uses_only_persisted_recovery_authority(monkeypatch: Any) -> None
     monkeypatch.setattr(
         module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
     )
+    monkeypatch.setattr(
+        module, "load_persisted_data_boundary_manifest", lambda *_args, **_kwargs: None
+    )
     output_sequence = iter(
         [
             {"MicrosoftEntraIdStatus": "not-configured"},
@@ -839,6 +988,39 @@ def test_persistence_requires_explicit_conditional_access_confirmation(
                 "--config",
                 str(config),
                 "--confirm-conditional-access",
+            ]
+        )
+        == 0
+    )
+    assert len(persisted) == 1
+
+
+def test_data_boundary_persistence_requires_explicit_review_confirmation(
+    tmp_path: Path, monkeypatch: Any, capsys: Any
+) -> None:
+    module = _load()
+    config = tmp_path / "data-boundary.json"
+    config.write_text(json.dumps(_data_boundary_manifest()), encoding="utf-8")
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(module, "verify_data_boundary", lambda *_args, **_kwargs: None)
+    persisted: list[Any] = []
+    monkeypatch.setattr(
+        module,
+        "persist_data_boundary_manifest",
+        lambda *args, **kwargs: persisted.append((args, kwargs)),
+    )
+
+    assert module.main(["configure-data-boundary", "--config", str(config)]) == 1
+    assert not persisted
+    assert "--confirm-data-boundary-review is required" in capsys.readouterr().err
+
+    assert (
+        module.main(
+            [
+                "configure-data-boundary",
+                "--config",
+                str(config),
+                "--confirm-data-boundary-review",
             ]
         )
         == 0
@@ -958,6 +1140,9 @@ def test_deploy_uses_only_persisted_policy_github_authority(monkeypatch: Any) ->
     monkeypatch.setattr(
         module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
     )
+    monkeypatch.setattr(
+        module, "load_persisted_data_boundary_manifest", lambda *_args, **_kwargs: None
+    )
     output_sequence = iter(
         [
             {"PolicyGitHubSourceStatus": "not-configured"},
@@ -981,6 +1166,46 @@ def test_deploy_uses_only_persisted_policy_github_authority(monkeypatch: Any) ->
         "github.com/example/security-policy"
     )
     assert "ambient-unsafe" not in repr(environment)
+
+
+def test_deploy_uses_only_persisted_data_boundary_authority(monkeypatch: Any) -> None:
+    module = _load()
+    boundary = module.DataBoundaryDeploymentManifest.parse(json.dumps(_data_boundary_manifest()))
+    monkeypatch.setattr(module, "load_persisted_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(module, "load_persisted_policy_github_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(module, "load_persisted_assurance_signer_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(module, "load_persisted_data_boundary_manifest", lambda *_a, **_k: boundary)
+    outputs = iter(
+        [
+            {"DataBoundaryStatus": "not-configured"},
+            {
+                "DataBoundaryStatus": "configured",
+                "DataBoundaryHomeRegion": boundary.home_region,
+                "DataBoundaryApprovedRegions": json.dumps(
+                    boundary.approved_data_regions, separators=(",", ":")
+                ),
+                "DataBoundaryKeyArn": boundary.customer_managed_data_key_arn,
+                "DataBoundaryOperatorAccessMode": "ip-restricted",
+            },
+        ]
+    )
+    monkeypatch.setattr(module, "stack_outputs", lambda *_a, **_k: next(outputs))
+    monkeypatch.setattr(module, "verify_data_boundary", lambda *_a, **_k: None)
+    monkeypatch.setenv("DATA_BOUNDARY_KMS_KEY_ARN", "arn:aws:kms:attacker")
+    monkeypatch.setenv("DATA_BOUNDARY_OPERATOR_IPV4_CIDRS", "0.0.0.0/0")
+    commands: list[tuple[list[str], dict[str, str]]] = []
+
+    def runner(command: list[str], **kwargs: Any) -> Any:
+        commands.append((command, kwargs.get("env", {})))
+        return _completed()
+
+    module.deploy("AaiSecControlPlane", profile="synthetic", region="eu-west-2", runner=runner)
+    environment = commands[-1][1]
+    assert environment["DATA_BOUNDARY_KMS_KEY_ARN"] == (boundary.customer_managed_data_key_arn)
+    assert environment["DATA_BOUNDARY_OPERATOR_IPV4_CIDRS"] == '["93.184.216.34/32"]'
+    assert "attacker" not in repr(environment)
+    assert "0.0.0.0/0" not in repr(environment)
 
 
 def test_policy_github_persistence_requires_explicit_review_confirmation(

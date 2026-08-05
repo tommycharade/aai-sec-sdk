@@ -364,7 +364,9 @@ Engineering can continue autonomously on:
   customer delivery authority;
 - Terraform Registry namespace/repository authority, release-signing identity
   and an approved non-production tenant for live provider acceptance;
-- customer-managed key, residency and private-access implementation;
+- live acceptance inputs for the implemented customer-managed key, residency,
+  deletion and IP-restriction foundation, plus a decision and network design
+  for AWS PrivateLink or equivalent private ingress;
 - UI simplification, accessibility and responsive browser testing; and
 - documentation, threat models, automated tests, pull requests and synthetic
   acceptance evidence.
