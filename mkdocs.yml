@@ -102,6 +102,7 @@ nav:
   - Scoped service identities and machine API: service-identities-design.md
   - Terraform provider and declarative management: terraform-provider-design.md
   - Secure webhooks: secure-webhooks-design.md
+  - Incident workflow integrations: incident-workflow-integrations-design.md
   - Enterprise integration design: enterprise-integration-design.md
   - Runtime attestation design: runtime-attestation-design.md
   - Approved runtime releases and version compliance: runtime-release-compliance-design.md

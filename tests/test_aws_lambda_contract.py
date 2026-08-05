@@ -245,6 +245,14 @@ class FakeTable:
             item["project_root"] = ExpressionAttributeValues[":project_root"]
             self.items[key] = item
             return {"Attributes": dict(item)}
+        if ":pending" in ExpressionAttributeValues and ":queued" in ExpressionAttributeValues:
+            if item.get("status") != ExpressionAttributeValues[":pending"]:
+                raise ConditionalFailure()
+            item["status"] = ExpressionAttributeValues[":queued"]
+            item.pop("workflow_outbox_pk", None)
+            item.pop("workflow_outbox_sk", None)
+            self.items[key] = item
+            return {"Attributes": dict(item)}
         if ":pending" in ExpressionAttributeValues:
             if (
                 item.get("status") != ExpressionAttributeValues[":pending"]
@@ -712,6 +720,8 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("WEBHOOK_QUEUE_URL", "https://sqs.example.invalid/webhooks.fifo")
     monkeypatch.setenv("WEBHOOK_SECRET_PREFIX", "aai-sec/webhooks/")
     monkeypatch.setenv("WEBHOOK_SECRET_KMS_KEY_ARN", policy_key_id)
+    monkeypatch.setenv("WORKFLOW_QUEUE_URL", "https://sqs.example.invalid/workflows.fifo")
+    monkeypatch.setenv("WORKFLOW_SECRET_PREFIX", "aai-sec/workflows/")
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/handler.py"
     monkeypatch.syspath_prepend(str(path.parent))
     spec = importlib.util.spec_from_file_location("aai_lambda_handler", path)
@@ -1024,7 +1034,7 @@ def test_secure_webhooks_reject_unsafe_egress_roles_and_cross_tenant_reads(
         "cognito:groups": ["platform-admin"],
         "sub": "platform-admin-a",
     }
-    request = {
+    request: dict[str, Any] = {
         "name": "Unsafe",
         "description": "Synthetic rejected destination",
         "endpoint": "https://127.0.0.1/hook",
@@ -1077,6 +1087,241 @@ def test_secure_webhooks_reject_unsafe_egress_roles_and_cross_tenant_reads(
             ),
         )["statusCode"]
         == 404
+    )
+
+
+def test_workflow_integration_lifecycle_is_verified_revision_bound_and_secret_free(
+    monkeypatch: Any,
+) -> None:
+    """Only a verified exact revision can become active provider authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-workflow"
+    now = 1_800_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "workflow-admin",
+    }
+    credential_reference = (
+        "arn:aws:secretsmanager:eu-west-2:111111111111:"
+        "secret:aai-sec/workflows/tenant-workflow/jira-primary-AbCdEf"
+    )
+    # The API must never read credential bytes while registering authority.
+    monkeypatch.setattr(
+        module._fake_secrets,
+        "get_secret_value",
+        lambda **_value: (_ for _ in ()).throw(
+            AssertionError("API must not read workflow credentials")
+        ),
+    )
+    created_response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/workflow-integrations",
+            "POST",
+            claims=platform,
+            body={
+                "name": "Primary Jira",
+                "description": "Content-minimised enterprise incident workflow",
+                "provider": "jira",
+                "configuration": {
+                    "baseUrl": "https://synthetic.atlassian.net",
+                    "projectKey": "SEC",
+                    "issueType": "Incident",
+                },
+                "credentialSecretArn": credential_reference,
+                "eventTypes": ["case.opened", "case.contained", "case.resolved"],
+            },
+        ),
+    )
+    assert created_response["statusCode"] == 201
+    connection = json.loads(created_response["body"])
+    assert connection["status"] == "pending_verification"
+    assert connection["credentialConfigured"] is True
+    assert credential_reference not in json.dumps(connection)
+
+    premature = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/workflow-integrations/{connection['id']}/activate",
+            "POST",
+            claims=platform,
+            body={
+                "expectedRevision": 1,
+                "reason": "Enable the reviewed incident workflow for production use.",
+            },
+        ),
+    )
+    assert premature["statusCode"] == 409
+
+    verification = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/workflow-integrations/{connection['id']}/verify",
+            "POST",
+            claims=platform,
+            body={"expectedRevision": 1},
+        ),
+    )
+    assert verification["statusCode"] == 202
+    delivery = json.loads(verification["body"])
+    assert delivery["verification"] is True
+    assert module._fake_sqs.messages[-1]["QueueUrl"].endswith("workflows.fifo")
+    assert set(json.loads(module._fake_sqs.messages[-1]["MessageBody"])) == {
+        "tenantId",
+        "deliveryId",
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "WORKFLOW_HEALTH", connection["id"])
+        | {
+            "tenant_id": tenant,
+            "connection_id": connection["id"],
+            "last_verification_at": now + 1,
+            "last_verification_status": "delivered",
+            "verified_revision": 1,
+        }
+    )
+    activated = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/workflow-integrations/{connection['id']}/activate",
+            "POST",
+            claims=platform,
+            body={
+                "expectedRevision": 1,
+                "reason": "Enable the reviewed incident workflow for production use.",
+            },
+        ),
+    )
+    assert activated["statusCode"] == 200
+    active = json.loads(activated["body"])
+    assert active["status"] == "active"
+    assert active["revision"] == 2
+
+    case = {
+        "id": "case-a",
+        "revision": 3,
+        "status": "contained",
+        "severity": "critical",
+        "title": "Synthetic case",
+        "alertSource": "behavior_analytics",
+        "reasonCode": "new_mcp_server",
+        "binding": {"host": "claude-code", "agentId": "agent-a"},
+        "rawSensitiveContent": "must never leave the case boundary",
+    }
+    first = module._workflow_delivery_records(tenant, case, "case.contained", now=now + 2)
+    second = module._workflow_delivery_records(tenant, case, "case.contained", now=now + 2)
+    assert len(first) == 1
+    assert first[0]["id"] == second[0]["id"]
+    assert first[0]["connection_revision"] == 2
+    assert "rawSensitiveContent" not in json.dumps(first[0]["payload"])
+    assert first[0]["payload"]["case"]["reasonCode"] == "new_mcp_server"
+
+    failed = {
+        **first[0],
+        "status": "failed",
+        "attempt_count": 5,
+        "failure_code": "provider_http_error",
+    }
+    table.put_item(Item=failed)
+    retried_response = _invoke(
+        module,
+        _event(
+            (
+                f"/api/enterprise/workflow-integrations/{connection['id']}"
+                f"/deliveries/{failed['id']}/retry"
+            ),
+            "POST",
+            claims=platform,
+            body={
+                "expectedAttemptCount": 5,
+                "reason": "The synthetic provider outage has been reviewed and resolved.",
+            },
+        ),
+    )
+    assert retried_response["statusCode"] == 202
+    retried = json.loads(retried_response["body"])
+    assert retried["id"] != failed["id"]
+    stored_retry = table.items[(f"TENANT#{tenant}", f"WORKFLOW_DELIVERY#{retried['id']}")]
+    assert stored_retry["status"] == "queued"
+    assert stored_retry["retry_of"] == failed["id"]
+    assert "workflow_outbox_pk" not in stored_retry
+    assert json.loads(module._fake_sqs.messages[-1]["MessageBody"])["deliveryId"] == retried["id"]
+
+    listed = _invoke(
+        module,
+        _event("/api/enterprise/workflow-integrations", "GET", claims=platform),
+    )
+    assert listed["statusCode"] == 200
+    listed_body = json.loads(listed["body"])
+    assert listed_body["items"][0]["lastVerificationStatus"] == "delivered"
+    assert credential_reference not in json.dumps(listed_body)
+
+
+def test_workflow_integrations_reject_roles_cross_tenant_secrets_and_unsafe_origins(
+    monkeypatch: Any,
+) -> None:
+    """Registration is integration-admin-only and tenant/provider constrained."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-workflow-deny"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-author"],
+        "sub": "policy-author-a",
+    }
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-admin-a",
+    }
+    request: dict[str, Any] = {
+        "name": "Unsafe Jira",
+        "description": "Synthetic rejected connection",
+        "provider": "jira",
+        "configuration": {
+            "baseUrl": "https://evil.example.test",
+            "projectKey": "SEC",
+            "issueType": "Incident",
+        },
+        "credentialSecretArn": (
+            "arn:aws:secretsmanager:eu-west-2:111111111111:"
+            "secret:aai-sec/workflows/other-tenant/jira-AbCdEf"
+        ),
+        "eventTypes": ["case.opened"],
+    }
+    denied = _invoke(
+        module,
+        _event("/api/enterprise/workflow-integrations", "POST", claims=author, body=request),
+    )
+    assert denied["statusCode"] == 403
+    assert json.loads(denied["body"])["requiredCapability"] == "integration_admin"
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/workflow-integrations",
+                "POST",
+                claims=platform,
+                body=request,
+            ),
+        )["statusCode"]
+        == 400
+    )
+    request["configuration"]["baseUrl"] = "https://safe.atlassian.net"
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/workflow-integrations",
+                "POST",
+                claims=platform,
+                body=request,
+            ),
+        )["statusCode"]
+        == 400
     )
 
 

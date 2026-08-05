@@ -28,6 +28,7 @@ The recommended navigation is:
 - Deployments
 - SDK runtime
 - Webhooks
+- Incident workflows
 
 The **Identity and access** page must not be one continuous administration
 form. Its overview shows verified identity foundations and one next-best
@@ -46,6 +47,21 @@ event and security-sensitive setting has contextual help. Non-platform roles
 receive the same secret-free posture without mutation controls. The page does
 not describe a queued test as verified delivery and does not present webhooks
 as completed SIEM integration.
+
+The **Incident workflows** administration page is separate from generic
+Webhooks and the Incidents investigation workspace. Its table shows provider,
+subscribed lifecycle, verification, latest delivery/external reference and
+status. Detail presents human-readable provider configuration, exact revision,
+credential-reference posture and content-minimised delivery evidence.
+
+The typed creation flow supports ServiceNow, Jira Cloud and PagerDuty. Every
+setting has contextual mouse and keyboard help. The browser accepts a
+tenant-scoped Secrets Manager ARN but never credential bytes. A connection
+must progress through register, synthetic verification and exact-revision
+activation. Platform administrators can then verify again, pause, resume,
+retire or explicitly retry a terminal failure with retained rationale.
+Read-only operators see posture and evidence but no mutation controls.
+Provider state is workflow output, never agent or policy authority.
 
 ## Enterprise-managed features
 

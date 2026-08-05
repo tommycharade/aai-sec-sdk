@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Added governed ServiceNow, Jira Cloud and PagerDuty incident workflows.
+  Platform administrators register only typed provider metadata and a
+  tenant-scoped Secrets Manager ARN, prove the exact revision with a synthetic
+  incident, then activate delivery from a dedicated credential-owning worker.
+  Case-opened, contained, resolved and closed events use a durable FIFO outbox,
+  provider reconciliation, bounded retries/DLQs, immutable content-minimised
+  evidence and an explicit controlled-retry path. The enterprise UI exposes
+  secret-free posture and lifecycle controls; live customer provider
+  acceptance remains open.
+
 - Replaced tenant-wide behavior baseline reads with bounded exact-agent
   DynamoDB partitions so a noisy agent cannot hide another agent's readiness.
   A 30-day fail-closed legacy migration, synchronous merge of the triggering

@@ -114,7 +114,7 @@ installation and convergence are deliberately not claimed.
 | --- | --- | --- | --- |
 | Fleet lifecycle | Partial | Enrollment, groups, revision-bound bulk assignment, trusted dynamic-group preview/apply and monitored five-minute deterministic reevaluation, health, immutable desired/package rollout binding, deterministic canary rings, time-zone maintenance windows, server-derived endpoint convergence, automatic health/deadline pause, exact known-good rollback, drift, emergency stop, irreversible revoke, atomic replacement, evidence-retaining offboarding, accountable ownership, server-clock-expiring exact-agent policy exceptions, source-reconciled orphan/leaver detection, AWS-managed Entra/Intune/GitHub discovery connectors, signed endpoint installation/process collection, per-device credential lifecycle, server-derived evidence health, deployment-owned approved runtime-release catalog, tenant-scoped version-compliance reporting, revision-bound dual-version runtime canary selection/admission with measured pause and rollback, and an executable-free least-privilege endpoint remediation coordination queue whose channel reports cannot replace attestation | Publish real release manifests; add immutable platform delivery packages, bijective device binding and IAM-authenticated Intune/Jamf dispatch; connect physical MDM distribution; complete real-provider population coverage and response automation |
 | Policy governance | Partial | Typed editor, immutable version ledger, readable active-versus-pending authority, independent review with rationale, semantic authority diff, bounded redacted historical simulation, restrictive composition, reviewed exact-commit GitHub import, immutable provenance UI, draft-only writes, KMS-signed canonical export, unattended repository- and permission-scoped GitHub App token minting, signed bundles, temporary agent exceptions, canary/scheduling, evidence-only convergence and known-good rollback | Complete live Git-provider acceptance and physical-endpoint rollout-SLO acceptance |
-| Security operations | Partial | Approvals, audit timeline, independent scoped emergency stops, scheduled server-derived endpoint detections, independently reviewed alert-only tool/MCP/denial/approval/decision-volume/outside-project/configuration-error behavior rules with exact-agent bounded history, explicit migration/completeness gates, explainable thresholds and paginated fleet readiness, independently re-hashed repository mapping and managed-configuration/runtime-attestation integrity rules with explicit blind spots and no automatic containment, private exact-version S3 integrity baselines and discovery pages with digest binding, stable evidence-preserving deduplication groups, exact maximum-seven-day suppressions with audited expiry/revocation, audited acknowledgement, durable SNS/SQS and signed-webhook delivery, revisioned cases, source-specific server-revalidated agent binding, evidence-preserving agent quarantine, independently approved endpoint-response rules with preview, action limits, cooldown, idempotent evidence, disable and rollback, session revocation, exact-agent brokered-credential revocation with machine-only live checks and recovery-gated restoration, a typed provenance-labelled identity/policy/tool/MCP/approval/credential/isolation/evidence/operator investigation timeline with explicit completeness, recovery-gated release and integrity-verifiable content-minimised case export | Real-provider incident-revocation acceptance, customer-specific capacity/load proof for exact-agent behavior history and the wider control plane, MDM/EDR isolation and external workflow integrations |
+| Security operations | Partial | Approvals, audit timeline, independent scoped emergency stops, scheduled server-derived endpoint detections, independently reviewed alert-only tool/MCP/denial/approval/decision-volume/outside-project/configuration-error behavior rules with exact-agent bounded history, explicit migration/completeness gates, explainable thresholds and paginated fleet readiness, independently re-hashed repository mapping and managed-configuration/runtime-attestation integrity rules with explicit blind spots and no automatic containment, private exact-version S3 integrity baselines and discovery pages with digest binding, stable evidence-preserving deduplication groups, exact maximum-seven-day suppressions with audited expiry/revocation, audited acknowledgement, durable SNS/SQS and signed-webhook delivery, revisioned cases, source-specific server-revalidated agent binding, evidence-preserving agent quarantine, independently approved endpoint-response rules with preview, action limits, cooldown, idempotent evidence, disable and rollback, session revocation, exact-agent brokered-credential revocation with machine-only live checks and recovery-gated restoration, a typed provenance-labelled identity/policy/tool/MCP/approval/credential/isolation/evidence/operator investigation timeline with explicit completeness, recovery-gated release, integrity-verifiable content-minimised case export, and governed ServiceNow/Jira/PagerDuty lifecycle delivery with exact-revision verification, provider reconciliation, isolated credentials, controlled retries and operator UI | Real-provider incident-revocation and workflow acceptance, customer-specific capacity/load proof for exact-agent behavior history and the wider control plane, and MDM/EDR isolation |
 | Reporting and administration | Partial | Fleet posture, health, SLO and compliance summaries; fail-closed population coverage; deployment-owned approved SDK/gateway/hook catalog and server-derived per-agent/deployment version compliance; purpose-specific executive and evidence-reader assurance reports; operator and daily/weekly scheduled snapshots with domain-separated KMS signatures, exact replicated Object Lock versions, audit-before-state evidence, revision-bound SQS workers, recovery-cell parity and in-product verification/download; scoped expiring service identities; versioned Terraform provider; tenant-managed signed webhooks with durable delivery and replay-verification helper | Customer-validated framework mappings, external report delivery, real-workload machine-API and Terraform acceptance, provider Registry release/signing, live customer webhook interruption/replay acceptance, CMK/residency and private access |
 
 ### P1-ADM-08 implementation evidence
@@ -226,6 +226,35 @@ content. Contract tests prove automatic addition, no-change idempotence,
 last-known-authority preservation on overlap, fixed failure evidence and
 rejection of caller-shaped schedule events. Endpoint posture attributes remain
 outstanding and are not claimed.
+
+### P1-SOC-09 implementation evidence
+
+The hosted control plane now has closed-schema ServiceNow, Jira Cloud and
+PagerDuty connections under `integration_admin` authority. The API stores a
+structurally validated tenant-scoped Secrets Manager ARN but cannot read its
+value. A dedicated KMS-decrypting worker strongly reloads exact live authority,
+revalidates public provider DNS and no-redirect HTTPS, bounds responses and
+handles provider credentials only in memory.
+
+Case-open, contain, resolve and close transactions atomically create
+deterministic content-minimised outbox records for active subscriptions. FIFO
+delivery, scheduled repair, five-attempt DLQs/alarms, ServiceNow correlation,
+Jira labels and PagerDuty dedup keys cover retries and ambiguous provider
+commits. More than one external match fails closed. Terminal evidence reaches
+Object Lock before mutable health. An explicit retry requires a retained reason,
+terminal attempt count and unchanged active connection, and creates a linked
+identity that performs provider reconciliation again.
+
+The enterprise UI provides a table-first provider workspace, typed registration,
+help for every setting, secret-ARN-only handling, synthetic verification,
+exact-revision activation, pause/resume/retire, delivery evidence and governed
+retry. Synthetic API, worker, SSRF, credential-isolation, provider contract,
+infrastructure and UI tests are retained. P1-SOC-09 remains Partial until a
+customer-owned provider completes least-privilege, create/update/resolve,
+response-loss, duplicate, outage, retry, rotation and revocation acceptance.
+See [Governed incident workflow
+integrations](incident-workflow-integrations-design.md) and [Inputs needed from
+the product owner](needed-from-from.md).
 
 ### P1-FLT-08, P1-POL-05 and P1-POL-06 implementation evidence
 

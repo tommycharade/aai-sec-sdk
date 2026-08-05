@@ -1344,6 +1344,38 @@ Terminal status is written to Object Lock without response content or key
 material. At-least-once transport means receiver idempotency remains mandatory.
 See [Secure webhooks](secure-webhooks-design.md).
 
+## Incident workflow provider threat model
+
+ServiceNow, Jira Cloud and PagerDuty are untrusted workflow peers. They may be
+unavailable, malicious, slow, return oversized or malformed content, redirect
+requests, resolve through private addresses, commit a write without returning
+success, or contain duplicate external objects. Their state never grants SDK
+policy, identity, approval, containment, recovery or case-transition
+authority.
+
+The browser and API handle only closed non-secret provider configuration and a
+structurally parsed tenant-scoped Secrets Manager ARN. Only the isolated
+workflow worker has `GetSecretValue` and KMS decrypt authority for
+`aai-sec/workflows/*`. Queue messages contain only tenant and delivery IDs.
+Before each attempt, the worker strongly reloads delivery and connection
+authority, requires an unchanged revision and allowed status, revalidates the
+secret namespace, validates provider-specific credential JSON, resolves the
+provider hostname and rejects redirects/private results.
+
+The worker sends only fixed content-minimised case fields, uses five-second
+timeouts and a 16 KiB response bound, and never persists response bodies or
+credential values. ServiceNow correlation IDs, Jira labels and PagerDuty dedup
+keys reconcile ambiguous retries. More than one match fails closed. Terminal
+evidence is written to Object Lock before mutable health posture; bounded FIFO
+retries, repair scheduling, DLQs and alarms make failure visible. An operator
+retry requires integration-admin authority, an unchanged active connection
+and retained rationale, and creates a linked new identity.
+
+Provider field mappings, customer IAM scope, egress controls, credential
+rotation/revocation and outage behavior still require live acceptance. See
+[Governed incident workflow
+integrations](incident-workflow-integrations-design.md).
+
 ## Signed assurance snapshot threat model
 
 The browser may request a profile, schedule and rationale, but it cannot supply

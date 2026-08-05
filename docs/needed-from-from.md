@@ -11,6 +11,29 @@ the approved secrets manager and provide only the secret resource name.
 
 ## Immediate critical-path inputs
 
+### Incident workflow live acceptance
+
+The ServiceNow, Jira Cloud and PagerDuty software foundation is implemented and
+synthetically tested. Live acceptance needs one customer-owned non-production
+provider selected for the first pilot and inputs engineering must not invent:
+
+- provider instance, site or service and its accountable owner;
+- a least-privilege service identity or routing key stored under
+  `aai-sec/workflows/<tenant>/<connection>` using the deployed
+  `WorkflowCredentialKeyArn`;
+- ServiceNow assignment group, Jira project/issue type, or PagerDuty service
+  label and escalation owner;
+- approved egress/proxy rules and DNS-rebinding control evidence;
+- a change window to verify create, update, resolve, response-loss
+  reconciliation, provider outage, controlled retry, credential rotation and
+  credential revocation; and
+- retained provider record IDs and change/evidence references for the test.
+
+Provide only the secret ARN to the UI. Never paste credential JSON into this
+document, source control, chat or a ticket. Until this acceptance is complete,
+P1-SOC-09 is an implemented production-shaped foundation, not a claim of live
+compatibility with customer provider customization.
+
 ### AWS CDK development-tooling advisory decision (2026-08-04)
 
 The latest published `aws-cdk-lib@2.263.0` bundle contains

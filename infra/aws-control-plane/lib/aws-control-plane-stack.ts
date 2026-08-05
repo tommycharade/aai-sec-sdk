@@ -369,6 +369,14 @@ export class AwsControlPlaneStack extends cdk.Stack {
       // removes them so retry cost is bounded by pending work, not 30-day history.
       projectionType: dynamodb.ProjectionType.ALL,
     });
+    table.addGlobalSecondaryIndex({
+      indexName: "WorkflowOutbox",
+      partitionKey: { name: "workflow_outbox_pk", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "workflow_outbox_sk", type: dynamodb.AttributeType.STRING },
+      // Only records not yet accepted by the isolated provider queue carry
+      // these keys. Provider credentials never enter this index.
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
 
     const presence = new dynamodb.Table(this, "PresenceTable", {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
@@ -615,6 +623,26 @@ export class AwsControlPlaneStack extends cdk.Stack {
       deadLetterQueue: { queue: webhookDeliveryDlq, maxReceiveCount: 5 },
       enforceSSL: true,
     });
+    const workflowDeliveryDlq = new sqs.Queue(this, "WorkflowDeliveryDlq", {
+      fifo: true,
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const workflowDeliveryQueue = new sqs.Queue(this, "WorkflowDeliveryQueue", {
+      fifo: true,
+      contentBasedDeduplication: false,
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      visibilityTimeout: cdk.Duration.seconds(60),
+      retentionPeriod: cdk.Duration.days(4),
+      deadLetterQueue: { queue: workflowDeliveryDlq, maxReceiveCount: 5 },
+      enforceSSL: true,
+    });
+    const workflowDispatchDlq = new sqs.Queue(this, "WorkflowDispatchDlq", {
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
     const webhookDispatchDlq = new sqs.Queue(this, "WebhookDispatchDlq", {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       retentionPeriod: cdk.Duration.days(14),
@@ -761,6 +789,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
     const webhookSecretKey = new kms.Key(this, "WebhookSecretKey", {
       alias: "alias/aai-sec-webhook-secrets",
       description: "Encrypts tenant webhook signing keys retained in Secrets Manager",
+      enableKeyRotation: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    const workflowCredentialKey = new kms.Key(this, "WorkflowCredentialKey", {
+      alias: "alias/aai-sec-workflow-credentials",
+      description: "Encrypts tenant workflow-provider credentials in Secrets Manager",
       enableKeyRotation: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
@@ -932,6 +966,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       WEBHOOK_QUEUE_URL: webhookDeliveryQueue.queueUrl,
       WEBHOOK_SECRET_PREFIX: "aai-sec/webhooks/",
       WEBHOOK_SECRET_KMS_KEY_ARN: webhookSecretKey.keyArn,
+      WORKFLOW_QUEUE_URL: workflowDeliveryQueue.queueUrl,
+      WORKFLOW_SECRET_PREFIX: "aai-sec/workflows/",
       INTEGRITY_BASELINE_BUCKET: integrityBaselines.bucketName,
       DISCOVERY_PAGE_BUCKET: discoveryPages.bucketName,
       RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
@@ -1049,6 +1085,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     }));
     securityAlerts.grantPublish(handler);
     webhookDeliveryQueue.grantSendMessages(handler);
+    workflowDeliveryQueue.grantSendMessages(handler);
     webhookSecretKey.grantEncrypt(handler);
     handler.addToRolePolicy(new iam.PolicyStatement({
       actions: [
@@ -1195,6 +1232,39 @@ export class AwsControlPlaneStack extends cdk.Stack {
       reportBatchItemFailures: false,
     }));
 
+    const workflowWorker = new lambda.Function(this, "WorkflowDeliveryWorker", {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: lambda.Architecture.ARM_64,
+      handler: "workflow_worker.handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+      timeout: cdk.Duration.seconds(20),
+      memorySize: 256,
+      reservedConcurrentExecutions: 20,
+      environment: {
+        CONTROL_TABLE: table.tableName,
+        AUDIT_BUCKET: audit.bucketName,
+        WORKFLOW_SECRET_PREFIX: "aai-sec/workflows/",
+      },
+      tracing: lambda.Tracing.PASS_THROUGH,
+    });
+    table.grantReadWriteData(workflowWorker);
+    audit.grantPut(workflowWorker);
+    workflowCredentialKey.grantDecrypt(workflowWorker);
+    workflowWorker.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["secretsmanager:GetSecretValue"],
+      resources: [
+        cdk.Stack.of(this).formatArn({
+          service: "secretsmanager",
+          resource: "secret",
+          resourceName: "aai-sec/workflows/*",
+        }),
+      ],
+    }));
+    workflowWorker.addEventSource(new lambdaEventSources.SqsEventSource(workflowDeliveryQueue, {
+      batchSize: 1,
+      reportBatchItemFailures: false,
+    }));
+
     const evidenceRetentionWorker = new lambda.Function(this, "EvidenceRetentionWorker", {
       runtime: lambda.Runtime.PYTHON_3_13,
       architecture: lambda.Architecture.ARM_64,
@@ -1290,6 +1360,22 @@ export class AwsControlPlaneStack extends cdk.Stack {
           schemaVersion: 1,
         }),
         deadLetterQueue: webhookDispatchDlq,
+        maxEventAge: cdk.Duration.minutes(15),
+        retryAttempts: 2,
+      }),
+    );
+    const workflowDispatchRule = new events.Rule(this, "WorkflowDispatchSchedule", {
+      description: "Retry persisted workflow outbox records that were not accepted by SQS",
+      schedule: events.Schedule.rate(cdk.Duration.minutes(1)),
+      enabled: true,
+    });
+    workflowDispatchRule.addTarget(
+      new eventTargets.LambdaFunction(handler, {
+        event: events.RuleTargetInput.fromObject({
+          source: "aai.workflow-dispatch",
+          schemaVersion: 1,
+        }),
+        deadLetterQueue: workflowDispatchDlq,
         maxEventAge: cdk.Duration.minutes(15),
         retryAttempts: 2,
       }),
@@ -1646,6 +1732,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       ["EvidenceRetentionScheduleDeadLetters", evidenceRetentionScheduleDlq, "Scheduled evidence-retention dispatch exhausted bounded retries."],
       ["WebhookDeliveryDeadLetters", webhookDeliveryDlq, "Signed webhook delivery exhausted bounded retries."],
       ["WebhookDispatchDeadLetters", webhookDispatchDlq, "Webhook outbox dispatch exhausted bounded retries."],
+      ["WorkflowDeliveryDeadLetters", workflowDeliveryDlq, "Incident workflow delivery exhausted bounded retries."],
+      ["WorkflowDispatchDeadLetters", workflowDispatchDlq, "Incident workflow outbox dispatch exhausted bounded retries."],
     ] as const) {
       const alarm = new cloudwatch.Alarm(this, id, {
         metric: queue.metricApproximateNumberOfMessagesVisible({
@@ -1737,6 +1825,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, "WebhookDeliveryQueueArn", { value: webhookDeliveryQueue.queueArn });
     new cdk.CfnOutput(this, "WebhookDeliveryDlqArn", { value: webhookDeliveryDlq.queueArn });
+    new cdk.CfnOutput(this, "WorkflowDeliveryQueueArn", { value: workflowDeliveryQueue.queueArn });
+    new cdk.CfnOutput(this, "WorkflowDeliveryDlqArn", { value: workflowDeliveryDlq.queueArn });
+    new cdk.CfnOutput(this, "WorkflowCredentialKeyArn", { value: workflowCredentialKey.keyArn });
     new cdk.CfnOutput(this, "WebhookDispatchDlqArn", { value: webhookDispatchDlq.queueArn });
     new cdk.CfnOutput(this, "WebhookSecretKmsKeyArn", { value: webhookSecretKey.keyArn });
     new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });
