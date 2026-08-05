@@ -729,8 +729,799 @@ def _runtime_release_catalog():
 def _runtime_manifest_digest(manifest):
     """Bind one normalized manifest and every approved artifact digest."""
     return hashlib.sha256(
-        json.dumps(manifest, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        json.dumps(_json(manifest), separators=(",", ":"), sort_keys=True).encode("utf-8")
     ).hexdigest()
+
+
+def _runtime_release_map(catalog=None):
+    """Index only deployment-approved releases by their immutable public identity."""
+    authority = _runtime_release_catalog() if catalog is None else catalog
+    return {release["id"]: release for release in authority["releases"]}
+
+
+_RUNTIME_RELEASE_BINDING_KEYS = {
+    "id",
+    "host",
+    "sdkVersion",
+    "sdkRevision",
+    "releaseTag",
+    "manifestSha256",
+    "releaseEvidenceSha256",
+    "packageSha256",
+    "gatewaySha256",
+    "hookSha256",
+    "manifestBundleSha256",
+    "approvalBundleSha256",
+    "attestationManifest",
+}
+
+
+def _runtime_release_binding(catalog, release):
+    """Freeze one approved release and both deployment bundle identities."""
+    matches = [
+        manifest
+        for manifest in _runtime_manifests()
+        if manifest.get("host") == release.get("host")
+        and manifest.get("sdkVersion") == release.get("sdkVersion")
+        and secrets.compare_digest(_runtime_manifest_digest(manifest), release["manifestSha256"])
+    ]
+    if len(matches) != 1:
+        raise RuntimeError("approved runtime release manifest cannot be bound exactly")
+    return {
+        **release,
+        "manifestBundleSha256": catalog["manifestBundleSha256"],
+        "approvalBundleSha256": catalog["approvalBundleSha256"],
+        "attestationManifest": _json(matches[0]),
+    }
+
+
+def _validated_runtime_release_binding(value, release_id, host):
+    """Fail closed unless persisted authority binds one complete approved release."""
+    if isinstance(value, dict):
+        value = _json(value)
+    if not isinstance(value, dict) or set(value) != _RUNTIME_RELEASE_BINDING_KEYS:
+        raise RuntimeError("runtime rollout release binding is malformed")
+    if value.get("id") != release_id or value.get("host") != host:
+        raise RuntimeError("runtime rollout release binding identity changed")
+    if value.get("id") != f"{host}:{value.get('sdkVersion', '')}":
+        raise RuntimeError("runtime rollout release binding version is malformed")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(value.get("sdkRevision", ""))):
+        raise RuntimeError("runtime rollout release revision is malformed")
+    if not re.fullmatch(
+        r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", str(value.get("releaseTag", ""))
+    ):
+        raise RuntimeError("runtime rollout release tag is malformed")
+    for field in _RUNTIME_RELEASE_BINDING_KEYS - {
+        "id",
+        "host",
+        "sdkVersion",
+        "sdkRevision",
+        "releaseTag",
+        "attestationManifest",
+    }:
+        if not re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))):
+            raise RuntimeError("runtime rollout release digest is malformed")
+    manifest = value.get("attestationManifest")
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != _ATTESTATION_MANIFEST_FIELDS
+        or manifest.get("host") != host
+        or manifest.get("sdkVersion") != value.get("sdkVersion")
+        or manifest.get("sdkRevision") != value.get("sdkRevision")
+        or not secrets.compare_digest(_runtime_manifest_digest(manifest), value["manifestSha256"])
+        or manifest.get("packageDigest") != value.get("packageSha256")
+        or manifest.get("gatewayDigest") != value.get("gatewaySha256")
+        or manifest.get("hookDigest") != value.get("hookSha256")
+    ):
+        raise RuntimeError("runtime rollout attestation manifest binding is malformed")
+    return value
+
+
+def _runtime_rollout_member_digest(tenant, agent):
+    """Return a content-free identity digest for frozen pause/rollback cohorts."""
+    identity = f"{tenant}:{agent.get('deployment_id', '')}:{agent.get('id', '')}"
+    return hashlib.sha256(identity.encode()).hexdigest()
+
+
+def _runtime_rollout_frozen_members(record):
+    """Validate and return a bounded immutable selected-cohort digest set."""
+    values = record.get("selectedMemberDigests")
+    if (
+        not isinstance(values, list)
+        or len(values) > _ROLLOUT_CONFIGURATION_LIMIT
+        or values != sorted(set(values))
+        or any(not re.fullmatch(r"[0-9a-f]{64}", str(value)) for value in values)
+    ):
+        raise RuntimeError("runtime rollout frozen cohort is malformed")
+    return frozenset(values)
+
+
+_RUNTIME_ROLLOUT_REQUIRED_KEYS = {
+    "pk",
+    "sk",
+    "tenant_id",
+    "schemaVersion",
+    "deploymentId",
+    "host",
+    "revision",
+    "state",
+    "currentReleaseId",
+    "currentReleaseBinding",
+    "targetReleaseId",
+    "targetReleaseBinding",
+    "percentage",
+    "healthCriteria",
+    "reason",
+    "startedAt",
+    "startedBy",
+    "pausedAt",
+    "pauseReason",
+    "selectedMemberDigests",
+    "updatedAt",
+}
+_RUNTIME_ROLLOUT_OPTIONAL_KEYS = {"convergedAt", "rolledBackAt"}
+
+
+def _validated_runtime_rollout(record, tenant, *, deployment_id=None, host=None):
+    """Validate the complete persisted rollout authority and state invariants.
+
+    This validator is deliberately independent of the live release catalog.
+    Once a transition exists, its persisted release bindings are the authority;
+    malformed state must never degrade into deployment-version fallback.
+    """
+    if isinstance(record, dict):
+        # DynamoDB's resource API materializes every number as Decimal. Convert
+        # integral values recursively before closed-schema and digest checks;
+        # fractional values remain floats and are rejected by integer rules.
+        record = _json(record)
+    if (
+        not isinstance(record, dict)
+        or not _RUNTIME_ROLLOUT_REQUIRED_KEYS.issubset(record)
+        or set(record) - _RUNTIME_ROLLOUT_REQUIRED_KEYS - _RUNTIME_ROLLOUT_OPTIONAL_KEYS
+    ):
+        raise RuntimeError("runtime rollout record has an invalid schema")
+    identifier = record.get("deploymentId")
+    if (
+        not isinstance(identifier, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", identifier)
+        or (deployment_id is not None and identifier != deployment_id)
+        or record.get("tenant_id") != tenant
+        or {"pk": record.get("pk"), "sk": record.get("sk")}
+        != _item_key(tenant, "RUNTIME_ROLLOUT", identifier)
+    ):
+        raise RuntimeError("runtime rollout identity binding is invalid")
+    runtime_host = record.get("host")
+    if runtime_host not in {"claude-code", "codex-cli"} or (
+        host is not None and runtime_host != host
+    ):
+        raise RuntimeError("runtime rollout host binding is invalid")
+    state = record.get("state")
+    percentage = record.get("percentage")
+    revision = record.get("revision")
+    if state not in _RUNTIME_ROLLOUT_STATES:
+        raise RuntimeError("runtime rollout state is invalid")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        raise RuntimeError("runtime rollout revision is invalid")
+    if isinstance(percentage, bool) or not isinstance(percentage, int):
+        raise RuntimeError("runtime rollout percentage is invalid")
+    percentage_valid = {
+        "canary": 1 <= percentage <= 25,
+        "active": 26 <= percentage <= 100,
+        "paused": 1 <= percentage <= 100,
+        "rolling_back": 1 <= percentage <= 100,
+        "converged": percentage == 100,
+        "rolled_back": percentage == 0,
+    }[state]
+    if not percentage_valid:
+        raise RuntimeError("runtime rollout percentage does not match its state")
+    try:
+        if _rollout_health_criteria(record.get("healthCriteria")) != record.get("healthCriteria"):
+            raise RuntimeError("runtime rollout health criteria changed during validation")
+        _case_reason(record.get("reason"), "runtime rollout reason")
+    except ValueError as error:
+        raise RuntimeError("runtime rollout policy metadata is malformed") from error
+    for field in ("startedAt", "updatedAt"):
+        value = record.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise RuntimeError(f"runtime rollout {field} is invalid")
+    for field in _RUNTIME_ROLLOUT_OPTIONAL_KEYS & set(record):
+        value = record.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise RuntimeError(f"runtime rollout {field} is invalid")
+    if state == "converged" and "convergedAt" not in record:
+        raise RuntimeError("converged runtime rollout has no completion timestamp")
+    if state == "rolled_back" and "rolledBackAt" not in record:
+        raise RuntimeError("rolled-back runtime rollout has no completion timestamp")
+    if not isinstance(record.get("startedBy"), str) or not record["startedBy"]:
+        raise RuntimeError("runtime rollout actor is invalid")
+    if record.get("schemaVersion") != 1:
+        raise RuntimeError("runtime rollout schema version is invalid")
+
+    current_id = record.get("currentReleaseId")
+    current_binding = _validated_runtime_release_binding(
+        record.get("currentReleaseBinding"), current_id, runtime_host
+    )
+    target_id = record.get("targetReleaseId")
+    target_binding = record.get("targetReleaseBinding")
+    if state == "rolled_back":
+        if target_id is not None or target_binding is not None:
+            raise RuntimeError("rolled-back runtime authority retains a target")
+    else:
+        validated_target = _validated_runtime_release_binding(
+            target_binding, target_id, runtime_host
+        )
+        if state in {"canary", "active", "paused", "rolling_back"} and target_id == current_id:
+            raise RuntimeError("open runtime transition target equals current release")
+        if state == "converged" and (
+            target_id != current_id or validated_target != current_binding
+        ):
+            raise RuntimeError("converged runtime authority is internally inconsistent")
+
+    frozen = _runtime_rollout_frozen_members(record)
+    if state not in {"paused", "rolling_back"} and frozen:
+        raise RuntimeError("runtime rollout has an unexpected frozen cohort")
+    if state == "paused":
+        paused_at = record.get("pausedAt")
+        if isinstance(paused_at, bool) or not isinstance(paused_at, int) or paused_at < 1:
+            raise RuntimeError("paused runtime rollout has no pause timestamp")
+        try:
+            _case_reason(record.get("pauseReason"), "runtime rollout pause reason")
+        except ValueError as error:
+            raise RuntimeError("paused runtime rollout reason is malformed") from error
+    elif record.get("pauseReason") is not None:
+        raise RuntimeError("non-paused runtime rollout retains pause authority")
+    return record
+
+
+def _runtime_rollout_agent_selected(tenant, record, agent):
+    """Select from live deterministic authority or an incident-frozen cohort."""
+    state = record.get("state")
+    if state in {"paused", "rolling_back"}:
+        return _runtime_rollout_member_digest(tenant, agent) in _runtime_rollout_frozen_members(
+            record
+        )
+    return _rollout_agent_selected(
+        tenant,
+        f"{agent.get('deployment_id')}:{agent.get('id')}",
+        int(record.get("percentage", 0)),
+    )
+
+
+def _runtime_rollout_selected_digests(tenant, record, agents):
+    """Snapshot only server-selected active identities as content-free digests."""
+    if record.get("state") in {"paused", "rolling_back"}:
+        return sorted(_runtime_rollout_frozen_members(record))
+    return sorted(
+        _runtime_rollout_member_digest(tenant, agent)
+        for agent in agents
+        if _runtime_rollout_agent_selected(tenant, record, agent)
+    )
+
+
+def _runtime_rollout_active_agents(tenant, deployment_id):
+    """Return the bounded server-owned active population for one deployment."""
+    return [
+        agent
+        for agent in _all_agents(tenant)
+        if agent.get("deployment_id") == deployment_id and _agent_lifecycle_state(agent) == "active"
+    ]
+
+
+def _runtime_rollout_record(tenant, deployment_id):
+    """Strongly read one deployment's server-owned runtime transition authority."""
+    return TABLE.get_item(
+        Key=_item_key(tenant, "RUNTIME_ROLLOUT", deployment_id), ConsistentRead=True
+    ).get("Item")
+
+
+def _runtime_release_for_agent(tenant, deployment, agent, *, catalog=None, rollout=None):
+    """Resolve the exact release admitted for one deterministic rollout member.
+
+    A transition admits at most the approved current and target releases. The
+    endpoint identity, not a browser-provided member list, decides which one is
+    expected. Paused canaries retain their already distributed target authority;
+    rollback switches selected endpoints back to the retained current release.
+    """
+    record = (
+        _runtime_rollout_record(tenant, deployment.get("id", "")) if rollout is None else rollout
+    )
+    fallback_id = f"{agent.get('host', '')}:{deployment.get('sdk_version', '')}"
+    if record:
+        record = _validated_runtime_rollout(
+            record,
+            tenant,
+            deployment_id=deployment.get("id"),
+            host=agent.get("host"),
+        )
+        state = record["state"]
+        host = record["host"]
+        current_id = record.get("currentReleaseId")
+        target_id = record.get("targetReleaseId")
+        current_release = _validated_runtime_release_binding(
+            record.get("currentReleaseBinding"), current_id, host
+        )
+        target_release = None
+        if target_id is not None:
+            target_release = _validated_runtime_release_binding(
+                record.get("targetReleaseBinding"), target_id, host
+            )
+        release = current_release
+        if state in {"canary", "active", "paused"} and target_id:
+            if target_release is None:
+                raise RuntimeError("runtime rollout target release binding is missing")
+            if _runtime_rollout_agent_selected(tenant, record, agent):
+                release = target_release
+        return release
+    authority = _runtime_release_catalog() if catalog is None else catalog
+    releases = _runtime_release_map(authority)
+    release = releases.get(fallback_id)
+    if release is None or release.get("host") != agent.get("host"):
+        return None
+    return release
+
+
+def _runtime_rollout_convergence(tenant, record, *, now=None, catalog=None):
+    """Measure exact target-release evidence for a server-selected rollout ring."""
+    record = _validated_runtime_rollout(record, tenant)
+    current = int(time.time()) if now is None else int(now)
+    deployment_id = record.get("deploymentId", "")
+    percentage = int(record.get("percentage", 0))
+    state = record.get("state")
+    if state not in _RUNTIME_ROLLOUT_STATES:
+        raise RuntimeError("runtime rollout state is invalid")
+    expected_id = (
+        record.get("currentReleaseId")
+        if state in {"rolling_back", "rolled_back", "converged"}
+        else record.get("targetReleaseId")
+    )
+    binding_field = (
+        "currentReleaseBinding"
+        if state in {"rolling_back", "rolled_back", "converged"}
+        else "targetReleaseBinding"
+    )
+    expected = _validated_runtime_release_binding(
+        record.get(binding_field), expected_id, record.get("host")
+    )
+    agents = _runtime_rollout_active_agents(tenant, deployment_id)
+    selected = [agent for agent in agents if _runtime_rollout_agent_selected(tenant, record, agent)]
+    unavailable = []
+    compliant = []
+    mismatched = []
+    for agent in selected:
+        connected = agent.get("status") == "connected" and int(agent.get("expires_at", 0)) > current
+        if not connected:
+            unavailable.append(agent)
+        elif (
+            expected
+            and agent.get("host") == expected.get("host")
+            and agent.get("attestation_status") == "compliant"
+            and int(agent.get("attestation_expires_at", 0)) > current
+            and agent.get("attestation_sdk_version") == expected.get("sdkVersion")
+            and agent.get("attestation_sdk_revision") == expected.get("sdkRevision")
+            and agent.get("attestation_manifest_sha256") == expected.get("manifestSha256")
+        ):
+            compliant.append(agent)
+        else:
+            mismatched.append(agent)
+
+    def measured(count):
+        return round((100 * count) / len(selected), 1) if selected else None
+
+    blockers = []
+    if not agents:
+        blockers.append("no_active_agents")
+    if any(agent.get("host") != expected.get("host") for agent in agents):
+        blockers.append("incompatible_agent_host")
+    started_at = int(record.get("startedAt", 0))
+    criteria = record.get("healthCriteria") or _ROLLOUT_DEFAULT_CRITERIA
+    grace_until = started_at + int(criteria.get("gracePeriodSeconds", 600))
+    minimum_sample = int(criteria.get("minSampleSize", 1))
+    sample_sufficient = len(selected) >= minimum_sample
+    # The configured minimum is a promotion gate for release expansion. A
+    # rollback must remain able to complete for the exact frozen cohort even
+    # when that emergency cohort is intentionally smaller than the canary gate.
+    sample_gate_applies = state in {"canary", "active", "paused"}
+    if sample_gate_applies and not sample_sufficient:
+        blockers.append("minimum_sample_not_met")
+    return {
+        "measuredAt": current,
+        "totalAgents": len(agents),
+        "selectedAgents": len(selected),
+        "compliantAgents": len(compliant),
+        "pendingAgents": len(mismatched),
+        "unavailableAgents": len(unavailable),
+        "compliantPercent": measured(len(compliant)),
+        "mismatchPercent": measured(len(mismatched)),
+        "unavailablePercent": measured(len(unavailable)),
+        "canaryConverged": (sample_sufficient or not sample_gate_applies)
+        and bool(selected)
+        and not blockers
+        and len(compliant) == len(selected),
+        "fullConverged": bool(agents)
+        and percentage == 100
+        and len(selected) == len(agents)
+        and len(compliant) == len(selected)
+        and not blockers,
+        "graceUntil": grace_until,
+        "inGracePeriod": current < grace_until,
+        "blockers": sorted(set(blockers)),
+        "ready": not blockers,
+    }
+
+
+def _runtime_rollout_view(tenant, record, *, now=None, reconcile=True):
+    """Project one content-minimised rollout with live server-derived evidence."""
+    record = _validated_runtime_rollout(record, tenant)
+    governed = _reconcile_runtime_rollout_current(tenant, record, now=now) if reconcile else record
+    governed = _validated_runtime_rollout(governed, tenant)
+    return {
+        "schemaVersion": 1,
+        "deploymentId": governed["deploymentId"],
+        "host": governed["host"],
+        "revision": int(governed["revision"]),
+        "state": governed["state"],
+        "currentReleaseId": governed["currentReleaseId"],
+        "targetReleaseId": governed.get("targetReleaseId"),
+        "percentage": int(governed.get("percentage", 0)),
+        "reason": governed.get("reason", ""),
+        "startedAt": int(governed.get("startedAt", 0)) or None,
+        "startedBy": governed.get("startedBy"),
+        "pausedAt": governed.get("pausedAt"),
+        "pauseReason": governed.get("pauseReason"),
+        "updatedAt": int(governed.get("updatedAt", 0)),
+        "healthCriteria": _json(governed.get("healthCriteria", _ROLLOUT_DEFAULT_CRITERIA)),
+        "convergence": _runtime_rollout_convergence(tenant, governed, now=now),
+    }
+
+
+def _put_runtime_rollout(tenant, current, updated, event_type, actor, reason):
+    """Atomically compare-and-swap runtime authority and its primary audit."""
+    expected = int(current.get("revision", 0)) if current else 0
+    now = int(time.time())
+    item = {
+        **updated,
+        **_item_key(tenant, "RUNTIME_ROLLOUT", updated["deploymentId"]),
+        "tenant_id": tenant,
+        "revision": expected + 1,
+        "updatedAt": now,
+    }
+    _validated_runtime_rollout(item, tenant)
+    authority_document = {
+        key: _json(value) for key, value in item.items() if key not in {"pk", "sk", "tenant_id"}
+    }
+    authority_sha256 = hashlib.sha256(
+        json.dumps(authority_document, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    payload = {
+        "deployment_id": item["deploymentId"],
+        "runtime_rollout_revision": item["revision"],
+        "previous_state": current.get("state") if current else None,
+        "state": item["state"],
+        "host": item["host"],
+        "current_release_id": item["currentReleaseId"],
+        "target_release_id": item.get("targetReleaseId"),
+        "percentage": item.get("percentage", 0),
+        "health_criteria": _json(item["healthCriteria"]),
+        "authority_sha256": authority_sha256,
+        "reason": reason,
+    }
+    audit = _configuration_audit_record(tenant, event_type, actor, payload, now=now)
+    try:
+        authority_write = _transaction_put(
+            item,
+            condition=(
+                "attribute_not_exists(pk)"
+                if current is None
+                else "attribute_exists(pk) AND revision = :revision"
+            ),
+            values=None if current is None else {":revision": expected},
+        )
+        DYNAMODB.transact_write_items(
+            TransactItems=[
+                authority_write,
+                _transaction_put(audit, condition="attribute_not_exists(pk)"),
+            ]
+        )
+    except Exception as error:
+        code = getattr(error, "response", {}).get("Error", {}).get("Code")
+        if _is_conditional_conflict(error) or code == "TransactionCanceledException":
+            raise PolicyConflict("runtime rollout revision changed") from error
+        raise
+    # DynamoDB is the primary evidence boundary. Object-Lock export is a
+    # best-effort replica, so an S3 outage cannot create unaudited authority.
+    _export_configuration_audit(tenant, event_type, actor, payload)
+    return item
+
+
+def _reconcile_runtime_rollout(tenant, record, *, now=None):
+    """Pause or complete a runtime rollout using only fresh attestation evidence."""
+    record = _validated_runtime_rollout(record, tenant)
+    current = int(time.time()) if now is None else int(now)
+    convergence = _runtime_rollout_convergence(tenant, record, now=current)
+    state = record.get("state")
+    if state in {"canary", "active"}:
+        criteria = record.get("healthCriteria") or _ROLLOUT_DEFAULT_CRITERIA
+        pause_reason = None
+        if not convergence["inGracePeriod"] and convergence["selectedAgents"] >= int(
+            criteria.get("minSampleSize", 1)
+        ):
+            if (convergence["unavailablePercent"] or 0) > int(
+                criteria.get("maxUnavailablePercent", 10)
+            ):
+                pause_reason = "runtime release unavailable threshold exceeded"
+            elif (convergence["mismatchPercent"] or 0) > int(criteria.get("maxDriftPercent", 10)):
+                pause_reason = "runtime release mismatch threshold exceeded"
+        if pause_reason:
+            return _put_runtime_rollout(
+                tenant,
+                record,
+                {
+                    **record,
+                    "state": "paused",
+                    "pausedAt": current,
+                    "pauseReason": pause_reason,
+                    "selectedMemberDigests": _runtime_rollout_selected_digests(
+                        tenant,
+                        record,
+                        _runtime_rollout_active_agents(tenant, record["deploymentId"]),
+                    ),
+                },
+                "runtime_release_rollout_auto_paused",
+                "system:runtime-rollout-reconciler",
+                pause_reason,
+            )
+        if state == "active" and convergence["fullConverged"]:
+            return _put_runtime_rollout(
+                tenant,
+                record,
+                {
+                    **record,
+                    "state": "converged",
+                    "currentReleaseId": record["targetReleaseId"],
+                    "currentReleaseBinding": record["targetReleaseBinding"],
+                    "percentage": 100,
+                    "convergedAt": current,
+                    "pauseReason": None,
+                    "selectedMemberDigests": [],
+                },
+                "runtime_release_rollout_converged",
+                "system:runtime-rollout-reconciler",
+                "all active endpoints reported the exact approved target release",
+            )
+    elif state == "rolling_back" and convergence["canaryConverged"]:
+        return _put_runtime_rollout(
+            tenant,
+            record,
+            {
+                **record,
+                "state": "rolled_back",
+                "targetReleaseId": None,
+                "targetReleaseBinding": None,
+                "percentage": 0,
+                "rolledBackAt": current,
+                "pauseReason": None,
+                "selectedMemberDigests": [],
+            },
+            "runtime_release_rollout_rolled_back",
+            "system:runtime-rollout-reconciler",
+            "selected endpoints returned to the retained current release",
+        )
+    return record
+
+
+def _reconcile_runtime_rollout_current(tenant, record, *, now=None):
+    """Reconcile or return the newer authority won by a concurrent request.
+
+    Reconciliation is monotonic and server-derived. A concurrent successful
+    writer is therefore safer and more current than failing an inventory read
+    or the entire scheduled tenant cycle with a stale compare-and-swap.
+    """
+    try:
+        return _reconcile_runtime_rollout(tenant, record, now=now)
+    except PolicyConflict as conflict:
+        current = _runtime_rollout_record(tenant, record.get("deploymentId", ""))
+        if not current:
+            raise RuntimeError("runtime rollout disappeared during reconciliation") from conflict
+        return current
+
+
+def _start_runtime_rollout(tenant, body, actor):
+    """Start or expand an exact approved dual-version runtime transition."""
+    required = {
+        "deploymentId",
+        "expectedRevision",
+        "targetReleaseId",
+        "targetState",
+        "percentage",
+        "healthCriteria",
+        "reason",
+    }
+    if not isinstance(body, dict) or set(body) != required:
+        raise ValueError("runtime rollout request has an invalid schema")
+    deployment_id = _bounded_identifier(body.get("deploymentId"), "deploymentId")
+    expected_revision = _managed_integer(
+        body.get("expectedRevision"), "runtime rollout expected revision"
+    )
+    target_release_id = _bounded_text(body.get("targetReleaseId"), "targetReleaseId", 128)
+    target_state = body.get("targetState")
+    percentage = _managed_integer(
+        body.get("percentage"), "runtime rollout percentage", positive=True
+    )
+    criteria = _rollout_health_criteria(body.get("healthCriteria"))
+    reason = _case_reason(body.get("reason"), "runtime rollout reason")
+    if target_state not in _RUNTIME_ROLLOUT_TARGET_STATES:
+        raise ValueError("runtime rollout target must be canary or active")
+    if percentage > 100 or (target_state == "canary" and percentage > 25):
+        raise ValueError("runtime canary must select between 1 and 25 percent")
+    if target_state == "active" and percentage <= 25:
+        raise ValueError("active runtime rollout must select more than 25 percent")
+    deployment = TABLE.get_item(
+        Key=_item_key(tenant, "DEPLOYMENT", deployment_id), ConsistentRead=True
+    ).get("Item")
+    if not deployment:
+        raise LookupError("deployment not found")
+    agents = _runtime_rollout_active_agents(tenant, deployment_id)
+    hosts = {agent.get("host") for agent in agents}
+    if not agents or len(hosts) != 1:
+        raise PolicyConflict("runtime rollout requires one non-empty compatible host population")
+    host = next(iter(hosts))
+    catalog = _runtime_release_catalog()
+    releases = _runtime_release_map(catalog)
+    current = _runtime_rollout_record(tenant, deployment_id)
+    current_revision = int(current.get("revision", 0)) if current else 0
+    if current_revision != expected_revision:
+        raise PolicyConflict("runtime rollout revision changed")
+    current_release_id = (
+        current.get("currentReleaseId")
+        if current
+        else f"{host}:{deployment.get('sdk_version', '')}"
+    )
+    if current:
+        current = _validated_runtime_rollout(
+            current, tenant, deployment_id=deployment_id, host=host
+        )
+        if current.get("state") == "rolling_back":
+            raise PolicyConflict("runtime rollback must complete before a new transition")
+        current_binding = _validated_runtime_release_binding(
+            current.get("currentReleaseBinding"), current_release_id, host
+        )
+    else:
+        current_release = releases.get(current_release_id)
+        if not current_release or current_release.get("host") != host:
+            raise PolicyConflict("current runtime release is not approved for the deployment host")
+        current_binding = _runtime_release_binding(catalog, current_release)
+    transition_open = bool(current and current.get("state") in {"canary", "active", "paused"})
+    if transition_open:
+        target_binding = _validated_runtime_release_binding(
+            current.get("targetReleaseBinding"), current.get("targetReleaseId"), host
+        )
+    else:
+        target = releases.get(target_release_id)
+        if not target or target.get("host") != host:
+            raise PolicyConflict("target runtime release is not approved for the deployment host")
+        target_binding = _runtime_release_binding(catalog, target)
+    if transition_open:
+        if current.get("targetReleaseId") != target_release_id:
+            raise PolicyConflict("runtime rollout target cannot change during a transition")
+        if percentage < int(current.get("percentage", 0)):
+            raise PolicyConflict("runtime rollout percentage cannot decrease outside rollback")
+        if (
+            target_state == "active"
+            and not _runtime_rollout_convergence(tenant, current)["canaryConverged"]
+        ):
+            raise PolicyConflict("runtime canary must converge before broad expansion")
+    elif target_state != "canary":
+        raise PolicyConflict("a new runtime release must begin with a canary")
+    elif target_release_id == current_release_id:
+        raise PolicyConflict("runtime rollout target must differ from the current release")
+    now = int(time.time())
+    updated = {
+        **(current or {}),
+        "schemaVersion": 1,
+        "deploymentId": deployment_id,
+        "host": host,
+        "state": target_state,
+        "currentReleaseId": current_release_id,
+        "currentReleaseBinding": current_binding,
+        "targetReleaseId": target_release_id,
+        "targetReleaseBinding": target_binding,
+        "percentage": percentage,
+        "healthCriteria": criteria,
+        "reason": reason,
+        "startedAt": now
+        if not current or current.get("targetReleaseId") != target_release_id
+        else current.get("startedAt", now),
+        "startedBy": actor,
+        "pausedAt": None,
+        "pauseReason": None,
+        "selectedMemberDigests": [],
+    }
+    stored = _put_runtime_rollout(
+        tenant, current, updated, "runtime_release_rollout_started", actor, reason
+    )
+    return _runtime_rollout_view(tenant, stored, now=now)
+
+
+def _pause_runtime_rollout(tenant, deployment_id, body, actor):
+    """Pause one exact runtime transition while retaining dual-version admission."""
+    if not isinstance(body, dict) or set(body) != {"expectedRevision", "reason"}:
+        raise ValueError("runtime rollout pause request has an invalid schema")
+    expected = _managed_integer(body.get("expectedRevision"), "runtime rollout expected revision")
+    reason = _case_reason(body.get("reason"), "runtime rollout pause reason")
+    current = _runtime_rollout_record(tenant, deployment_id)
+    if not current:
+        raise LookupError("runtime rollout not found")
+    current = _validated_runtime_rollout(current, tenant, deployment_id=deployment_id)
+    if int(current.get("revision", 0)) != expected:
+        raise PolicyConflict("runtime rollout revision changed")
+    if current.get("state") not in {"canary", "active"}:
+        raise PolicyConflict("runtime rollout is not pausable")
+    now = int(time.time())
+    stored = _put_runtime_rollout(
+        tenant,
+        current,
+        {
+            **current,
+            "state": "paused",
+            "pausedAt": now,
+            "pauseReason": reason,
+            "selectedMemberDigests": _runtime_rollout_selected_digests(
+                tenant,
+                current,
+                _runtime_rollout_active_agents(tenant, deployment_id),
+            ),
+        },
+        "runtime_release_rollout_paused",
+        actor,
+        reason,
+    )
+    return _runtime_rollout_view(tenant, stored, now=now, reconcile=False)
+
+
+def _rollback_runtime_rollout(tenant, deployment_id, body, actor):
+    """Direct selected endpoints back to the retained approved current release."""
+    if not isinstance(body, dict) or set(body) != {"expectedRevision", "reason"}:
+        raise ValueError("runtime rollout rollback request has an invalid schema")
+    expected = _managed_integer(body.get("expectedRevision"), "runtime rollout expected revision")
+    reason = _case_reason(body.get("reason"), "runtime rollout rollback reason")
+    current = _runtime_rollout_record(tenant, deployment_id)
+    if not current:
+        raise LookupError("runtime rollout not found")
+    current = _validated_runtime_rollout(current, tenant, deployment_id=deployment_id)
+    if int(current.get("revision", 0)) != expected:
+        raise PolicyConflict("runtime rollout revision changed")
+    if current.get("state") not in {"canary", "active", "paused"}:
+        raise PolicyConflict("runtime rollout is not rollback eligible")
+    now = int(time.time())
+    selected_member_digests = _runtime_rollout_selected_digests(
+        tenant,
+        current,
+        _runtime_rollout_active_agents(tenant, deployment_id),
+    )
+    stored = _put_runtime_rollout(
+        tenant,
+        current,
+        {
+            **current,
+            "state": "rolling_back",
+            "startedAt": now,
+            "startedBy": actor,
+            "pauseReason": None,
+            "selectedMemberDigests": selected_member_digests,
+        },
+        "runtime_release_rollout_rollback_started",
+        actor,
+        reason,
+    )
+    return _runtime_rollout_view(tenant, stored, now=now)
+
+
+def _runtime_rollouts(tenant):
+    """Return every deployment transition after bounded evidence reconciliation."""
+    records = _list(tenant, "RUNTIME_ROLLOUT", consistent_read=True)
+    if len(records) > _ROLLOUT_CONFIGURATION_LIMIT:
+        raise RuntimeError("runtime rollout inventory exceeds its safe bound")
+    return [_runtime_rollout_view(tenant, record) for record in records]
 
 
 def _version_compliance(tenant, *, now=None, page_token=None, page_limit=_LIST_PAGE_ITEM_LIMIT):
@@ -748,22 +1539,32 @@ def _version_compliance(tenant, *, now=None, page_token=None, page_limit=_LIST_P
         if isinstance(agent.get("deployment_id"), str)
     }
     deployments = {}
+    runtime_rollouts = {}
     for deployment_id in sorted(deployment_ids):
         deployment = TABLE.get_item(
             Key=_item_key(tenant, "DEPLOYMENT", deployment_id), ConsistentRead=True
         ).get("Item")
         if deployment:
             deployments[deployment_id] = deployment
+            rollout = _runtime_rollout_record(tenant, deployment_id)
+            if rollout:
+                runtime_rollouts[deployment_id] = _reconcile_runtime_rollout_current(
+                    tenant, rollout, now=checked_at
+                )
     agent_rows = []
     for agent in agents:
         deployment_id = agent.get("deployment_id", "")
         deployment = deployments.get(deployment_id, {})
         host = agent.get("host", "")
-        desired_version = deployment.get("sdk_version")
+        rollout = runtime_rollouts.get(deployment_id)
+        release = _runtime_release_for_agent(
+            tenant, deployment, agent, catalog=catalog, rollout=rollout
+        )
+        desired_version = release.get("sdkVersion") if release else deployment.get("sdk_version")
         observed_version = agent.get("attestation_sdk_version")
         observed_revision = agent.get("attestation_sdk_revision")
         observed_manifest_digest = agent.get("attestation_manifest_sha256")
-        release = approved.get((host, desired_version))
+        release = release or approved.get((host, desired_version))
         attestation_status = agent.get("attestation_status", "pending")
         expires_at = int(agent.get("attestation_expires_at", 0))
         # Containment always outranks release configuration so the operator
@@ -804,7 +1605,26 @@ def _version_compliance(tenant, *, now=None, page_token=None, page_limit=_LIST_P
     deployment_rows = []
     for deployment_id, deployment in sorted(deployments.items()):
         scoped = [item for item in agent_rows if item["deploymentId"] == deployment_id]
-        desired_version = deployment.get("sdk_version")
+        rollout = runtime_rollouts.get(deployment_id)
+        current_release_id = (
+            rollout.get("currentReleaseId")
+            if rollout
+            else f"{scoped[0]['host']}:{deployment.get('sdk_version')}"
+            if scoped
+            else None
+        )
+        target_release_id = rollout.get("targetReleaseId") if rollout else None
+        effective_release_id = (
+            target_release_id
+            if rollout and rollout.get("state") in {"canary", "active", "paused"}
+            else current_release_id
+        )
+        effective_release = _runtime_release_map(catalog).get(effective_release_id)
+        desired_version = (
+            effective_release.get("sdkVersion")
+            if effective_release
+            else deployment.get("sdk_version")
+        )
         hosts = sorted({item["host"] for item in scoped})
         target_approved = bool(hosts) and all((host, desired_version) in approved for host in hosts)
         compliant = sum(item["status"] == "compliant" for item in scoped)
@@ -813,6 +1633,10 @@ def _version_compliance(tenant, *, now=None, page_token=None, page_limit=_LIST_P
                 "deploymentId": deployment_id,
                 "name": deployment.get("name", deployment_id),
                 "desiredSdkVersion": desired_version,
+                "currentReleaseId": current_release_id,
+                "targetReleaseId": target_release_id,
+                "runtimeRolloutState": rollout.get("state") if rollout else None,
+                "runtimeRolloutPercentage": int(rollout.get("percentage", 0)) if rollout else 0,
                 "targetApproved": target_approved,
                 "agentCount": len(scoped),
                 "compliantAgents": compliant,
@@ -847,17 +1671,34 @@ def _version_compliance(tenant, *, now=None, page_token=None, page_limit=_LIST_P
     }
 
 
-def _runtime_manifest(tenant, deployment_id, host, manifests=None):
-    """Select one immutable manifest from deployment version and host identity."""
+def _runtime_manifest(tenant, deployment_id, host, manifests=None, agent=None):
+    """Select one immutable manifest from deployment and rollout membership."""
     manifests = _runtime_manifests() if manifests is None else manifests
-    if not manifests:
+    rollout = _runtime_rollout_record(tenant, deployment_id)
+    if not manifests and not rollout:
         return None
     deployment = TABLE.get_item(
         Key=_item_key(tenant, "DEPLOYMENT", deployment_id), ConsistentRead=True
     ).get("Item")
     if not deployment:
         raise PermissionError("runtime attestation deployment is unavailable")
-    expected_version = deployment.get("sdk_version")
+    release = _runtime_release_for_agent(
+        tenant,
+        deployment,
+        agent
+        or {
+            "id": "",
+            "deployment_id": deployment_id,
+            "host": host,
+        },
+        rollout=rollout if agent is not None else {},
+    )
+    if release and isinstance(release.get("attestationManifest"), dict):
+        # Open rollout authority carries the exact approved manifest bytes it
+        # admitted. Replacing the deployment catalog under the same version ID
+        # cannot silently change an in-flight endpoint trust decision.
+        return _json(release["attestationManifest"])
+    expected_version = release.get("sdkVersion") if release else deployment.get("sdk_version")
     matches = [
         manifest
         for manifest in manifests
@@ -880,12 +1721,19 @@ def _issue_attestation_challenge(tenant, session, token):
         ExpressionAttributeValues={":nonce": nonce, ":expires": expires_at, ":now": now},
     )
     manifests = _runtime_manifests()
+    rollout = _runtime_rollout_record(tenant, session.get("deployment_id", ""))
+    if rollout:
+        _validated_runtime_rollout(
+            rollout,
+            tenant,
+            deployment_id=session.get("deployment_id"),
+        )
     return {
         "nonce": nonce,
         "expiresAt": expires_at,
         # Once any approved bundle is installed, an unlisted host/version is a
         # trust failure rather than a development compatibility state.
-        "required": bool(manifests),
+        "required": bool(manifests or rollout),
     }
 
 
@@ -933,7 +1781,9 @@ def _quarantine_attestation(tenant, agent, token, reasons):
 def _validate_runtime_attestation(tenant, deployment_id, agent, session, token, value):
     """Consume one challenge and compare fresh evidence to manifest and baseline."""
     manifests = _runtime_manifests()
-    manifest = _runtime_manifest(tenant, deployment_id, agent.get("host", ""), manifests)
+    manifest = _runtime_manifest(
+        tenant, deployment_id, agent.get("host", ""), manifests, agent=agent
+    )
     if manifest is None:
         if manifests:
             _quarantine_attestation(tenant, agent, token, ["approved_manifest_missing"])
@@ -1032,9 +1882,12 @@ def _validate_runtime_attestation(tenant, deployment_id, agent, session, token, 
 def _require_current_attestation(tenant, deployment_id, agent):
     """Deny governed agent routes when configured attestation is not current."""
     manifests = _runtime_manifests()
-    if not manifests:
+    rollout = _runtime_rollout_record(tenant, deployment_id)
+    if not manifests and not rollout:
         return
-    manifest = _runtime_manifest(tenant, deployment_id, agent.get("host", ""), manifests)
+    manifest = _runtime_manifest(
+        tenant, deployment_id, agent.get("host", ""), manifests, agent=agent
+    )
     if manifest is None:
         raise PermissionError("runtime attestation has no approved host/version manifest")
     if agent.get("attestation_status") != "compliant" or int(
@@ -1499,6 +2352,24 @@ def _mutation_resource_scope(tenant, event, path):
                 _delegated_scope_lineage(tenant, "deployment", deployment_id)
                 for deployment_id in deployment_ids
             ]
+        except (ValueError, LookupError):
+            return None
+    if parts == ["runtime-rollouts"]:
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", body.get("deploymentId"))
+        except (ValueError, LookupError):
+            return None
+    if (
+        len(parts) == 3
+        and parts[0] == "runtime-rollouts"
+        and parts[2]
+        in {
+            "pause",
+            "rollback",
+        }
+    ):
+        try:
+            return _delegated_scope_lineage(tenant, "deployment", parts[1])
         except (ValueError, LookupError):
             return None
     if parts == ["emergency-stop"] and body.get("deploymentId"):
@@ -1980,6 +2851,7 @@ def _machine_route_capability(method, path):
         "/enterprise/policies",
         "/enterprise/projects",
         "/enterprise/runtime-releases",
+        "/enterprise/runtime-rollouts",
         "/enterprise/skills",
         "/enterprise/slo",
         "/enterprise/templates",
@@ -2057,10 +2929,15 @@ def _machine_route_capability(method, path):
             "/enterprise/deployment-config",
             "/enterprise/deployment-config/batch-rollout",
             "/enterprise/deployment-config/rollback",
+            "/enterprise/runtime-rollouts",
             "/enterprise/templates",
         }
         or re.fullmatch(
             r"/enterprise/deployment-config/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/pause",
+            normalized,
+        )
+        or re.fullmatch(
+            r"/enterprise/runtime-rollouts/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/(?:pause|rollback)",
             normalized,
         )
     ):
@@ -3725,6 +4602,10 @@ _ROLLOUT_RINGS = frozenset({"canary", "broad"})
 _ROLLOUT_BATCH_LIMIT = 20
 _ROLLOUT_CONFIGURATION_LIMIT = 5_000
 _ROLLOUT_MAX_SCHEDULE_SECONDS = 30 * 24 * 60 * 60
+_RUNTIME_ROLLOUT_STATES = frozenset(
+    {"canary", "active", "paused", "rolling_back", "converged", "rolled_back"}
+)
+_RUNTIME_ROLLOUT_TARGET_STATES = frozenset({"canary", "active"})
 _ROLLOUT_DEFAULT_CRITERIA = {
     "maxUnavailablePercent": 10,
     "maxDriftPercent": 10,
@@ -17205,6 +18086,7 @@ def _rollout_reconciliation_cycle():
             raise RuntimeError("rollout tenant inventory exceeds its safe bound")
     processed_tenants = 0
     processed_rollouts = 0
+    processed_runtime_rollouts = 0
     failed = 0
     for registration in tenants:
         tenant = registration.get("endpoint_detection_sk")
@@ -17218,6 +18100,12 @@ def _rollout_reconciliation_cycle():
                 raise RuntimeError("scheduled rollout inventory exceeds its safe bound")
             for configuration in configurations:
                 _reconcile_deployment_rollout(tenant, configuration)
+            runtime_rollouts = _list(tenant, "RUNTIME_ROLLOUT", consistent_read=True)
+            processed_runtime_rollouts += len(runtime_rollouts)
+            if processed_runtime_rollouts > _ROLLOUT_CONFIGURATION_LIMIT:
+                raise RuntimeError("scheduled runtime rollout inventory exceeds its safe bound")
+            for runtime_rollout in runtime_rollouts:
+                _reconcile_runtime_rollout_current(tenant, runtime_rollout)
             processed_tenants += 1
         except Exception:
             failed += 1
@@ -17226,6 +18114,7 @@ def _rollout_reconciliation_cycle():
     return {
         "processedTenants": processed_tenants,
         "processedRollouts": processed_rollouts,
+        "processedRuntimeRollouts": processed_runtime_rollouts,
         "failedTenants": 0,
     }
 
@@ -19012,7 +19901,9 @@ def _verify_agent(tenant, deployment_id, agent_id):
         and int(agent.get("expires_at", 0)) > checked_at
     )
     attestation_manifest = (
-        _runtime_manifest(tenant, deployment_id, agent.get("host", "")) if agent else None
+        _runtime_manifest(tenant, deployment_id, agent.get("host", ""), agent=agent)
+        if agent
+        else None
     )
     attestation_current = bool(
         agent
@@ -21080,6 +21971,7 @@ def handler(event, context):
             if method == "GET" and parts in (
                 ["runtime-releases"],
                 ["version-compliance"],
+                ["runtime-rollouts"],
             ):
                 # This tenant-wide projection exposes no executable bytes or
                 # credentials, but it still reveals fleet/release posture and
@@ -21103,10 +21995,25 @@ def handler(event, context):
                     except (TypeError, ValueError) as error:
                         return _response(400, {"error": str(error)})
                     return _response(200, posture)
+                if parts == ["runtime-rollouts"]:
+                    return _response(200, {"items": _runtime_rollouts(tenant), "nextCursor": None})
                 return _response(
                     200,
                     _runtime_release_catalog(),
                 )
+            if method == "POST" and parts == ["runtime-rollouts"]:
+                return _response(201, _start_runtime_rollout(tenant, _body(event), actor))
+            if (
+                method == "POST"
+                and len(parts) == 3
+                and parts[0] == "runtime-rollouts"
+                and parts[2] in {"pause", "rollback"}
+            ):
+                deployment_id = _bounded_identifier(parts[1], "deploymentId")
+                operation = (
+                    _pause_runtime_rollout if parts[2] == "pause" else _rollback_runtime_rollout
+                )
+                return _response(200, operation(tenant, deployment_id, _body(event), actor))
             if method == "GET" and parts == ["tenant"]:
                 root = TABLE.get_item(
                     Key=_item_key(tenant, "TENANT", "root"), ConsistentRead=True

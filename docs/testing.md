@@ -1,5 +1,22 @@
 # Testing and assurance
 
+Runtime-release rollout contracts prove deterministic dual-version selection,
+immutable manifest and approval-bundle bindings, exact target attestation,
+minimum-sample and canary-before-broad sequencing, threshold pause, frozen
+pause/rollback membership under population churn, target-attested measured
+rollback, malformed-authority refusal, tenant/delegated-scope and RBAC denial,
+empty-catalog bypass denial, state-specific field-removal denial,
+recursive DynamoDB `Decimal` normalization for stored authority and nested
+manifest hashing, stale-revision denial and an atomic complete-authority audit hash. UI contracts
+prove closed-schema response validation, independent release-endpoint failure,
+bounded integer health inputs, accessible modal focus behavior, explicit resume,
+pause and rollback journeys, contradictory-convergence and malformed-catalog
+denial, non-dismissible pending mutations, completed-transition reset, and
+accepted-mutation/failed-refresh recovery that prevents an unsafe retry.
+Physical MDM installation remains a separate
+live-acceptance gate; see
+[Measured runtime-release rollouts](runtime-release-rollout-design.md).
+
 `make check` is the required local and CI quality gate. It runs formatting,
 linting, strict typing, unit and adversarial tests, 90% branch coverage,
 guardrail checks, a strict documentation build, package validation, dependency

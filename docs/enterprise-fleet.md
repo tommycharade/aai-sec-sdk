@@ -1,5 +1,11 @@
 # Enterprise fleet control plane
 
+Runtime software transitions use the separate
+[measured runtime-release rollout](runtime-release-rollout-design.md) boundary.
+It admits one approved current and target release per deployment, selects
+canaries server-side and derives completion from exact runtime attestation. It
+does not replace MDM or another administrator-owned binary delivery channel.
+
 The enterprise fleet layer manages many independently deployed SDK control
 planes and many Claude Code projects without moving execution authority into
 the browser. It is a provider-neutral inventory and governance boundary:

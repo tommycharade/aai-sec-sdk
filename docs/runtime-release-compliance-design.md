@@ -16,10 +16,12 @@ active tenant agent with its deployment target and fresh runtime attestation.
 The Deployments **Runtime releases** workspace presents both views without
 allowing the browser to create release authority.
 
-This is the read-only release and compliance foundation for P1-FLT-06 and
-P1-ADM-02. It is not yet an SDK/gateway/hook upgrade orchestrator. Selecting a
-new release, dual-version canary admission, MDM delivery and automatic rollback
-remain required before managed upgrades can be marked complete.
+This is the release and compliance foundation for P1-FLT-06 and P1-ADM-02.
+The control plane now also provides revision-bound dual-version canary
+selection, exact per-agent admission, measured expansion, pause and rollback as
+documented in [Measured runtime-release rollouts](runtime-release-rollout-design.md).
+MDM or another administrator-owned delivery channel remains required before a
+managed upgrade can be marked physically complete.
 
 ## Trust boundary
 
@@ -38,6 +40,14 @@ remain required before managed upgrades can be marked complete.
 - Compliance is derived from current tenant-scoped deployment and active-agent
   records. Revoked and offboarded identities remain evidence but do not count
   as a live release population.
+
+An open transition is insulated from later catalog replacement: the control
+plane persists closed current and target release bindings containing the exact
+attestation manifest, revision, artifact identities and both approval-bundle
+identities. Malformed or missing persisted bindings fail closed rather than
+falling back to a deployment version. The persisted authority is evaluated
+before the empty-catalog development compatibility path, so removing the live
+catalog cannot turn off attestation during an open or retained rollout.
 
 The release catalog intentionally returns no executable bytes, source origin,
 project path, credential, prompt, command, tool arguments or result content.
@@ -122,8 +132,11 @@ release authority and stale evidence visible instead of treating them as
 healthy.
 
 It does not distribute files, update an endpoint, prove hardware identity,
-prove MDM enforcement, approve a release, choose a canary, or safely admit old
-and new runtime versions during an upgrade. Software attestation retains the
+prove MDM enforcement or approve a release. The separate measured rollout
+authority chooses a deterministic canary, freezes membership on pause or
+rollback, and safely admits the exact bound old and new releases; it still
+depends on an endpoint channel to deliver bytes.
+Software attestation retains the
 root-administrator limitation documented in the
 [runtime attestation design](runtime-attestation-design.md).
 

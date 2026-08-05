@@ -1,5 +1,24 @@
 # Operational runbooks
 
+## Runtime release canary and rollback
+
+Before starting, verify that both current and target appear in **Deployments →
+Runtime releases**, the deployment has one active host population, and the
+managed software channel can deliver the exact approved target bytes. Choose
+**Change release**, start at 1–25 percent and record explicit unavailable,
+mismatch, sample and grace thresholds with the approved change rationale.
+
+Do not expand while **Broad** is disabled. It unlocks only after every
+server-selected canary reports fresh exact target version, revision and manifest
+evidence and the configured minimum sample is present. Pause when investigating
+anomalous evidence. Pause freezes the current selected identities; newly enrolled
+or reactivated agents remain on the retained release. Resume is explicit and
+reopens selection to the live population. Roll back with the live revision to
+direct the frozen selected agents to the retained current release, then wait for
+their exact current-release attestation and the measured `rolled_back` state. A
+control-plane state change is not evidence that MDM delivered or loaded bytes;
+retain the endpoint-channel evidence separately.
+
 These runbooks are for operators deploying the SDK with real policy, identity,
 approval, audit, idempotency, and isolation services. The SDK exposes signals
 and fail-closed outcomes; it does not operate customer infrastructure. Use
