@@ -126,6 +126,42 @@ class ScopedCredential:
         if result is not None:
             raise ValueError("credential operation must not return provider material")
 
+    def restrict(self, validity_provider: Callable[[], bool]) -> ScopedCredential:
+        """Return an equivalent capability narrowed by one additional live check.
+
+        The new capability preserves the exact credential, tool, resources and
+        lifetime while requiring both this credential's existing authority and
+        ``validity_provider`` to remain active.  It is used by deployment
+        adapters to add incident-response revocation without exposing or
+        copying provider material.  Lookup failure remains fail-closed through
+        :meth:`valid_for`.
+
+        The method can only narrow authority: callers cannot extend lifetime,
+        alter scope, replace the provider token, or remove an existing
+        revocation check.
+        """
+        if not callable(validity_provider):
+            raise TypeError("credential validity provider must be callable")
+        provider = _PROVIDER_REGISTRY.get(self)
+        if provider is None:
+            raise ValueError("credential material is unavailable")
+
+        def remains_active() -> bool:
+            # Re-evaluate the parent so provider revocation and any earlier
+            # restrictions remain authoritative.  The second callback can
+            # only remove authority from that already-live capability.
+            return self.valid_for(self.tool_name, self.resources) and validity_provider() is True
+
+        return ScopedCredential(
+            credential_id=self.credential_id,
+            tool_name=self.tool_name,
+            resources=self.resources,
+            issued_at=self.issued_at,
+            expires_at=self.expires_at,
+            _secret_provider=provider,
+            _validity_provider=remains_active,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class CredentialMetadata:

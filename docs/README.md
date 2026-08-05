@@ -35,6 +35,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Hosted endpoint evidence and fleet health](hosted-endpoint-evidence.md)
 - [Endpoint detection and response](endpoint-detection-response.md)
 - [Incident cases and containment](incident-case-containment-design.md)
+- [Incident-driven credential revocation](incident-credential-revocation-design.md)
 - [Audit-ready incident case export](incident-case-export-design.md)
 - [Durable evidence governance](durable-evidence-governance-design.md)
 - [Asynchronous tenant retention](asynchronous-retention-design.md)
@@ -139,6 +140,10 @@ Azure, GCP and AWS cloud credential adapters bind short-lived grants to exact
 tools, resources, scopes and live revocation state. The hosted control plane
 keeps human registration separate from machine evidence and exposes no cloud
 secret; see [Cloud credential authority](cloud-credential-authority-design.md).
+Incident responders can revoke all current and future brokered authority for
+one exact server-bound agent without editing policy; the runtime checks before
+mint, after mint and before each use. Recovery remains server-gated; see
+[Incident-driven credential revocation](incident-credential-revocation-design.md).
 Hostile or generated code additionally needs an exact reviewed boundary; see
 [Production isolation authority](production-isolation-authority-design.md).
 

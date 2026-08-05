@@ -139,9 +139,11 @@ the rule language, governance lifecycle, non-guarantees and acceptance model.
 
 This tranche provides detections, durable local delivery, revisioned incident
 cases, authoritative endpoint-to-agent binding and approved automatic SDK
-quarantine. It does not provide MDM/EDR device isolation, process termination,
-network isolation, automatic third-party credential revocation, maintenance
-windows, repository/configuration anomaly baselines or a production SIEM
-adapter. Alert-only tool, MCP, decision-volume and approval-volume behavior
-detection is specified separately in
+quarantine. Case responders can separately revoke registered brokered cloud
+authority through the [incident credential response
+boundary](incident-credential-revocation-design.md). It does not provide
+MDM/EDR device isolation, process termination, network isolation, provider-side
+transaction recall, maintenance windows, repository/configuration anomaly
+baselines or a production SIEM adapter. Alert-only tool, MCP, decision-volume
+and approval-volume behavior detection is specified separately in
 [Explainable agent behavior detection](behavior-detection-design.md).

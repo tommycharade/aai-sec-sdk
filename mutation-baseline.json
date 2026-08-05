@@ -12,7 +12,8 @@
     "timeout and reconciliation",
     "audit replication failure",
     "native hook fail-closed decisions and command-pattern availability",
-    "production isolation profile, action-binding, freshness, signature, and revocation authority"
+    "production isolation profile, action-binding, freshness, signature, and revocation authority",
+    "incident-bound credential mint and use revocation"
   ],
   "source_scope": [
     "src/agentic_security/_command_patterns.py",
@@ -24,6 +25,7 @@
     "src/agentic_security/budgets.py",
     "src/agentic_security/credentials.py",
     "src/agentic_security/cloud_credentials.py",
+    "src/agentic_security/credential_authority.py",
     "src/agentic_security/idempotency.py",
     "src/agentic_security/isolation.py",
     "src/agentic_security/policies.py",
@@ -45,7 +47,8 @@
     "budgets": ["src/agentic_security/budgets.py"],
     "credentials": [
       "src/agentic_security/credentials.py",
-      "src/agentic_security/cloud_credentials.py"
+      "src/agentic_security/cloud_credentials.py",
+      "src/agentic_security/credential_authority.py"
     ],
     "idempotency": ["src/agentic_security/idempotency.py"],
     "isolation": ["src/agentic_security/isolation.py"],

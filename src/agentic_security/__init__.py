@@ -91,6 +91,13 @@ from .components import (
     TerminalRecorder,
     TerminalRecorderError,
 )
+from .credential_authority import (
+    CredentialAuthorityChecker,
+    CredentialAuthorityDecision,
+    CredentialAuthorityRequest,
+    CredentialAuthorityState,
+    RevocationAwareCredentialBroker,
+)
 from .credentials import (
     CredentialBroker,
     CredentialMetadata,
@@ -338,6 +345,11 @@ __all__ = [
     "CloudWorkloadCredentialBroker",
     "GcpWorkloadIdentityCredentialBroker",
     "GrantRevocationChecker",
+    "CredentialAuthorityChecker",
+    "CredentialAuthorityDecision",
+    "CredentialAuthorityRequest",
+    "CredentialAuthorityState",
+    "RevocationAwareCredentialBroker",
     "ClaudeCodeHook",
     "ClaudeHookDecision",
     "ClaudeHookResult",

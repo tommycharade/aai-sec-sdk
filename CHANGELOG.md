@@ -1,5 +1,13 @@
 # Changelog
 
+- Added case-owned, exact-agent revocation and recovery of brokered cloud
+  authority. A machine-only live authority check blocks new mints and
+  callback-checked credential use across current and future brokers, while the
+  SDK wrapper fails closed before mint, after mint and before every use. The
+  incident UI exposes the control and server-gated recovery without handling
+  credentials. P1-SOC-04 now has an implemented software foundation; real
+  provider acceptance remains open.
+
 - Added production isolation authority foundations: immutable reviewed
   profiles, exact action-bound signed evidence, live revocation, structured
   permit/audit identity, and an attested Docker launch contract whose

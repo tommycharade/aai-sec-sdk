@@ -254,3 +254,26 @@ list as the complete tenant record.
 The workflow never asks automation to carry a person's Entra session and never
 offers machine authority for policy approval, identity administration,
 break-glass or incident response.
+
+## Journey 9: Revoke an agent's brokered cloud authority
+
+**Actor:** Incident responder or security operator.
+
+1. Open **Incidents → Cases** and select the investigation created from the
+   retained alert.
+2. Verify that the server shows one current exact agent binding. Do not proceed
+   from an unbound, ambiguous or changed case.
+3. Select **Revoke cloud credentials**, review the exact target and record a
+   redaction-safe operational rationale.
+4. Confirm that the case card shows a live credential control and the active
+   broker snapshot. New brokers are covered even when absent from the snapshot.
+5. Continue investigation. Quarantine execution or revoke sessions separately
+   when those independent controls are required.
+6. Resolve or acknowledge the source alert, restore agent verification and
+   release quarantine before requesting credential recovery.
+7. Select **Restore cloud credentials**. A failed server recovery check is not
+   overridable in the browser.
+8. Verify the restoration event and only then resolve the case.
+
+Provider work already in flight may complete. This workflow blocks new mints
+and callback-checked use; it is not a provider-side transaction recall.

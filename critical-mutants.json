@@ -75,6 +75,21 @@
       "required_kill_percent": 100
     },
     {
+      "id": "CREDENTIAL-INCIDENT",
+      "invariant": "Central incident authority is exact-action bound and checked before mint, after mint, and before every provider-material use.",
+      "symbols": [
+        "agentic_security.credential_authority.RevocationAwareCredentialBroker._decision",
+        "agentic_security.credential_authority.RevocationAwareCredentialBroker.mint"
+      ],
+      "test_ids": [
+        "CREDENTIAL_INCIDENT_001",
+        "CREDENTIAL_INCIDENT_002",
+        "CREDENTIAL_INCIDENT_003",
+        "CREDENTIAL_INCIDENT_004"
+      ],
+      "required_kill_percent": 100
+    },
+    {
       "id": "LIFE-001",
       "invariant": "Timed-out workers retain capacity until completion and report the correct phase.",
       "symbols": [
