@@ -329,6 +329,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
       projectionType: dynamodb.ProjectionType.ALL,
     });
     table.addGlobalSecondaryIndex({
+      indexName: "BehaviorAgentTimeline",
+      partitionKey: { name: "behavior_pk", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "behavior_sk", type: dynamodb.AttributeType.STRING },
+      // Baseline evaluation is scoped to one authenticated enrolled agent.
+      // Partitioning by exact agent prevents a noisy fleet member from
+      // exhausting another member's bounded history window.
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+    table.addGlobalSecondaryIndex({
       indexName: "EndpointDetectionTenants",
       partitionKey: { name: "endpoint_detection_pk", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "endpoint_detection_sk", type: dynamodb.AttributeType.STRING },

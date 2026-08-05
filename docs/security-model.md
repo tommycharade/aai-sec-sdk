@@ -1165,6 +1165,13 @@ observations; they can create an explainable alert but can never invoke an
 automatic quarantine rule. The server derives tenant, agent, host, policy and
 receipt time, bounds the retained history, refuses truncated or insufficient
 baselines and records count/threshold/digest evidence without raw activity.
+Behavior history is partitioned by exact tenant and enrolled agent, so one
+noisy identity cannot truncate another identity's baseline. During the 30-day
+sparse-index migration window, bounded legacy history is merged and any
+truncation is explicit. DynamoDB secondary-index reads are eventually
+consistent; the evaluator merges the current server-owned observation
+synchronously, while the read-only fleet posture honestly declares that it may
+briefly lag.
 New tool and MCP identities remain untrusted dimensions. If a responder later
 opens a case, every consequential action revalidates the current enrolled-agent
 lifecycle, deployment, sole group, active policy and project-root digest. This

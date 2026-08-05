@@ -101,6 +101,10 @@ _MAX_LIST_PAGES = 8
 _MAX_LIST_ITEMS = 2_000
 _DECISION_WINDOW_LIMIT = 250
 _DECISION_TIMELINE_INDEX = "DecisionTimeline"
+_BEHAVIOR_AGENT_TIMELINE_INDEX = "BehaviorAgentTimeline"
+_BEHAVIOR_AGENT_INDEX_MIGRATION_ID = "agent-timeline-v1"
+_BEHAVIOR_AGENT_INDEX_MIGRATION_SECONDS = 30 * 24 * 60 * 60
+_BEHAVIOR_OBSERVATION_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _POLICY_SIMULATION_MAX_LOOKBACK_DAYS = 90
 _ATTESTATION_MANIFEST_FIELDS = frozenset(
     {
@@ -312,6 +316,7 @@ _INTEGRITY_ATTESTATION_REASONS = frozenset(
 )
 _BEHAVIOR_HISTORY_LIMIT = 2_000
 _BEHAVIOR_ACTIVE_RULE_LIMIT = 100
+_BEHAVIOR_BASELINE_PAGE_LIMIT = 50
 _BEHAVIOR_EVENT_REASONS = _BEHAVIOR_SIGNAL_TYPES
 _ENDPOINT_EVENT_REASONS = frozenset({"signature_invalid", "report_replayed"})
 _ENDPOINT_ALERT_DEFINITIONS = {
@@ -15134,6 +15139,12 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
         "observed_at": observed_at,
         "timeline_pk": f"TENANT#{tenant}#DECISION",
         "timeline_sk": f"{observed_at:010d}#{record_id}",
+        # The agent-partitioned sparse index is the scalable analytics read
+        # boundary. Tenant and agent identity are derived from the live
+        # authenticated session; model output cannot select this partition.
+        "behavior_pk": f"TENANT#{tenant}#AGENT#{agent_key}",
+        "behavior_sk": f"{observed_at:010d}#decision#{record_id}",
+        "behavior_kind": "decision",
         "ttl": observed_at + (30 * 86400),
     }
     if action_digest is not None:
@@ -15182,7 +15193,10 @@ def _record_agent_decision(tenant, deployment_id, agent_id, body):
         },
     )
     try:
-        _evaluate_behavior_rules_for_agent(tenant, agent_key, now=observed_at)
+        _ensure_behavior_agent_index_migration(tenant, now=observed_at)
+        _evaluate_behavior_rules_for_agent(
+            tenant, agent_key, now=observed_at, current_observation=item
+        )
     except Exception:
         # Decision reporting is observational and follows the governed action.
         # Detection failure must be visible but cannot rewrite that past action
@@ -18453,8 +18467,38 @@ def _record_behavior_health(tenant, status, *, now=None):
         print(json.dumps({"warning": "behavior detection health persistence failed"}))
 
 
+def _ensure_behavior_agent_index_migration(tenant, *, now):
+    """Retain when exact-agent behavior indexing first became authoritative.
+
+    Existing pre-index records do not carry the sparse-index attributes. For
+    one maximum-retention window the evaluator therefore combines the new
+    exact-agent index with the legacy tenant timeline. A conditional create
+    makes the transition timestamp monotonic under concurrent agent reports.
+    Failure to establish this marker cannot widen authority: the evaluator
+    remains in legacy/incomplete mode and agent activity stays alert-only.
+    """
+    key = _item_key(tenant, "BEHAVIOR_MIGRATION", _BEHAVIOR_AGENT_INDEX_MIGRATION_ID)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if existing:
+        return existing
+    record = {
+        **key,
+        "tenant_id": tenant,
+        "id": _BEHAVIOR_AGENT_INDEX_MIGRATION_ID,
+        "started_at": int(now),
+        "schema_version": 1,
+    }
+    try:
+        TABLE.put_item(Item=record, ConditionExpression="attribute_not_exists(pk)")
+        return record
+    except Exception as error:
+        if not _is_conditional_conflict(error):
+            raise
+        return TABLE.get_item(Key=key, ConsistentRead=True).get("Item") or record
+
+
 def _behavior_decision_history(tenant):
-    """Read a complete bounded activity history or refuse a misleading baseline."""
+    """Read the legacy bounded tenant history during sparse-index migration."""
     result = TABLE.query(
         IndexName=_DECISION_TIMELINE_INDEX,
         KeyConditionExpression=Key("timeline_pk").eq(f"TENANT#{tenant}#DECISION"),
@@ -18464,6 +18508,111 @@ def _behavior_decision_history(tenant):
     items = result.get("Items", [])
     truncated = bool(result.get("LastEvaluatedKey") or len(items) > _BEHAVIOR_HISTORY_LIMIT)
     return items[:_BEHAVIOR_HISTORY_LIMIT], truncated
+
+
+def _behavior_legacy_history(tenant):
+    """Read one complete legacy transition window shared by agent evaluations."""
+    decisions, truncated = _behavior_decision_history(tenant)
+    approvals = _list(tenant, "APPROVAL", consistent_read=True)
+    return {"decisions": decisions, "approvals": approvals, "truncated": truncated}
+
+
+def _behavior_agent_history(
+    tenant, agent_key, *, now, legacy_history=None, current_observation=None
+):
+    """Return bounded exact-agent behavior evidence and honest completeness.
+
+    The primary read uses an exact tenant-and-agent GSI partition. During the
+    30-day migration window, legacy records are merged from one tenant-bounded
+    read. Any index or legacy truncation marks the result incomplete so an
+    omitted event can never be interpreted as normal behavior.
+    """
+    result = TABLE.query(
+        IndexName=_BEHAVIOR_AGENT_TIMELINE_INDEX,
+        KeyConditionExpression=Key("behavior_pk").eq(f"TENANT#{tenant}#AGENT#{agent_key}"),
+        ScanIndexForward=False,
+        Limit=_BEHAVIOR_HISTORY_LIMIT + 1,
+    )
+    indexed = result.get("Items", [])
+    index_truncated = bool(result.get("LastEvaluatedKey") or len(indexed) > _BEHAVIOR_HISTORY_LIMIT)
+    indexed = indexed[:_BEHAVIOR_HISTORY_LIMIT]
+    marker = TABLE.get_item(
+        Key=_item_key(tenant, "BEHAVIOR_MIGRATION", _BEHAVIOR_AGENT_INDEX_MIGRATION_ID),
+        ConsistentRead=True,
+    ).get("Item")
+    migration_started_at = int(marker.get("started_at", 0)) if marker else None
+    migration_complete = bool(
+        migration_started_at is not None
+        and migration_started_at <= int(now) - _BEHAVIOR_AGENT_INDEX_MIGRATION_SECONDS
+    )
+    legacy_truncated = False
+    legacy_decisions = []
+    legacy_approvals = []
+    if not migration_complete:
+        context = legacy_history if legacy_history is not None else _behavior_legacy_history(tenant)
+        legacy_truncated = bool(context.get("truncated"))
+        legacy_decisions = [
+            item
+            for item in context.get("decisions", [])
+            if f"{item.get('deployment_id')}:{item.get('agent_id')}" == agent_key
+        ]
+        legacy_approvals = [
+            item for item in context.get("approvals", []) if item.get("agent_key") == agent_key
+        ]
+
+    current_records = []
+    expected_partition = f"TENANT#{tenant}#AGENT#{agent_key}"
+    if (
+        isinstance(current_observation, dict)
+        and current_observation.get("behavior_pk") == expected_partition
+    ):
+        # DynamoDB GSIs are eventually consistent. The caller has just
+        # persisted this server-derived observation, so merge that exact item
+        # into the evaluator input instead of waiting for index propagation.
+        current_records.append(current_observation)
+
+    by_key = {
+        (str(item.get("pk", "")), str(item.get("sk", ""))): item
+        for item in indexed + legacy_decisions + legacy_approvals + current_records
+    }
+    ordered = sorted(
+        by_key.values(),
+        key=lambda item: (
+            int(item.get("observed_at", item.get("requested_at", item.get("created_at", 0)))),
+            str(item.get("sk", "")),
+        ),
+        reverse=True,
+    )
+    combined_truncated = len(ordered) > _BEHAVIOR_HISTORY_LIMIT
+    ordered = ordered[:_BEHAVIOR_HISTORY_LIMIT]
+    decisions = [
+        item
+        for item in ordered
+        if item.get("behavior_kind") == "decision"
+        or (item.get("behavior_kind") is None and "deployment_id" in item)
+    ]
+    approvals = [
+        item
+        for item in ordered
+        if item.get("behavior_kind") == "approval"
+        or (item.get("behavior_kind") is None and "agent_key" in item and "requested_at" in item)
+    ]
+    observed_times = [
+        int(item.get("observed_at", item.get("requested_at", item.get("created_at", 0))))
+        for item in ordered
+    ]
+    return {
+        "decisions": decisions,
+        "approvals": approvals,
+        "truncated": index_truncated or legacy_truncated or combined_truncated,
+        "migrationState": "current" if migration_complete else "migrating",
+        "migrationStartedAt": migration_started_at,
+        "firstObservedAt": min(observed_times) if observed_times else None,
+        "lastObservedAt": max(observed_times) if observed_times else None,
+        "indexedEvents": len(indexed),
+        "eventCount": len(ordered),
+        "currentObservationMerged": bool(current_records),
+    }
 
 
 def _behavior_signal_metrics(
@@ -18776,10 +18925,12 @@ def _open_behavior_alert(tenant, rule, agent, metric, *, now):
     return record
 
 
-def _behavior_rule_metrics(tenant, configuration, agent_key, *, now):
+def _behavior_rule_metrics(tenant, configuration, agent_key, *, now, history=None):
     """Evaluate one normalized behavior rule without mutating alert state."""
-    decisions, truncated = _behavior_decision_history(tenant)
-    approvals = _list(tenant, "APPROVAL", consistent_read=True)
+    agent_history = history or _behavior_agent_history(tenant, agent_key, now=now)
+    decisions = agent_history["decisions"]
+    approvals = agent_history["approvals"]
+    truncated = bool(agent_history["truncated"])
     matches = []
     for signal in configuration["match"]["signalTypes"]:
         matches.extend(
@@ -18798,7 +18949,194 @@ def _behavior_rule_metrics(tenant, configuration, agent_key, *, now):
     return matches
 
 
-def _evaluate_behavior_rules_for_agent(tenant, agent_key, *, now=None):
+def _validated_active_behavior_rules(tenant):
+    """Load active immutable behavior rules or fail on retained corruption."""
+    rules = []
+    for item in _list(tenant, "RESPONSE_RULE", consistent_read=True):
+        configuration = item.get("configuration")
+        if not (
+            item.get("enabled") is True
+            and int(item.get("active_version", 0)) > 0
+            and isinstance(configuration, dict)
+            and (configuration.get("match") or {}).get("source") == "agent_activity"
+        ):
+            continue
+        normalized = _response_rule_configuration(configuration)
+        version = int(item["active_version"])
+        version_record = _response_rule_version_record(tenant, item["id"], version)
+        if (
+            version_record.get("state") != "active"
+            or version_record.get("content_hash") != item.get("content_hash")
+            or _configuration_hash(normalized) != item.get("content_hash")
+        ):
+            raise RuntimeError("active behavior rule integrity is invalid")
+        rules.append((item, normalized))
+    if len(rules) > _BEHAVIOR_ACTIVE_RULE_LIMIT:
+        raise RuntimeError("active behavior rule count exceeds its safe bound")
+    rules.sort(
+        key=lambda value: (
+            int(value[1].get("priority", 1_000)),
+            str(value[0].get("id", "")),
+        )
+    )
+    return rules
+
+
+def _behavior_baseline_signal_posture(rule, configuration, signal, history, *, now):
+    """Explain readiness for one signal without evaluating or creating alerts."""
+    baseline = configuration["baseline"]
+    current_start = int(now) - (int(baseline["currentWindowMinutes"]) * 60)
+    history_start = int(now) - (int(baseline["lookbackDays"]) * 86_400)
+    source = history["approvals"] if signal == "approval_request_spike" else history["decisions"]
+    historical = [
+        item
+        for item in source
+        if history_start
+        <= int(item.get("observed_at", item.get("requested_at", item.get("created_at", 0))))
+        < current_start
+    ]
+    minimum = int(baseline["minimumBaselineEvents"])
+    status = (
+        "incomplete"
+        if history["truncated"]
+        else "ready"
+        if len(historical) >= minimum
+        else "warming"
+    )
+    return {
+        "ruleId": rule["id"],
+        "ruleVersion": int(rule["active_version"]),
+        "ruleName": rule.get("name", rule["id"]),
+        "signalType": signal,
+        "status": status,
+        "baselineCount": len(historical),
+        "minimumBaselineEvents": minimum,
+        "lookbackDays": int(baseline["lookbackDays"]),
+        "currentWindowMinutes": int(baseline["currentWindowMinutes"]),
+        "minimumCurrentEvents": int(baseline["minimumCurrentEvents"]),
+        "sensitivityMultiplier": float(baseline["sensitivityMultiplier"]),
+    }
+
+
+def _behavior_baseline_page(
+    tenant,
+    *,
+    now=None,
+    page_token=None,
+    page_limit=_BEHAVIOR_BASELINE_PAGE_LIMIT,
+):
+    """Return a paginated, content-minimised fleet baseline readiness view."""
+    checked_at = int(time.time()) if now is None else int(now)
+    if (
+        isinstance(page_limit, bool)
+        or not isinstance(page_limit, int)
+        or not 1 <= page_limit <= _BEHAVIOR_BASELINE_PAGE_LIMIT
+    ):
+        raise ValueError(
+            f"behavior baseline page limit must be between 1 and {_BEHAVIOR_BASELINE_PAGE_LIMIT}"
+        )
+    raw_agents, next_token = _tenant_list_page(
+        tenant,
+        "AGENT",
+        token=page_token,
+        limit=page_limit,
+    )
+    agents = [item for item in raw_agents if _agent_lifecycle_state(item) == "active"]
+    rules = _validated_active_behavior_rules(tenant)
+    marker = TABLE.get_item(
+        Key=_item_key(tenant, "BEHAVIOR_MIGRATION", _BEHAVIOR_AGENT_INDEX_MIGRATION_ID),
+        ConsistentRead=True,
+    ).get("Item")
+    migration_complete = bool(
+        marker
+        and int(marker.get("started_at", 0)) <= checked_at - _BEHAVIOR_AGENT_INDEX_MIGRATION_SECONDS
+    )
+    # Read the bounded legacy transition source once for this page, never once
+    # per agent. A truncation remains visible on every affected row.
+    legacy_history = None if migration_complete else _behavior_legacy_history(tenant)
+    items = []
+    for agent in sorted(
+        agents,
+        key=lambda item: (str(item.get("deployment_id", "")), str(item.get("id", ""))),
+    ):
+        agent_key = f"{agent.get('deployment_id', '')}:{agent.get('id', '')}"
+        history = _behavior_agent_history(
+            tenant,
+            agent_key,
+            now=checked_at,
+            legacy_history=legacy_history,
+        )
+        host = _response_rule_host_identity(agent.get("host"))
+        signal_rows = []
+        for rule, configuration in rules:
+            if host not in configuration["match"]["hosts"]:
+                continue
+            for signal in configuration["match"]["signalTypes"]:
+                signal_rows.append(
+                    _behavior_baseline_signal_posture(
+                        rule,
+                        configuration,
+                        signal,
+                        history,
+                        now=checked_at,
+                    )
+                )
+        states = {item["status"] for item in signal_rows}
+        status = (
+            "not_configured"
+            if not signal_rows
+            else "incomplete"
+            if "incomplete" in states
+            else "warming"
+            if "warming" in states
+            else "ready"
+        )
+        items.append(
+            {
+                "agentKey": agent_key,
+                "deploymentId": agent.get("deployment_id", ""),
+                "agentId": agent.get("id", ""),
+                "host": host,
+                "status": status,
+                "eventCount": int(history["eventCount"]),
+                "indexedEvents": int(history["indexedEvents"]),
+                "decisionEvents": len(history["decisions"]),
+                "approvalEvents": len(history["approvals"]),
+                "firstObservedAt": history["firstObservedAt"],
+                "lastObservedAt": history["lastObservedAt"],
+                "historyTruncated": bool(history["truncated"]),
+                "migrationState": history["migrationState"],
+                "migrationStartedAt": history["migrationStartedAt"],
+                "signals": signal_rows,
+            }
+        )
+    counts = {
+        state: sum(item["status"] == state for item in items)
+        for state in ("ready", "warming", "incomplete", "not_configured")
+    }
+    return {
+        "schemaVersion": 1,
+        "checkedAt": checked_at,
+        "scope": "fleet" if page_token is None and next_token is None else "page",
+        "pageLimit": page_limit,
+        "nextToken": next_token,
+        "hasMore": next_token is not None,
+        "historyLimitPerAgent": _BEHAVIOR_HISTORY_LIMIT,
+        "readConsistency": "eventually_consistent_index",
+        "migrationWindowDays": _BEHAVIOR_AGENT_INDEX_MIGRATION_SECONDS // 86_400,
+        "summary": {"agents": len(items), **counts},
+        "items": items,
+        "contentBoundary": {
+            "rawPromptsIncluded": False,
+            "toolArgumentsIncluded": False,
+            "toolResultsIncluded": False,
+            "credentialsIncluded": False,
+            "projectPathsIncluded": False,
+        },
+    }
+
+
+def _evaluate_behavior_rules_for_agent(tenant, agent_key, *, now=None, current_observation=None):
     """Evaluate active alert-only rules for one authenticated enrolled agent."""
     current_time = int(time.time()) if now is None else int(now)
     agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
@@ -18806,38 +19144,24 @@ def _evaluate_behavior_rules_for_agent(tenant, agent_key, *, now=None):
     )
     if not agent or _agent_lifecycle_state(agent) != "active":
         return []
-    rules = []
-    for item in _list(tenant, "RESPONSE_RULE", consistent_read=True):
-        configuration = item.get("configuration")
-        if (
-            item.get("enabled") is True
-            and int(item.get("active_version", 0)) > 0
-            and isinstance(configuration, dict)
-            and (configuration.get("match") or {}).get("source") == "agent_activity"
-        ):
-            rules.append(item)
-    if len(rules) > _BEHAVIOR_ACTIVE_RULE_LIMIT:
-        raise RuntimeError("active behavior rule count exceeds its safe bound")
-    rules.sort(
-        key=lambda item: (
-            int(item.get("configuration", {}).get("priority", 1_000)),
-            str(item.get("id", "")),
-        )
+    rules = _validated_active_behavior_rules(tenant)
+    history = _behavior_agent_history(
+        tenant,
+        agent_key,
+        now=current_time,
+        current_observation=current_observation,
     )
     alerts = []
-    for rule in rules:
-        version = int(rule["active_version"])
-        version_record = _response_rule_version_record(tenant, rule["id"], version)
-        configuration = _response_rule_configuration(rule.get("configuration"))
-        if (
-            version_record.get("state") != "active"
-            or version_record.get("content_hash") != rule.get("content_hash")
-            or _configuration_hash(configuration) != rule.get("content_hash")
-        ):
-            raise RuntimeError("active behavior rule integrity is invalid")
+    for rule, configuration in rules:
         if _response_rule_host_identity(agent.get("host")) not in configuration["match"]["hosts"]:
             continue
-        for metric in _behavior_rule_metrics(tenant, configuration, agent_key, now=current_time):
+        for metric in _behavior_rule_metrics(
+            tenant,
+            configuration,
+            agent_key,
+            now=current_time,
+            history=history,
+        ):
             if metric.get("outcome") != "would_alert":
                 continue
             alerts.append(_open_behavior_alert(tenant, rule, agent, metric, now=current_time))
@@ -23602,7 +23926,17 @@ def handler(event, context):
                     "requested_at": now,
                     "expires_at": now + review_ttl,
                     "grant_ttl_seconds": grant_ttl,
-                    "ttl": now + review_ttl,
+                    # Approval-volume baselines use the same exact-agent
+                    # partition as decision observations. The server derives
+                    # agent_key from the authenticated session above.
+                    "behavior_pk": f"TENANT#{tenant}#AGENT#{agent_key}",
+                    "behavior_sk": f"{now:010d}#approval#{approval_id}",
+                    "behavior_kind": "approval",
+                    # Capability expiry remains expires_at. Retain the
+                    # content-minimised request for the same 30-day window as
+                    # agent decisions so approval-volume baselines can be
+                    # evaluated after the capability is no longer usable.
+                    "ttl": now + _BEHAVIOR_OBSERVATION_RETENTION_SECONDS,
                 }
                 try:
                     # Approval IDs are one-shot action capabilities.  Never
@@ -23631,7 +23965,10 @@ def handler(event, context):
                     },
                 )
                 try:
-                    _evaluate_behavior_rules_for_agent(tenant, agent_key, now=now)
+                    _ensure_behavior_agent_index_migration(tenant, now=now)
+                    _evaluate_behavior_rules_for_agent(
+                        tenant, agent_key, now=now, current_observation=item
+                    )
                 except Exception:
                     _record_behavior_health(tenant, "degraded", now=now)
                     print(json.dumps({"warning": "behavior approval detection remains degraded"}))
@@ -24745,6 +25082,24 @@ def handler(event, context):
                 if not _operator_roles(event):
                     return _response(403, {"error": "tenant-wide trust posture requires a role"})
                 return _response(200, _policy_trust_convergence(tenant))
+            if method == "GET" and parts == ["behavior-baselines"]:
+                if not _operator_authorized(event, "inventory_read", include_break_glass=False):
+                    return _response(
+                        403,
+                        {"error": "behavior baseline posture requires inventory-read authority"},
+                    )
+                query = event.get("queryStringParameters") or {}
+                if not isinstance(query, dict):
+                    return _response(400, {"error": "query parameters are invalid"})
+                try:
+                    page = _behavior_baseline_page(
+                        tenant,
+                        page_token=query.get("nextToken"),
+                        page_limit=int(query.get("limit", _BEHAVIOR_BASELINE_PAGE_LIMIT)),
+                    )
+                except (TypeError, ValueError) as error:
+                    return _response(400, {"error": str(error)})
+                return _response(200, page)
             if method == "GET" and parts in (
                 ["runtime-releases"],
                 ["version-compliance"],
@@ -25420,7 +25775,8 @@ def handler(event, context):
                             ":actor": actor,
                             ":reason": reason,
                             ":expires_at": grant_expiry if decision == "approved" else now,
-                            ":ttl": grant_expiry if decision == "approved" else now + 86400,
+                            ":ttl": int(current.get("requested_at", now))
+                            + _BEHAVIOR_OBSERVATION_RETENTION_SECONDS,
                         },
                         ReturnValues="ALL_NEW",
                     )
