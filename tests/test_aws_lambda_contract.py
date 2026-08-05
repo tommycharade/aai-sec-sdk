@@ -8,8 +8,10 @@ import importlib.util
 import json
 import re
 import sys
+import threading
 import time
 import types
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -171,6 +173,25 @@ class FakeTable:
         item = self.items.get(key)
         if item is None:
             raise ConditionalFailure()
+        if ":report_pk" in ExpressionAttributeValues:
+            if (
+                item.get("assurance_report_pk") != ExpressionAttributeValues[":report_pk"]
+                or item.get("assurance_report_sk") != ExpressionAttributeValues[":report_sk"]
+            ):
+                raise ConditionalFailure()
+            if ":candidate_revision" in ExpressionAttributeValues:
+                if item.get("revision") != ExpressionAttributeValues[":candidate_revision"]:
+                    raise ConditionalFailure()
+            elif "revision" in item:
+                raise ConditionalFailure()
+            item.pop("assurance_report_pk", None)
+            item.pop("assurance_report_sk", None)
+            item["assurance_report_quarantined_at"] = ExpressionAttributeValues[":quarantined_at"]
+            item["assurance_report_quarantine_reason"] = ExpressionAttributeValues[
+                ":quarantine_reason"
+            ]
+            self.items[key] = item
+            return {"Attributes": dict(item)}
         if ":partition" in ExpressionAttributeValues and ":tenant" in ExpressionAttributeValues:
             update_expression = str(_.get("UpdateExpression", ""))
             if "evidence_assurance_pk" in update_expression:
@@ -289,6 +310,8 @@ class FakeTable:
                         for item in values
                         if str(item.get(field, "")).startswith(str(expected))
                     ]
+                elif operation == "lte":
+                    values = [item for item in values if item.get(field, "") <= expected]
         return {"Items": [dict(item) for item in values]}
 
 
@@ -526,6 +549,13 @@ class FakeSqs:
         self.messages.append(dict(value))
         return {"MessageId": f"message-{len(self.messages)}"}
 
+    def send_message_batch(self, **value: Any) -> dict[str, list[Any]]:
+        for entry in value.get("Entries", []):
+            self.messages.append(
+                {"QueueUrl": value["QueueUrl"], "MessageBody": entry["MessageBody"]}
+            )
+        return {"Successful": list(value.get("Entries", [])), "Failed": []}
+
 
 class FakeSecretsManager:
     """Retain exact synthetic secret versions without exposing them through views."""
@@ -571,7 +601,7 @@ class FakeKms:
     def sign(self, **value: Any) -> dict[str, Any]:
         self.calls.append(dict(value))
         return {
-            "KeyId": self.key_id,
+            "KeyId": value["KeyId"],
             "SigningAlgorithm": "ECDSA_SHA_256",
             "Signature": b"synthetic-ecdsa-signature",
         }
@@ -590,7 +620,7 @@ class FakeKms:
         """Accept only the exact synthetic signature emitted by this KMS double."""
         self.calls.append(dict(value))
         return {
-            "KeyId": self.key_id,
+            "KeyId": value["KeyId"],
             "SigningAlgorithm": "ECDSA_SHA_256",
             "SignatureValid": value.get("Signature") == b"synthetic-ecdsa-signature",
         }
@@ -641,6 +671,7 @@ def _load_handler(monkeypatch: Any) -> Any:
     conditions.Key = lambda name: types.SimpleNamespace(  # type: ignore[attr-defined]
         eq=lambda value: FakeCondition([(name, "eq", value)]),
         begins_with=lambda value: FakeCondition([(name, "begins_with", value)]),
+        lte=lambda value: FakeCondition([(name, "lte", value)]),
     )
     monkeypatch.setitem(sys.modules, "boto3", boto3)
     monkeypatch.setitem(sys.modules, "boto3.dynamodb", dynamodb)
@@ -654,6 +685,9 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("DISCOVERY_PAGE_BUCKET", "discovery-pages")
     monkeypatch.setenv("EVIDENCE_QUEUE_URL", "https://sqs.example.invalid/evidence.fifo")
     monkeypatch.setenv(
+        "ASSURANCE_REPORT_QUEUE_URL", "https://sqs.example.invalid/assurance-reports"
+    )
+    monkeypatch.setenv(
         "EVIDENCE_RETENTION_QUEUE_URL",
         "https://sqs.example.invalid/evidence-retention.fifo",
     )
@@ -665,6 +699,9 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("SCIM_TABLE", "")
     monkeypatch.setenv("SPLUNK_STUB_ENABLED", "true")
     monkeypatch.setenv("POLICY_SIGNING_KEY_ARN", policy_key_id)
+    assurance_key_id = "arn:aws:kms:eu-west-1:111111111111:key/mrk-abcdefabcdefabcdefabcdefabcdefab"
+    monkeypatch.setenv("ASSURANCE_REPORT_SIGNING_KEY_ARN", assurance_key_id)
+    monkeypatch.setenv("ASSURANCE_REPORT_VERIFICATION_KEY_ARNS", json.dumps([assurance_key_id]))
     monkeypatch.setenv(
         "REGIONAL_POLICY_SIGNING_KEY_ARN",
         "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef",
@@ -1155,6 +1192,1223 @@ def test_enterprise_assurance_report_routes_enforce_profile_roles(monkeypatch: A
             _event("/api/enterprise/reports/executive", "GET", claims=anonymous),
         )["statusCode"]
         == 403
+    )
+
+
+def test_signed_assurance_snapshot_is_exact_version_bound_and_verifiable(
+    monkeypatch: Any,
+) -> None:
+    """A retained snapshot must bind canonical report bytes to KMS and S3 versions."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-signed-assurance"
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "TENANT", "root"),
+            "tenant_id": tenant,
+            "id": tenant,
+            "status": "active",
+        }
+    )
+    snapshot = module._create_assurance_snapshot(
+        tenant,
+        "auditor",
+        "auditor-a",
+        source="operator",
+        snapshot_id="operator-request-a",
+        now=1_800_000_000,
+        request_digest="a" * 64,
+    )
+    assert snapshot["profile"] == "auditor"
+    assert snapshot["source"] == "operator"
+    assert snapshot["objectVersionId"].startswith("version-")
+    record = table.get_item(
+        Key=module._assurance_item_key(tenant, "REPORT_SNAPSHOT", snapshot["id"]),
+        ConsistentRead=True,
+    )["Item"]
+    assert "report" not in record
+    assert "signature" in record
+    document = module._assurance_snapshot_document(tenant, record)
+    assert document["tenantId"] == tenant
+    assert document["integrity"]["reportSha256"] == snapshot["contentSha256"]
+    assert document["integrity"]["domain"] == "aai-sec-assurance-snapshot-v1"
+    verified = module._verify_assurance_snapshot(tenant, snapshot["id"])
+    assert verified["verified"] is True
+    assert module._fake_kms.calls[-1]["MessageType"] == "DIGEST"
+    assert module._fake_kms.calls[-1]["SigningAlgorithm"] == "ECDSA_SHA_256"
+
+    # Simulate a crash after S3 accepted the object but before DynamoDB stored
+    # its exact version. A retry adopts only the already signed valid object.
+    del table.items[(f"ASSURANCE#{tenant}", f"REPORT_SNAPSHOT#{snapshot['id']}")]
+    recovered = module._create_assurance_snapshot(
+        tenant,
+        "auditor",
+        "auditor-a",
+        source="operator",
+        snapshot_id=snapshot["id"],
+        now=1_800_000_100,
+        request_digest="a" * 64,
+    )
+    assert recovered["contentSha256"] == snapshot["contentSha256"]
+    record = table.get_item(
+        Key=module._assurance_item_key(tenant, "REPORT_SNAPSHOT", snapshot["id"]),
+        ConsistentRead=True,
+    )["Item"]
+    assert record["generated_at"] == 1_800_000_000
+
+    # A later version at the same key can never replace the exact committed
+    # version selected by DynamoDB metadata.
+    module.S3.put_object(
+        Bucket="evidence-reports",
+        Key=record["object_key"],
+        Body=b'{"tampered":true}',
+    )
+    assert module._assurance_snapshot_document(tenant, record) == document
+    assert module._fake_s3.get_requests[-1]["VersionId"] == record["object_version_id"]
+    with pytest.raises(LookupError):
+        module._assurance_snapshot_record("tenant-other", snapshot["id"])
+
+
+def test_assurance_report_schedule_is_revisioned_and_runs_idempotently(
+    monkeypatch: Any,
+) -> None:
+    """Due tenant schedules create one deterministic snapshot and advance once."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-report-schedule"
+    partition, sort_key = module._evidence_assurance_registration(tenant)
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "TENANT", "root"),
+            "tenant_id": tenant,
+            "id": tenant,
+            "status": "active",
+            "evidence_assurance_pk": partition,
+            "evidence_assurance_sk": sort_key,
+        }
+    )
+    now = 1_800_000_000
+    schedule = module._set_assurance_report_schedule(
+        tenant,
+        {
+            "expectedRevision": 0,
+            "enabled": True,
+            "profile": "executive",
+            "cadence": "daily",
+            "hourUtc": 8,
+            "dayOfWeek": None,
+            "rationale": "Create a daily executive assurance record.",
+        },
+        "platform-admin-a",
+        now=now,
+    )
+    assert schedule["revision"] == 1
+    with pytest.raises(module.PolicyConflict):
+        module._set_assurance_report_schedule(
+            tenant,
+            {
+                "expectedRevision": 0,
+                "enabled": False,
+                "profile": "executive",
+                "cadence": "daily",
+                "hourUtc": 8,
+                "dayOfWeek": None,
+                "rationale": "Attempt an update from stale browser state.",
+            },
+            "platform-admin-a",
+            now=now,
+        )
+    schedule_record = table.items[(f"ASSURANCE#{tenant}", "REPORT_SCHEDULE#current")]
+    schedule_record["next_run_at"] = now - 60
+    due = now - 60
+    report_partition, report_sort = module._assurance_report_index(tenant, due)
+    schedule_record["assurance_report_pk"] = report_partition
+    schedule_record["assurance_report_sk"] = report_sort
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    shard = int(report_partition.rsplit("#", 1)[1])
+    result = module._assurance_report_schedule_cycle(shard)
+    assert result["queuedJobs"] == 1
+    message = json.loads(module._fake_sqs.messages[-1]["MessageBody"])
+    assert module._process_assurance_report_job(message)["status"] == "completed"
+    stored = table.items[(f"ASSURANCE#{tenant}", "REPORT_SCHEDULE#current")]
+    assert stored["last_snapshot_id"] == f"scheduled-{due}-executive"
+    assert stored["next_run_at"] > now
+    rerun = module._assurance_report_schedule_cycle(shard)
+    assert rerun["queuedJobs"] == 0
+    snapshots = [
+        item for item in table.items.values() if item.get("sk", "").startswith("REPORT_SNAPSHOT#")
+    ]
+    assert len(snapshots) == 1
+
+
+def test_assurance_snapshot_routes_separate_administration_and_auditor_read(
+    monkeypatch: Any,
+) -> None:
+    """Schedule/generation require evidence admin while auditors may verify."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-report-route"
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "TENANT", "root"),
+            "tenant_id": tenant,
+            "id": tenant,
+            "status": "active",
+        }
+    )
+    admin = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    auditor = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["auditor"],
+        "sub": "auditor-a",
+    }
+    created = _invoke(
+        module,
+        _event(
+            "/api/enterprise/reports/snapshots",
+            "POST",
+            claims=admin,
+            body={
+                "requestId": "request-a",
+                "profile": "auditor",
+                "rationale": "Capture approved point-in-time audit posture.",
+            },
+        ),
+    )
+    assert created["statusCode"] == 201
+    snapshot_id = json.loads(created["body"])["id"]
+    denied = _invoke(
+        module,
+        _event(
+            "/api/enterprise/reports/snapshots",
+            "POST",
+            claims=auditor,
+            body={
+                "requestId": "request-b",
+                "profile": "auditor",
+                "rationale": "Auditors cannot create retained report authority.",
+            },
+        ),
+    )
+    assert denied["statusCode"] == 403
+    verified = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/reports/snapshots/{snapshot_id}/verify",
+            "POST",
+            claims=auditor,
+        ),
+    )
+    assert verified["statusCode"] == 200
+    assert json.loads(verified["body"])["verified"] is True
+
+
+def test_assurance_snapshot_missing_exact_version_is_explicitly_unavailable(
+    monkeypatch: Any,
+) -> None:
+    """A missing retained version never falls back to latest or becomes an opaque 500."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-report-unavailable"
+    table.put_item(
+        Item={**module._item_key(tenant, "TENANT", "root"), "tenant_id": tenant, "id": tenant}
+    )
+    admin = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    created = _invoke(
+        module,
+        _event(
+            "/api/enterprise/reports/snapshots",
+            "POST",
+            claims=admin,
+            body={
+                "requestId": "missing-version",
+                "profile": "executive",
+                "rationale": "Retain an approved executive assurance record.",
+            },
+        ),
+    )
+    snapshot_id = json.loads(created["body"])["id"]
+    record = table.items[(f"ASSURANCE#{tenant}", f"REPORT_SNAPSHOT#{snapshot_id}")]
+    del module.S3.objects[(record["object_key"], record["object_version_id"])]
+
+    for method, suffix in (("GET", ""), ("POST", "/verify")):
+        response = _invoke(
+            module,
+            _event(
+                f"/api/enterprise/reports/snapshots/{snapshot_id}{suffix}",
+                method,
+                claims=admin,
+            ),
+        )
+        assert response["statusCode"] == 503
+        assert json.loads(response["body"]) == {
+            "error": "assurance snapshot is temporarily unavailable"
+        }
+
+
+def test_assurance_snapshot_worker_write_authority_is_prefix_bounded() -> None:
+    """Primary and recovery workers can retain snapshots but cannot delete evidence."""
+    root = Path(__file__).parents[1] / "infra" / "aws-control-plane" / "lib"
+    primary = (root / "aws-control-plane-stack.ts").read_text(encoding="utf-8")
+    recovery = (root / "passive-regional-cell-stack.ts").read_text(encoding="utf-8")
+
+    assert 'actions: ["s3:PutObject", "s3:PutObjectRetention"]' in primary
+    assert 'audit.arnForObjects("tenant=*/assurance-snapshots/*")' in primary
+    assert 'audit.arnForObjects("tenant=*/year=*/month=*/idempotent-*")' in primary
+    assert "audit.grantPut(assuranceReportWorker)" not in primary
+    assert "audit.grantRead(assuranceReportWorker)" not in primary
+    assert "table.grantReadData(assuranceReportWorker)" in primary
+    assert "table.grantReadWriteData(assuranceReportWorker)" not in primary
+    assert '"dynamodb:LeadingKeys": ["ASSURANCE#*"]' in primary
+    assert (
+        'assuranceReportSigningKey.grant(assuranceReportWorker, "kms:Sign", "kms:Verify")'
+        in primary
+    )
+    assert 'policySigningKey.grant(assuranceReportWorker, "kms:Sign", "kms:Verify")' not in primary
+    assert "evidenceReports.grantReadWrite(handler)" not in primary
+
+    assert 'actions: ["s3:PutObject", "s3:PutObjectRetention"]' in recovery
+    assert 'auditReplica.arnForObjects("tenant=*/assurance-snapshots/*")' in recovery
+    assert 'auditReplica.arnForObjects("tenant=*/year=*/month=*/idempotent-*")' in recovery
+    assert "auditReplica.grantPut(assuranceReportWorker)" not in recovery
+    assert "auditReplica.grantRead(assuranceReportWorker)" not in recovery
+    assert '"dynamodb:LeadingKeys": ["ASSURANCE#*"]' in recovery
+    assert (
+        'assuranceReportSigningReplica.grant(assuranceReportWorker, "kms:Sign", "kms:Verify")'
+        in recovery
+    )
+    assert (
+        'policySigningReplica.grant(assuranceReportWorker, "kms:Sign", "kms:Verify")'
+        not in recovery
+    )
+
+
+def test_assurance_snapshot_signature_binds_identity_envelope(monkeypatch: Any) -> None:
+    """Changing tenant, snapshot, profile, source or time invalidates KMS verification."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-envelope-binding"
+    table.put_item(
+        Item={**module._item_key(tenant, "TENANT", "root"), "tenant_id": tenant, "id": tenant}
+    )
+    snapshot = module._create_assurance_snapshot(
+        tenant,
+        "executive",
+        "platform-admin-a",
+        source="operator",
+        snapshot_id="operator-envelope-a",
+        now=1_800_000_000,
+        request_digest="a" * 64,
+    )
+    record = table.items[(f"ASSURANCE#{tenant}", f"REPORT_SNAPSHOT#{snapshot['id']}")]
+    original_envelope = record["envelope_sha256"]
+    for field, replacement in (
+        ("tenantId", "tenant-other"),
+        ("snapshotId", "operator-envelope-b"),
+        ("profile", "auditor"),
+        ("source", "schedule"),
+        ("generatedAt", 1_800_000_001),
+        ("scheduleRevision", 9),
+    ):
+        document = copy.deepcopy(module._assurance_snapshot_document(tenant, record))
+        document[field] = replacement
+        payload = module._assurance_signature_payload(
+            document["tenantId"],
+            document["snapshotId"],
+            document["profile"],
+            document["source"],
+            document["generatedAt"],
+            document["integrity"]["reportSha256"],
+            document["scheduleRevision"],
+        )
+        assert module._canonical_sha256(payload) != original_envelope
+
+    module.KMS.verify = lambda **value: {
+        "KeyId": value["KeyId"],
+        "SigningAlgorithm": value["SigningAlgorithm"],
+        "SignatureValid": value["Message"] == bytes.fromhex(original_envelope),
+    }
+    assert module._verify_assurance_snapshot(tenant, snapshot["id"])["verified"] is True
+    record["envelope_sha256"] = "b" * 64
+    with pytest.raises(RuntimeError, match="content verification"):
+        module._verify_assurance_snapshot(tenant, snapshot["id"])
+
+
+def test_assurance_report_reads_deny_roleless_and_request_reuse_is_bound(
+    monkeypatch: Any,
+) -> None:
+    """Every retained-report read needs authority and request IDs bind all input."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-assurance-access"
+    table.put_item(
+        Item={**module._item_key(tenant, "TENANT", "root"), "tenant_id": tenant, "id": tenant}
+    )
+    admin = {"custom:tenant_id": tenant, "cognito:groups": ["platform-admin"], "sub": "admin-a"}
+    roleless = {"custom:tenant_id": tenant, "sub": "roleless-a"}
+    request = {
+        "requestId": "bound-request",
+        "profile": "executive",
+        "rationale": "Capture an approved executive posture record.",
+    }
+    created = _invoke(
+        module,
+        _event("/api/enterprise/reports/snapshots", "POST", claims=admin, body=request),
+    )
+    snapshot_id = json.loads(created["body"])["id"]
+    for path in (
+        "/api/enterprise/reports/schedule",
+        "/api/enterprise/reports/snapshots",
+        f"/api/enterprise/reports/snapshots/{snapshot_id}",
+    ):
+        assert _invoke(module, _event(path, "GET", claims=roleless))["statusCode"] == 403
+    assert (
+        _invoke(
+            module,
+            _event(
+                f"/api/enterprise/reports/snapshots/{snapshot_id}/verify",
+                "POST",
+                claims=roleless,
+            ),
+        )["statusCode"]
+        == 403
+    )
+    changed = _invoke(
+        module,
+        _event(
+            "/api/enterprise/reports/snapshots",
+            "POST",
+            claims=admin,
+            body={
+                **request,
+                "rationale": "A different approved rationale must not reuse authority.",
+            },
+        ),
+    )
+    assert changed["statusCode"] == 409
+
+
+def test_assurance_schedule_claim_blocks_concurrent_change_and_recovers(
+    monkeypatch: Any,
+) -> None:
+    """A due occurrence is linearized before queueing and duplicate delivery is safe."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-assurance-race"
+    table.put_item(
+        Item={**module._item_key(tenant, "TENANT", "root"), "tenant_id": tenant, "id": tenant}
+    )
+    now = 1_800_000_000
+    module._set_assurance_report_schedule(
+        tenant,
+        {
+            "expectedRevision": 0,
+            "enabled": True,
+            "profile": "executive",
+            "cadence": "daily",
+            "hourUtc": 8,
+            "dayOfWeek": None,
+            "rationale": "Run an approved daily assurance capture.",
+        },
+        "admin-a",
+        now=now,
+    )
+    schedule = table.items[(f"ASSURANCE#{tenant}", "REPORT_SCHEDULE#current")]
+    due = now - 1
+    schedule["next_run_at"] = due
+    schedule["assurance_report_pk"], schedule["assurance_report_sk"] = (
+        module._assurance_report_index(tenant, due)
+    )
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    shard = int(schedule["assurance_report_pk"].rsplit("#", 1)[1])
+    module._assurance_report_schedule_cycle(shard)
+    claimed = table.items[(f"ASSURANCE#{tenant}", "REPORT_SCHEDULE#current")]
+    with pytest.raises(module.PolicyConflict, match="generation is already in progress"):
+        module._set_assurance_report_schedule(
+            tenant,
+            {
+                "expectedRevision": claimed["revision"],
+                "enabled": False,
+                "profile": "executive",
+                "cadence": "daily",
+                "hourUtc": 8,
+                "dayOfWeek": None,
+                "rationale": "Disable this schedule during a claimed occurrence.",
+            },
+            "admin-a",
+            now=now,
+        )
+    module._assurance_report_schedule_cycle(shard)
+    messages = [json.loads(item["MessageBody"]) for item in module._fake_sqs.messages]
+    assert len(messages) == 1
+    assert module._process_assurance_report_job(messages[-1])["status"] == "completed"
+    assert module._process_assurance_report_job(messages[-1])["status"] == "stale_claim"
+    assert (
+        len(
+            [
+                item
+                for item in table.items.values()
+                if str(item.get("sk", "")).startswith("REPORT_SNAPSHOT#")
+            ]
+        )
+        == 1
+    )
+
+
+def test_assurance_snapshot_stream_read_is_bounded(monkeypatch: Any) -> None:
+    """Oversized streams are never fully consumed or parsed."""
+    module, _ = _load_handler(monkeypatch)
+
+    class OversizedBody:
+        def __init__(self) -> None:
+            self.requested: list[int] = []
+
+        def read(self, size: int) -> bytes:
+            self.requested.append(size)
+            return b"x" * size
+
+    body = OversizedBody()
+    with pytest.raises(RuntimeError, match="exceeds"):
+        module._evidence_body_bytes({"Body": body}, module._ASSURANCE_REPORT_MAX_BYTES)
+    assert body.requested == [module._ASSURANCE_REPORT_MAX_BYTES + 1]
+
+
+def test_assurance_mutations_never_commit_without_audit_evidence(monkeypatch: Any) -> None:
+    """An audit outage leaves retryable objects but no successful control state."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-assurance-audit-gap"
+    table.put_item(
+        Item={**module._item_key(tenant, "TENANT", "root"), "tenant_id": tenant, "id": tenant}
+    )
+    original_put = module.S3.put_object
+    failures = {"remaining": 1}
+
+    def fail_audit_once(**value: Any) -> dict[str, str]:
+        if "idempotent-" in value["Key"] and failures["remaining"]:
+            failures["remaining"] -= 1
+            raise RuntimeError("synthetic audit outage")
+        return cast(dict[str, str], original_put(**value))
+
+    module.S3.put_object = fail_audit_once
+    with pytest.raises(RuntimeError, match="audit outage"):
+        module._create_assurance_snapshot(
+            tenant,
+            "executive",
+            "admin-a",
+            source="operator",
+            snapshot_id="operator-audit-gap",
+            now=1_800_000_000,
+            request_digest="a" * 64,
+        )
+    assert (f"ASSURANCE#{tenant}", "REPORT_SNAPSHOT#operator-audit-gap") not in table.items
+    recovered = module._create_assurance_snapshot(
+        tenant,
+        "executive",
+        "admin-a",
+        source="operator",
+        snapshot_id="operator-audit-gap",
+        now=1_800_000_100,
+        request_digest="a" * 64,
+    )
+    assert recovered["generatedAt"] == 1_800_000_000
+
+    failures["remaining"] = 1
+    with pytest.raises(RuntimeError, match="audit outage"):
+        module._set_assurance_report_schedule(
+            tenant,
+            {
+                "expectedRevision": 0,
+                "enabled": True,
+                "profile": "executive",
+                "cadence": "daily",
+                "hourUtc": 8,
+                "dayOfWeek": None,
+                "rationale": "Enable approved daily assurance records.",
+            },
+            "admin-a",
+            now=1_800_000_000,
+        )
+    assert (f"ASSURANCE#{tenant}", "REPORT_SCHEDULE#current") not in table.items
+
+
+def test_assurance_scheduler_isolates_corrupt_tenant_and_processes_next_page(
+    monkeypatch: Any,
+) -> None:
+    """One malformed record and a 251st due tenant cannot starve valid schedules."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_800_000_000
+    shard = 0
+    monkeypatch.setattr(
+        module,
+        "_assurance_report_index",
+        lambda tenant, due_at: (
+            f"ASSURANCE_REPORT#{shard:02d}",
+            f"{int(due_at):012d}#{tenant}",
+        ),
+    )
+    for index in range(252):
+        tenant = f"tenant-page-{index:03d}"
+        table.put_item(
+            Item={
+                **module._assurance_item_key(tenant, "REPORT_SCHEDULE", "current"),
+                "tenant_id": tenant,
+                "enabled": True,
+                "profile": "executive",
+                "cadence": "daily",
+                "hour_utc": 8 if index != 0 else 99,
+                "day_of_week": None,
+                "revision": 1,
+                "next_run_at": now - 1,
+                "assurance_report_pk": f"ASSURANCE_REPORT#{shard:02d}",
+                "assurance_report_sk": f"{now - 1:012d}#{tenant}",
+            }
+        )
+    original_query = table.query
+
+    def paged_query(**value: Any) -> dict[str, Any]:
+        result = original_query(**value)
+        if value.get("IndexName") != module._ASSURANCE_REPORT_INDEX:
+            return cast(dict[str, Any], result)
+        items = sorted(result["Items"], key=lambda item: item["assurance_report_sk"])
+        limit = int(value["Limit"])
+        return {
+            "Items": items[:limit],
+            **(
+                {"LastEvaluatedKey": {"pk": items[limit - 1]["pk"], "sk": items[limit - 1]["sk"]}}
+                if len(items) > limit
+                else {}
+            ),
+        }
+
+    table.query = paged_query
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    first = module._assurance_report_schedule_cycle(shard)
+    second = module._assurance_report_schedule_cycle(shard)
+    assert first == {
+        "shard": shard,
+        "dueSchedules": 250,
+        "queuedJobs": 249,
+        "corruptSchedules": 1,
+        "quarantineFailures": 0,
+        "moreDueSchedules": True,
+    }
+    assert second["queuedJobs"] == 2
+    assert second["moreDueSchedules"] is False
+    assert len(module._fake_sqs.messages) == 251
+    assert len(module._fake_sns.messages) == 1
+
+
+def test_assurance_scheduler_quarantines_full_corrupt_page_before_valid_tenant(
+    monkeypatch: Any,
+) -> None:
+    """A fully malformed first page cannot permanently starve the next tenant."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_800_000_000
+    shard = 0
+    monkeypatch.setattr(
+        module,
+        "_assurance_report_index",
+        lambda tenant, due_at: (
+            f"ASSURANCE_REPORT#{shard:02d}",
+            f"{int(due_at):012d}#{tenant}",
+        ),
+    )
+    for index in range(251):
+        tenant = f"tenant-corrupt-page-{index:03d}"
+        table.put_item(
+            Item={
+                **module._assurance_item_key(tenant, "REPORT_SCHEDULE", "current"),
+                "tenant_id": tenant,
+                "enabled": True,
+                "profile": "executive",
+                "cadence": "daily",
+                "hour_utc": 99 if index < 250 else 8,
+                "day_of_week": None,
+                "revision": 1,
+                "next_run_at": now - 1,
+                "assurance_report_pk": f"ASSURANCE_REPORT#{shard:02d}",
+                "assurance_report_sk": f"{now - 1:012d}#{tenant}",
+            }
+        )
+    original_query = table.query
+
+    def paged_query(**value: Any) -> dict[str, Any]:
+        result = cast(dict[str, Any], original_query(**value))
+        if value.get("IndexName") != module._ASSURANCE_REPORT_INDEX:
+            return result
+        items = sorted(result["Items"], key=lambda item: item["assurance_report_sk"])
+        limit = int(value["Limit"])
+        return {
+            "Items": items[:limit],
+            **(
+                {"LastEvaluatedKey": {"pk": items[limit - 1]["pk"], "sk": items[limit - 1]["sk"]}}
+                if len(items) > limit
+                else {}
+            ),
+        }
+
+    table.query = paged_query
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    first = module._assurance_report_schedule_cycle(shard)
+    second = module._assurance_report_schedule_cycle(shard)
+    assert first["corruptSchedules"] == 250
+    assert first["quarantineFailures"] == 0
+    assert first["queuedJobs"] == 0
+    assert first["moreDueSchedules"] is True
+    assert second["queuedJobs"] == 1
+    assert second["moreDueSchedules"] is False
+    quarantined = [
+        item
+        for item in table.items.values()
+        if item.get("assurance_report_quarantine_reason") == "malformed_schedule_record"
+    ]
+    assert len(quarantined) == 250
+    assert all("assurance_report_pk" not in item for item in quarantined)
+
+
+def test_assurance_scheduler_quarantines_full_page_of_malformed_revisions(
+    monkeypatch: Any,
+) -> None:
+    """String, boolean, missing and oversized revisions cannot starve page 251."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_800_000_000
+    monkeypatch.setattr(
+        module,
+        "_assurance_report_index",
+        lambda tenant, due_at: ("ASSURANCE_REPORT#00", f"{int(due_at):012d}#{tenant}"),
+    )
+    revisions: tuple[Any, ...] = (
+        "corrupt",
+        True,
+        None,
+        module._ASSURANCE_REPORT_MAX_REVISION + 1,
+    )
+    for index in range(251):
+        tenant = f"tenant-bad-revision-{index:03d}"
+        item = {
+            **module._assurance_item_key(tenant, "REPORT_SCHEDULE", "current"),
+            "tenant_id": tenant,
+            "enabled": True,
+            "profile": "executive",
+            "cadence": "daily",
+            "hour_utc": 8,
+            "day_of_week": None,
+            "next_run_at": now - 1,
+            "assurance_report_pk": "ASSURANCE_REPORT#00",
+            "assurance_report_sk": f"{now - 1:012d}#{tenant}",
+        }
+        if index < 250:
+            raw_revision = revisions[index % len(revisions)]
+            if raw_revision is not None:
+                item["revision"] = raw_revision
+        else:
+            item["revision"] = 1
+        table.put_item(Item=item)
+    original_query = table.query
+
+    def paged_query(**value: Any) -> dict[str, Any]:
+        result = cast(dict[str, Any], original_query(**value))
+        if value.get("IndexName") != module._ASSURANCE_REPORT_INDEX:
+            return result
+        items = sorted(result["Items"], key=lambda item: item["assurance_report_sk"])
+        limit = int(value["Limit"])
+        return {
+            "Items": items[:limit],
+            **({"LastEvaluatedKey": {"pk": items[limit - 1]["pk"]}} if len(items) > limit else {}),
+        }
+
+    table.query = paged_query
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    first = module._assurance_report_schedule_cycle(0)
+    second = module._assurance_report_schedule_cycle(0)
+    assert first["corruptSchedules"] == 250
+    assert first["queuedJobs"] == 0
+    assert second["queuedJobs"] == 1
+    quarantined = [
+        item
+        for item in table.items.values()
+        if item.get("assurance_report_quarantine_reason") == "malformed_schedule_record"
+    ]
+    assert len(quarantined) == 250
+    assert all("assurance_report_pk" not in item for item in quarantined)
+
+
+def test_assurance_scheduler_quarantine_cannot_overwrite_concurrent_repair(
+    monkeypatch: Any,
+) -> None:
+    """A repaired schedule wins an exact race with stale-record quarantine."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_800_000_000
+    tenant = "tenant-concurrent-repair"
+    monkeypatch.setattr(
+        module,
+        "_assurance_report_index",
+        lambda indexed_tenant, due_at: (
+            "ASSURANCE_REPORT#00",
+            f"{int(due_at):012d}#{indexed_tenant}",
+        ),
+    )
+    key = module._assurance_item_key(tenant, "REPORT_SCHEDULE", "current")
+    table.put_item(
+        Item={
+            **key,
+            "tenant_id": tenant,
+            "enabled": True,
+            "profile": "executive",
+            "cadence": "daily",
+            "hour_utc": 99,
+            "day_of_week": None,
+            "revision": 1,
+            "next_run_at": now - 1,
+            "assurance_report_pk": "ASSURANCE_REPORT#00",
+            "assurance_report_sk": f"{now - 1:012d}#{tenant}",
+        }
+    )
+    original_update = table.update_item
+    repair_pending = True
+
+    def repair_before_quarantine(**kwargs: Any) -> dict[str, Any]:
+        nonlocal repair_pending
+        if repair_pending and ":report_pk" in kwargs.get("ExpressionAttributeValues", {}):
+            repair_pending = False
+            table.items[(key["pk"], key["sk"])]["hour_utc"] = 8
+            table.items[(key["pk"], key["sk"])]["revision"] = 2
+        return cast(dict[str, Any], original_update(**kwargs))
+
+    table.update_item = repair_before_quarantine
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    first = module._assurance_report_schedule_cycle(0)
+    repaired = table.items[(key["pk"], key["sk"])]
+    assert first["corruptSchedules"] == 1
+    assert first["quarantineFailures"] == 0
+    assert repaired["revision"] == 2
+    assert repaired["hour_utc"] == 8
+    assert repaired["assurance_report_pk"] == "ASSURANCE_REPORT#00"
+    assert "assurance_report_quarantine_reason" not in repaired
+
+    second = module._assurance_report_schedule_cycle(0)
+    assert second["queuedJobs"] == 1
+
+
+def test_assurance_scheduler_transient_claim_failure_never_quarantines_valid_record(
+    monkeypatch: Any,
+) -> None:
+    """Provider failure during a valid claim leaves the due schedule retryable."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_800_000_000
+    tenant = "tenant-transient-claim"
+    monkeypatch.setattr(
+        module,
+        "_assurance_report_index",
+        lambda indexed_tenant, due_at: (
+            "ASSURANCE_REPORT#00",
+            f"{int(due_at):012d}#{indexed_tenant}",
+        ),
+    )
+    key = module._assurance_item_key(tenant, "REPORT_SCHEDULE", "current")
+    table.put_item(
+        Item={
+            **key,
+            "tenant_id": tenant,
+            "enabled": True,
+            "profile": "executive",
+            "cadence": "daily",
+            "hour_utc": 8,
+            "day_of_week": None,
+            "revision": 1,
+            "next_run_at": now - 1,
+            "assurance_report_pk": "ASSURANCE_REPORT#00",
+            "assurance_report_sk": f"{now - 1:012d}#{tenant}",
+        }
+    )
+    original_put = table.put_item
+
+    def transient_claim_failure(**kwargs: Any) -> None:
+        if kwargs.get("ConditionExpression") == (
+            "revision = :revision AND next_run_at = :next_run_at"
+        ):
+            raise RuntimeError("synthetic DynamoDB throttling")
+        original_put(**kwargs)
+
+    table.put_item = transient_claim_failure
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    with pytest.raises(RuntimeError, match="throttling"):
+        module._assurance_report_schedule_cycle(0)
+    retained = table.items[(key["pk"], key["sk"])]
+    assert retained["assurance_report_pk"] == "ASSURANCE_REPORT#00"
+    assert retained["revision"] == 1
+    assert "assurance_report_quarantine_reason" not in retained
+    view = module._assurance_report_schedule_view(retained)
+    assert view["generationStatus"] == "idle"
+    assert view["quarantinedAt"] is None
+
+
+def test_assurance_schedule_view_exposes_quarantine_and_reviewed_repair(
+    monkeypatch: Any,
+) -> None:
+    """Operators see quarantine and a revisioned schedule save clears it."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_800_000_000
+    tenant = "tenant-quarantine-view"
+    key = module._assurance_item_key(tenant, "REPORT_SCHEDULE", "current")
+    table.put_item(
+        Item={
+            **key,
+            "tenant_id": tenant,
+            "enabled": True,
+            "profile": "executive",
+            "cadence": "daily",
+            "hour_utc": 99,
+            "day_of_week": None,
+            "revision": 1,
+            "next_run_at": now - 1,
+            "assurance_report_quarantined_at": now,
+            "assurance_report_quarantine_reason": "malformed_schedule_record",
+        }
+    )
+    view = module._assurance_report_schedule_view(table.items[(key["pk"], key["sk"])])
+    assert view["generationStatus"] == "quarantined"
+    assert view["quarantinedAt"] == now
+    assert view["quarantineReason"] == "malformed_schedule_record"
+
+    repaired = module._set_assurance_report_schedule(
+        tenant,
+        {
+            "expectedRevision": 1,
+            "enabled": True,
+            "profile": "executive",
+            "cadence": "daily",
+            "hourUtc": 8,
+            "dayOfWeek": None,
+            "rationale": "Reviewed and repaired malformed reporting schedule.",
+        },
+        "admin-a",
+        now=now + 60,
+    )
+    assert repaired["generationStatus"] == "idle"
+    assert repaired["quarantinedAt"] is None
+    assert repaired["quarantineReason"] is None
+
+
+@pytest.mark.parametrize(
+    ("has_revision", "raw_revision"),
+    ((True, "corrupt"), (True, True), (False, None), (True, 2_147_483_648)),
+)
+def test_assurance_schedule_repairs_each_malformed_revision_shape(
+    monkeypatch: Any, has_revision: bool, raw_revision: Any
+) -> None:
+    """Opaque revision zero binds and replaces the exact malformed record."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_800_000_000
+    tenant = f"tenant-repair-{str(raw_revision).lower()}-{has_revision}"
+    key = module._assurance_item_key(tenant, "REPORT_SCHEDULE", "current")
+    item = {
+        **key,
+        "tenant_id": tenant,
+        "enabled": True,
+        "profile": "executive",
+        "cadence": "daily",
+        "hour_utc": 8,
+        "day_of_week": None,
+        "next_run_at": now - 1,
+        "assurance_report_quarantined_at": now,
+        "assurance_report_quarantine_reason": "malformed_schedule_record",
+    }
+    if has_revision:
+        item["revision"] = raw_revision
+    table.put_item(Item=item)
+    view = module._assurance_report_schedule_view(item)
+    assert view["revision"] == 0
+    assert view["generationStatus"] == "quarantined"
+    repaired = module._set_assurance_report_schedule(
+        tenant,
+        {
+            "expectedRevision": 0,
+            "enabled": True,
+            "profile": "executive",
+            "cadence": "daily",
+            "hourUtc": 8,
+            "dayOfWeek": None,
+            "rationale": "Reviewed and repaired malformed revision authority.",
+        },
+        "admin-a",
+        now=now + 60,
+    )
+    assert repaired["revision"] == 1
+    assert repaired["generationStatus"] == "idle"
+
+
+def test_assurance_dispatch_partial_batch_retries_only_unaccepted_job(monkeypatch: Any) -> None:
+    """Accepted jobs leave the due index while one rejected job remains retryable."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_800_000_000
+    shard = 0
+    tenants = ("tenant-batch-a", "tenant-batch-b")
+    monkeypatch.setattr(
+        module,
+        "_assurance_report_index",
+        lambda tenant, due_at: (
+            f"ASSURANCE_REPORT#{shard:02d}",
+            f"{int(due_at):012d}#{tenant}",
+        ),
+    )
+    for tenant in tenants:
+        table.put_item(
+            Item={
+                **module._assurance_item_key(tenant, "REPORT_SCHEDULE", "current"),
+                "tenant_id": tenant,
+                "enabled": True,
+                "profile": "executive",
+                "cadence": "daily",
+                "hour_utc": 8,
+                "day_of_week": None,
+                "revision": 1,
+                "next_run_at": now - 1,
+                "assurance_report_pk": f"ASSURANCE_REPORT#{shard:02d}",
+                "assurance_report_sk": f"{now - 1:012d}#{tenant}",
+            }
+        )
+    attempts = {"count": 0}
+    original_send = module.SQS.send_message_batch
+
+    def partial_send(**value: Any) -> dict[str, Any]:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            accepted, rejected = value["Entries"]
+            module._fake_sqs.messages.append(
+                {"QueueUrl": value["QueueUrl"], "MessageBody": accepted["MessageBody"]}
+            )
+            return {"Successful": [accepted], "Failed": [{"Id": rejected["Id"]}]}
+        return cast(dict[str, Any], original_send(**value))
+
+    monkeypatch.setattr(module.SQS, "send_message_batch", partial_send)
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    with pytest.raises(RuntimeError, match="rejected"):
+        module._assurance_report_schedule_cycle(shard)
+    records = [item for item in table.items.values() if item.get("sk") == "REPORT_SCHEDULE#current"]
+    assert sum("assurance_report_pk" in item for item in records) == 1
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"Successful": [{"Id": "report-0"}]},
+        {"Successful": [], "Failed": []},
+        {"Successful": [{"Id": "report-0"}, {"Id": "report-0"}], "Failed": []},
+        {"Successful": [], "Failed": [{"Id": "report-99"}]},
+    ],
+)
+def test_assurance_dispatch_rejects_malformed_batch_response(
+    monkeypatch: Any, response: dict[str, Any]
+) -> None:
+    """Unaccounted, duplicate, or unknown SQS result IDs fail closed."""
+    module, _ = _load_handler(monkeypatch)
+    monkeypatch.setattr(module.SQS, "send_message_batch", lambda **value: response)
+    with pytest.raises(RuntimeError, match="malformed batch response"):
+        module._dispatch_assurance_report_messages([{"tenantId": "tenant-a"}])
+
+
+def test_assurance_history_page_reports_truncation_without_unbounded_read(
+    monkeypatch: Any,
+) -> None:
+    """A bounded DynamoDB page remains usable while explicitly reporting more history."""
+    module, table = _load_handler(monkeypatch)
+    page = [
+        {
+            **module._assurance_item_key("tenant-a", "REPORT_SNAPSHOT", f"snapshot-{index}"),
+            "id": f"snapshot-{index}",
+        }
+        for index in range(module._ASSURANCE_REPORT_HISTORY_LIMIT)
+    ]
+    observed: dict[str, Any] = {}
+
+    def bounded_query(**value: Any) -> dict[str, Any]:
+        observed.update(value)
+        return {
+            "Items": page,
+            "LastEvaluatedKey": page[-1],
+        }
+
+    monkeypatch.setattr(table, "query", bounded_query)
+    items, truncated = module._assurance_list_page(
+        "tenant-a", "REPORT_SNAPSHOT", consistent_read=True
+    )
+    assert items == page
+    assert truncated is True
+    assert observed["Limit"] == module._ASSURANCE_REPORT_HISTORY_LIMIT + 1
+    assert observed["ConsistentRead"] is True
+
+
+def test_assurance_key_registry_fails_closed_on_ambiguous_or_foreign_authority(
+    monkeypatch: Any,
+) -> None:
+    """Startup key configuration must be local, unique, complete, and dedicated."""
+    module, _ = _load_handler(monkeypatch)
+    signer = "arn:aws:kms:eu-west-1:111111111111:key/mrk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    historical = "arn:aws:kms:eu-west-1:111111111111:key/mrk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    assert module._parse_assurance_key_registry(
+        json.dumps([signer, historical]), "eu-west-1", signer, ()
+    ) == (signer, historical)
+    invalid = (
+        ("{}", "eu-west-1", signer, ()),
+        ("[]", "eu-west-1", signer, ()),
+        (json.dumps([signer, signer]), "eu-west-1", signer, ()),
+        (json.dumps([signer.replace("eu-west-1", "eu-west-2")]), "eu-west-1", signer, ()),
+        (json.dumps([historical]), "eu-west-1", signer, ()),
+        (json.dumps([signer]), "eu-west-1", signer, (signer,)),
+    )
+    for raw, region, signing_key, policy_keys in invalid:
+        with pytest.raises(RuntimeError):
+            module._parse_assurance_key_registry(raw, region, signing_key, policy_keys)
+
+
+def test_assurance_verification_rejects_wrong_kms_response_and_accepts_historical_mrk(
+    monkeypatch: Any,
+) -> None:
+    """Verification binds key/algorithm and resolves a retained MRK through its local replica."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-key-history"
+    table.put_item(
+        Item={**module._item_key(tenant, "TENANT", "root"), "tenant_id": tenant, "id": tenant}
+    )
+    snapshot = module._create_assurance_snapshot(
+        tenant,
+        "executive",
+        "admin-a",
+        source="operator",
+        snapshot_id="operator-key-history",
+        now=1_800_000_000,
+        request_digest="a" * 64,
+    )
+    original_verify = module.KMS.verify
+    wrong_key = "arn:aws:kms:eu-west-2:111111111111:key/mrk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    module.KMS.verify = lambda **value: {
+        "KeyId": wrong_key,
+        "SigningAlgorithm": "ECDSA_SHA_256",
+        "SignatureValid": True,
+    }
+    with pytest.raises(RuntimeError, match="verification failed"):
+        module._verify_assurance_snapshot(tenant, snapshot["id"])
+    module.KMS.verify = lambda **value: {
+        "KeyId": value["KeyId"],
+        "SigningAlgorithm": "RSASSA_PSS_SHA_256",
+        "SignatureValid": True,
+    }
+    with pytest.raises(RuntimeError, match="verification failed"):
+        module._verify_assurance_snapshot(tenant, snapshot["id"])
+    module.KMS.verify = lambda **value: {
+        "KeyId": value["KeyId"],
+        "SigningAlgorithm": "ECDSA_SHA_256",
+        "SignatureValid": False,
+    }
+    with pytest.raises(RuntimeError, match="verification failed"):
+        module._verify_assurance_snapshot(tenant, snapshot["id"])
+    module.KMS.verify = lambda **value: {}
+    with pytest.raises(RuntimeError, match="verification failed"):
+        module._verify_assurance_snapshot(tenant, snapshot["id"])
+    original_document = module._assurance_snapshot_document
+    with monkeypatch.context() as context:
+        malformed = original_document(
+            tenant, table.items[(f"ASSURANCE#{tenant}", f"REPORT_SNAPSHOT#{snapshot['id']}")]
+        )
+        malformed["integrity"]["signature"] = "not-valid-base64***"
+        context.setattr(module, "_assurance_snapshot_document", lambda *_args: malformed)
+        with pytest.raises(RuntimeError, match="signature is malformed"):
+            module._verify_assurance_snapshot(tenant, snapshot["id"])
+
+    old_identity = table.items[(f"ASSURANCE#{tenant}", f"REPORT_SNAPSHOT#{snapshot['id']}")][
+        "signing_key_id"
+    ]
+    recovery_old_arn = f"arn:aws:kms:eu-west-1:111111111111:key/{old_identity}"
+    new_arn = "arn:aws:kms:eu-west-1:111111111111:key/mrk-cccccccccccccccccccccccccccccccc"
+    module.ASSURANCE_REPORT_SIGNING_KEY_ARN = new_arn
+    module.ASSURANCE_REPORT_VERIFICATION_KEY_ARNS = (recovery_old_arn, new_arn)
+    module.KMS.verify = original_verify
+    assert module._verify_assurance_snapshot(tenant, snapshot["id"])["verified"] is True
+    assert module._fake_kms.calls[-1]["KeyId"] == recovery_old_arn
+
+
+def test_assurance_request_claim_rejects_concurrent_changed_first_use(monkeypatch: Any) -> None:
+    """A durable pre-signing claim binds actor/profile/rationale before S3 can race."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-request-race"
+    snapshot_id = "operator-shared-request"
+    table.put_item(
+        Item={
+            **module._assurance_item_key(tenant, "REPORT_REQUEST", snapshot_id),
+            "tenant_id": tenant,
+            "snapshot_id": snapshot_id,
+            "request_digest": "a" * 64,
+            "created_at": 1_800_000_000,
+        }
+    )
+    with pytest.raises(module.PolicyConflict, match="request identity"):
+        module._create_assurance_snapshot(
+            tenant,
+            "executive",
+            "other-admin",
+            source="operator",
+            snapshot_id=snapshot_id,
+            now=1_800_000_000,
+            request_digest="b" * 64,
+        )
+
+
+def test_assurance_request_claim_linearizes_real_overlapping_first_use(monkeypatch: Any) -> None:
+    """Two overlapping changed requests produce one retained snapshot and one conflict."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-request-overlap"
+    snapshot_id = "operator-overlap-request"
+    table.put_item(
+        Item={**module._item_key(tenant, "TENANT", "root"), "tenant_id": tenant, "id": tenant}
+    )
+    original_put = table.put_item
+    barrier = threading.Barrier(2)
+
+    def overlapping_put(*, Item: dict[str, Any], **kwargs: Any) -> None:
+        if Item.get("sk") == f"REPORT_REQUEST#{snapshot_id}":
+            barrier.wait(timeout=5)
+        original_put(Item=Item, **kwargs)
+
+    monkeypatch.setattr(table, "put_item", overlapping_put)
+
+    def create(profile: str, digest: str) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            module._create_assurance_snapshot(
+                tenant,
+                profile,
+                "admin-a",
+                source="operator",
+                snapshot_id=snapshot_id,
+                now=1_800_000_000,
+                request_digest=digest,
+            ),
+        )
+
+    outcomes: list[object] = []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(create, "executive", "a" * 64),
+            executor.submit(create, "auditor", "b" * 64),
+        ]
+        for future in futures:
+            try:
+                outcomes.append(future.result(timeout=10))
+            except Exception as error:  # noqa: PERF203 - preserve both concurrent outcomes.
+                outcomes.append(error)
+    assert sum(isinstance(value, dict) for value in outcomes) == 1
+    assert sum(isinstance(value, module.PolicyConflict) for value in outcomes) == 1
+    assert (
+        len(
+            [
+                item
+                for item in table.items.values()
+                if item.get("sk") == f"REPORT_SNAPSHOT#{snapshot_id}"
+            ]
+        )
+        == 1
     )
 
 

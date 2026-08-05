@@ -481,6 +481,9 @@ def test_configured_stack_cannot_be_deployed_after_manifest_loss(monkeypatch: An
         module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
         module,
         "stack_outputs",
         lambda *_args, **_kwargs: {"MicrosoftEntraIdStatus": "configured"},
@@ -497,6 +500,9 @@ def test_configured_replication_cannot_be_deployed_after_manifest_loss(monkeypat
         module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
         module,
         "stack_outputs",
         lambda *_args, **_kwargs: {
@@ -508,6 +514,210 @@ def test_configured_replication_cannot_be_deployed_after_manifest_loss(monkeypat
         module.deploy("AaiSecControlPlane", profile="synthetic", region="eu-west-2")
 
 
+def test_rotated_signer_cannot_be_deployed_after_manifest_loss(monkeypatch: Any) -> None:
+    module = _load()
+    monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module,
+        "stack_outputs",
+        lambda *_args, **_kwargs: {"AssuranceReportSignerAuthorityStatus": "persisted-rotation"},
+    )
+    with pytest.raises(module.DeploymentConfigurationError, match="rotated assurance signer"):
+        module.deploy("AaiSecControlPlane", profile="synthetic", region="eu-west-2")
+
+
+def test_stale_signer_manifest_cannot_roll_back_outside_rotation(monkeypatch: Any) -> None:
+    module = _load()
+    deployed = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "1" * 32
+    stale_current = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "2" * 32
+    unrelated_history = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "3" * 32
+    signer = module.AssuranceSignerDeploymentManifest(
+        stale_current,
+        (unrelated_history,),
+        "eu-west-1",
+        "change/STALE-1",
+    )
+    monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: signer
+    )
+    monkeypatch.setattr(
+        module,
+        "stack_outputs",
+        lambda *_args, **_kwargs: {
+            "AssuranceReportSignerAuthorityStatus": "persisted-rotation",
+            "AssuranceReportSigningKeyArn": deployed,
+            "AssuranceReportHistoricalVerificationKeyArns": "[]",
+        },
+    )
+    with pytest.raises(module.DeploymentConfigurationError, match="outside rotation"):
+        module.deploy("AaiSecControlPlane", profile="synthetic", region="eu-west-2")
+
+
+@pytest.mark.parametrize(
+    "deployed_history",
+    (
+        [],
+        ["older-b", "older-a"],
+        ["older-a", "substituted"],
+        ["older-a"],
+    ),
+)
+def test_stale_historical_signer_registry_fails_before_deploy(
+    monkeypatch: Any, deployed_history: list[str]
+) -> None:
+    module = _load()
+    current = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "1" * 32
+    older_a = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "2" * 32
+    older_b = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "3" * 32
+    aliases = {"older-a": older_a, "older-b": older_b, "substituted": current}
+    signer = module.AssuranceSignerDeploymentManifest(
+        current,
+        (older_a, older_b),
+        "eu-west-1",
+        "change/HISTORY-1",
+    )
+    monkeypatch.setattr(module, "load_persisted_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: signer
+    )
+    monkeypatch.setattr(
+        module,
+        "stack_outputs",
+        lambda *_args, **_kwargs: {
+            "AssuranceReportSignerAuthorityStatus": "persisted-rotation",
+            "AssuranceReportSigningKeyArn": current,
+            "AssuranceReportHistoricalVerificationKeyArns": json.dumps(
+                [aliases[value] for value in deployed_history]
+            ),
+        },
+    )
+    calls: list[Any] = []
+    with pytest.raises(module.DeploymentConfigurationError, match="history differs"):
+        module.deploy(
+            "AaiSecControlPlane",
+            profile="synthetic",
+            region="eu-west-2",
+            runner=lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+    assert calls == []
+
+
+def test_explicit_signer_cutover_accepts_exact_old_current_and_older_history(
+    monkeypatch: Any,
+) -> None:
+    module = _load()
+    old = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "1" * 32
+    new = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "2" * 32
+    older = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "3" * 32
+    signer = module.AssuranceSignerDeploymentManifest(
+        new,
+        (old, older),
+        "eu-west-1",
+        "change/CUTOVER-1",
+    )
+    monkeypatch.setattr(module, "load_persisted_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(module, "load_persisted_policy_github_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_a, **_k: signer
+    )
+    outputs = iter(
+        [
+            {
+                "AssuranceReportSignerAuthorityStatus": "bootstrap",
+                "AssuranceReportSigningKeyArn": old,
+                "AssuranceReportHistoricalVerificationKeyArns": json.dumps([older]),
+            },
+            {
+                "AssuranceReportSignerAuthorityStatus": "persisted-rotation",
+                "AssuranceReportSigningKeyArn": new,
+                "AssuranceReportHistoricalVerificationKeyArns": json.dumps(
+                    [old, older], separators=(",", ":")
+                ),
+            },
+        ]
+    )
+    monkeypatch.setattr(module, "stack_outputs", lambda *_a, **_k: next(outputs))
+    commands: list[list[str]] = []
+
+    def runner(command: list[str], **_kwargs: Any) -> Any:
+        commands.append(command)
+        return _completed()
+
+    module.deploy(
+        "AaiSecControlPlane",
+        profile="synthetic",
+        region="eu-west-2",
+        allow_assurance_signer_transition=True,
+        runner=runner,
+    )
+    assert len(commands) == 2
+
+
+@pytest.mark.parametrize(
+    "deployed_older_history",
+    ([], ["older-b", "older-a"], ["older-a", "substituted"], ["older-a"]),
+)
+def test_explicit_cutover_rejects_changed_older_history_before_deploy(
+    monkeypatch: Any, deployed_older_history: list[str]
+) -> None:
+    module = _load()
+    old = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "1" * 32
+    new = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "2" * 32
+    older_a = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "3" * 32
+    older_b = "arn:aws:kms:eu-west-2:111122223333:key/mrk-" + "4" * 32
+    aliases = {"older-a": older_a, "older-b": older_b, "substituted": new}
+    signer = module.AssuranceSignerDeploymentManifest(
+        new,
+        (old, older_a, older_b),
+        "eu-west-1",
+        "change/CUTOVER-2",
+    )
+    monkeypatch.setattr(module, "load_persisted_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(module, "load_persisted_policy_github_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_a, **_k: signer
+    )
+    monkeypatch.setattr(
+        module,
+        "stack_outputs",
+        lambda *_a, **_k: {
+            "AssuranceReportSignerAuthorityStatus": "persisted-rotation",
+            "AssuranceReportSigningKeyArn": old,
+            "AssuranceReportHistoricalVerificationKeyArns": json.dumps(
+                [aliases[value] for value in deployed_older_history]
+            ),
+        },
+    )
+    calls: list[Any] = []
+    with pytest.raises(module.DeploymentConfigurationError, match="history differs"):
+        module.deploy(
+            "AaiSecControlPlane",
+            profile="synthetic",
+            region="eu-west-2",
+            allow_assurance_signer_transition=True,
+            runner=lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+    assert calls == []
+
+
 def test_deploy_injects_only_manifest_references_and_verifies_posture(monkeypatch: Any) -> None:
     module = _load()
     manifest = module.EntraDeploymentManifest.parse(json.dumps(_manifest()))
@@ -515,6 +725,9 @@ def test_deploy_injects_only_manifest_references_and_verifies_posture(monkeypatc
     monkeypatch.setattr(module, "load_persisted_recovery_manifest", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
     )
     output_sequence = iter(
         [
@@ -574,6 +787,9 @@ def test_deploy_uses_only_persisted_recovery_authority(monkeypatch: Any) -> None
     )
     monkeypatch.setattr(
         module, "load_persisted_policy_github_manifest", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
     )
     output_sequence = iter(
         [
@@ -738,6 +954,9 @@ def test_deploy_uses_only_persisted_policy_github_authority(monkeypatch: Any) ->
         module,
         "load_persisted_policy_github_manifest",
         lambda *_args, **_kwargs: policy_github,
+    )
+    monkeypatch.setattr(
+        module, "load_persisted_assurance_signer_manifest", lambda *_args, **_kwargs: None
     )
     output_sequence = iter(
         [

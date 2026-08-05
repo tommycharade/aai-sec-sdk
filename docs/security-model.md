@@ -1232,3 +1232,51 @@ signature interval so the receiver can move keys without an unsigned gap.
 Terminal status is written to Object Lock without response content or key
 material. At-least-once transport means receiver idempotency remains mandatory.
 See [Secure webhooks](secure-webhooks-design.md).
+
+## Signed assurance snapshot threat model
+
+The browser may request a profile, schedule and rationale, but it cannot supply
+report facts, tenant identity, signing evidence, object coordinates or schedule
+execution authority. Live roles are checked for every request. Auditor content,
+schedule metadata and history require `evidence_read`; generation and schedule
+changes require `evidence_admin`.
+
+AWS KMS signs a SHA-256 digest of a domain-separated canonical envelope, not
+only the report body. The envelope binds tenant, snapshot, profile, source,
+generated/signed time, schedule revision and canonical report digest. Copying a
+valid signature across tenants or changing any envelope field therefore fails
+verification. KMS key identity, algorithm and `SignatureValid` are all checked.
+The report signer is a dedicated retained multi-Region key, distinct from
+executable-policy authority. The worker receives no policy-key ARN or grant. A
+validated local-Region registry maps stable MRK identities to current and
+historical replicas; malformed, duplicate, foreign, missing or overlapping
+authority fails closed.
+Historical replicas receive verify-only IAM and are part of the exact
+deployment-verification input; only the current assurance key can sign.
+
+Snapshot bytes and a deterministic audit event are retained under S3 Object
+Lock before DynamoDB metadata commits. Exact object version and digest are
+rechecked on every read, with a one-megabyte pre-parse bound. Missing, altered,
+oversized, cross-tenant or malformed evidence fails closed. Request IDs bind
+profile, actor and rationale digest in a conditional claim written before
+signing; concurrent changed first use is a conflict.
+
+Scheduled work is claimed by an optimistic schedule revision before it enters
+a dedicated SQS queue. The worker reloads the exact claim; duplicate, stale or
+changed claims cannot select authority. A dispatcher never builds reports, one
+failed tenant cannot block valid schedules, and fixed sharding, queue retries,
+reserved concurrency and DLQ alarms bound fleet-wide work. Standby recovery
+compute has no concurrency or active schedule/signing authority. See
+[Enterprise assurance reports](enterprise-assurance-reports-design.md).
+
+Mutable report state uses `ASSURANCE#{tenant}`, separate from policy, identity
+and agent records. Worker IAM permits only conditional `PutItem` against that
+leading key, dedicated assurance-key sign/verify and two exact audit S3
+prefixes. Bounded due pages let later tenants progress; only acknowledged SQS
+batch IDs leave the due index, while malformed provider responses fail closed.
+Malformed schedules are conditionally quarantined out of the due GSI, so even
+a complete corrupt page cannot indefinitely hide a later valid tenant. The
+quarantine update binds the exact observed index and revision. Conditional
+conflicts preserve concurrent repair, while DynamoDB throttling and service
+failures fail the shard and leave valid records indexed; infrastructure
+failure is never treated as evidence of malformed tenant state.

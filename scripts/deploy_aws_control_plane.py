@@ -62,11 +62,21 @@ _POLICY_GITHUB_MANIFEST_V2_FIELDS = {
     "allowedRepositories",
     "reviewEvidenceRef",
 }
+_ASSURANCE_SIGNER_MANIFEST_FIELDS = {
+    "schemaVersion",
+    "currentSignerArn",
+    "historicalVerificationKeyArns",
+    "recoveryRegion",
+    "approvalEvidenceRef",
+}
 _AWS_SECRET_NAME = re.compile(r"^[A-Za-z0-9/_+=.@-]{1,512}$")
 _AAI_TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _EVIDENCE_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,511}$")
 _AWS_PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@/+-]{0,127}$")
 _AWS_REGION = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
+_MRK_ARN = re.compile(
+    r"^arn:(aws|aws-us-gov|aws-cn):kms:([a-z]{2}(?:-gov)?-[a-z]+-\d):(\d{12}):key/(mrk-[0-9a-f]{32})$"
+)
 _ENTRA_ENVIRONMENT_FIELDS = (
     "ENTRA_TENANT_ID",
     "ENTRA_CLIENT_ID",
@@ -386,6 +396,85 @@ class PolicyGitHubDeploymentManifest:
         return environment
 
 
+@dataclass(frozen=True)
+class AssuranceSignerDeploymentManifest:
+    """Persisted two-phase signer authority that routine deploys cannot forget."""
+
+    current_signer_arn: str
+    historical_verification_key_arns: tuple[str, ...]
+    recovery_region: str
+    approval_evidence_ref: str
+
+    @classmethod
+    def parse(cls, payload: str) -> AssuranceSignerDeploymentManifest:
+        """Parse one exact current/history signer registry."""
+        if len(payload.encode("utf-8")) > 16_384:
+            raise DeploymentConfigurationError("assurance signer manifest exceeds 16 KiB")
+        try:
+            value = json.loads(payload, object_pairs_hook=_strict_object)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise DeploymentConfigurationError("assurance signer manifest is invalid") from error
+        if (
+            not isinstance(value, dict)
+            or set(value) != _ASSURANCE_SIGNER_MANIFEST_FIELDS
+            or value.get("schemaVersion") != 1
+        ):
+            raise DeploymentConfigurationError("assurance signer manifest schema is invalid")
+        current = value.get("currentSignerArn")
+        history = value.get("historicalVerificationKeyArns")
+        current_match = _MRK_ARN.fullmatch(current) if isinstance(current, str) else None
+        if (
+            current_match is None
+            or not isinstance(history, list)
+            or not 1 <= len(history) <= 8
+            or len(set(history)) != len(history)
+        ):
+            raise DeploymentConfigurationError("assurance signer registry is invalid")
+        for key_arn in history:
+            match = _MRK_ARN.fullmatch(key_arn) if isinstance(key_arn, str) else None
+            if (
+                match is None
+                or match.group(1) != current_match.group(1)
+                or match.group(2) != current_match.group(2)
+                or match.group(3) != current_match.group(3)
+                or match.group(4) == current_match.group(4)
+            ):
+                raise DeploymentConfigurationError("historical assurance registry is invalid")
+        recovery_region = _bounded_string(value.get("recoveryRegion"), "recoveryRegion", maximum=32)
+        if not _AWS_REGION.fullmatch(recovery_region) or recovery_region == current_match.group(2):
+            raise DeploymentConfigurationError("assurance signer recoveryRegion is invalid")
+        evidence = _bounded_string(
+            value.get("approvalEvidenceRef"), "approvalEvidenceRef", maximum=512
+        )
+        if not _EVIDENCE_REFERENCE.fullmatch(evidence):
+            raise DeploymentConfigurationError("assurance signer evidence reference is invalid")
+        assert isinstance(current, str)  # Narrowed by exact ARN validation above.
+        return cls(current, tuple(history), recovery_region, evidence)
+
+    def canonical_json(self) -> str:
+        """Return stable, secret-free signer deployment authority."""
+        return json.dumps(
+            {
+                "approvalEvidenceRef": self.approval_evidence_ref,
+                "currentSignerArn": self.current_signer_arn,
+                "historicalVerificationKeyArns": list(self.historical_verification_key_arns),
+                "recoveryRegion": self.recovery_region,
+                "schemaVersion": 1,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def deployment_environment(self) -> dict[str, str]:
+        """Return exact current and historical CDK authority."""
+        return {
+            "ASSURANCE_REPORT_SIGNING_KEY_ARN": self.current_signer_arn,
+            "ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS": json.dumps(
+                self.historical_verification_key_arns, separators=(",", ":")
+            ),
+        }
+
+
 def _aws(
     arguments: Sequence[str],
     *,
@@ -433,6 +522,13 @@ def policy_github_parameter_name(stack_name: str) -> str:
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack_name):
         raise DeploymentConfigurationError("stack name is invalid")
     return f"/aai-sec/{stack_name}/policy-github"
+
+
+def assurance_signer_parameter_name(stack_name: str) -> str:
+    """Return the persistent current/history assurance signer authority path."""
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack_name):
+        raise DeploymentConfigurationError("stack name is invalid")
+    return f"/aai-sec/{stack_name}/assurance-signer"
 
 
 def stack_outputs(
@@ -581,6 +677,45 @@ def load_persisted_policy_github_manifest(
     if not isinstance(payload, str):
         raise DeploymentConfigurationError("persisted policy GitHub manifest is not text")
     return PolicyGitHubDeploymentManifest.parse(payload)
+
+
+def load_persisted_assurance_signer_manifest(
+    stack_name: str, *, profile: str, region: str, runner: Runner = subprocess.run
+) -> AssuranceSignerDeploymentManifest | None:
+    """Load signer authority, returning None only before the first rotation."""
+    result = runner(
+        [
+            "aws",
+            "ssm",
+            "get-parameter",
+            "--name",
+            assurance_signer_parameter_name(stack_name),
+            "--with-decryption",
+            "--profile",
+            profile,
+            "--region",
+            region,
+            "--output",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        if "ParameterNotFound" in result.stderr:
+            return None
+        raise DeploymentConfigurationError((result.stderr.strip() or "SSM lookup failed")[-500:])
+    try:
+        payload = json.loads(result.stdout)["Parameter"]["Value"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise DeploymentConfigurationError(
+            "persisted assurance signer manifest is malformed"
+        ) from error
+    if not isinstance(payload, str):
+        raise DeploymentConfigurationError("persisted assurance signer manifest is not text")
+    return AssuranceSignerDeploymentManifest.parse(payload)
 
 
 def _secret_value(name: str, *, profile: str, region: str, runner: Runner = subprocess.run) -> str:
@@ -907,11 +1042,41 @@ def persist_policy_github_manifest(
     )
 
 
+def persist_assurance_signer_manifest(
+    manifest: AssuranceSignerDeploymentManifest,
+    stack_name: str,
+    *,
+    profile: str,
+    region: str,
+    runner: Runner = subprocess.run,
+) -> None:
+    """Persist reviewed signer cutover authority for every future deployment."""
+    _aws(
+        [
+            "ssm",
+            "put-parameter",
+            "--name",
+            assurance_signer_parameter_name(stack_name),
+            "--type",
+            "SecureString",
+            "--overwrite",
+            "--value",
+            manifest.canonical_json(),
+            "--description",
+            "Persistent AAI Security assurance signer rotation authority",
+        ],
+        profile=profile,
+        region=region,
+        runner=runner,
+    )
+
+
 def deploy(
     stack_name: str,
     *,
     profile: str,
     region: str,
+    allow_assurance_signer_transition: bool = False,
     runner: Runner = subprocess.run,
 ) -> EntraDeploymentManifest | None:
     """Deploy with persisted identity configuration or refuse destructive omission."""
@@ -920,6 +1085,9 @@ def deploy(
         stack_name, profile=profile, region=region, runner=runner
     )
     policy_github = load_persisted_policy_github_manifest(
+        stack_name, profile=profile, region=region, runner=runner
+    )
+    assurance_signer = load_persisted_assurance_signer_manifest(
         stack_name, profile=profile, region=region, runner=runner
     )
     outputs = stack_outputs(
@@ -941,6 +1109,46 @@ def deploy(
         raise DeploymentConfigurationError(
             "stack has GitHub policy sources configured but its persistent manifest is missing"
         )
+    if (
+        assurance_signer is None
+        and outputs.get("AssuranceReportSignerAuthorityStatus") == "persisted-rotation"
+    ):
+        raise DeploymentConfigurationError(
+            "stack uses a rotated assurance signer but its persistent manifest is missing"
+        )
+    if assurance_signer is not None and outputs:
+        deployed_current = outputs.get("AssuranceReportSigningKeyArn")
+        try:
+            deployed_history_value = json.loads(
+                outputs["AssuranceReportHistoricalVerificationKeyArns"]
+            )
+        except (KeyError, json.JSONDecodeError, TypeError) as error:
+            raise DeploymentConfigurationError(
+                "deployed assurance signer history is malformed"
+            ) from error
+        if not isinstance(deployed_history_value, list) or not all(
+            isinstance(value, str) for value in deployed_history_value
+        ):
+            raise DeploymentConfigurationError("deployed assurance signer history is malformed")
+        deployed_history = tuple(deployed_history_value)
+        if deployed_current == assurance_signer.current_signer_arn:
+            expected_deployed_history = assurance_signer.historical_verification_key_arns
+        elif (
+            allow_assurance_signer_transition
+            and assurance_signer.historical_verification_key_arns
+            and deployed_current == assurance_signer.historical_verification_key_arns[0]
+        ):
+            # Before the guarded cutover, current[old] + history[older] must
+            # exactly equal the promoted manifest's history[old, older].
+            expected_deployed_history = assurance_signer.historical_verification_key_arns[1:]
+        else:
+            raise DeploymentConfigurationError(
+                "persisted assurance signer differs from deployed authority outside rotation"
+            )
+        if deployed_history != expected_deployed_history:
+            raise DeploymentConfigurationError(
+                "persisted assurance signer history differs from deployed authority"
+            )
     environment = os.environ.copy()
     # Ambient shell state is not deployment authority. Remove every legacy
     # identity field before optionally loading the persisted reviewed manifest.
@@ -948,6 +1156,8 @@ def deploy(
         *_ENTRA_ENVIRONMENT_FIELDS,
         *_RECOVERY_ENVIRONMENT_FIELDS,
         *_POLICY_GITHUB_ENVIRONMENT_FIELDS,
+        "ASSURANCE_REPORT_SIGNING_KEY_ARN",
+        "ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS",
     ):
         environment.pop(field, None)
     environment.update({"AWS_PROFILE": profile, "AWS_REGION": region})
@@ -968,6 +1178,10 @@ def deploy(
             policy_github, profile=profile, region=region, runner=runner
         )
         environment.update(policy_github.deployment_environment())
+    if assurance_signer is not None:
+        if assurance_signer.current_signer_arn.split(":")[3] != region:
+            raise DeploymentConfigurationError("assurance signer belongs to another region")
+        environment.update(assurance_signer.deployment_environment())
     root = Path(__file__).resolve().parents[1]
     infrastructure = root / "infra" / "aws-control-plane"
     for command in (
@@ -992,6 +1206,13 @@ def deploy(
         raise DeploymentConfigurationError("deployed audit-recovery posture is incomplete")
     if policy_github is not None and post.get("PolicyGitHubSourceStatus") != "configured":
         raise DeploymentConfigurationError("deployed GitHub policy-source posture is incomplete")
+    if assurance_signer is not None and (
+        post.get("AssuranceReportSignerAuthorityStatus") != "persisted-rotation"
+        or post.get("AssuranceReportSigningKeyArn") != assurance_signer.current_signer_arn
+        or post.get("AssuranceReportHistoricalVerificationKeyArns")
+        != json.dumps(assurance_signer.historical_verification_key_arns, separators=(",", ":"))
+    ):
+        raise DeploymentConfigurationError("deployed assurance signer posture is incomplete")
     return manifest
 
 

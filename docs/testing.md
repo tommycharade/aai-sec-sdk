@@ -214,6 +214,23 @@ evidence against the current commit, `pyproject.toml`, the baseline threshold,
 and the results-file hash. It fails closed for missing, stale, cross-commit,
 scope-mismatched, malformed, or tampered evidence.
 
+## Assurance-report rotation and scheduling
+
+AWS contract tests run a complete synthetic signer cutover: candidate staging,
+exact primary/recovery MRK pairing, persistent promotion, old-current history,
+passive convergence and pre-rotation signature verification in both Regions.
+Synthesized IAM contracts separately prove historical keys are verify-only.
+Failure injection interrupts after key creation, SSM persistence, primary
+deployment and passive deployment and proves the next invocation resumes from
+the durable phase. Negative fixtures cover malformed base64 and false KMS
+verification, wrong key identity, wrong algorithm, non-32-byte digests and
+oversized signatures. Deployment preflight tests reject removed, reordered,
+substituted and truncated historical signer registries before CDK runs.
+Scheduler adversarial tests distinguish deterministic malformed records from
+transient DynamoDB claim failures, prove revision-bound concurrent repair and
+advance beyond fully corrupt 250-record pages containing malformed string,
+boolean, missing and oversized revisions.
+
 ## Adapter contracts
 
 Managed package distribution contracts cover canonical publication and exact

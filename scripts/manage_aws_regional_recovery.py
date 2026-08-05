@@ -55,6 +55,25 @@ _STACK = re.compile(r"^[A-Za-z][A-Za-z0-9-]{0,127}$")
 _PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@/+-]{0,127}$")
 _EVIDENCE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,511}$")
 _TABLE_NAME = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
+_MRK_ARN = re.compile(
+    r"^arn:(aws|aws-us-gov|aws-cn):kms:([a-z]{2}(?:-gov)?-[a-z]+-\d):(\d{12}):key/(mrk-[0-9a-f]{32})$"
+)
+
+
+def _key_arn_list(raw: str, label: str) -> list[str]:
+    """Return one bounded unique JSON list of exact MRK ARNs."""
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise RecoveryConfigurationError(f"{label} is malformed") from error
+    if (
+        not isinstance(values, list)
+        or len(values) > 8
+        or not all(isinstance(value, str) and _MRK_ARN.fullmatch(value) for value in values)
+        or len(set(values)) != len(values)
+    ):
+        raise RecoveryConfigurationError(f"{label} is malformed")
+    return values
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -222,6 +241,8 @@ def stack_outputs(
         "AuditReplicaBucketArn",
         "AuditReplicaRegion",
         "RegionalPolicySigningKeyArn",
+        "AssuranceReportSigningKeyArn",
+        "AssuranceReportHistoricalVerificationKeyArns",
         "PolicySigningKeyArn",
     }
     if not required.issubset(outputs):
@@ -232,6 +253,15 @@ def stack_outputs(
     for output in _OUTPUT_TABLES.values():
         if not _TABLE_NAME.fullmatch(outputs[output]):
             raise RecoveryConfigurationError("stack returned an invalid DynamoDB table name")
+    historical_keys = _key_arn_list(
+        outputs["AssuranceReportHistoricalVerificationKeyArns"],
+        "primary historical assurance key registry",
+    )
+    if any(
+        (match := _MRK_ARN.fullmatch(key)) is None or match.group(2) != manifest.primary_region
+        for key in historical_keys
+    ):
+        raise RecoveryConfigurationError("primary historical assurance keys use another Region")
     return outputs
 
 
@@ -271,14 +301,24 @@ def recovery_stack_outputs(
         raise RecoveryConfigurationError("passive signing replica is not explicitly staged")
     if not isinstance(result.get("RegionalPolicySigningReplicaKeyArn"), str):
         raise RecoveryConfigurationError("passive signing replica ARN is missing")
+    if not isinstance(result.get("AssuranceReportSigningReplicaKeyArn"), str):
+        raise RecoveryConfigurationError("passive assurance signing replica ARN is missing")
+    _key_arn_list(
+        result.get("AssuranceReportHistoricalVerificationReplicaKeyArns", ""),
+        "passive historical assurance replica registry",
+    )
     return result
 
 
 def deploy_signing_replica(
     primary_key_arn: str,
+    primary_assurance_key_arn: str,
+    primary_historical_assurance_key_arns: str,
     manifest: RegionalRecoveryManifest,
     *,
     profile: str,
+    configured_assurance_replica_key_arn: str = "",
+    configured_historical_assurance_replica_key_arns: str = "[]",
     runner: Runner = subprocess.run,
 ) -> None:
     """Deploy only the retained passive KMS replica from reviewed authority."""
@@ -288,10 +328,63 @@ def deploy_signing_replica(
     )
     if match is None:
         raise RecoveryConfigurationError("primary regional signing key ARN is malformed")
+    assurance_match = re.fullmatch(
+        r"arn:(aws|aws-us-gov|aws-cn):kms:[a-z]{2}(?:-gov)?-[a-z]+-\d:(\d{12}):key/(mrk-[0-9a-f]{32})",
+        primary_assurance_key_arn,
+    )
+    if assurance_match is None or assurance_match.group(2) != match.group(2):
+        raise RecoveryConfigurationError("primary assurance signing key ARN is malformed")
+    historical_keys = _key_arn_list(
+        primary_historical_assurance_key_arns,
+        "primary historical assurance key registry",
+    )
+    for historical_key in historical_keys:
+        historical_match = _MRK_ARN.fullmatch(historical_key)
+        if historical_match is None or (
+            historical_match.group(2) != manifest.primary_region
+            or historical_match.group(3) != match.group(2)
+            or historical_key == primary_assurance_key_arn
+        ):
+            raise RecoveryConfigurationError("primary historical assurance key registry is invalid")
+    configured_history = _key_arn_list(
+        configured_historical_assurance_replica_key_arns,
+        "configured historical assurance replica registry",
+    )
+    if configured_assurance_replica_key_arn:
+        replica_match = _MRK_ARN.fullmatch(configured_assurance_replica_key_arn)
+        if replica_match is None or (
+            replica_match.group(2) != manifest.recovery_region
+            or replica_match.group(3) != match.group(2)
+            or replica_match.group(4) != assurance_match.group(4)
+        ):
+            raise RecoveryConfigurationError("configured assurance replica identity is invalid")
+    if configured_history and len(configured_history) != len(historical_keys):
+        raise RecoveryConfigurationError("configured historical replicas do not cover history")
+    for primary_key, replica_key in zip(
+        historical_keys,
+        configured_history,
+        strict=bool(configured_history),
+    ):
+        primary_match = _MRK_ARN.fullmatch(primary_key)
+        replica_match = _MRK_ARN.fullmatch(replica_key)
+        if (
+            replica_match is None
+            or primary_match is None
+            or (
+                replica_match.group(2) != manifest.recovery_region
+                or replica_match.group(3) != primary_match.group(3)
+                or replica_match.group(4) != primary_match.group(4)
+            )
+        ):
+            raise RecoveryConfigurationError("configured historical replica identity is invalid")
     environment = os.environ.copy()
     # Ambient recovery values are never deployment authority.
     for field in (
         "REGIONAL_POLICY_SIGNING_KEY_ARN",
+        "ASSURANCE_REPORT_SIGNING_KEY_ARN",
+        "ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS",
+        "ASSURANCE_REPORT_SIGNING_REPLICA_KEY_ARN",
+        "ASSURANCE_REPORT_HISTORICAL_VERIFICATION_REPLICA_KEY_ARNS",
         "RECOVERY_REGION",
         "PRIMARY_REGION",
         "CDK_DEFAULT_ACCOUNT",
@@ -305,6 +398,14 @@ def deploy_signing_replica(
             "CDK_DEFAULT_ACCOUNT": match.group(2),
             "CDK_DEFAULT_REGION": manifest.recovery_region,
             "REGIONAL_POLICY_SIGNING_KEY_ARN": primary_key_arn,
+            "ASSURANCE_REPORT_SIGNING_KEY_ARN": primary_assurance_key_arn,
+            "ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS": json.dumps(
+                historical_keys, separators=(",", ":")
+            ),
+            "ASSURANCE_REPORT_SIGNING_REPLICA_KEY_ARN": (configured_assurance_replica_key_arn),
+            "ASSURANCE_REPORT_HISTORICAL_VERIFICATION_REPLICA_KEY_ARNS": json.dumps(
+                configured_history, separators=(",", ":")
+            ),
             "RECOVERY_REGION": manifest.recovery_region,
             "PRIMARY_REGION": manifest.primary_region,
         }
@@ -888,6 +989,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             load_persisted_manifest(manifest, profile=arguments.profile)
             deploy_signing_replica(
                 outputs["RegionalPolicySigningKeyArn"],
+                outputs["AssuranceReportSigningKeyArn"],
+                outputs["AssuranceReportHistoricalVerificationKeyArns"],
                 manifest,
                 profile=arguments.profile,
             )
@@ -899,6 +1002,29 @@ def main(argv: Sequence[str] | None = None) -> int:
                 manifest,
                 profile=arguments.profile,
             )
+            verify_signing_replica(
+                outputs["AssuranceReportSigningKeyArn"],
+                passive_outputs["AssuranceReportSigningReplicaKeyArn"],
+                manifest,
+                profile=arguments.profile,
+            )
+            primary_history = _key_arn_list(
+                outputs["AssuranceReportHistoricalVerificationKeyArns"],
+                "primary historical assurance key registry",
+            )
+            recovery_history = _key_arn_list(
+                passive_outputs["AssuranceReportHistoricalVerificationReplicaKeyArns"],
+                "passive historical assurance replica registry",
+            )
+            if len(primary_history) != len(recovery_history):
+                raise RecoveryConfigurationError("historical assurance replica count differs")
+            for primary_key, replica_key in zip(primary_history, recovery_history, strict=True):
+                verify_signing_replica(
+                    primary_key,
+                    replica_key,
+                    manifest,
+                    profile=arguments.profile,
+                )
             if outputs["PolicySigningKeyArn"] == outputs["RegionalPolicySigningKeyArn"]:
                 raise RecoveryConfigurationError("staged key was activated before trust rollout")
         canaries: list[dict[str, Any]] = []

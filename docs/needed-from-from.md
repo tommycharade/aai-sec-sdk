@@ -298,8 +298,9 @@ Engineering can continue autonomously on:
   composition, scheduled rollout and signed bundles;
 - credential-revocation workflows, repository/configuration anomaly response
   and fleet-scale behavior baseline storage;
-- signed and scheduled assurance-report distribution and reviewed framework
-  mappings;
+- external assurance-report delivery and reviewed framework mappings; signed,
+  scheduled in-product retention and verification are implemented without
+  customer delivery authority;
 - Terraform Registry namespace/repository authority, release-signing identity
   and an approved non-production tenant for live provider acceptance;
 - customer-managed key, residency and private-access implementation;

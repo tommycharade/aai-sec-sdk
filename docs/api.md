@@ -597,17 +597,56 @@ changes policy authority. See
 Any canonical tenant operator may read it. `GET
 /enterprise/reports/auditor` requires `evidence_read` and adds bounded policy,
 group and business-scope references plus least-privilege routes to detailed
-evidence.
+evidence. These live views are derived responses and are not retained evidence.
+
+`GET|PUT /enterprise/reports/schedule` reads or revision-guards a daily or
+weekly UTC signed-snapshot schedule. Reads require `evidence_read`; writes
+require `evidence_admin`, a 20–500 character rationale and the exact current
+`expectedRevision`. The request is a closed object containing `enabled`,
+`profile`, `cadence`, `hourUtc`, `dayOfWeek`, `expectedRevision` and
+`rationale`. A fresh claimed occurrence prevents schedule changes until the
+worker completes or the bounded claim expires. The response exposes
+`generationStatus` as `idle`, `queued` or `quarantined`, together with
+`quarantinedAt` and the content-minimised `quarantineReason`. Saving a reviewed
+new revision is the only API repair path; it replaces the quarantined record
+and restores a validated due-index entry. If stored revision authority itself
+is malformed, reads expose opaque revision `0` and quarantine rather than
+coercing the value. A save with `expectedRevision: 0` conditionally binds the
+exact malformed value or its absence before replacing it with revision `1`.
+
+`GET|POST /enterprise/reports/snapshots` lists retained snapshot metadata or
+creates an operator-requested snapshot. Creation requires `evidence_admin` and
+a closed `{requestId, profile, rationale}` object. Reusing a request ID with a
+different actor, profile or rationale returns `409`, including concurrent
+first use because the bound request claim is committed before signing. History
+returns at most 100 newest records and an explicit `truncated` marker; it never
+turns additional retained history into an error or performs an unbounded read.
+
+`GET /enterprise/reports/snapshots/{snapshotId}` returns the signed document;
+`POST /enterprise/reports/snapshots/{snapshotId}/verify` re-reads its exact S3
+version, recomputes the report and identity-envelope hashes and verifies the
+KMS signature. Executive downloads require a canonical tenant role. Auditor
+downloads, all history, and auditor verification require `evidence_read`.
+Roleless tenant identities are denied. A retained exact version that is
+missing, corrupt or not yet available in the active Region returns `503` and
+never falls back to the latest object version.
 
 Both profiles are generated only from bounded server-owned reads. They expose
 population, runtime trust, managed configuration, policy governance,
 exceptions, operational work and immutable-evidence monitoring. Coverage
 percentages remain unavailable when discovery sources are incomplete. Raw
 paths, user names, command content, credentials and free-form decision text are
-excluded. Each section and complete report has a canonical SHA-256 digest; the
-digest detects later modification but is not a signature, trusted timestamp or
-compliance attestation. See
+excluded. Each section and complete live report has a canonical SHA-256 digest.
+A retained snapshot additionally carries a domain-separated KMS ECDSA P-256
+signature binding tenant, snapshot identity, profile, source, schedule revision,
+time and report digest. It proves control-plane origin and alteration detection,
+not a trusted timestamp, compliance certification or independent attestation. See
 [Enterprise assurance reports](enterprise-assurance-reports-design.md).
+
+The signer is a dedicated retained multi-Region assurance key. Verification
+resolves the snapshot's stable MRK identity through a deployment-owned list of
+current and historical local-Region replica ARNs. Unknown, duplicate,
+cross-Region or policy-signing authority fails closed.
 
 ## Service identities and machine access
 
