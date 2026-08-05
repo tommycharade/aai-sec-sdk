@@ -389,6 +389,11 @@ Engineering can continue autonomously on:
 - documentation, threat models, automated tests, pull requests and synthetic
   acceptance evidence.
 
+The maximum 500-target Intune continuation path now has reproducible
+[synthetic acceptance evidence](synthetic-intune-continuation-acceptance-2026-08-05.md).
+Customer-specific capacity proof and live Microsoft provider acceptance remain
+owner-dependent and are not implied by that result.
+
 AWS deployment may continue only for stacks whose real owner-approved inputs
 already exist. Synthetic values may be used for synthesis and CI verification,
 never to create production or pilot authority.

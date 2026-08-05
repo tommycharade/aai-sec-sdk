@@ -118,6 +118,7 @@ nav:
   - Managed endpoint delivery user journeys: managed-endpoint-delivery-user-journeys.md
   - Microsoft Intune managed delivery: intune-managed-delivery-design.md
   - Microsoft Intune bounded continuation: intune-continuation-authority-design.md
+  - Synthetic Intune continuation acceptance: synthetic-intune-continuation-acceptance-2026-08-05.md
   - Microsoft Intune managed delivery user journeys: intune-managed-delivery-user-journeys.md
   - Managed host configuration: managed-host-configuration.md
   - Codex effective-control evidence: codex-effective-controls-design.md
