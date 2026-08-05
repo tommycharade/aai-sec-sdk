@@ -16,6 +16,10 @@ latest supported release line.
 - [ ] `make security-check` reports no unaccepted dependency vulnerabilities;
       any build-only exception has a named owner, compensating controls,
       automated upstream monitoring and an unexpired review date.
+- [ ] `python scripts/verify_vulnerability_management.py` proves the public
+      support/SLA policy is in review and the checked synthetic rehearsal meets
+      every deadline; retain separate live exercise evidence before claiming
+      operational performance.
 - [ ] `requirements-ci.txt` and `requirements-docs.txt` are reviewed when
       direct toolchain versions change; direct inputs are exact-pinned.
 - [ ] `requirements-build.txt` matches the exact PEP 517 build requirements.
@@ -55,8 +59,10 @@ and are excluded from deployed SDK, UI and Lambda artifacts. A scanner finding
 in bundled CDK tooling may be accepted only through a dated, owner-approved
 risk record that documents exploitability, preserves full-audit visibility,
 monitors upstream daily and causes CI to fail when the exception expires. The
-current record is [Temporary risk acceptance: AWS CDK bundled
-brace-expansion](risk-acceptance-cdk-brace-expansion-2026-07-29.md).
+[historical AWS CDK record](risk-acceptance-cdk-brace-expansion-2026-07-29.md)
+covers only `GHSA-mh99-v99m-4gvg`; it does not authorize later findings
+against the same bundled package. The current owner decision is tracked in
+[Inputs needed from the product owner](needed-from-from.md).
 
 The build job adds the raw mutation evidence to `dist/` before creating
 checksums with `scripts/write_checksums.py`, excluding only the checksum file

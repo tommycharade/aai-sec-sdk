@@ -81,7 +81,7 @@ warn_unused_configs = true
 [[tool.mypy.overrides]]
 # These providers are intentionally optional deployment adapters. Their imports
 # are checked when installed, while a core-only SDK environment remains valid.
-module = ["boto3", "boto3.*", "psutil", "psutil.*", "psycopg", "psycopg.*"]
+module = ["boto3", "boto3.*", "cvss", "cvss.*", "psutil", "psutil.*", "psycopg", "psycopg.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
