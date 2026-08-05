@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import os
+import platform
 import stat
 import sys
 import time
@@ -27,6 +28,13 @@ _IDENTIFIER_CHARACTERS = frozenset(
 )
 _MAX_INSTALLATIONS = 100
 _MAX_BINARY_BYTES = 1_073_741_824
+_OPERATING_SYSTEMS = {"darwin": "darwin", "linux": "linux", "windows": "windows"}
+_ARCHITECTURES = {
+    "arm64": "arm64",
+    "aarch64": "arm64",
+    "x86_64": "x86_64",
+    "amd64": "x86_64",
+}
 
 
 class EndpointEvidenceError(RuntimeError):
@@ -203,6 +211,15 @@ def _canonical(value: dict[str, Any]) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
+def _endpoint_platform() -> tuple[str, str]:
+    """Measure one supported OS/architecture pair without model or manifest input."""
+    operating_system = _OPERATING_SYSTEMS.get(platform.system().lower())
+    architecture = _ARCHITECTURES.get(platform.machine().lower())
+    if operating_system is None or architecture is None:
+        raise EndpointEvidenceError("endpoint platform is unsupported")
+    return operating_system, architecture
+
+
 def collect_signed_report(
     manifest_path: Path,
     *,
@@ -212,6 +229,7 @@ def collect_signed_report(
     administrator_check: Callable[[], bool] = _is_administrator,
     manifest_security_check: Callable[[Path], None] = _validate_manifest_security,
     process_reader: Callable[[], set[tuple[Path, Path]]] = _running_processes,
+    platform_reader: Callable[[], tuple[str, str]] = _endpoint_platform,
 ) -> dict[str, Any]:
     """Measure one endpoint and return a canonical per-device signed report."""
     if not administrator_check():
@@ -242,7 +260,13 @@ def collect_signed_report(
     if not isinstance(installations, list) or not 1 <= len(installations) <= _MAX_INSTALLATIONS:
         raise EndpointEvidenceError("endpoint manifest must contain 1 to 100 installations")
     running = process_reader()
+    operating_system, architecture = platform_reader()
+    if operating_system not in set(_OPERATING_SYSTEMS.values()) or architecture not in set(
+        _ARCHITECTURES.values()
+    ):
+        raise EndpointEvidenceError("endpoint platform is unsupported")
     normalized_device: dict[str, Any] = {"id": device_id, "managed": device["managed"]}
+    normalized_device.update({"operatingSystem": operating_system, "architecture": architecture})
     if "businessUnit" in device:
         normalized_device["businessUnit"] = _identifier(device["businessUnit"], "businessUnit")
     if "userIds" in device:
@@ -326,7 +350,7 @@ def collect_signed_report(
     if isinstance(timestamp, bool) or timestamp < 0:
         raise EndpointEvidenceError("observedAt must be a non-negative integer")
     payload = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "observedAt": timestamp,
         "device": normalized_device,
         "installations": sorted(normalized_installations, key=lambda item: item["id"]),

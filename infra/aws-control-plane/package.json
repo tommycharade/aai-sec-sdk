@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test:delivery-authority": "tsx --test test/delivery-package-authority.test.ts",
     "test:github-app": "tsx --test test/github-app-token-broker.test.ts",
     "synth": "npm run build && cdk synth",
     "deploy": "python3 ../../scripts/deploy_aws_control_plane.py deploy",

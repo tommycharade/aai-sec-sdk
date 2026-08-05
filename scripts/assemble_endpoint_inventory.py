@@ -20,6 +20,8 @@ _IDENTIFIER_CHARACTERS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
 )
 _SUPPORTED_HOSTS = frozenset({"claude-code", "codex-cli"})
+_SUPPORTED_OPERATING_SYSTEMS = frozenset({"darwin", "linux", "windows"})
+_SUPPORTED_ARCHITECTURES = frozenset({"arm64", "x86_64"})
 
 
 class EndpointAssemblyError(RuntimeError):
@@ -224,10 +226,12 @@ def assemble_inventory(
         expected = hmac.new(secret.encode(), _canonical(payload), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(signature, expected):
             raise EndpointAssemblyError("endpoint report signature is invalid")
-        if (
-            set(payload) != {"schemaVersion", "observedAt", "device", "installations"}
-            or payload.get("schemaVersion") != 1
-        ):
+        if set(payload) != {
+            "schemaVersion",
+            "observedAt",
+            "device",
+            "installations",
+        } or payload.get("schemaVersion") not in {1, 2}:
             raise EndpointAssemblyError("endpoint report payload has an invalid schema")
         observed_at = payload.get("observedAt")
         if (
@@ -240,7 +244,16 @@ def assemble_inventory(
         report_installations = payload.get("installations")
         if not isinstance(device, dict) or not isinstance(report_installations, list):
             raise EndpointAssemblyError("endpoint report device or installations are invalid")
-        normalized_device = _device(device)
+        device_for_inventory = dict(device)
+        if payload["schemaVersion"] == 2:
+            operating_system = device_for_inventory.pop("operatingSystem", None)
+            architecture = device_for_inventory.pop("architecture", None)
+            if (
+                operating_system not in _SUPPORTED_OPERATING_SYSTEMS
+                or architecture not in _SUPPORTED_ARCHITECTURES
+            ):
+                raise EndpointAssemblyError("endpoint report platform is unsupported")
+        normalized_device = _device(device_for_inventory)
         device_id = normalized_device["id"]
         if device_id != binding["deviceId"] or device_id not in devices:
             raise EndpointAssemblyError("endpoint report is not bound to an authoritative device")

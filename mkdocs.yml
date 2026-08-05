@@ -114,6 +114,8 @@ nav:
   - Approved runtime releases and version compliance: runtime-release-compliance-design.md
   - Measured runtime-release rollouts: runtime-release-rollout-design.md
   - Runtime remediation coordination: runtime-remediation-coordination-design.md
+  - Managed endpoint delivery authority: managed-endpoint-delivery-authority-design.md
+  - Managed endpoint delivery user journeys: managed-endpoint-delivery-user-journeys.md
   - Managed host configuration: managed-host-configuration.md
   - Codex effective-control evidence: codex-effective-controls-design.md
   - Managed endpoint deployment design: managed-endpoint-deployment-design.md

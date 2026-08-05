@@ -327,9 +327,14 @@ canary bounds, automatic pause, immutable package selection and rollback.
 This implements the control-plane portions of P1-FLT-08, P1-POL-05 and
 P1-POL-06. The requirement remains short of enterprise acceptance until a real
 MDM-delivered Claude/Codex fleet demonstrates the rollout SLO. P1-FLT-06 also
-remains partial: configuration packages are pinned, but SDK, gateway and hook
-upgrade channels still need independently approved release manifests and
-physical endpoint distribution.
+remains partial, but its software authority has advanced: SDK, gateway and hook
+releases have independently approved manifests; deployment-owned delivery
+packages now bind an exact release, OS, architecture, immutable object version
+and separate package approval; schema-v2 endpoint reports sign platform
+identity; and the control plane/UI derive an exact device-installation-agent
+preflight without exposing package locators. Physical Intune distribution,
+provider credentials/outbox/idempotency, dispatch-time reauthorization and
+live upgrade/rollback acceptance remain open.
 
 ### P1-FLT-09 and P1-POL-10 implementation evidence
 

@@ -868,7 +868,7 @@ def test_private_operator_boundary_requires_gateway_api_and_endpoint_context(
         },
     }
     response = _invoke(module, private_event)
-    assert response["statusCode"] == 200
+    assert response["statusCode"] == 200, response
     posture = json.loads(response["body"])
     assert posture["operatorAccess"]["privateLinkConfigured"] is True
     assert posture["operatorAccess"]["allowedVpcEndpointCount"] == 1
@@ -10214,6 +10214,14 @@ def test_runtime_release_machine_routes_require_exact_inventory_scope(
         route = f"/machine/v1/enterprise/{suffix}"
         assert _invoke(module, _event(route, "GET", token=inventory_token))["statusCode"] == 200
         assert _invoke(module, _event(route, "GET", token=draft_token))["statusCode"] == 403
+    delivery_route = _event(
+        "/machine/v1/enterprise/endpoint-delivery", "GET", token=inventory_token
+    )
+    delivery_route["queryStringParameters"] = {"deploymentId": "missing-deployment"}
+    assert _invoke(module, delivery_route)["statusCode"] == 404
+    denied_delivery = _event("/machine/v1/enterprise/endpoint-delivery", "GET", token=draft_token)
+    denied_delivery["queryStringParameters"] = {"deploymentId": "missing-deployment"}
+    assert _invoke(module, denied_delivery)["statusCode"] == 403
     mutation = {
         "deploymentId": "missing-deployment",
         "expectedRevision": 0,
@@ -10242,6 +10250,169 @@ def test_runtime_release_machine_routes_require_exact_inventory_scope(
             ]
             == 403
         )
+
+
+def test_endpoint_delivery_readiness_requires_signed_platform_and_exact_package(
+    monkeypatch: Any,
+) -> None:
+    """The control plane never guesses platform or exposes a package locator."""
+    module, table = _load_handler(monkeypatch)
+    now = 1_900_040_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    manifest = _runtime_manifest("claude-code", "1.1.0", "a" * 40)
+    _set_runtime_manifests(monkeypatch, [manifest])
+    tenant = "tenant-delivery-readiness"
+    deployment_id = "deployment-delivery"
+    agent_id = "agent-delivery"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", deployment_id)
+        | {"id": deployment_id, "sdk_version": "1.1.0"}
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", f"{deployment_id}:{agent_id}")
+        | {
+            "id": agent_id,
+            "deployment_id": deployment_id,
+            "host": "claude-code",
+            "project_root": "/synthetic/delivery",
+            "status": "connected",
+            "expires_at": now + 300,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            "session_revision": 1,
+        }
+    )
+    monkeypatch.setattr(
+        module,
+        "_authoritative_endpoint_devices",
+        lambda *_args, **_kwargs: {"device-a": {"id": "device-a", "managed": True}},
+    )
+    binding = {
+        "status": "bound",
+        "reasonCode": "unique_current_match",
+        "deviceId": "device-a",
+        "agentKey": f"{deployment_id}:{agent_id}",
+        "installationIds": ["installation-a"],
+        "operatingSystem": None,
+        "architecture": None,
+        "bindingDigest": "b" * 64,
+        "evidenceObservedAt": now - 10,
+    }
+    monkeypatch.setattr(module, "_endpoint_agent_binding", lambda *_args, **_kwargs: dict(binding))
+    empty_catalog = {
+        "schemaVersion": 1,
+        "status": "not_configured",
+        "packageBundleSha256": "c" * 64,
+        "approvalBundleSha256": "d" * 64,
+        "packages": [],
+    }
+    monkeypatch.setattr(module, "_delivery_package_catalog", lambda _catalog: empty_catalog)
+
+    blocked = module._endpoint_delivery_readiness(tenant, deployment_id, now=now)
+
+    assert blocked["readyAgents"] == 0
+    assert blocked["blockedAgents"] == 1
+    assert blocked["items"][0]["reasonCode"] == "platform_evidence_missing"
+    assert blocked["items"][0]["packageId"] is None
+
+    release_id = "claude-code:1.1.0"
+    public_package = {
+        "id": f"delivery:{'e' * 64}",
+        "releaseId": release_id,
+        "host": "claude-code",
+        "operatingSystem": "darwin",
+        "architecture": "arm64",
+        "packageFormat": "pkg",
+        "manifestSha256": "e" * 64,
+        "objectSha256": "f" * 64,
+        "storageIdentitySha256": "1" * 64,
+        "providerPackageIdentitySha256": "2" * 64,
+        "packageSignatureEvidenceSha256": "3" * 64,
+        "releaseEvidenceSha256": "4" * 64,
+        "approvedAt": "2026-08-05",
+        "approverEvidenceSha256": "5" * 64,
+    }
+    configured_catalog = {**empty_catalog, "status": "configured", "packages": [public_package]}
+    monkeypatch.setattr(
+        module,
+        "_endpoint_agent_binding",
+        lambda *_args, **_kwargs: {
+            **binding,
+            "operatingSystem": "darwin",
+            "architecture": "arm64",
+        },
+    )
+    monkeypatch.setattr(module, "_delivery_package_catalog", lambda _catalog: configured_catalog)
+
+    ready = module._endpoint_delivery_readiness(tenant, deployment_id, now=now)
+
+    assert ready["readyAgents"] == 1
+    assert ready["blockedAgents"] == 0
+    assert ready["items"][0]["status"] == "ready"
+    assert ready["items"][0]["packageId"] == public_package["id"]
+    serialized = json.dumps(ready).lower()
+    assert "bucketarn" not in serialized
+    assert "objectkey" not in serialized
+    assert "objectversionid" not in serialized
+
+    route = _event(
+        "/api/enterprise/endpoint-delivery",
+        "GET",
+        claims={
+            "custom:tenant_id": tenant,
+            "cognito:groups": ["fleet-operator"],
+            "sub": "fleet-delivery-reader",
+        },
+    )
+    route["queryStringParameters"] = {"deploymentId": deployment_id}
+    response = _invoke(module, route)
+    assert response["statusCode"] == 200, response
+    assert json.loads(response["body"])["items"][0]["status"] == "ready"
+    denied = _event(
+        "/api/enterprise/endpoint-delivery",
+        "GET",
+        claims={
+            "custom:tenant_id": tenant,
+            "cognito:groups": ["policy-author"],
+            "sub": "policy-only-reader",
+        },
+    )
+    denied["queryStringParameters"] = {"deploymentId": deployment_id}
+    assert _invoke(module, denied)["statusCode"] == 403
+
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "other-deployment:agent-duplicate")
+        | {
+            "id": "agent-duplicate",
+            "deployment_id": "other-deployment",
+            "host": "claude-code",
+            "project_root": "/synthetic/delivery",
+            "status": "connected",
+            "expires_at": now + 300,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            "session_revision": 1,
+        }
+    )
+
+    def ambiguous_binding(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        candidates = kwargs["agent_candidates"]
+        root_digest = hashlib.sha256(b"/synthetic/delivery").hexdigest()
+        assert len(candidates[("claude-code", root_digest)]) == 2
+        return {
+            **binding,
+            "status": "ambiguous",
+            "reasonCode": "agent_match_not_unique",
+            "agentKey": None,
+            "operatingSystem": "darwin",
+            "architecture": "arm64",
+        }
+
+    monkeypatch.setattr(module, "_endpoint_agent_binding", ambiguous_binding)
+    ambiguous = module._endpoint_delivery_readiness(tenant, deployment_id, now=now)
+    assert ambiguous["items"][0]["status"] == "blocked"
+    assert ambiguous["items"][0]["reasonCode"] == "endpoint_binding_missing"
 
 
 def test_runtime_remediation_is_machine_scoped_revision_bound_and_attestation_verified(
@@ -12203,9 +12374,15 @@ def test_hosted_endpoint_evidence_is_tenant_bound_signed_and_server_derived(
     assert len(issued["secret"]) >= 32
     assert issued["secret"] not in json.dumps(list(table.items.values()))
     payload = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "observedAt": now,
-        "device": {"id": "device-a", "managed": True, "businessUnit": "Platform"},
+        "device": {
+            "id": "device-a",
+            "managed": True,
+            "businessUnit": "Platform",
+            "operatingSystem": "darwin",
+            "architecture": "arm64",
+        },
         "installations": [
             {
                 "id": "installation-a",
@@ -12229,6 +12406,10 @@ def test_hosted_endpoint_evidence_is_tenant_bound_signed_and_server_derived(
     ingest_path = f"/api/endpoint-evidence/{tenant}/device-a"
     accepted = _invoke(module, _event(ingest_path, "POST", body=report, token=issued["secret"]))
     assert accepted["statusCode"] == 202
+    retained = table.items[(f"TENANT#{tenant}", "ENDPOINT_EVIDENCE#device-a")]
+    assert retained["payload"]["schemaVersion"] == 2
+    assert retained["payload"]["device"]["operatingSystem"] == "darwin"
+    assert retained["payload"]["device"]["architecture"] == "arm64"
     duplicate = _invoke(module, _event(ingest_path, "POST", body=report, token=issued["secret"]))
     assert duplicate["statusCode"] == 202
     assert json.loads(duplicate["body"])["duplicate"] is True
@@ -14363,9 +14544,14 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
         )["body"]
     )
     evidence_payload = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "observedAt": now,
-        "device": {"id": "device-a", "managed": True},
+        "device": {
+            "id": "device-a",
+            "managed": True,
+            "operatingSystem": "darwin",
+            "architecture": "arm64",
+        },
         "installations": [
             {
                 "id": "installation-a",
@@ -14398,6 +14584,9 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
         )["statusCode"]
         == 202
     )
+    live_binding = module._endpoint_agent_binding(tenant, "device-a", now=now)
+    assert live_binding["operatingSystem"] == "darwin"
+    assert live_binding["architecture"] == "arm64"
     alert_id = "endpoint-alert-a"
     table.put_item(
         Item=module._item_key(tenant, "ALERT", alert_id)

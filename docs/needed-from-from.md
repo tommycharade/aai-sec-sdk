@@ -243,16 +243,21 @@ attestation posture with release-bound enforcement evidence.
 ### Hosted endpoint-remediation provider
 
 Executable-free remediation coordination and its read-only operator view are
-implemented and synthetically tested. A hosted Intune, Jamf or equivalent
+implemented and synthetically tested. The software now validates an immutable
+package registry and derives a `1:1:1` endpoint readiness binding, but the
+checked-in package authority is intentionally empty and no customer device is
+claimed as ready. A hosted Intune, Jamf or equivalent
 dispatcher remains deliberately gated on provider-owned inputs that engineering
 must not invent:
 
 - the approved endpoint-management provider and a non-production managed-device
   cohort;
-- an immutable, platform- and architecture-specific delivery-package registry
-  whose digests bind to approved runtime release evidence;
-- a bijective managed-device, SDK installation and enrolled-agent identity
-  mapping for every pilot endpoint;
+- customer-approved immutable package records for each pilot OS/architecture,
+  including exact versioned S3 objects, signatures and independent approval
+  evidence bound to an approved runtime release;
+- fresh schema-v2 signed endpoint evidence and current MDM inventory that make
+  the software-derived managed-device, SDK installation and enrolled-agent
+  mapping bijective for every pilot endpoint;
 - a tenant-tagged Secrets Manager resource and dedicated IAM execution role for
   the provider adapter, with no provider credentials exposed to the browser,
   model or enrolled agent;

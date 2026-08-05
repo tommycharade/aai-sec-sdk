@@ -19,6 +19,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as subscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as sqs from "aws-cdk-lib/aws-sqs";
+import { loadDeliveryPackageBundles } from "./delivery-package-authority";
 
 /** Deployment-owned, secret-free identities required by the passive cell. */
 export interface PassiveRegionalCellProps extends cdk.StackProps {
@@ -297,6 +298,11 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       path.join(__dirname, "../lambda/runtime-manifests.provenance.json"),
       "utf8",
     );
+    const deliveryPackageAuthority = loadDeliveryPackageBundles(
+      path.join(__dirname, "../lambda"),
+      runtimeManifestBundle,
+      runtimeApprovalBundle,
+    );
     const environment = {
       CONTROL_TABLE: control.tableName,
       PRESENCE_TABLE: presence.tableName,
@@ -339,6 +345,8 @@ export class PassiveRegionalCellStack extends cdk.Stack {
       RUNTIME_ATTESTATION_APPROVALS_SHA256: createHash("sha256")
         .update(runtimeApprovalBundle)
         .digest("hex"),
+      DELIVERY_PACKAGES_SHA256: deliveryPackageAuthority.packageBundleSha256,
+      DELIVERY_PACKAGE_APPROVALS_SHA256: deliveryPackageAuthority.approvalBundleSha256,
     };
     const code = lambda.Code.fromAsset(path.join(__dirname, "../lambda"));
     const handler = new lambda.Function(this, "PassiveControlPlaneHandler", {

@@ -29,6 +29,13 @@ DACL. Hardware-backed device identity remains part of P0-05 acceptance.
    receives content-minimised acceptance, rejection and credential-lifecycle
    audit evidence.
 
+Sensor report schema v2 additionally signs a normalized operating system
+(`darwin`, `linux` or `windows`) and architecture (`arm64` or `x86_64`)
+measured from the local administrator process. The manifest, browser and model
+cannot supply these values. Schema-v1 reports remain valid health evidence for
+backward compatibility, but they are explicitly insufficient for selecting a
+platform-specific delivery package.
+
 The server derives `healthy`, `attention` or `stale` from independent MDM
 inventory, credential state, report freshness, binary measurement and process
 measurement. Stale Intune inventory remains visible as stale rather than

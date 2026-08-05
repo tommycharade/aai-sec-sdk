@@ -154,7 +154,7 @@ GET and POST redirects are disabled so that bearer cannot cross origins.
 
 This coordination foundation must not be described as hosted Intune or Jamf
 delivery. Before the control plane itself dispatches privileged provider work,
-a separate reviewed design must add:
+the reviewed delivery design requires:
 
 1. an immutable, signed, platform/architecture-specific delivery-package
    registry with exact S3 object version and provider package identity;
@@ -167,6 +167,13 @@ a separate reviewed design must add:
    target intent; and
 6. job-bound post-dispatch attestation evidence if causal installation proof is
    required in addition to current-state compliance.
+
+Items 1 and 2 now have a read-only software foundation: deployment-owned
+package/approval bundles, schema-v2 signed platform evidence and an exact
+device-installation-agent readiness projection. They do not yet authorize a
+worker. Items 3–6, dispatch-time repetition of items 1–2, and live Intune
+acceptance remain open; see [Managed endpoint delivery
+authority](managed-endpoint-delivery-authority-design.md).
 
 Until those controls exist, an enterprise operator uses this queue to
 coordinate its own authenticated MDM workflow. Physical MDM delivery and live

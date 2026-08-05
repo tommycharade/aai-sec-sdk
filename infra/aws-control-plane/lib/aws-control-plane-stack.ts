@@ -27,6 +27,7 @@ import * as subscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as sqs from "aws-cdk-lib/aws-sqs";
 import * as events from "aws-cdk-lib/aws-events";
 import * as eventTargets from "aws-cdk-lib/aws-events-targets";
+import { loadDeliveryPackageBundles } from "./delivery-package-authority";
 
 const runtimeManifestFields = new Set([
   "schemaVersion",
@@ -247,6 +248,11 @@ export class AwsControlPlaneStack extends cdk.Stack {
     const runtimeManifestCount = (JSON.parse(runtimeManifestBundle) as unknown[]).length;
     const runtimeManifestDigest = createHash("sha256").update(runtimeManifestBundle).digest("hex");
     const runtimeApprovalDigest = createHash("sha256").update(runtimeApprovalBundle).digest("hex");
+    const deliveryPackageAuthority = loadDeliveryPackageBundles(
+      path.join(__dirname, "../lambda"),
+      runtimeManifestBundle,
+      runtimeApprovalBundle,
+    );
     const entraInputs = [entraTenantId, entraClientId, entraClientSecretName, entraAaiTenantId];
     if (entraInputs.some(Boolean) && !entraInputs.every(Boolean)) {
       throw new Error(
@@ -1104,6 +1110,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       DISCOVERY_PAGE_BUCKET: discoveryPages.bucketName,
       RUNTIME_ATTESTATION_MANIFESTS_SHA256: runtimeManifestDigest,
       RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
+      DELIVERY_PACKAGES_SHA256: deliveryPackageAuthority.packageBundleSha256,
+      DELIVERY_PACKAGE_APPROVALS_SHA256: deliveryPackageAuthority.approvalBundleSha256,
       POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
       ASSURANCE_REPORT_SIGNING_KEY_ARN: assuranceReportSigningKey.keyArn,
       ASSURANCE_REPORT_VERIFICATION_KEY_ARNS: cdk.Fn.join("", [

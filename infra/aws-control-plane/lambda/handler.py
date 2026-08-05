@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from endpoint_delivery import DeliveryPackageError, delivery_package_authority
 from native_control_conflicts import analyze_native_control_conflicts
 from policy_composition import PolicyComponent, PolicyCompositionError, compose_policy
 from policy_signing import bundle_from_record, sign_policy_bundle, verify_policy_bundle
@@ -1055,6 +1056,19 @@ def _runtime_release_catalog():
         "approvalBundleSha256": approval_bundle_digest,
         "releases": releases,
     }
+
+
+def _delivery_package_catalog(runtime_catalog=None):
+    """Return the locator-free projection of deployment-owned package authority.
+
+    Package object locations are worker credentials, not fleet inventory.  The
+    operator API therefore receives only immutable identities and approval
+    evidence from the separately validated delivery authority.
+    """
+    authority = delivery_package_authority(
+        _runtime_release_catalog() if runtime_catalog is None else runtime_catalog
+    )
+    return authority["catalog"]
 
 
 def _runtime_manifest_digest(manifest):
@@ -3880,6 +3894,7 @@ def _machine_route_capability(method, path):
         "/enterprise/deployment-config/history",
         "/enterprise/deployments",
         "/enterprise/drift",
+        "/enterprise/endpoint-delivery",
         "/enterprise/groups",
         "/enterprise/health",
         "/enterprise/mcp-servers",
@@ -16500,13 +16515,38 @@ def _validate_endpoint_report(report, device_id):
         "installations",
     }:
         raise ValueError("endpoint report payload has an invalid schema")
-    if payload.get("schemaVersion") != 1:
+    schema_version = payload.get("schemaVersion")
+    if schema_version not in {1, 2}:
         raise ValueError("endpoint report schema version is unsupported")
     observed_at = _discovery_integer(payload.get("observedAt"), "observedAt", minimum=1)
     device = payload.get("device")
     if not isinstance(device, dict):
         raise ValueError("endpoint report device is invalid")
-    normalized_device = _discovery_observation({"kind": "device", **device}, "endpoint")
+    platform_fields = {}
+    device_for_inventory = dict(device)
+    if schema_version == 2:
+        if set(device) - {
+            "id",
+            "managed",
+            "businessUnit",
+            "userIds",
+            "operatingSystem",
+            "architecture",
+        }:
+            raise ValueError("endpoint report device is invalid")
+        operating_system = device_for_inventory.pop("operatingSystem", None)
+        architecture = device_for_inventory.pop("architecture", None)
+        if operating_system not in {"darwin", "linux", "windows"}:
+            raise ValueError("endpoint report operating system is unsupported")
+        if architecture not in {"arm64", "x86_64"}:
+            raise ValueError("endpoint report architecture is unsupported")
+        platform_fields = {
+            "operatingSystem": operating_system,
+            "architecture": architecture,
+        }
+    normalized_device = _discovery_observation(
+        {"kind": "device", **device_for_inventory}, "endpoint"
+    )
     if normalized_device["id"] != device_id:
         raise PermissionError("endpoint report device identity mismatch")
     installations = payload.get("installations")
@@ -16525,8 +16565,9 @@ def _validate_endpoint_report(report, device_id):
     if len(identities) != len(set(identities)):
         raise ValueError("endpoint installation identifiers must be unique")
     normalized_device.pop("kind")
+    normalized_device.update(platform_fields)
     normalized_payload = {
-        "schemaVersion": 1,
+        "schemaVersion": schema_version,
         "observedAt": observed_at,
         "device": normalized_device,
         "installations": sorted(normalized_installations, key=lambda item: item["id"]),
@@ -17347,7 +17388,33 @@ def _case_reason(value, field="reason"):
     return reason
 
 
-def _endpoint_agent_binding(tenant, device_id, *, now=None):
+def _endpoint_agent_candidates(agents):
+    """Index live bindable agents by exact host and server-derived root digest."""
+    candidates = {}
+    for agent in agents:
+        project_root = agent.get("project_root")
+        if (
+            _agent_lifecycle_state(agent) != "active"
+            or _stored_agent_lifecycle_revision(agent.get("lifecycle_revision")) is None
+            or _agent_session_revision(agent) is None
+            or not isinstance(project_root, str)
+            or not project_root
+        ):
+            continue
+        key = (agent.get("host"), hashlib.sha256(project_root.encode()).hexdigest())
+        candidates.setdefault(key, []).append(agent)
+    return candidates
+
+
+def _endpoint_agent_binding(
+    tenant,
+    device_id,
+    *,
+    now=None,
+    devices=None,
+    agent_candidates=None,
+    include_policy=True,
+):
     """Resolve one endpoint installation to exactly one active enrolled agent.
 
     The device report is observational. This resolver derives correlation only
@@ -17364,6 +17431,8 @@ def _endpoint_agent_binding(tenant, device_id, *, now=None):
         "deploymentId": None,
         "agentId": None,
         "host": None,
+        "operatingSystem": None,
+        "architecture": None,
         "projectRootDigest": None,
         "installationIds": [],
         "evidenceRevision": None,
@@ -17375,7 +17444,11 @@ def _endpoint_agent_binding(tenant, device_id, *, now=None):
         "policyVersion": None,
     }
     try:
-        devices = _authoritative_endpoint_devices(tenant, now=current_time)
+        devices = (
+            _authoritative_endpoint_devices(tenant, now=current_time)
+            if devices is None
+            else devices
+        )
     except (LookupError, PolicyConflict, ValueError):
         return {**base, "reasonCode": "endpoint_inventory_not_current"}
     device = devices.get(device_id)
@@ -17394,17 +17467,11 @@ def _endpoint_agent_binding(tenant, device_id, *, now=None):
         return {**base, "reasonCode": "signed_report_not_current"}
     payload = report.get("payload")
     installations = payload.get("installations", []) if isinstance(payload, dict) else []
-    agents = [
-        agent
-        for agent in _all_agents(tenant, consistent_read=True)
-        if _agent_lifecycle_state(agent) == "active"
-        # Incident response must not claim a usable binding for a legacy
-        # identity that lacks explicit optimistic-concurrency or session
-        # authority. Those records remain visible for migration but cannot be
-        # selected for a consequential response mutation.
-        and _stored_agent_lifecycle_revision(agent.get("lifecycle_revision")) is not None
-        and _agent_session_revision(agent) is not None
-    ]
+    candidate_index = (
+        _endpoint_agent_candidates(_all_agents(tenant, consistent_read=True))
+        if agent_candidates is None
+        else agent_candidates
+    )
     candidates = {}
     installation_ids = {}
     for installation in installations:
@@ -17414,19 +17481,10 @@ def _endpoint_agent_binding(tenant, device_id, *, now=None):
         host = installation.get("host")
         if not isinstance(digest, str) or not isinstance(host, str):
             continue
-        for agent in agents:
-            project_root = agent.get("project_root")
-            if (
-                agent.get("host") == host
-                and isinstance(project_root, str)
-                and project_root
-                and secrets.compare_digest(
-                    hashlib.sha256(project_root.encode()).hexdigest(), digest
-                )
-            ):
-                key = f"{agent.get('deployment_id')}:{agent.get('id')}"
-                candidates[key] = (agent, host, digest)
-                installation_ids.setdefault(key, set()).add(installation.get("id", ""))
+        for agent in candidate_index.get((host, digest), []):
+            key = f"{agent.get('deployment_id')}:{agent.get('id')}"
+            candidates[key] = (agent, host, digest)
+            installation_ids.setdefault(key, set()).add(installation.get("id", ""))
     if not candidates:
         return {
             **base,
@@ -17445,11 +17503,15 @@ def _endpoint_agent_binding(tenant, device_id, *, now=None):
             "evidenceDigest": report.get("reportDigest"),
         }
     agent_key, (agent, host, project_digest) = next(iter(candidates.items()))
-    groups = [
-        group
-        for group in _list(tenant, "GROUP", consistent_read=True)
-        if agent_key in group.get("agent_keys", [])
-    ]
+    groups = (
+        [
+            group
+            for group in _list(tenant, "GROUP", consistent_read=True)
+            if agent_key in group.get("agent_keys", [])
+        ]
+        if include_policy
+        else []
+    )
     policy = None
     if len(groups) == 1:
         policy = TABLE.get_item(
@@ -17464,6 +17526,19 @@ def _endpoint_agent_binding(tenant, device_id, *, now=None):
         "deploymentId": agent.get("deployment_id"),
         "agentId": agent.get("id"),
         "host": host,
+        # Platform is usable only when a future sensor schema signs and the
+        # ingestion boundary validates it. Schema v1 intentionally leaves
+        # these fields empty so package selection cannot rely on inference.
+        "operatingSystem": (
+            payload.get("device", {}).get("operatingSystem")
+            if payload.get("schemaVersion") == 2 and isinstance(payload.get("device"), dict)
+            else None
+        ),
+        "architecture": (
+            payload.get("device", {}).get("architecture")
+            if payload.get("schemaVersion") == 2 and isinstance(payload.get("device"), dict)
+            else None
+        ),
         "projectRootDigest": project_digest,
         "installationIds": sorted(value for value in installation_ids[agent_key] if value),
         "evidenceRevision": int(report.get("revision", 0)),
@@ -17480,6 +17555,127 @@ def _endpoint_agent_binding(tenant, device_id, *, now=None):
         "bindingDigest": hashlib.sha256(
             json.dumps(digest_material, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest(),
+    }
+
+
+def _endpoint_delivery_readiness(tenant, deployment_id, *, now=None):
+    """Derive dispatch readiness without granting endpoint execution authority.
+
+    Every row joins current server-owned deployment and rollout state to a
+    fresh signed endpoint report and immutable package approval.  Missing or
+    ambiguous evidence remains visible with one stable blocker and can never
+    be converted into an executable package locator by this read API.
+    """
+    current = int(time.time()) if now is None else int(now)
+    deployment_id = _bounded_identifier(deployment_id, "deploymentId")
+    deployment = TABLE.get_item(
+        Key=_item_key(tenant, "DEPLOYMENT", deployment_id), ConsistentRead=True
+    ).get("Item")
+    if not deployment:
+        raise LookupError("deployment not found")
+    runtime_catalog = _runtime_release_catalog()
+    package_catalog = _delivery_package_catalog(runtime_catalog)
+    packages = {
+        (
+            package["releaseId"],
+            package["host"],
+            package["operatingSystem"],
+            package["architecture"],
+        ): package
+        for package in package_catalog["packages"]
+    }
+    rollout = _runtime_rollout_record(tenant, deployment_id)
+    if rollout:
+        rollout = _reconcile_runtime_rollout_current(tenant, rollout, now=current)
+    # Correlation ambiguity is tenant-wide: a matching active agent in another
+    # deployment must block the binding rather than disappear from the selected
+    # deployment's preflight. One strong inventory read supplies both views.
+    tenant_agents = _all_agents(tenant, consistent_read=True)
+    agents = sorted(
+        (
+            agent
+            for agent in tenant_agents
+            if agent.get("deployment_id") == deployment_id
+            and _agent_lifecycle_state(agent) == "active"
+        ),
+        key=lambda item: item.get("id", ""),
+    )
+    devices = _authoritative_endpoint_devices(tenant, now=current)
+    candidate_index = _endpoint_agent_candidates(tenant_agents)
+    bindings = [
+        _endpoint_agent_binding(
+            tenant,
+            device_id,
+            now=current,
+            devices=devices,
+            agent_candidates=candidate_index,
+            include_policy=False,
+        )
+        for device_id in devices
+    ]
+    rows = []
+    for agent in agents:
+        agent_key = f"{deployment_id}:{agent.get('id', '')}"
+        matches = [binding for binding in bindings if binding.get("agentKey") == agent_key]
+        release = _runtime_release_for_agent(
+            tenant, deployment, agent, catalog=runtime_catalog, rollout=rollout or {}
+        )
+        binding = matches[0] if len(matches) == 1 else None
+        package = None
+        if len(matches) > 1:
+            reason = "multiple_managed_device_matches"
+        elif binding is None:
+            reason = "endpoint_binding_missing"
+        elif len(binding.get("installationIds", [])) != 1:
+            reason = "installation_binding_not_unique"
+        elif not binding.get("operatingSystem") or not binding.get("architecture"):
+            reason = "platform_evidence_missing"
+        elif release is None:
+            reason = "approved_runtime_release_missing"
+        else:
+            package = packages.get(
+                (
+                    release["id"],
+                    agent.get("host"),
+                    binding["operatingSystem"],
+                    binding["architecture"],
+                )
+            )
+            reason = None if package else "approved_delivery_package_missing"
+        ready = reason is None
+        rows.append(
+            {
+                "agentId": agent.get("id", ""),
+                "agentKey": agent_key,
+                "host": agent.get("host"),
+                "deviceId": binding.get("deviceId") if binding else None,
+                "installationId": (
+                    binding["installationIds"][0]
+                    if binding and len(binding.get("installationIds", [])) == 1
+                    else None
+                ),
+                "operatingSystem": binding.get("operatingSystem") if binding else None,
+                "architecture": binding.get("architecture") if binding else None,
+                "releaseId": release.get("id") if release else None,
+                "packageId": package.get("id") if package else None,
+                "bindingDigest": binding.get("bindingDigest") if binding else None,
+                "readyForDispatch": ready,
+                "status": "ready" if ready else "blocked",
+                "reasonCode": reason,
+                "evidenceObservedAt": binding.get("evidenceObservedAt") if binding else None,
+            }
+        )
+    ready_count = sum(row["readyForDispatch"] for row in rows)
+    return {
+        "schemaVersion": 1,
+        "deploymentId": deployment_id,
+        "measuredAt": current,
+        "packageAuthority": package_catalog,
+        "totalAgents": len(rows),
+        "readyAgents": ready_count,
+        "blockedAgents": len(rows) - ready_count,
+        "items": rows,
+        "nextToken": None,
     }
 
 
@@ -26000,6 +26196,7 @@ def handler(event, context):
                 ["version-compliance"],
                 ["runtime-rollouts"],
                 ["runtime-remediations"],
+                ["endpoint-delivery"],
             ):
                 # This tenant-wide projection exposes no executable bytes or
                 # credentials, but it still reveals fleet/release posture and
@@ -26035,6 +26232,19 @@ def handler(event, context):
                             next_token=query.get("nextToken"),
                         )
                     except (TypeError, ValueError) as error:
+                        return _response(400, {"error": str(error)})
+                    except LookupError as error:
+                        return _response(404, {"error": str(error)})
+                    return _response(200, posture)
+                if parts == ["endpoint-delivery"]:
+                    query = event.get("queryStringParameters") or {}
+                    if not isinstance(query, dict):
+                        return _response(400, {"error": "query parameters are invalid"})
+                    try:
+                        posture = _endpoint_delivery_readiness(
+                            tenant, query.get("deploymentId")
+                        )
+                    except (TypeError, ValueError, DeliveryPackageError) as error:
                         return _response(400, {"error": str(error)})
                     except LookupError as error:
                         return _response(404, {"error": str(error)})

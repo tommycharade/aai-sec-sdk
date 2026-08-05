@@ -187,6 +187,9 @@ jobs:
       - name: Prove GitHub App token-broker contracts
         working-directory: infra/aws-control-plane
         run: npm run test:github-app
+      - name: Prove delivery-package deployment authority
+        working-directory: infra/aws-control-plane
+        run: npm run test:delivery-authority
       - name: Prove policy-source verifier privilege separation
         run: python -m pytest -q tests/test_aws_policy_source_stack.py
 
