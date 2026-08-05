@@ -65,6 +65,23 @@ Runtime-manifest assurance is split across three boundaries:
   challenge freshness, mismatch quarantine, session revocation and governed
   route denial.
 
+Runtime-remediation coordination is covered at two boundaries:
+
+- `tests/test_aws_lambda_contract.py` proves deployment-scoped pagination,
+  exact instruction/revision binding, machine-only claim/report authority,
+  canonical digest recomputation, active-lease and idempotency behavior,
+  concurrent rollout/quarantine cancellation, stale rollout invalidation, malformed
+  task denial, atomic primary audit, independent channel/verification totals
+  and the rule that an install report remains unverified until fresh exact
+  attestation; and
+- `tests/test_ui_control_plane.py` proves the typed
+  `RuntimeRemediationClient`, closed response schemas, contradictory count and
+  eligibility rejection, expired verification denial, GET/POST redirect bearer
+  containment, bounded fixed failure codes and content-free network requests.
+
+These are coordination and evidence contracts, not live Intune/Jamf dispatch
+or physical endpoint acceptance.
+
 `npm run build && npm run synth` in `infra/aws-control-plane` additionally
 proves that CDK accepts the checked-in empty development pair and will reject a
 stale pair before deployment. Live modified-host acceptance remains required

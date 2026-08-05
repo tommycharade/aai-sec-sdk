@@ -923,6 +923,24 @@ revisions fail closed. Runtime authority and content-minimised primary audit
 evidence commit in one DynamoDB transaction. See
 [Measured runtime-release rollouts](runtime-release-rollout-design.md).
 
+Endpoint remediation coordination is a still narrower observation boundary.
+The server derives an executable-free instruction only for the exact live
+rollout member and hashes the complete release/rollout binding. Browsers,
+ordinary agent sessions and broad runtime machine credentials cannot claim or
+report it. A dedicated `runtime_remediation` machine credential can lease one
+instruction and submit only `installed` or a fixed redacted failure code; it
+cannot author a rollout, select members, receive executable material or mark a
+runtime verified. A rollout revision change invalidates the instruction.
+Fresh exact challenge-bound attestation remains the only completion signal.
+Every claim/report transaction conditions on the exact rollout and active agent
+state together with the task and audit write. SDK clients recompute canonical
+instruction digests, reject changed mutation authority and refuse redirects so
+the scoped service bearer cannot cross origins.
+Hosted provider dispatch, privileged installation and provider credentials are
+outside this contract and require IAM-authenticated adapters, immutable
+delivery packages and current managed-device binding. See
+[Runtime remediation coordination](runtime-remediation-coordination-design.md).
+
 ## Dynamic group authority boundary
 
 Dynamic membership changes which policy can authorize an agent, so neither the

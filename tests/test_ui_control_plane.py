@@ -6,7 +6,9 @@ import base64
 import hashlib
 import io
 import json
+import threading
 from hashlib import sha256
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
 
@@ -40,6 +42,8 @@ from agentic_security import (
     NativeActionRule,
     OperatorIdentity,
     PolicyTrustStore,
+    RuntimeRemediationClient,
+    RuntimeRemediationInstruction,
     StaticBearerAuthenticator,
     TrustedPolicyKey,
     canonical_policy_payload,
@@ -58,6 +62,34 @@ from agentic_security.ui_control_plane import (
 
 TOKEN = "synthetic-local-token-1234"  # noqa: S105 - synthetic test credential
 POLICY_KEY_ID = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789abc"
+
+
+def runtime_remediation_instruction_digest(item: dict[str, object]) -> str:
+    """Independently reproduce the server's immutable instruction binding."""
+    fields = (
+        "schemaVersion",
+        "deploymentId",
+        "agentId",
+        "host",
+        "rolloutRevision",
+        "rolloutState",
+        "releaseId",
+        "releaseTag",
+        "sdkVersion",
+        "sdkRevision",
+        "manifestSha256",
+        "releaseEvidenceSha256",
+        "packageSha256",
+        "gatewaySha256",
+        "hookSha256",
+    )
+    return sha256(
+        json.dumps(
+            {field: item[field] for field in fields},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
 
 
 def signed_policy_fixture() -> tuple[dict[str, object], PolicyTrustStore]:
@@ -581,7 +613,7 @@ def test_agent_client_verifies_managed_package_response_and_target(
 
     captured: list[Any] = []
 
-    def fake_urlopen(request: Any, **_kwargs: object) -> Response:
+    def fake_urlopen(request: Any, *_args: object, **_kwargs: object) -> Response:
         captured.append(request)
         return Response()
 
@@ -661,6 +693,392 @@ def test_agent_client_requires_v2_trust_digest_outside_package_bytes(
     response_value["policyTrustBundleSha256"] = "f" * 64
     with pytest.raises(ControlPlaneDependencyError, match="verification failed"):
         client.managed_deployment_package(platform=ManagedPlatform.LINUX)
+
+
+def test_runtime_remediation_client_is_typed_content_free_and_revision_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SDK helps an MDM worker without downloading or executing release bytes."""
+    import agentic_security.ui_control_plane as control_plane
+
+    instruction: dict[str, object] = {
+        "schemaVersion": 1,
+        "instructionId": "1" * 64,
+        "deploymentId": "deployment-a",
+        "agentId": "agent-a",
+        "host": "claude-code",
+        "rolloutRevision": 3,
+        "rolloutState": "canary",
+        "releaseId": "claude-code:1.2.0",
+        "releaseTag": "v1.2.0",
+        "sdkVersion": "1.2.0",
+        "sdkRevision": "2" * 40,
+        "manifestSha256": "3" * 64,
+        "releaseEvidenceSha256": "4" * 64,
+        "packageSha256": "5" * 64,
+        "gatewaySha256": "6" * 64,
+        "hookSha256": "7" * 64,
+        "status": "pending",
+        "channelStatus": "not_started",
+        "runtimeVerification": "not_verified",
+        "eligible": True,
+        "taskRevision": 0,
+        "attempts": 0,
+        "claimedAt": None,
+        "leaseExpiresAt": None,
+        "reportedAt": None,
+        "reasonCode": None,
+        "evidenceObservedAt": None,
+        "evidenceExpiresAt": 1_900_000_300,
+    }
+    instruction["instructionId"] = runtime_remediation_instruction_digest(instruction)
+    responses: list[dict[str, object]] = [
+        {
+            "schemaVersion": 1,
+            "deploymentId": "deployment-a",
+            "rolloutRevision": 3,
+            "rolloutState": "canary",
+            "measuredAt": 1_900_000_000,
+            "totalItems": 1,
+            "statusCounts": {
+                "pending": 1,
+                "in_progress": 0,
+                "awaiting_attestation": 0,
+                "failed": 0,
+                "verified": 0,
+                "blocked": 0,
+            },
+            "channelStatusCounts": {
+                "not_started": 1,
+                "in_progress": 0,
+                "installed_reported": 0,
+                "failed": 0,
+            },
+            "runtimeVerificationCounts": {
+                "not_verified": 1,
+                "verified": 0,
+                "blocked": 0,
+            },
+            "items": [instruction],
+            "nextToken": None,
+            "hasMore": False,
+        },
+        {
+            **instruction,
+            "status": "in_progress",
+            "channelStatus": "in_progress",
+            "eligible": False,
+            "taskRevision": 1,
+            "attempts": 1,
+            "claimedAt": 1_900_000_010,
+            "leaseExpiresAt": 1_900_000_910,
+        },
+        {
+            **instruction,
+            "status": "failed",
+            "channelStatus": "failed",
+            "eligible": True,
+            "taskRevision": 2,
+            "attempts": 1,
+            "claimedAt": 1_900_000_010,
+            "leaseExpiresAt": 1_900_000_910,
+            "reportedAt": 1_900_000_020,
+            "reasonCode": "privilege_unavailable",
+        },
+        {
+            **instruction,
+            "status": "awaiting_attestation",
+            "channelStatus": "installed_reported",
+            "eligible": False,
+            "taskRevision": 2,
+            "attempts": 1,
+            "claimedAt": 1_900_000_010,
+            "leaseExpiresAt": 1_900_000_910,
+            "reportedAt": 1_900_000_020,
+        },
+        {
+            **instruction,
+            "agentId": "agent-other",
+            "status": "awaiting_attestation",
+            "channelStatus": "installed_reported",
+            "eligible": False,
+            "taskRevision": 3,
+            "attempts": 1,
+            "claimedAt": 1_900_000_010,
+            "leaseExpiresAt": 1_900_000_910,
+            "reportedAt": 1_900_000_020,
+        },
+    ]
+    responses[-1]["instructionId"] = runtime_remediation_instruction_digest(responses[-1])
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(responses.pop(0)).encode()
+
+    requests: list[Any] = []
+
+    def fake_urlopen(request: Any, *_args: object, **_kwargs: object) -> Response:
+        requests.append(request)
+        return Response()
+
+    monkeypatch.setattr(control_plane, "_open_remediation_https", fake_urlopen)
+    client = RuntimeRemediationClient("https://control.example.test", TOKEN)
+    page = client.list("deployment-a")
+    assert page.total_items == 1
+    assert page.items[0].package_sha256 == "5" * 64
+    assert requests[0].method == "GET"
+    assert "deploymentId=deployment-a" in requests[0].full_url
+
+    claimed = client.claim(page.items[0], request_id="claim-a")
+    assert claimed.status == "in_progress"
+    claim_body = json.loads(requests[1].data)
+    assert claim_body == {
+        "expectedTaskRevision": 0,
+        "instructionId": instruction["instructionId"],
+        "requestId": "claim-a",
+    }
+    failed = client.report_failed(
+        claimed, request_id="report-failed", reason_code="privilege_unavailable"
+    )
+    assert failed.status == "failed"
+    assert json.loads(requests[2].data)["reasonCode"] == "privilege_unavailable"
+    installed = client.report_installed(claimed, request_id="report-a")
+    assert installed.status == "awaiting_attestation"
+    assert installed.status != "verified"
+    report_body = json.loads(requests[3].data)
+    assert report_body["expectedTaskRevision"] == 1
+    assert report_body["reasonCode"] is None
+    assert all(
+        marker not in json.dumps(requests_body).lower()
+        for requests_body in (claim_body, report_body)
+        for marker in ("command", "path", "https://", "credential", "base64")
+    )
+    with pytest.raises(ValueError, match="not claimable"):
+        client.claim(installed, request_id="claim-again")
+    with pytest.raises(ControlPlaneDependencyError, match="authority changed"):
+        client.report_installed(installed, request_id="cross-authority")
+
+
+def test_runtime_remediation_client_rejects_malformed_authority_and_raw_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cross-scope, contradictory and content-rich channel state fails closed."""
+    import agentic_security.ui_control_plane as control_plane
+
+    client = RuntimeRemediationClient("https://control.example.test", TOKEN)
+    with pytest.raises(ValueError, match="HTTPS"):
+        RuntimeRemediationClient("http://control.example.test", TOKEN)
+    with pytest.raises(ValueError, match="service credential"):
+        RuntimeRemediationClient("https://control.example.test", "short")
+    with pytest.raises(ValueError, match="timeout"):
+        RuntimeRemediationClient("https://control.example.test", TOKEN, timeout_seconds=0)
+    with pytest.raises(ValueError, match="limit"):
+        client.list("deployment-a", limit=0)
+    with pytest.raises(ValueError, match="pagination"):
+        client.list("deployment-a", next_token="")
+    with pytest.raises(ValueError, match="deployment ID"):
+        client.list("deployment/a")
+    with pytest.raises(ValueError, match="failure reason"):
+        client.report_failed(
+            cast(RuntimeRemediationInstruction, object()),
+            request_id="report-a",
+            reason_code="raw_exception",
+        )
+
+    malformed = {
+        "schemaVersion": 1,
+        "deploymentId": "deployment-a",
+        "rolloutRevision": 1,
+        "rolloutState": "canary",
+        "measuredAt": 1_900_000_000,
+        "totalItems": 0,
+        "statusCounts": {
+            "pending": 1,
+            "in_progress": 0,
+            "awaiting_attestation": 0,
+            "failed": 0,
+            "verified": 0,
+            "blocked": 0,
+        },
+        "channelStatusCounts": {
+            "not_started": 0,
+            "in_progress": 0,
+            "installed_reported": 0,
+            "failed": 0,
+        },
+        "runtimeVerificationCounts": {
+            "not_verified": 0,
+            "verified": 0,
+            "blocked": 0,
+        },
+        "items": [],
+        "nextToken": None,
+        "hasMore": False,
+    }
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(malformed).encode()
+
+    monkeypatch.setattr(
+        control_plane, "_open_remediation_https", lambda *_args, **_kwargs: Response()
+    )
+    with pytest.raises(ControlPlaneDependencyError, match="counts are inconsistent"):
+        client.list("deployment-a")
+    monkeypatch.setattr(
+        control_plane,
+        "_open_remediation_https",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("synthetic outage")),
+    )
+    with pytest.raises(ControlPlaneDependencyError, match="request failed"):
+        client.list("deployment-a")
+
+
+@pytest.mark.parametrize(
+    ("replacement", "message"),
+    [
+        ({"schemaVersion": 2}, "schema"),
+        ({"attempts": True}, "numeric"),
+        ({"instructionId": "not-a-digest"}, "digest"),
+        ({"packageSha256": "8" * 64}, "binding"),
+        ({"sdkRevision": "short"}, "SDK revision"),
+        ({"host": "unknown-host"}, "identity"),
+        ({"reasonCode": "raw provider exception"}, "failure reason"),
+        ({"eligible": False}, "eligibility"),
+    ],
+)
+def test_runtime_remediation_instruction_rejects_ambiguous_wire_state(
+    replacement: dict[str, object], message: str
+) -> None:
+    """The public parser rejects malformed identity, evidence and eligibility."""
+    instruction: dict[str, object] = {
+        "schemaVersion": 1,
+        "instructionId": "1" * 64,
+        "deploymentId": "deployment-a",
+        "agentId": "agent-a",
+        "host": "claude-code",
+        "rolloutRevision": 3,
+        "rolloutState": "canary",
+        "releaseId": "claude-code:1.2.0",
+        "releaseTag": "v1.2.0",
+        "sdkVersion": "1.2.0",
+        "sdkRevision": "2" * 40,
+        "manifestSha256": "3" * 64,
+        "releaseEvidenceSha256": "4" * 64,
+        "packageSha256": "5" * 64,
+        "gatewaySha256": "6" * 64,
+        "hookSha256": "7" * 64,
+        "status": "pending",
+        "channelStatus": "not_started",
+        "runtimeVerification": "not_verified",
+        "eligible": True,
+        "taskRevision": 0,
+        "attempts": 0,
+        "claimedAt": None,
+        "leaseExpiresAt": None,
+        "reportedAt": None,
+        "reasonCode": None,
+        "evidenceObservedAt": None,
+        "evidenceExpiresAt": None,
+    }
+    instruction["instructionId"] = runtime_remediation_instruction_digest(instruction)
+    instruction.update(replacement)
+    with pytest.raises(ControlPlaneDependencyError, match=message):
+        RuntimeRemediationInstruction.from_wire(instruction)
+
+
+def test_runtime_remediation_client_never_forwards_bearer_across_redirects() -> None:
+    """GET and POST redirects fail before a second origin receives the bearer."""
+    received_authorization: list[str | None] = []
+
+    class TargetHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
+            received_authorization.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.end_headers()
+
+        do_POST = do_GET
+
+        def log_message(self, *_args: object) -> None:
+            return None
+
+    target = ThreadingHTTPServer(("127.0.0.1", 0), TargetHandler)
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{target.server_port}/capture")
+            self.end_headers()
+
+        do_POST = do_GET
+
+        def log_message(self, *_args: object) -> None:
+            return None
+
+    redirect = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    threads = [
+        threading.Thread(target=server.serve_forever, daemon=True) for server in (target, redirect)
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        client = RuntimeRemediationClient(f"http://127.0.0.1:{redirect.server_port}", TOKEN)
+        with pytest.raises(ControlPlaneDependencyError, match="request failed"):
+            client.list("deployment-a")
+        wire: dict[str, object] = {
+            "schemaVersion": 1,
+            "instructionId": "0" * 64,
+            "deploymentId": "deployment-a",
+            "agentId": "agent-a",
+            "host": "claude-code",
+            "rolloutRevision": 3,
+            "rolloutState": "canary",
+            "releaseId": "claude-code:1.2.0",
+            "releaseTag": "v1.2.0",
+            "sdkVersion": "1.2.0",
+            "sdkRevision": "2" * 40,
+            "manifestSha256": "3" * 64,
+            "releaseEvidenceSha256": "4" * 64,
+            "packageSha256": "5" * 64,
+            "gatewaySha256": "6" * 64,
+            "hookSha256": "7" * 64,
+            "status": "in_progress",
+            "channelStatus": "in_progress",
+            "runtimeVerification": "not_verified",
+            "eligible": False,
+            "taskRevision": 1,
+            "attempts": 1,
+            "claimedAt": 1_900_000_000,
+            "leaseExpiresAt": 1_900_000_900,
+            "reportedAt": None,
+            "reasonCode": None,
+            "evidenceObservedAt": None,
+            "evidenceExpiresAt": None,
+        }
+        wire["instructionId"] = runtime_remediation_instruction_digest(wire)
+        with pytest.raises(ControlPlaneDependencyError, match="request failed"):
+            client.report_installed(
+                RuntimeRemediationInstruction.from_wire(wire), request_id="report-a"
+            )
+        assert received_authorization == []
+    finally:
+        for server in (redirect, target):
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=2)
 
 
 def test_agent_client_remeasures_and_reports_typed_managed_configuration(

@@ -37,7 +37,7 @@ from threading import RLock
 from typing import Any, Final, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener, urlopen
 
 import certifi
 
@@ -88,6 +88,23 @@ def _open_https(request: Request, timeout: float) -> Any:
         timeout=timeout,
         context=ssl.create_default_context(cafile=certifi.where()),
     )
+
+
+class _NoRemediationRedirects(HTTPRedirectHandler):
+    """Refuse redirects so a scoped service bearer never crosses origins."""
+
+    def redirect_request(self, *_args: object, **_kwargs: object) -> None:
+        """Return no follow-up request for every 3xx response."""
+        return None
+
+
+def _open_remediation_https(request: Request, timeout: float) -> Any:
+    """Open one remediation request with TLS and redirects disabled."""
+    opener = build_opener(
+        HTTPSHandler(context=ssl.create_default_context(cafile=certifi.where())),
+        _NoRemediationRedirects(),
+    )
+    return opener.open(request, timeout=timeout)
 
 
 _RUNTIME_KEYS: Final[frozenset[str]] = frozenset(
@@ -447,6 +464,518 @@ class AgentPresenceStore:
         if include_session:
             snapshot["sessionId"] = presence.session_id
         return snapshot
+
+
+_RUNTIME_REMEDIATION_STATUSES: Final[frozenset[str]] = frozenset(
+    {
+        "pending",
+        "in_progress",
+        "awaiting_attestation",
+        "failed",
+        "verified",
+        "blocked",
+    }
+)
+_RUNTIME_REMEDIATION_FAILURE_REASONS: Final[frozenset[str]] = frozenset(
+    {
+        "channel_timeout",
+        "digest_mismatch",
+        "host_unsupported",
+        "installation_failed",
+        "package_unavailable",
+        "preflight_failed",
+        "privilege_unavailable",
+        "restart_failed",
+    }
+)
+
+
+def _runtime_remediation_instruction_digest(item: Mapping[str, object]) -> str:
+    """Hash exactly the immutable instruction fields used by the server."""
+    fields = (
+        "schemaVersion",
+        "deploymentId",
+        "agentId",
+        "host",
+        "rolloutRevision",
+        "rolloutState",
+        "releaseId",
+        "releaseTag",
+        "sdkVersion",
+        "sdkRevision",
+        "manifestSha256",
+        "releaseEvidenceSha256",
+        "packageSha256",
+        "gatewaySha256",
+        "hookSha256",
+    )
+    canonical = {field: item.get(field) for field in fields}
+    return sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeRemediationInstruction:
+    """One executable-free release instruction for an endpoint manager.
+
+    The instruction binds an exact server-selected agent, rollout revision and
+    approved artifact digests. It never contains executable bytes, download
+    locations, commands, paths or credentials. A successful channel report is
+    only an observation; ``status == "verified"`` still requires fresh runtime
+    attestation from the governed host.
+    """
+
+    instruction_id: str
+    deployment_id: str
+    agent_id: str
+    host: str
+    rollout_revision: int
+    rollout_state: str
+    release_id: str
+    release_tag: str
+    sdk_version: str
+    sdk_revision: str
+    manifest_sha256: str
+    release_evidence_sha256: str
+    package_sha256: str
+    gateway_sha256: str
+    hook_sha256: str
+    status: str
+    channel_status: str
+    runtime_verification: str
+    eligible: bool
+    task_revision: int
+    attempts: int
+    claimed_at: int | None
+    lease_expires_at: int | None
+    reported_at: int | None
+    reason_code: str | None
+    evidence_observed_at: int | None
+    evidence_expires_at: int | None
+
+    @classmethod
+    def from_wire(cls, value: object) -> RuntimeRemediationInstruction:
+        """Parse one closed response and reject ambiguous endpoint authority."""
+        item = dict(_mapping(value, "runtime remediation instruction"))
+        expected = {
+            "schemaVersion",
+            "instructionId",
+            "deploymentId",
+            "agentId",
+            "host",
+            "rolloutRevision",
+            "rolloutState",
+            "releaseId",
+            "releaseTag",
+            "sdkVersion",
+            "sdkRevision",
+            "manifestSha256",
+            "releaseEvidenceSha256",
+            "packageSha256",
+            "gatewaySha256",
+            "hookSha256",
+            "status",
+            "channelStatus",
+            "runtimeVerification",
+            "eligible",
+            "taskRevision",
+            "attempts",
+            "claimedAt",
+            "leaseExpiresAt",
+            "reportedAt",
+            "reasonCode",
+            "evidenceObservedAt",
+            "evidenceExpiresAt",
+        }
+        if set(item) != expected or item.get("schemaVersion") != 1:
+            raise ControlPlaneDependencyError("runtime remediation instruction schema is invalid")
+
+        def integer(field: str, *, minimum: int = 0, optional: bool = False) -> int | None:
+            raw = item.get(field)
+            if optional and raw is None:
+                return None
+            if isinstance(raw, bool) or not isinstance(raw, int) or raw < minimum:
+                raise ControlPlaneDependencyError(
+                    "runtime remediation instruction numeric state is invalid"
+                )
+            return raw
+
+        def required_integer(field: str, *, minimum: int = 0) -> int:
+            """Return one required integer with a narrowed static type."""
+            raw = integer(field, minimum=minimum)
+            if raw is None:  # Defensive: ``optional`` was deliberately false.
+                raise ControlPlaneDependencyError(
+                    "runtime remediation instruction numeric state is invalid"
+                )
+            return raw
+
+        for field in (
+            "instructionId",
+            "manifestSha256",
+            "releaseEvidenceSha256",
+            "packageSha256",
+            "gatewaySha256",
+            "hookSha256",
+        ):
+            if not re.fullmatch(r"[0-9a-f]{64}", str(item.get(field, ""))):
+                raise ControlPlaneDependencyError(
+                    "runtime remediation instruction digest is invalid"
+                )
+        if not re.fullmatch(r"[0-9a-f]{40}", str(item.get("sdkRevision", ""))):
+            raise ControlPlaneDependencyError("runtime remediation SDK revision is invalid")
+        if (
+            item.get("host") not in {"claude-code", "codex-cli"}
+            or item.get("rolloutState") not in {"canary", "active", "paused", "rolling_back"}
+            or item.get("status") not in _RUNTIME_REMEDIATION_STATUSES
+            or item.get("channelStatus")
+            not in {"not_started", "in_progress", "installed_reported", "failed"}
+            or item.get("runtimeVerification") not in {"not_verified", "verified", "blocked"}
+            or not isinstance(item.get("eligible"), bool)
+            or any(
+                not isinstance(item.get(field), str) or not item[field]
+                for field in (
+                    "deploymentId",
+                    "agentId",
+                    "releaseId",
+                    "releaseTag",
+                    "sdkVersion",
+                )
+            )
+        ):
+            raise ControlPlaneDependencyError("runtime remediation instruction identity is invalid")
+        reason = item.get("reasonCode")
+        if reason is not None and reason not in _RUNTIME_REMEDIATION_FAILURE_REASONS:
+            raise ControlPlaneDependencyError("runtime remediation failure reason is invalid")
+        status = str(item["status"])
+        channel_status = str(item["channelStatus"])
+        runtime_verification = str(item["runtimeVerification"])
+        eligible = bool(item["eligible"])
+        raw_attempts = required_integer("attempts")
+        if eligible != (status in {"pending", "failed"} and raw_attempts < 5):
+            raise ControlPlaneDependencyError("runtime remediation eligibility is inconsistent")
+        if item["instructionId"] != _runtime_remediation_instruction_digest(item):
+            raise ControlPlaneDependencyError("runtime remediation instruction binding is invalid")
+        return cls(
+            instruction_id=str(item["instructionId"]),
+            deployment_id=str(item["deploymentId"]),
+            agent_id=str(item["agentId"]),
+            host=str(item["host"]),
+            rollout_revision=required_integer("rolloutRevision", minimum=1),
+            rollout_state=str(item["rolloutState"]),
+            release_id=str(item["releaseId"]),
+            release_tag=str(item["releaseTag"]),
+            sdk_version=str(item["sdkVersion"]),
+            sdk_revision=str(item["sdkRevision"]),
+            manifest_sha256=str(item["manifestSha256"]),
+            release_evidence_sha256=str(item["releaseEvidenceSha256"]),
+            package_sha256=str(item["packageSha256"]),
+            gateway_sha256=str(item["gatewaySha256"]),
+            hook_sha256=str(item["hookSha256"]),
+            status=status,
+            channel_status=channel_status,
+            runtime_verification=runtime_verification,
+            eligible=eligible,
+            task_revision=required_integer("taskRevision"),
+            attempts=raw_attempts,
+            claimed_at=integer("claimedAt", minimum=1, optional=True),
+            lease_expires_at=integer("leaseExpiresAt", minimum=1, optional=True),
+            reported_at=integer("reportedAt", minimum=1, optional=True),
+            reason_code=reason if isinstance(reason, str) else None,
+            evidence_observed_at=integer("evidenceObservedAt", minimum=1, optional=True),
+            evidence_expires_at=integer("evidenceExpiresAt", minimum=1, optional=True),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeRemediationPage:
+    """One bounded page of deployment-scoped endpoint remediation work."""
+
+    deployment_id: str
+    rollout_revision: int
+    rollout_state: str
+    measured_at: int
+    total_items: int
+    status_counts: Mapping[str, int]
+    channel_status_counts: Mapping[str, int]
+    runtime_verification_counts: Mapping[str, int]
+    items: tuple[RuntimeRemediationInstruction, ...]
+    next_token: str | None
+    has_more: bool
+
+
+class RuntimeRemediationClient:
+    """Least-privilege client for an administrator-owned MDM worker.
+
+    The bearer should have only ``inventory_read`` and
+    ``runtime_remediation`` machine capabilities. This client performs no
+    installation, command execution, download or privilege escalation. The
+    deployment adapter remains responsible for obtaining independently
+    approved bytes and applying them through Intune, Jamf or an equivalent
+    administrator-controlled channel.
+    """
+
+    def __init__(self, base_url: str, token: str, *, timeout_seconds: float = 10) -> None:
+        """Validate transport and retain one scoped service-identity bearer."""
+        parsed = urlsplit(base_url.rstrip("/"))
+        local_http = parsed.scheme == "http" and parsed.hostname in {
+            "localhost",
+            "127.0.0.1",
+            "::1",
+        }
+        if not parsed.hostname or parsed.scheme != "https" and not local_http:
+            raise ValueError("runtime remediation URL must use HTTPS outside localhost")
+        if not token or len(token) < 16:
+            raise ValueError("runtime remediation client requires a service credential")
+        if timeout_seconds <= 0:
+            raise ValueError("runtime remediation timeout must be positive")
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.timeout_seconds = timeout_seconds
+
+    def list(
+        self, deployment_id: str, *, limit: int = 100, next_token: str | None = None
+    ) -> RuntimeRemediationPage:
+        """Read one bounded deployment queue without claiming any work."""
+        identifier = self._identifier(deployment_id, "deployment ID")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 250:
+            raise ValueError("runtime remediation limit must be between 1 and 250")
+        if next_token is not None and (not next_token or len(next_token) > 512):
+            raise ValueError("runtime remediation pagination token is invalid")
+        query = f"deploymentId={quote(identifier)}&limit={limit}"
+        if next_token is not None:
+            query += f"&nextToken={quote(next_token)}"
+        value = self._request(f"/machine/v1/enterprise/runtime-remediations?{query}")
+        expected = {
+            "schemaVersion",
+            "deploymentId",
+            "rolloutRevision",
+            "rolloutState",
+            "measuredAt",
+            "totalItems",
+            "statusCounts",
+            "channelStatusCounts",
+            "runtimeVerificationCounts",
+            "items",
+            "nextToken",
+            "hasMore",
+        }
+        if set(value) != expected or value.get("schemaVersion") != 1:
+            raise ControlPlaneDependencyError("runtime remediation page schema is invalid")
+        if value.get("deploymentId") != identifier or not isinstance(value.get("items"), list):
+            raise ControlPlaneDependencyError("runtime remediation page identity is invalid")
+        items = tuple(RuntimeRemediationInstruction.from_wire(item) for item in value["items"])
+        if len(items) > limit or any(item.deployment_id != identifier for item in items):
+            raise ControlPlaneDependencyError("runtime remediation page scope is invalid")
+        status_counts = dict(_mapping(value.get("statusCounts"), "runtime remediation counts"))
+        if set(status_counts) != _RUNTIME_REMEDIATION_STATUSES or any(
+            isinstance(count, bool) or not isinstance(count, int) or count < 0
+            for count in status_counts.values()
+        ):
+            raise ControlPlaneDependencyError("runtime remediation counts are invalid")
+        channel_status_counts = dict(
+            _mapping(value.get("channelStatusCounts"), "runtime remediation channel counts")
+        )
+        if set(channel_status_counts) != {
+            "not_started",
+            "in_progress",
+            "installed_reported",
+            "failed",
+        } or any(
+            isinstance(count, bool) or not isinstance(count, int) or count < 0
+            for count in channel_status_counts.values()
+        ):
+            raise ControlPlaneDependencyError("runtime remediation channel counts are invalid")
+        runtime_verification_counts = dict(
+            _mapping(
+                value.get("runtimeVerificationCounts"),
+                "runtime remediation verification counts",
+            )
+        )
+        if set(runtime_verification_counts) != {"not_verified", "verified", "blocked"} or any(
+            isinstance(count, bool) or not isinstance(count, int) or count < 0
+            for count in runtime_verification_counts.values()
+        ):
+            raise ControlPlaneDependencyError("runtime remediation verification counts are invalid")
+        if (
+            isinstance(value.get("rolloutRevision"), bool)
+            or not isinstance(value.get("rolloutRevision"), int)
+            or value["rolloutRevision"] < 1
+            or isinstance(value.get("measuredAt"), bool)
+            or not isinstance(value.get("measuredAt"), int)
+            or value["measuredAt"] < 1
+            or isinstance(value.get("totalItems"), bool)
+            or not isinstance(value.get("totalItems"), int)
+            or value["totalItems"] < 0
+            or value.get("rolloutState")
+            not in {"canary", "active", "paused", "rolling_back", "converged", "rolled_back"}
+        ):
+            raise ControlPlaneDependencyError("runtime remediation page numeric state is invalid")
+        if sum(status_counts.values()) != value["totalItems"]:
+            raise ControlPlaneDependencyError("runtime remediation counts are inconsistent")
+        if (
+            sum(channel_status_counts.values()) != value["totalItems"]
+            or sum(runtime_verification_counts.values()) != value["totalItems"]
+        ):
+            raise ControlPlaneDependencyError(
+                "runtime remediation independent counts are inconsistent"
+            )
+        measured_at = value["measuredAt"]
+        for item in items:
+            verified = item.runtime_verification == "verified"
+            if verified != (item.status == "verified") or verified != bool(
+                item.evidence_observed_at
+                and item.evidence_observed_at <= measured_at
+                and item.evidence_expires_at
+                and item.evidence_expires_at > measured_at
+            ):
+                raise ControlPlaneDependencyError(
+                    "runtime remediation verification evidence is inconsistent"
+                )
+        if not isinstance(value.get("hasMore"), bool) or (
+            value["hasMore"] != isinstance(value.get("nextToken"), str)
+        ):
+            raise ControlPlaneDependencyError("runtime remediation pagination is invalid")
+        return RuntimeRemediationPage(
+            deployment_id=identifier,
+            rollout_revision=value["rolloutRevision"],
+            rollout_state=str(value["rolloutState"]),
+            measured_at=value["measuredAt"],
+            total_items=value["totalItems"],
+            status_counts=status_counts,
+            channel_status_counts=channel_status_counts,
+            runtime_verification_counts=runtime_verification_counts,
+            items=items,
+            next_token=value.get("nextToken"),
+            has_more=value["hasMore"],
+        )
+
+    def claim(
+        self, instruction: RuntimeRemediationInstruction, *, request_id: str
+    ) -> RuntimeRemediationInstruction:
+        """Lease one exact instruction; this does not authorize different work."""
+        if not instruction.eligible or instruction.status in {"blocked", "verified"}:
+            raise ValueError("runtime remediation instruction is not claimable")
+        return self._mutate(
+            instruction,
+            "claim",
+            {
+                "instructionId": instruction.instruction_id,
+                "expectedTaskRevision": instruction.task_revision,
+                "requestId": self._identifier(request_id, "request ID"),
+            },
+        )
+
+    def report_installed(
+        self, instruction: RuntimeRemediationInstruction, *, request_id: str
+    ) -> RuntimeRemediationInstruction:
+        """Report channel completion while leaving verification to attestation."""
+        return self._mutate(
+            instruction,
+            "report",
+            {
+                "instructionId": instruction.instruction_id,
+                "expectedTaskRevision": instruction.task_revision,
+                "requestId": self._identifier(request_id, "request ID"),
+                "outcome": "installed",
+                "reasonCode": None,
+            },
+        )
+
+    def report_failed(
+        self,
+        instruction: RuntimeRemediationInstruction,
+        *,
+        request_id: str,
+        reason_code: str,
+    ) -> RuntimeRemediationInstruction:
+        """Report one fixed, content-free failure without uploading raw errors."""
+        if reason_code not in _RUNTIME_REMEDIATION_FAILURE_REASONS:
+            raise ValueError("runtime remediation failure reason is unsupported")
+        return self._mutate(
+            instruction,
+            "report",
+            {
+                "instructionId": instruction.instruction_id,
+                "expectedTaskRevision": instruction.task_revision,
+                "requestId": self._identifier(request_id, "request ID"),
+                "outcome": "failed",
+                "reasonCode": reason_code,
+            },
+        )
+
+    @staticmethod
+    def _identifier(value: object, name: str) -> str:
+        """Reject unbounded or path-shaped identifiers before network use."""
+        if not isinstance(value, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value
+        ):
+            raise ValueError(f"runtime remediation {name} is invalid")
+        return value
+
+    def _mutate(
+        self,
+        instruction: RuntimeRemediationInstruction,
+        action: str,
+        body: Mapping[str, object],
+    ) -> RuntimeRemediationInstruction:
+        """Send one exact mutation and reject cross-instruction responses."""
+        value = self._request(
+            "/machine/v1/enterprise/runtime-remediations/"
+            f"{quote(instruction.deployment_id)}/{quote(instruction.agent_id)}/{action}",
+            body,
+        )
+        result = RuntimeRemediationInstruction.from_wire(value)
+        if (
+            result.instruction_id != instruction.instruction_id
+            or result.deployment_id != instruction.deployment_id
+            or result.agent_id != instruction.agent_id
+            or result.host != instruction.host
+            or result.rollout_revision != instruction.rollout_revision
+            or result.rollout_state != instruction.rollout_state
+            or result.release_id != instruction.release_id
+            or result.release_tag != instruction.release_tag
+            or result.sdk_version != instruction.sdk_version
+            or result.sdk_revision != instruction.sdk_revision
+            or result.manifest_sha256 != instruction.manifest_sha256
+            or result.release_evidence_sha256 != instruction.release_evidence_sha256
+            or result.package_sha256 != instruction.package_sha256
+            or result.gateway_sha256 != instruction.gateway_sha256
+            or result.hook_sha256 != instruction.hook_sha256
+        ):
+            raise ControlPlaneDependencyError("runtime remediation response authority changed")
+        return result
+
+    def _request(self, path: str, body: Mapping[str, object] | None = None) -> JsonObject:
+        """Perform one bounded authenticated request without redirects or retries."""
+        encoded = (
+            json.dumps(dict(body), sort_keys=True, separators=(",", ":")).encode()
+            if body is not None
+            else None
+        )
+        request = Request(  # noqa: S310 - constructor validated the URL scheme.
+            f"{self.base_url}{path}",
+            data=encoded,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.token}",
+                **({"Content-Type": "application/json"} if encoded is not None else {}),
+            },
+            method="POST" if encoded is not None else "GET",
+        )
+        try:
+            with _open_remediation_https(request, self.timeout_seconds) as response:
+                final_url = response.geturl() if hasattr(response, "geturl") else request.full_url
+                expected = urlsplit(request.full_url)
+                observed = urlsplit(final_url)
+                if (observed.scheme, observed.hostname, observed.port) != (
+                    expected.scheme,
+                    expected.hostname,
+                    expected.port,
+                ):
+                    raise URLError("runtime remediation response origin changed")
+                value = json.loads(response.read(1_000_000))
+        except (HTTPError, URLError, OSError, json.JSONDecodeError) as exc:
+            raise ControlPlaneDependencyError("runtime remediation request failed") from exc
+        return dict(_mapping(value, "runtime remediation response"))
 
 
 class ControlPlaneAgentClient:
@@ -2039,6 +2568,9 @@ __all__ = [
     "InMemoryControlPlaneAuthority",
     "OperatorAuthenticator",
     "OperatorIdentity",
+    "RuntimeRemediationClient",
+    "RuntimeRemediationInstruction",
+    "RuntimeRemediationPage",
     "StaticBearerAuthenticator",
     "validate_configuration",
 ]

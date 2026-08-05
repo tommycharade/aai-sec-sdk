@@ -13,6 +13,12 @@ catalog. It does not distribute executable files. Intune, another MDM tool, or
 an administrator-owned software channel must deliver the already approved
 bytes to each endpoint.
 
+The [runtime remediation coordination](runtime-remediation-coordination-design.md)
+contract exposes exact server-selected, executable-free work to a scoped
+external endpoint-management worker and records bounded channel outcomes.
+Those outcomes remain operational observations; only fresh exact attestation
+can complete this rollout.
+
 ## Security invariants
 
 - A deployment has one current release and at most one target release.

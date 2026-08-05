@@ -217,6 +217,32 @@ Microsoft Intune, because Microsoft Entra ID is the first identity provider.
 These inputs are required to replace the deployed `not-configured` runtime
 attestation posture with release-bound enforcement evidence.
 
+### Hosted endpoint-remediation provider
+
+Executable-free remediation coordination and its read-only operator view are
+implemented and synthetically tested. A hosted Intune, Jamf or equivalent
+dispatcher remains deliberately gated on provider-owned inputs that engineering
+must not invent:
+
+- the approved endpoint-management provider and a non-production managed-device
+  cohort;
+- an immutable, platform- and architecture-specific delivery-package registry
+  whose digests bind to approved runtime release evidence;
+- a bijective managed-device, SDK installation and enrolled-agent identity
+  mapping for every pilot endpoint;
+- a tenant-tagged Secrets Manager resource and dedicated IAM execution role for
+  the provider adapter, with no provider credentials exposed to the browser,
+  model or enrolled agent;
+- approved privilege, restart, retry and maintenance-window behavior; and
+- retained provider job evidence and a live acceptance window proving that a
+  channel success remains `awaiting_attestation` until the governed host emits
+  fresh exact runtime evidence.
+
+Until these inputs and an adapter-specific threat-model review exist, the
+control plane coordinates an administrator-owned external worker only. It does
+not claim hosted dispatch, remote installation or causal proof that a provider
+job produced the later attestation.
+
 ### GitHub organization discovery pilot
 
 - GitHub organization slug and an agreed complete repository denominator.
