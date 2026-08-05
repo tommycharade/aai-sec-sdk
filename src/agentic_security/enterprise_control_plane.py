@@ -29,6 +29,8 @@ from urllib.request import Request, urlopen
 
 from ._command_patterns import compile_command_patterns
 from .audit import AuditSink
+from .codex_effective_controls import codex_effective_control_evidence_from_wire
+from .errors import SecurityConfigurationError
 from .managed_deployment import ManagedDeploymentPackage
 from .policy_composition import PolicyComponent, PolicyCompositionError, compose_policy
 from .policy_sources import (
@@ -605,6 +607,7 @@ def _json_object(value: Mapping[str, Any] | None, name: str) -> str:
         "version",
         "telemetry",
         "managedConfiguration",
+        "nativeEffectiveControls",
     }
     data = dict(value or {})
     if len(data) > 20 or any(str(key) not in safe_keys for key in data):
@@ -615,6 +618,9 @@ def _json_object(value: Mapping[str, Any] | None, name: str) -> str:
             continue
         if key == "managedConfiguration":
             data[key] = _normalize_managed_configuration_report(item)
+            continue
+        if key == "nativeEffectiveControls":
+            data[key] = _normalize_native_effective_controls(item)
             continue
         if not isinstance(key, str) or not isinstance(item, (str, int, float, bool, list)):
             raise FleetConfigurationError(f"{name} must contain JSON scalar metadata")
@@ -689,6 +695,14 @@ def _normalize_managed_configuration_report(value: object) -> dict[str, Any]:
         raise FleetConfigurationError("managedConfiguration timestamps are invalid")
     result.update({"source": source, "verifiedAt": verified_at, "expiresAt": expires_at})
     return result
+
+
+def _normalize_native_effective_controls(value: object) -> dict[str, Any]:
+    """Validate the exact secret-free Codex process evidence schema."""
+    try:
+        return codex_effective_control_evidence_from_wire(value).to_wire()
+    except SecurityConfigurationError:
+        raise FleetConfigurationError("nativeEffectiveControls has an invalid schema") from None
 
 
 def _normalize_agent_telemetry(value: object, name: str = "telemetry") -> dict[str, int | float]:
@@ -1053,6 +1067,9 @@ class EnterpriseFleetStore:
                     item = _agent_inventory_projection(row)
                     item["managed_configuration"] = self._managed_configuration_posture(
                         row["deployment_id"], row["host"], row["metadata"]
+                    )
+                    item["native_effective_controls"] = self._native_effective_control_posture(
+                        row["host"], row["metadata"]
                     )
                     projected.append(item)
                 items = tuple(projected)
@@ -3122,8 +3139,9 @@ class EnterpriseFleetStore:
         session_id: str,
         telemetry: Mapping[str, int | float] | None = None,
         managed_configuration: Mapping[str, Any] | None = None,
+        native_effective_controls: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Refresh a session and persist bounded telemetry and managed evidence."""
+        """Refresh a session and persist bounded telemetry and native evidence."""
         deployment_id, agent_id, session_id = (
             _text(deployment_id, "deploymentId"),
             _text(agent_id, "agentId"),
@@ -3160,6 +3178,14 @@ class EnterpriseFleetStore:
             if managed_configuration is not None:
                 metadata["managedConfiguration"] = _normalize_managed_configuration_report(
                     managed_configuration
+                )
+            if native_effective_controls is not None:
+                if agent["host"] != "codex-cli":
+                    raise FleetConfigurationError(
+                        "native effective controls are supported only for Codex"
+                    )
+                metadata["nativeEffectiveControls"] = _normalize_native_effective_controls(
+                    native_effective_controls
                 )
             metadata_json = _json_object(metadata, "metadata")
             self._connection.execute(
@@ -4254,7 +4280,32 @@ class EnterpriseFleetStore:
         result["managed_configuration"] = self._managed_configuration_posture(
             row["deployment_id"], row["host"], row["metadata"]
         )
+        result["native_effective_controls"] = self._native_effective_control_posture(
+            row["host"], row["metadata"]
+        )
         return result
+
+    def _native_effective_control_posture(self, host: str, metadata: object) -> dict[str, Any]:
+        """Return server-derived freshness for safe Codex process evidence."""
+        if host != "codex-cli":
+            return {"status": "not_applicable", "observed": None}
+        report: dict[str, Any] | None = None
+        if isinstance(metadata, str):
+            try:
+                value = json.loads(metadata)
+                candidate = (
+                    value.get("nativeEffectiveControls") if isinstance(value, Mapping) else None
+                )
+                if isinstance(candidate, Mapping):
+                    report = _normalize_native_effective_controls(candidate)
+            except (FleetConfigurationError, TypeError, ValueError):
+                report = None
+        if report is None:
+            return {"status": "missing", "observed": None}
+        status = report["state"]
+        if report["verifiedAt"] > self._now() or report["expiresAt"] <= self._now():
+            status = "stale"
+        return {"status": status, "observed": report}
 
     def _managed_configuration_posture(
         self, deployment_id: str, host: str, metadata: object
@@ -5118,6 +5169,7 @@ class EnterpriseFleetApplication:
                     _text(body.get("sessionId"), "sessionId"),
                     body.get("telemetry"),
                     body.get("managedConfiguration"),
+                    body.get("nativeEffectiveControls"),
                 )
                 return self._respond(start_response, 200, result)
             if method == "POST" and path.startswith(prefix) and path.endswith("/disconnect"):

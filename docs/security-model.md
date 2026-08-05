@@ -882,6 +882,18 @@ closed pending ACL verification. Installation proves protected bytes on disk,
 not that a host process loaded them; heartbeat measurement and live action
 probes remain independent requirements.
 
+Codex process-loaded configuration is inspected only through its documented
+app-server protocol. The endpoint pins the exact executable digest, invokes it
+without a shell, bounds every response and projects raw configuration into a
+fixed content-minimised schema before comparison or export. Raw responses may
+contain credentials, paths, commands and URLs, so they are never logged,
+persisted or included in errors. Missing administrator requirements, protocol
+uncertainty and projected drift fail closed. MCP names are inventory only;
+identity/runtime status is not claimed because querying it can initialize an
+external server. Claude Code has no equivalent supported machine-readable API
+and remains explicitly unverified at this boundary. See
+[Codex effective-control evidence](codex-effective-controls-design.md).
+
 Host limitations remain visible as coverage rather than being silently
 promoted to enforcement. Claude command/path behavior routed through the AAI
 hook is labelled SDK-enforced; Codex experimental network controls require a

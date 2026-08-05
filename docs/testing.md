@@ -96,6 +96,12 @@ managed file. Retain separate device evidence from the privileged-file
 measurement and live host action probes in
 [Managed host configuration](managed-host-configuration.md).
 
+`tests/test_codex_effective_controls.py` exercises a synthetic app-server over
+the real JSONL subprocess boundary. It proves matching and deny-first behavior,
+binary pinning, bounded time and output, duplicate/malformed/error handling, and
+that secret-bearing configuration fields and server errors never enter the
+evidence projection.
+
 `tests/test_managed_deployment.py` validates canonical package parsing,
 out-of-band digest binding, exact host file sets, artifact/executable digests,
 duplicate-key denial, cross-target denial and path confinement.

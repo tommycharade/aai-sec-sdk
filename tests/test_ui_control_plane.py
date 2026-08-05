@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import threading
+from dataclasses import replace
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,6 +24,7 @@ from agentic_security import (
     AgentSessionStore,
     AuditEvent,
     CallbackControlPlaneAuthority,
+    CodexEffectiveControlEvidence,
     ControlPlaneAgentClient,
     ControlPlaneApplication,
     ControlPlaneConfigurationError,
@@ -47,6 +49,7 @@ from agentic_security import (
     StaticBearerAuthenticator,
     TrustedPolicyKey,
     canonical_policy_payload,
+    codex_effective_control_evidence_from_wire,
     validate_configuration,
 )
 from agentic_security.ui_control_plane import (
@@ -1146,6 +1149,115 @@ def test_agent_client_remeasures_and_reports_typed_managed_configuration(
         "expiresAt": 201,
     }
     assert bodies[1]["managedConfiguration"]["verifiedAt"] == 102  # type: ignore[index]
+
+
+def _missing_codex_effective_evidence(now: int = 100) -> CodexEffectiveControlEvidence:
+    """Return synthetic closed process evidence for heartbeat contracts."""
+    return codex_effective_control_evidence_from_wire(
+        {
+            "host": "codex-cli",
+            "hostVersion": "0.146.0",
+            "platform": "macos",
+            "state": "missing",
+            "reason": "administrator-requirements-missing",
+            "expectedDigest": "a" * 64,
+            "observedDigest": "b" * 64,
+            "approvalPolicy": "on-request",
+            "sandboxMode": "workspace-write",
+            "defaultPermissions": None,
+            "webSearchMode": None,
+            "managedMcpServerNames": [],
+            "unexpectedMcpServerCount": 2,
+            "preToolHookSha256": ["c" * 64],
+            "requirements": None,
+            "securityOrigins": {"approval_policy": "user"},
+            "mismatches": [],
+            "unverifiedControls": [],
+            "allowedActions": [],
+            "deniedActions": ["Read"],
+            "approvalRequiredActions": [],
+            "verifiedAt": now,
+            "expiresAt": now + 60,
+        }
+    )
+
+
+def test_agent_client_reports_typed_codex_effective_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AWS Codex heartbeats carry only the evidence object's safe wire shape."""
+    import agentic_security.ui_control_plane as control_plane
+
+    bodies: list[dict[str, object]] = []
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return b'{"status":"connected","controlState":{"executionAllowed":true}}'
+
+    def fake_urlopen(request: Any, **_kwargs: object) -> Response:
+        bodies.append(json.loads(request.data))
+        return Response()
+
+    monkeypatch.setattr(control_plane, "urlopen", fake_urlopen)
+    evidence = _missing_codex_effective_evidence()
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="codex-managed",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+        host=AgentHost.CODEX_CLI,
+        effective_controls_provider=lambda: evidence,
+    )
+
+    client.heartbeat(TOKEN)
+
+    assert bodies == [{"sessionId": TOKEN, "nativeEffectiveControls": evidence.to_wire()}]
+
+
+def test_agent_client_rejects_effective_controls_for_non_codex_session() -> None:
+    """Claude and unauthenticated clients cannot submit Codex process evidence."""
+    with pytest.raises(ValueError, match="requires an AWS Codex session"):
+        ControlPlaneAgentClient(
+            "https://control.example.test/api",
+            TOKEN,
+            agent_id="claude-managed",
+            project_root="/workspace/kratos",
+            deployment_id="deployment-prod",
+            aws_agent_session=True,
+            host=AgentHost.CLAUDE_CODE,
+            effective_controls_provider=_missing_codex_effective_evidence,
+        )
+
+
+def test_agent_client_revalidates_typed_effective_control_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider cannot forge allows by directly constructing a typed object."""
+    import agentic_security.ui_control_plane as control_plane
+
+    monkeypatch.setattr(control_plane, "urlopen", lambda *_args, **_kwargs: None)
+    forged = replace(_missing_codex_effective_evidence(), allowed_actions=("Read",))
+    client = ControlPlaneAgentClient(
+        "https://control.example.test/api",
+        TOKEN,
+        agent_id="codex-managed",
+        project_root="/workspace/kratos",
+        deployment_id="deployment-prod",
+        aws_agent_session=True,
+        host=AgentHost.CODEX_CLI,
+        effective_controls_provider=lambda: forged,
+    )
+
+    with pytest.raises(ControlPlaneConfigurationError, match="invalid evidence"):
+        client.heartbeat(TOKEN)
 
 
 def test_agent_client_rejects_untrusted_managed_configuration_provider(

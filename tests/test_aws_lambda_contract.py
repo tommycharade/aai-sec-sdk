@@ -4599,6 +4599,60 @@ def _runtime_evidence(
     }
 
 
+def _native_missing_evidence(now: int) -> dict[str, Any]:
+    """Return synthetic closed Codex process evidence for AWS contracts."""
+    return {
+        "host": "codex-cli",
+        "hostVersion": "0.146.0",
+        "platform": "linux",
+        "state": "missing",
+        "reason": "administrator-requirements-missing",
+        "expectedDigest": "a" * 64,
+        "observedDigest": "b" * 64,
+        "approvalPolicy": "on-request",
+        "sandboxMode": "workspace-write",
+        "defaultPermissions": None,
+        "webSearchMode": None,
+        "managedMcpServerNames": [],
+        "unexpectedMcpServerCount": 1,
+        "preToolHookSha256": ["c" * 64],
+        "requirements": None,
+        "securityOrigins": {"approval_policy": "user"},
+        "mismatches": [],
+        "unverifiedControls": [],
+        "allowedActions": [],
+        "deniedActions": ["Read"],
+        "approvalRequiredActions": [],
+        "verifiedAt": now,
+        "expiresAt": now + 60,
+    }
+
+
+def test_native_effective_controls_are_content_minimised_and_freshness_derived(
+    monkeypatch: Any,
+) -> None:
+    """AWS storage rejects extensions and derives stale state on every read."""
+    module, _table = _load_handler(monkeypatch)
+    now = 1_900_000_000
+    evidence = _native_missing_evidence(now)
+
+    normalized = module._native_effective_controls(evidence)
+    assert normalized == evidence
+    assert module._native_effective_control_posture(
+        {"host": "codex-cli", "native_effective_controls_report": normalized}, now=now
+    ) == {"status": "missing", "observed": evidence}
+    assert (
+        module._native_effective_control_posture(
+            {"host": "codex-cli", "native_effective_controls_report": normalized}, now=now + 61
+        )["status"]
+        == "stale"
+    )
+    hostile = dict(evidence, rawConfig={"Authorization": "Bearer synthetic-secret"})
+    with pytest.raises(ValueError, match="invalid schema") as caught:
+        module._native_effective_controls(hostile)
+    assert "synthetic-secret" not in str(caught.value)
+
+
 @pytest.mark.parametrize(
     ("claim", "expected"),
     [

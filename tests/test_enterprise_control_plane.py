@@ -705,6 +705,70 @@ def test_managed_configuration_posture_is_server_derived_and_fail_closed(tmp_pat
     )
 
 
+def test_codex_native_effective_controls_are_validated_and_expire(tmp_path: Path) -> None:
+    """Fleet reads show safe process posture and reject secret-bearing extensions."""
+    clock = Clock()
+    store = EnterpriseFleetStore(tmp_path / "fleet.sqlite", now=clock)
+    seed(store)
+    operator = identity("org-a")
+    registered = store.register_agent(
+        operator,
+        deployment_id="deploy-a",
+        agent_id="codex-a",
+        host="codex-cli",
+        project_root="/workspace/payments",
+    )
+    evidence = {
+        "host": "codex-cli",
+        "hostVersion": "0.146.0",
+        "platform": "linux",
+        "state": "missing",
+        "reason": "administrator-requirements-missing",
+        "expectedDigest": "a" * 64,
+        "observedDigest": "b" * 64,
+        "approvalPolicy": "on-request",
+        "sandboxMode": "workspace-write",
+        "defaultPermissions": None,
+        "webSearchMode": None,
+        "managedMcpServerNames": [],
+        "unexpectedMcpServerCount": 1,
+        "preToolHookSha256": ["c" * 64],
+        "requirements": None,
+        "securityOrigins": {"approval_policy": "user"},
+        "mismatches": [],
+        "unverifiedControls": [],
+        "allowedActions": [],
+        "deniedActions": ["Read"],
+        "approvalRequiredActions": [],
+        "verifiedAt": 1_000,
+        "expiresAt": 1_060,
+    }
+
+    result = store.heartbeat(
+        operator,
+        "deploy-a",
+        "codex-a",
+        registered["sessionId"],
+        native_effective_controls=evidence,
+    )
+
+    assert result["native_effective_controls"]["status"] == "missing"
+    assert result["native_effective_controls"]["observed"] == evidence
+    hostile = dict(evidence, rawConfig={"Authorization": "Bearer synthetic-secret"})
+    with pytest.raises(FleetConfigurationError, match="invalid schema") as caught:
+        store.heartbeat(
+            operator,
+            "deploy-a",
+            "codex-a",
+            registered["sessionId"],
+            native_effective_controls=hostile,
+        )
+    assert "synthetic-secret" not in str(caught.value)
+    clock.value = 1_100
+    agent = store.list_inventory(operator, "agents").items[0]
+    assert agent["native_effective_controls"]["status"] == "stale"
+
+
 def test_managed_package_publication_and_agent_repair_are_digest_bound(tmp_path: Path) -> None:
     """A drifted exact agent can retrieve, verify and later report its package."""
     store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")

@@ -5231,6 +5231,75 @@ _MANAGED_SOURCES = {
     "codex-cloud",
     "codex-mdm",
 }
+_NATIVE_EFFECTIVE_FIELDS = {
+    "host",
+    "hostVersion",
+    "platform",
+    "state",
+    "reason",
+    "expectedDigest",
+    "observedDigest",
+    "approvalPolicy",
+    "sandboxMode",
+    "defaultPermissions",
+    "webSearchMode",
+    "managedMcpServerNames",
+    "unexpectedMcpServerCount",
+    "preToolHookSha256",
+    "requirements",
+    "securityOrigins",
+    "mismatches",
+    "unverifiedControls",
+    "allowedActions",
+    "deniedActions",
+    "approvalRequiredActions",
+    "verifiedAt",
+    "expiresAt",
+}
+_NATIVE_EFFECTIVE_REASONS = {
+    "enforced": "effective-controls-match",
+    "missing": "administrator-requirements-missing",
+    "conflict": "effective-controls-differ",
+    "deployment_required": "effective-controls-partially-observable",
+}
+_NATIVE_MISMATCH_CODES = {
+    "allowed-approval-policies",
+    "default-permissions",
+    "allowed-permission-profiles",
+    "allowed-sandbox-modes",
+    "allowed-web-search-modes",
+    "managed-hooks-only",
+    "feature-requirements",
+    "network-enabled",
+    "managed-network-domains-only",
+    "network-domains",
+    "effective-approval-policy",
+    "effective-sandbox-mode",
+    "effective-default-permissions",
+    "managed-pre-tool-hook",
+    "host-version",
+}
+_NATIVE_GAP_CODES = {
+    "mcp-runtime-status",
+    "command-rule-runtime-match",
+    "deny-read-runtime-match",
+}
+_NATIVE_ORIGINS = {
+    "approval_policy",
+    "sandbox_mode",
+    "default_permissions",
+    "web_search",
+}
+_NATIVE_SOURCE_TYPES = {
+    "mdm",
+    "system",
+    "enterpriseManaged",
+    "user",
+    "project",
+    "sessionFlags",
+    "legacyManagedConfigTomlFromFile",
+    "legacyManagedConfigTomlFromMdm",
+}
 _MAX_MANAGED_PACKAGE_BYTES = 280 * 1024
 _MANAGED_PACKAGE_FIELDS_V1 = {
     "schemaVersion",
@@ -5339,6 +5408,193 @@ def _managed_host(value, *, report=False):
             raise ValueError("managed configuration timestamps are invalid")
         result.update({"source": source, "verifiedAt": verified_at, "expiresAt": expires_at})
     return result
+
+
+def _native_string_list(value, name, *, choices=None, digest=False):
+    """Validate one bounded list without reflecting its content in errors."""
+    if not isinstance(value, list) or len(value) > 256:
+        raise ValueError(f"{name} must be a bounded list")
+    result = []
+    for item in value:
+        text = _bounded_text(item, name, 1024)
+        if choices is not None and text not in choices:
+            raise ValueError(f"{name} contains an unsupported value")
+        if digest and not re.fullmatch(r"[0-9a-f]{64}", text):
+            raise ValueError(f"{name} contains an invalid digest")
+        result.append(text)
+    return sorted(set(result))
+
+
+def _native_optional_text(value, name):
+    """Validate one nullable bounded enum-like value."""
+    return None if value is None else _bounded_text(value, name, 128)
+
+
+def _native_bool_map(value, name):
+    """Validate one bounded string-to-boolean requirement map."""
+    if not isinstance(value, dict) or len(value) > 256:
+        raise ValueError(f"{name} must be a bounded object")
+    result = {}
+    for key, decision in value.items():
+        key = _bounded_text(key, name, 253)
+        if not isinstance(decision, bool):
+            raise ValueError(f"{name} values must be boolean")
+        result[key] = decision
+    return result
+
+
+def _native_requirements(value):
+    """Validate the fixed content-minimised administrator-requirement schema."""
+    fields = {
+        "allowedApprovalPolicies",
+        "defaultPermissions",
+        "allowedPermissionProfiles",
+        "allowedSandboxModes",
+        "allowedWebSearchModes",
+        "allowManagedHooksOnly",
+        "featureRequirements",
+        "network",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("native effective requirements have an invalid schema")
+    network = value.get("network")
+    if not isinstance(network, dict) or set(network) != {
+        "enabled",
+        "managedAllowedDomainsOnly",
+        "domains",
+    }:
+        raise ValueError("native effective network requirements have an invalid schema")
+    domains = network.get("domains")
+    if not isinstance(domains, dict) or len(domains) > 256:
+        raise ValueError("native effective network domains are invalid")
+    normalized_domains = {}
+    for domain, decision in domains.items():
+        domain = _bounded_text(domain, "native network domain", 253)
+        if decision not in {"allow", "deny"}:
+            raise ValueError("native effective network decision is unsupported")
+        normalized_domains[domain] = decision
+    for field in ("enabled", "managedAllowedDomainsOnly"):
+        if network.get(field) is not None and not isinstance(network.get(field), bool):
+            raise ValueError("native effective network boolean is invalid")
+    hooks_only = value.get("allowManagedHooksOnly")
+    if hooks_only is not None and not isinstance(hooks_only, bool):
+        raise ValueError("native effective hook requirement is invalid")
+    return {
+        "allowedApprovalPolicies": _native_string_list(
+            value.get("allowedApprovalPolicies"), "native approval policies"
+        ),
+        "defaultPermissions": _native_optional_text(
+            value.get("defaultPermissions"), "native default permissions"
+        ),
+        "allowedPermissionProfiles": _native_bool_map(
+            value.get("allowedPermissionProfiles"), "native permission profiles"
+        ),
+        "allowedSandboxModes": _native_string_list(
+            value.get("allowedSandboxModes"), "native sandbox modes"
+        ),
+        "allowedWebSearchModes": _native_string_list(
+            value.get("allowedWebSearchModes"), "native web-search modes"
+        ),
+        "allowManagedHooksOnly": hooks_only,
+        "featureRequirements": _native_bool_map(
+            value.get("featureRequirements"), "native feature requirements"
+        ),
+        "network": {
+            "enabled": network.get("enabled"),
+            "managedAllowedDomainsOnly": network.get("managedAllowedDomainsOnly"),
+            "domains": normalized_domains,
+        },
+    }
+
+
+def _native_effective_controls(value):
+    """Validate safe Codex process evidence before DynamoDB persistence."""
+    if not isinstance(value, dict) or set(value) != _NATIVE_EFFECTIVE_FIELDS:
+        raise ValueError("native effective controls have an invalid schema")
+    if value.get("host") != "codex-cli":
+        raise ValueError("native effective controls have an invalid host")
+    state = _bounded_text(value.get("state"), "native effective state", 32)
+    if state not in _NATIVE_EFFECTIVE_REASONS or value.get("reason") != (
+        _NATIVE_EFFECTIVE_REASONS[state]
+    ):
+        raise ValueError("native effective state and reason are inconsistent")
+    platform = _bounded_text(value.get("platform"), "native effective platform", 16)
+    if platform not in {"macos", "linux", "windows"}:
+        raise ValueError("native effective platform is unsupported")
+    digests = {}
+    for field in ("expectedDigest", "observedDigest"):
+        digest = value.get(field)
+        if digest is not None:
+            digest = _bounded_text(digest, field, 64)
+            if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise ValueError("native effective digest is invalid")
+        digests[field] = digest
+    verified_at = _managed_integer(value.get("verifiedAt"), "native verifiedAt")
+    expires_at = _managed_integer(value.get("expiresAt"), "native expiresAt")
+    if expires_at <= verified_at or expires_at - verified_at > 300:
+        raise ValueError("native effective timestamps are invalid")
+    count = _managed_integer(value.get("unexpectedMcpServerCount"), "unexpected MCP count")
+    if count > 256:
+        raise ValueError("native effective MCP count exceeds the bound")
+    mismatches = _native_string_list(
+        value.get("mismatches"), "native mismatches", choices=_NATIVE_MISMATCH_CODES
+    )
+    gaps = _native_string_list(
+        value.get("unverifiedControls"), "native control gaps", choices=_NATIVE_GAP_CODES
+    )
+    allowed = _native_string_list(value.get("allowedActions"), "native allowed actions")
+    denied = _native_string_list(value.get("deniedActions"), "native denied actions")
+    approval = _native_string_list(
+        value.get("approvalRequiredActions"), "native approval actions"
+    )
+    requirements_value = value.get("requirements")
+    requirements = (
+        None if requirements_value is None else _native_requirements(requirements_value)
+    )
+    if state != "enforced" and (allowed or approval):
+        raise ValueError("closed native effective controls cannot include allows")
+    if state == "enforced" and (mismatches or gaps or requirements is None):
+        raise ValueError("enforced native effective controls have unresolved controls")
+    if state == "missing" and requirements is not None:
+        raise ValueError("missing native effective controls cannot include requirements")
+    origins = value.get("securityOrigins")
+    if not isinstance(origins, dict) or len(origins) > len(_NATIVE_ORIGINS):
+        raise ValueError("native effective origins are invalid")
+    normalized_origins = {}
+    for key, source in origins.items():
+        if key not in _NATIVE_ORIGINS or source not in _NATIVE_SOURCE_TYPES:
+            raise ValueError("native effective origin is unsupported")
+        normalized_origins[key] = source
+    return {
+        "host": "codex-cli",
+        "hostVersion": _bounded_text(value.get("hostVersion"), "native hostVersion", 128),
+        "platform": platform,
+        "state": state,
+        "reason": _NATIVE_EFFECTIVE_REASONS[state],
+        **digests,
+        "approvalPolicy": _native_optional_text(value.get("approvalPolicy"), "approval policy"),
+        "sandboxMode": _native_optional_text(value.get("sandboxMode"), "sandbox mode"),
+        "defaultPermissions": _native_optional_text(
+            value.get("defaultPermissions"), "default permissions"
+        ),
+        "webSearchMode": _native_optional_text(value.get("webSearchMode"), "web search mode"),
+        "managedMcpServerNames": _native_string_list(
+            value.get("managedMcpServerNames"), "managed MCP names"
+        ),
+        "unexpectedMcpServerCount": count,
+        "preToolHookSha256": _native_string_list(
+            value.get("preToolHookSha256"), "native hook digests", digest=True
+        ),
+        "requirements": requirements,
+        "securityOrigins": normalized_origins,
+        "mismatches": mismatches,
+        "unverifiedControls": gaps,
+        "allowedActions": allowed,
+        "deniedActions": denied,
+        "approvalRequiredActions": approval,
+        "verifiedAt": verified_at,
+        "expiresAt": expires_at,
+    }
 
 
 def _reject_duplicate_package_keys(pairs):
@@ -5797,6 +6053,28 @@ def _managed_configuration_posture(tenant, agent, *, now=None):
             else "enforced"
         )
     return {"status": status, "desired": desired, "observed": observed}
+
+
+def _native_effective_control_posture(agent, *, now=None):
+    """Derive freshness from validated content-minimised Codex process evidence."""
+    if agent.get("host") != "codex-cli":
+        return {"status": "not_applicable", "observed": None}
+    observed_value = agent.get("native_effective_controls_report")
+    try:
+        observed = (
+            _native_effective_controls(observed_value)
+            if isinstance(observed_value, dict)
+            else None
+        )
+    except ValueError:
+        observed = None
+    if observed is None:
+        return {"status": "missing", "observed": None}
+    current = int(time.time()) if now is None else now
+    status = observed["state"]
+    if observed["verifiedAt"] > current or observed["expiresAt"] <= current:
+        status = "stale"
+    return {"status": status, "observed": observed}
 
 
 def _policy_trust_convergence(tenant, *, now=None):
@@ -14261,6 +14539,7 @@ def _all_agents(tenant, *, consistent_read=False):
         elif agent.get("expires_at", 0) < now and agent.get("status") != "offline":
             agent["status"] = "offline"
         agent["managed_configuration"] = _managed_configuration_posture(tenant, agent, now=now)
+        agent["native_effective_controls"] = _native_effective_control_posture(agent, now=now)
         agent["ownership"] = _agent_ownership_view(agent, now=now)
     return agents
 
@@ -21506,6 +21785,15 @@ def handler(event, context):
                 if managed_configuration is not None:
                     item["managed_configuration_report"] = _managed_host(
                         managed_configuration, report=True
+                    )
+                native_effective_controls = body.get("nativeEffectiveControls")
+                if native_effective_controls is not None:
+                    if item.get("host") != "codex-cli":
+                        raise ValueError(
+                            "native effective controls are supported only for Codex"
+                        )
+                    item["native_effective_controls_report"] = _native_effective_controls(
+                        native_effective_controls
                     )
                 item.update(
                     {
