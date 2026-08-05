@@ -64,6 +64,7 @@ _EVIDENCE_FIELDS: Final[frozenset[str]] = frozenset(
         "host",
         "hostVersion",
         "platform",
+        "bundleHash",
         "state",
         "reason",
         "expectedDigest",
@@ -160,6 +161,7 @@ class CodexEffectiveControlEvidence:
 
     host_version: str
     platform: str
+    bundle_hash: str
     state: EnforcementState
     reason: str
     expected_digest: str
@@ -187,6 +189,7 @@ class CodexEffectiveControlEvidence:
             "host": AgentHost.CODEX_CLI.value,
             "hostVersion": self.host_version,
             "platform": self.platform,
+            "bundleHash": self.bundle_hash,
             "state": self.state.value,
             "reason": self.reason,
             "expectedDigest": self.expected_digest,
@@ -240,6 +243,7 @@ def codex_effective_control_evidence_from_wire(
     if state not in _REASONS_BY_STATE or item.get("reason") != _REASONS_BY_STATE[state]:
         raise SecurityConfigurationError("Codex effective-control reason does not match state")
     expected_digest = _sha256(item.get("expectedDigest"), "expected evidence digest")
+    bundle_hash = _sha256(item.get("bundleHash"), "managed bundle hash")
     observed_value = item.get("observedDigest")
     observed_digest = (
         None if observed_value is None else _sha256(observed_value, "observed evidence digest")
@@ -279,6 +283,7 @@ def codex_effective_control_evidence_from_wire(
     return CodexEffectiveControlEvidence(
         host_version=_enum_text(item.get("hostVersion"), "evidence host version", 128),
         platform=platform.value,
+        bundle_hash=bundle_hash,
         state=state,
         reason=_REASONS_BY_STATE[state],
         expected_digest=expected_digest,
@@ -683,6 +688,7 @@ def _reconcile(
     return CodexEffectiveControlEvidence(
         host_version=observed.host_version,
         platform=observed.platform,
+        bundle_hash=bundle.bundle_hash,
         state=state,
         reason=reason,
         expected_digest=expected_digest,

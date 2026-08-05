@@ -230,3 +230,10 @@ The zero digest is a placeholder and intentionally fails against a real binary;
 replace it with independently approved release metadata. See
 [Codex effective-control evidence](codex-effective-controls-design.md) for the
 threat model and known observability limits.
+
+The wire evidence also carries `bundleHash`. The control plane compares it with
+the deployment's current desired target on every authority read. Do not copy a
+digest from endpoint output into desired state: desired state must come from the
+reviewed centrally published package. Missing, stale, partially observable or
+mismatched evidence blocks governed Codex execution while leaving the
+authenticated managed-package repair route available.

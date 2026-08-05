@@ -4499,7 +4499,10 @@ def _bound_endpoint_alert(
 
 
 def _managed_package_fixture(
-    *, policy_version: int = 1, with_trust: bool = False
+    *,
+    policy_version: int = 1,
+    with_trust: bool = False,
+    host: AgentHost = AgentHost.CLAUDE_CODE,
 ) -> tuple[ManagedDeploymentPackage, dict[str, Any]]:
     """Build canonical package bytes and matching AWS desired-host metadata."""
     hook_path = "/opt/aai-security/hooks/native-policy"
@@ -4509,8 +4512,8 @@ def _managed_package_fixture(
             policy_version,
             action_rules=(NativeActionRule("Read", NativeActionDecision.ALLOW, "synthetic read"),),
         ),
-        host=AgentHost.CLAUDE_CODE,
-        host_version="2.1.220",
+        host=host,
+        host_version="0.146.0" if host is AgentHost.CODEX_CLI else "2.1.220",
         platform=ManagedPlatform.LINUX,
         hook_command=hook_path,
     )
@@ -4605,6 +4608,7 @@ def _native_missing_evidence(now: int) -> dict[str, Any]:
         "host": "codex-cli",
         "hostVersion": "0.146.0",
         "platform": "linux",
+        "bundleHash": "d" * 64,
         "state": "missing",
         "reason": "administrator-requirements-missing",
         "expectedDigest": "a" * 64,
@@ -4628,29 +4632,112 @@ def _native_missing_evidence(now: int) -> dict[str, Any]:
     }
 
 
+def _native_enforced_evidence(now: int, bundle_hash: str) -> dict[str, Any]:
+    """Return synthetic positive Codex evidence with no unresolved controls."""
+    return {
+        **_native_missing_evidence(now),
+        "bundleHash": bundle_hash,
+        "state": "enforced",
+        "reason": "effective-controls-match",
+        "defaultPermissions": ":workspace",
+        "webSearchMode": "cached",
+        "unexpectedMcpServerCount": 0,
+        "requirements": {
+            "allowedApprovalPolicies": ["on-request"],
+            "defaultPermissions": ":workspace",
+            "allowedPermissionProfiles": {":workspace": True},
+            "allowedSandboxModes": [],
+            "allowedWebSearchModes": ["cached"],
+            "allowManagedHooksOnly": True,
+            "featureRequirements": {"hooks": True},
+            "network": {
+                "enabled": None,
+                "managedAllowedDomainsOnly": None,
+                "domains": {},
+            },
+        },
+        "securityOrigins": {"approval_policy": "system"},
+        "allowedActions": ["Read"],
+        "deniedActions": ["Bash(rm *)"],
+    }
+
+
 def test_native_effective_controls_are_content_minimised_and_freshness_derived(
     monkeypatch: Any,
 ) -> None:
     """AWS storage rejects extensions and derives stale state on every read."""
-    module, _table = _load_handler(monkeypatch)
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-native-controls"
     now = 1_900_000_000
     evidence = _native_missing_evidence(now)
+    desired = {
+        "host": "codex-cli",
+        "hostVersion": "0.146.0",
+        "platform": "linux",
+        "bundleHash": evidence["bundleHash"],
+        "policyId": "policy-safe",
+        "policyVersion": 1,
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "CONFIGURATION", "dep-a")
+        | {"desiredConfiguration": {"managedHost": desired}}
+    )
+    agent = {
+        "id": "codex-a",
+        "deployment_id": "dep-a",
+        "host": "codex-cli",
+        "native_effective_controls_report": module._native_effective_controls(evidence),
+    }
 
     normalized = module._native_effective_controls(evidence)
     assert normalized == evidence
-    assert module._native_effective_control_posture(
-        {"host": "codex-cli", "native_effective_controls_report": normalized}, now=now
-    ) == {"status": "missing", "observed": evidence}
-    assert (
-        module._native_effective_control_posture(
-            {"host": "codex-cli", "native_effective_controls_report": normalized}, now=now + 61
-        )["status"]
-        == "stale"
+    posture = module._native_effective_control_posture(tenant, agent, now=now)
+    assert posture == {
+        "status": "missing",
+        "desired": {
+            "bundleHash": evidence["bundleHash"],
+            "hostVersion": "0.146.0",
+            "platform": "linux",
+        },
+        "observed": evidence,
+    }
+    assert module._agent_control_state(tenant, agent)["authorityBlockers"] == [
+        "native_effective_controls"
+    ]
+    table.put_item(Item=module._item_key(tenant, "AGENT", "dep-a:codex-a") | agent)
+    table.put_item(
+        Item=module._item_key(tenant, "POLICY", "policy-safe") | {"id": "policy-safe", "version": 1}
     )
+    table.put_item(
+        Item=module._item_key(tenant, "GROUP", "group-safe")
+        | {
+            "id": "group-safe",
+            "policyId": "policy-safe",
+            "agent_keys": ["dep-a:codex-a"],
+        }
+    )
+    verification = module._verify_agent(tenant, "dep-a", "codex-a")
+    assert verification["checks"]["nativeEffectiveControls"]["passed"] is False
+    assert verification["checks"]["emergencyStop"]["passed"] is True
+    assert (
+        module._native_effective_control_posture(tenant, agent, now=now + 61)["status"] == "stale"
+    )
+    forged = _native_enforced_evidence(now, "e" * 64)
+    agent["native_effective_controls_report"] = module._native_effective_controls(forged)
+    assert module._native_effective_control_posture(tenant, agent, now=now)["status"] == "conflict"
+    assert module._agent_control_state(tenant, agent)["executionAllowed"] is False
+    agent["native_effective_controls_report"] = module._native_effective_controls(
+        _native_enforced_evidence(now, evidence["bundleHash"])
+    )
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    assert module._agent_control_state(tenant, agent)["executionAllowed"] is True
+    module._require_current_native_effective_controls(tenant, agent)
     hostile = dict(evidence, rawConfig={"Authorization": "Bearer synthetic-secret"})
     with pytest.raises(ValueError, match="invalid schema") as caught:
         module._native_effective_controls(hostile)
     assert "synthetic-secret" not in str(caught.value)
+    with pytest.raises(ValueError, match="digest is invalid"):
+        module._native_effective_controls({**evidence, "bundleHash": "not-a-digest"})
 
 
 @pytest.mark.parametrize(
@@ -14279,15 +14366,18 @@ def test_aws_managed_package_v2_requires_exact_deployment_owned_trust(monkeypatc
         )
 
 
-def test_aws_managed_package_publication_and_drift_repair_route(monkeypatch: Any) -> None:
+@pytest.mark.parametrize("host", [AgentHost.CLAUDE_CODE, AgentHost.CODEX_CLI])
+def test_aws_managed_package_publication_and_drift_repair_route(
+    monkeypatch: Any, host: AgentHost
+) -> None:
     """AWS publishes by CAS and lets only the exact attested agent repair drift."""
     module, table = _load_handler(monkeypatch)
     tenant = "tenant-package"
     now = 1_900_000_000
     monkeypatch.setattr(module.time, "time", lambda: now)
-    runtime_manifest = _runtime_manifest()
+    runtime_manifest = _runtime_manifest(host.value)
     _set_runtime_manifests(monkeypatch, [runtime_manifest])
-    package, desired = _managed_package_fixture()
+    package, desired = _managed_package_fixture(host=host)
     project_root = "/synthetic/project"
     token = "synthetic-managed-package-agent-session"  # noqa: S105
     table.put_item(
@@ -14317,7 +14407,7 @@ def test_aws_managed_package_publication_and_drift_repair_route(monkeypatch: Any
         | {
             "id": "agent-a",
             "deployment_id": "dep-a",
-            "host": "claude-code",
+            "host": host.value,
             "project_root": project_root,
             "status": "connected",
             "expires_at": now + 300,
@@ -14682,8 +14772,14 @@ def test_fleet_emergency_stop_is_reversible_durable_and_enforced(monkeypatch: An
     assert denied_payload["error"] == "server-owned response control withholds agent execution"
     assert denied_payload["controlState"] == {
         "activeStopScopes": ["fleet"],
+        "authorityBlockers": ["emergency_stop"],
         "evidenceAllowed": True,
         "executionAllowed": False,
+        "nativeEffectiveControls": {
+            "desired": None,
+            "required": False,
+            "status": "not_applicable",
+        },
         "quarantine": None,
     }
     verification = _invoke(

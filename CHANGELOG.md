@@ -1,5 +1,15 @@
 # Changelog
 
+- Made Codex process-loaded evidence a server-owned execution-authority gate.
+  Evidence now binds the exact managed bundle hash; the local and AWS control
+  planes independently compare current desired host/version/platform and
+  freshness, reject forged positive state as conflict, emit fixed authority
+  blocker codes and deny governed routes. The authenticated managed-package
+  path remains available for exact-agent repair while emergency stop,
+  quarantine, rollout and runtime-attestation controls remain enforced. The UI
+  shows assigned-versus-observed bundle identity, effective native actions and
+  actionable blocked/available authority state.
+
 - Added release-pinned, bounded Codex app-server effective-control evidence
   with deny-first reconciliation and a credential-free heartbeat projection.
 

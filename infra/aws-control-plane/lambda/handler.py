@@ -2543,6 +2543,13 @@ def _require_current_managed_configuration(tenant, agent):
         raise PermissionError("managed host configuration is not freshly enforced")
 
 
+def _require_current_native_effective_controls(tenant, agent):
+    """Withhold Codex authority until process-effective controls match desired state."""
+    posture = _native_effective_control_posture(tenant, agent)
+    if agent.get("host") == "codex-cli" and posture.get("status") != "enforced":
+        raise PermissionError("Codex native effective controls are not freshly enforced")
+
+
 def _json_default(value):
     """Convert DynamoDB decimals without changing integer API contracts to floats."""
     if isinstance(value, Decimal):
@@ -5235,6 +5242,7 @@ _NATIVE_EFFECTIVE_FIELDS = {
     "host",
     "hostVersion",
     "platform",
+    "bundleHash",
     "state",
     "reason",
     "expectedDigest",
@@ -5514,21 +5522,27 @@ def _native_effective_controls(value):
     if value.get("host") != "codex-cli":
         raise ValueError("native effective controls have an invalid host")
     state = _bounded_text(value.get("state"), "native effective state", 32)
-    if state not in _NATIVE_EFFECTIVE_REASONS or value.get("reason") != (
-        _NATIVE_EFFECTIVE_REASONS[state]
+    if (
+        state not in _NATIVE_EFFECTIVE_REASONS
+        or value.get("reason") != (_NATIVE_EFFECTIVE_REASONS[state])
     ):
         raise ValueError("native effective state and reason are inconsistent")
     platform = _bounded_text(value.get("platform"), "native effective platform", 16)
     if platform not in {"macos", "linux", "windows"}:
         raise ValueError("native effective platform is unsupported")
-    digests = {}
-    for field in ("expectedDigest", "observedDigest"):
-        digest = value.get(field)
-        if digest is not None:
-            digest = _bounded_text(digest, field, 64)
-            if not re.fullmatch(r"[0-9a-f]{64}", digest):
-                raise ValueError("native effective digest is invalid")
-        digests[field] = digest
+    digests = {
+        "bundleHash": _bounded_text(value.get("bundleHash"), "bundleHash", 64),
+        "expectedDigest": _bounded_text(value.get("expectedDigest"), "expectedDigest", 64),
+    }
+    observed_digest = value.get("observedDigest")
+    digests["observedDigest"] = (
+        None if observed_digest is None else _bounded_text(observed_digest, "observedDigest", 64)
+    )
+    if any(
+        digest is not None and not re.fullmatch(r"[0-9a-f]{64}", digest)
+        for digest in digests.values()
+    ):
+        raise ValueError("native effective digest is invalid")
     verified_at = _managed_integer(value.get("verifiedAt"), "native verifiedAt")
     expires_at = _managed_integer(value.get("expiresAt"), "native expiresAt")
     if expires_at <= verified_at or expires_at - verified_at > 300:
@@ -5544,13 +5558,9 @@ def _native_effective_controls(value):
     )
     allowed = _native_string_list(value.get("allowedActions"), "native allowed actions")
     denied = _native_string_list(value.get("deniedActions"), "native denied actions")
-    approval = _native_string_list(
-        value.get("approvalRequiredActions"), "native approval actions"
-    )
+    approval = _native_string_list(value.get("approvalRequiredActions"), "native approval actions")
     requirements_value = value.get("requirements")
-    requirements = (
-        None if requirements_value is None else _native_requirements(requirements_value)
-    )
+    requirements = None if requirements_value is None else _native_requirements(requirements_value)
     if state != "enforced" and (allowed or approval):
         raise ValueError("closed native effective controls cannot include allows")
     if state == "enforced" and (mismatches or gaps or requirements is None):
@@ -5979,10 +5989,9 @@ def _publish_managed_package(tenant, deployment_id, body, actor):
 
 def _agent_managed_package(tenant, deployment_id, agent_id, agent):
     """Return a current package to one exact rollout-selected enrolled agent."""
-    try:
-        _require_agent_execution_authority(tenant, agent)
-    except PermissionError as error:
-        raise ManagedPackageConflict("response control blocks managed package retrieval") from error
+    control_state = _agent_control_state(tenant, agent)
+    if control_state["quarantine"] is not None or control_state["activeStopScopes"]:
+        raise ManagedPackageConflict("response control blocks managed package retrieval")
     agent_key = f"{deployment_id}:{agent_id}"
     desired, configuration = _desired_managed_host(tenant, deployment_id)
     state = configuration.get("rolloutState")
@@ -6055,26 +6064,46 @@ def _managed_configuration_posture(tenant, agent, *, now=None):
     return {"status": status, "desired": desired, "observed": observed}
 
 
-def _native_effective_control_posture(agent, *, now=None):
-    """Derive freshness from validated content-minimised Codex process evidence."""
+def _native_effective_control_posture(tenant, agent, *, now=None):
+    """Bind Codex process evidence to current server-owned managed authority."""
     if agent.get("host") != "codex-cli":
-        return {"status": "not_applicable", "observed": None}
+        return {"status": "not_applicable", "desired": None, "observed": None}
+    try:
+        desired, _configuration = _desired_managed_host(tenant, str(agent.get("deployment_id", "")))
+    except ValueError:
+        desired = None
     observed_value = agent.get("native_effective_controls_report")
     try:
         observed = (
-            _native_effective_controls(observed_value)
-            if isinstance(observed_value, dict)
-            else None
+            _native_effective_controls(observed_value) if isinstance(observed_value, dict) else None
         )
     except ValueError:
         observed = None
-    if observed is None:
-        return {"status": "missing", "observed": None}
+    desired_projection = (
+        None
+        if desired is None
+        else {
+            "bundleHash": desired["bundleHash"],
+            "hostVersion": desired["hostVersion"],
+            "platform": desired["platform"],
+        }
+    )
+    if desired is None or observed is None:
+        return {"status": "missing", "desired": desired_projection, "observed": observed}
     current = int(time.time()) if now is None else now
-    status = observed["state"]
-    if observed["verifiedAt"] > current or observed["expiresAt"] <= current:
+    if any(
+        (
+            observed["bundleHash"] != desired["bundleHash"],
+            observed["hostVersion"] != desired["hostVersion"],
+            observed["platform"] != desired["platform"],
+        )
+    ):
+        status = "conflict"
+    elif observed["verifiedAt"] > current or observed["expiresAt"] <= current:
         status = "stale"
-    return {"status": status, "observed": observed}
+    else:
+        status = observed["state"]
+    return {"status": status, "desired": desired_projection, "observed": observed}
 
 
 def _policy_trust_convergence(tenant, *, now=None):
@@ -11200,6 +11229,12 @@ def _agent_control_state(tenant, agent):
             "executionAllowed": False,
             "evidenceAllowed": False,
             "activeStopScopes": ["missing_agent"],
+            "authorityBlockers": ["missing_agent"],
+            "nativeEffectiveControls": {
+                "required": False,
+                "status": "not_applicable",
+                "desired": None,
+            },
             "quarantine": None,
         }
     deployment_id = str(agent.get("deployment_id", ""))
@@ -11234,13 +11269,28 @@ def _agent_control_state(tenant, agent):
         if containment
         else None
     )
+    native_posture = _native_effective_control_posture(tenant, agent)
+    authority_blockers = []
+    if scopes:
+        authority_blockers.append("emergency_stop")
+    if quarantine is not None:
+        authority_blockers.append("quarantine")
+    native_required = agent.get("host") == "codex-cli"
+    if native_required and native_posture["status"] != "enforced":
+        authority_blockers.append("native_effective_controls")
     return {
-        "executionAllowed": not scopes and quarantine is None,
+        "executionAllowed": not authority_blockers,
         # Quarantine intentionally preserves the signed heartbeat/attestation
         # channel. Emergency stop also preserves evidence in the current host
         # protocol but withholds all execution authority.
         "evidenceAllowed": True,
         "activeStopScopes": scopes,
+        "authorityBlockers": authority_blockers,
+        "nativeEffectiveControls": {
+            "required": native_required,
+            "status": native_posture["status"],
+            "desired": native_posture["desired"],
+        },
         "quarantine": quarantine,
     }
 
@@ -11252,6 +11302,8 @@ def _require_agent_execution_authority(tenant, agent):
         raise PermissionError("agent is in incident quarantine")
     if state["activeStopScopes"]:
         raise PermissionError("agent emergency stop is active")
+    if "native_effective_controls" in state["authorityBlockers"]:
+        raise PermissionError("Codex native effective controls are not freshly enforced")
     return state
 
 
@@ -14539,7 +14591,9 @@ def _all_agents(tenant, *, consistent_read=False):
         elif agent.get("expires_at", 0) < now and agent.get("status") != "offline":
             agent["status"] = "offline"
         agent["managed_configuration"] = _managed_configuration_posture(tenant, agent, now=now)
-        agent["native_effective_controls"] = _native_effective_control_posture(agent, now=now)
+        agent["native_effective_controls"] = _native_effective_control_posture(
+            tenant, agent, now=now
+        )
         agent["ownership"] = _agent_ownership_view(agent, now=now)
     return agents
 
@@ -20860,6 +20914,22 @@ def _verify_agent(tenant, deployment_id, agent_id):
     managed_configuration_current = bool(
         managed_configuration and managed_configuration.get("status") == "enforced"
     )
+    native_effective_controls = (
+        _native_effective_control_posture(tenant, agent, now=checked_at) if agent else None
+    )
+    native_effective_controls_current = bool(
+        native_effective_controls
+        and (
+            native_effective_controls.get("status") == "not_applicable"
+            or native_effective_controls.get("status") == "enforced"
+        )
+    )
+    response_controls_clear = bool(
+        agent
+        and control_state
+        and not control_state["activeStopScopes"]
+        and control_state["quarantine"] is None
+    )
     ownership = _agent_ownership_view(agent, now=checked_at) if agent else None
     ownership_current = bool(ownership and ownership.get("status") == "current")
     if not agent:
@@ -20917,6 +20987,20 @@ def _verify_agent(tenant, deployment_id, agent_id):
                 else "Managed host configuration is not freshly proven."
             ),
         },
+        "nativeEffectiveControls": {
+            "passed": native_effective_controls_current,
+            "detail": (
+                "Codex process-effective controls match the current managed bundle."
+                if native_effective_controls
+                and native_effective_controls.get("status") == "enforced"
+                else (
+                    "Native effective-control evidence is not required for this host."
+                    if native_effective_controls
+                    and native_effective_controls.get("status") == "not_applicable"
+                    else "Codex process-effective controls are not freshly proven."
+                )
+            ),
+        },
         "ownership": {
             "passed": ownership_current,
             "detail": (
@@ -20934,10 +21018,10 @@ def _verify_agent(tenant, deployment_id, agent_id):
             "detail": policy_detail,
         },
         "emergencyStop": {
-            "passed": bool(agent and control_state and control_state["executionAllowed"]),
+            "passed": response_controls_clear,
             "detail": (
                 "No emergency stop or incident quarantine is active."
-                if agent and control_state and control_state["executionAllowed"]
+                if response_controls_clear
                 else "A server-owned response control withholds execution authority."
             ),
         },
@@ -20962,6 +21046,7 @@ def _verify_agent(tenant, deployment_id, agent_id):
             "sdkRevision": agent.get("attestation_sdk_revision") if agent else None,
         },
         "managedConfiguration": managed_configuration,
+        "nativeEffectiveControls": native_effective_controls,
         "ownership": ownership,
         "controlState": control_state,
     }
@@ -21789,9 +21874,7 @@ def handler(event, context):
                 native_effective_controls = body.get("nativeEffectiveControls")
                 if native_effective_controls is not None:
                     if item.get("host") != "codex-cli":
-                        raise ValueError(
-                            "native effective controls are supported only for Codex"
-                        )
+                        raise ValueError("native effective controls are supported only for Codex")
                     item["native_effective_controls_report"] = _native_effective_controls(
                         native_effective_controls
                     )
@@ -21848,6 +21931,15 @@ def handler(event, context):
             if not governed_agent:
                 return _response(404, {"error": "agent not found"})
             control_state = _agent_control_state(tenant, governed_agent)
+            # A blocked Codex process must still be able to retrieve the exact
+            # server-owned package that repairs its effective controls. Stops
+            # and quarantine remain authoritative inside the package helper.
+            if method == "GET" and action == ["managed-package"]:
+                _require_current_attestation(tenant, deployment_id, governed_agent)
+                return _response(
+                    200,
+                    _agent_managed_package(tenant, deployment_id, agent_id, governed_agent),
+                )
             if not control_state["executionAllowed"]:
                 return _response(
                     409,
@@ -21856,13 +21948,10 @@ def handler(event, context):
                         "controlState": control_state,
                     },
                 )
+            _require_agent_execution_authority(tenant, governed_agent)
             _require_current_attestation(tenant, deployment_id, governed_agent)
-            if method == "GET" and action == ["managed-package"]:
-                return _response(
-                    200,
-                    _agent_managed_package(tenant, deployment_id, agent_id, governed_agent),
-                )
             _require_current_managed_configuration(tenant, governed_agent)
+            _require_current_native_effective_controls(tenant, governed_agent)
             if method == "POST" and action == ["decisions"]:
                 recorded = _record_agent_decision(tenant, deployment_id, agent_id, _body(event))
                 return _response(409 if recorded.get("conflict") else 202, recorded)

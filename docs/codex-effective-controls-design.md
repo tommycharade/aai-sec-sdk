@@ -5,9 +5,11 @@
 An endpoint can ask the running Codex app-server which configuration and
 administrator requirements it actually resolved, compare a deliberately small
 projection with the centrally compiled bundle, and report a short-lived result.
-The result is evidence about the queried process at one instant. It is not an
-installation claim, a binary provenance claim, or proof that a later action was
-executed under the same settings.
+The control plane binds that result to the current server-owned managed bundle
+and uses it as a Codex execution-authority prerequisite. The observation is
+still evidence about the queried process at one instant: it is not an
+installation claim, hardware attestation, or proof that an arbitrary later
+action ran under unchanged settings.
 
 This closes the gap between “the expected file exists” and “Codex loaded the
 expected restrictions” for controls exposed by Codex's supported app-server
@@ -38,8 +40,10 @@ The probe therefore:
 - correlates exact request identifiers and rejects duplicate, missing,
   malformed, oversized, or error responses;
 - constructs evidence only from an allowlisted projection; and
-- withholds every intended allow when evidence is missing, stale, malformed,
-  incomplete, or inconsistent with the compiled bundle.
+- includes the exact managed `bundleHash` inspected by the probe; and
+- withholds every governed route that can return or consume execution authority
+  when evidence is missing, stale, malformed, incomplete, or inconsistent with
+  the current server-owned bundle.
 
 The app-server process inherits the endpoint environment because it must resolve
 the same user and managed configuration as Codex. That environment is trusted
@@ -53,6 +57,7 @@ The safe result contains only:
 
 - host and version;
 - platform family;
+- the SHA-256 identity of the managed bundle supplied to the probe;
 - effective approval, sandbox, default-permission, and web-search modes;
 - configured MCP server **names only**;
 - SHA-256 digests and counts of loaded `PreToolUse` command hooks;
@@ -84,6 +89,40 @@ or that a server connected. The probe does not call `mcpServerStatus/list`
 because doing so can initialize external servers and cause network/process side
 effects. Live MCP acceptance remains a separate, explicitly authorized test.
 
+## Server-owned execution authority
+
+The endpoint cannot grant itself authority by submitting `state=enforced`.
+Every read derives posture again from strongly read server state:
+
+1. load the current deployment `managedHost` target;
+2. validate the exact closed evidence schema;
+3. compare `bundleHash`, `hostVersion`, and `platform` with that target;
+4. apply the server clock to `verifiedAt` and `expiresAt`; and
+5. accept the endpoint's reconciled state only after the identity and freshness
+   checks pass.
+
+| State | Server interpretation | Execution authority |
+| --- | --- | --- |
+| `enforced` | Exact current target, fresh evidence, and no unresolved probe control | Available if all other gates pass |
+| `missing` | No current target or no valid process evidence | Blocked |
+| `conflict` | Bundle, host version, platform, or process projection differs | Blocked |
+| `stale` | Evidence is future-dated or expired | Blocked |
+| `deployment_required` | The supported API cannot prove every requested control | Blocked |
+
+The heartbeat response exposes a server-owned `controlState` with
+`executionAllowed`, fixed `authorityBlockers`, and a content-free
+`nativeEffectiveControls` projection. The enrolled client treats a missing or
+false `executionAllowed` as a dependency failure. Governed policy and decision
+routes independently repeat the native-control check; the UI is never the
+enforcement boundary.
+
+The authenticated `managed-package` route deliberately remains available when
+native evidence alone is blocking execution. This is the recovery channel for
+installing the exact assigned package. Runtime attestation, rollout selection,
+tenant/agent identity, emergency stop, and incident quarantine still apply, so
+the repair exception cannot obtain another deployment's package or override
+response controls.
+
 ## Claude Code limitation
 
 Claude Code documents interactive `/status`, `/permissions`, `/hooks`, and
@@ -97,6 +136,8 @@ acceptance. It must not scrape terminal output or claim process-loaded evidence.
 Tests use a synthetic app-server executable and synthetic values. They cover a
 matching projection, absent requirements, drift, stale evidence, wrong binaries,
 malformed/oversized/duplicate/error responses, timeouts, secret-bearing fields,
-and cleanup. A live Kratos check is expected to report `missing` until an
+cleanup, bundle substitution, a forged `enforced` state, server-clock expiry,
+governed-route denial, and repair-package availability. A live Kratos check is
+expected to report `missing` until an
 administrator installs the compiled `/etc/codex/requirements.toml`; that is a
 truthful negative acceptance, not a test failure.
