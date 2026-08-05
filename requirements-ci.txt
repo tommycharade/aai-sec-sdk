@@ -10,6 +10,9 @@ mypy==2.1.0
 opentelemetry-api==1.42.1
 pip-audit==2.10.1
 mutmut==3.6.0
+# Mutmut's generated mutant set changes with its AST engine. Pin it explicitly
+# so local evidence and fresh CI runners exercise the same security mutations.
+libcst==1.9.0
 pre-commit==4.6.1
 psutil==7.2.2
 pytest==9.0.3

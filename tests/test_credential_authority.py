@@ -207,8 +207,9 @@ def test_delegate_must_return_a_scoped_capability() -> None:
         InvalidBroker(),  # type: ignore[arg-type]
         authority,
     )
-    with pytest.raises(ValueError, match="returned no scoped capability"):
+    with pytest.raises(ValueError) as error:
         broker.mint(_context(), _tool(), (RESOURCE,), 300)
+    assert str(error.value) == "credential broker returned no scoped capability"
 
 
 def test_scoped_credential_restriction_can_only_remove_authority() -> None:
