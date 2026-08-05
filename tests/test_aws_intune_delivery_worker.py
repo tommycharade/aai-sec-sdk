@@ -660,3 +660,115 @@ def test_lost_continuation_send_preserves_new_revision_as_retryable(
     assert transitions[0]["continuation_revision"] == 1
     assert transitions[1]["status"] == "retryable"
     assert transitions[1]["failure_code"] == "continuation_enqueue_failed"
+
+
+def test_handler_completes_41_targets_only_after_two_pages_and_final_reproduction(
+    worker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real handler cannot skip a page or assign before final reproduction."""
+    monkeypatch.setenv("ENDPOINT_DELIVERY_DISPATCH_ENABLED", "true")
+    monkeypatch.setenv("ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256", "f" * 64)
+    pages = [
+        {"id": "b" * 64, "pageDigest": "c" * 64, "targetCount": 40},
+        {"id": "d" * 64, "pageDigest": "e" * 64, "targetCount": 1},
+    ]
+    instruction = {"pages": pages}
+    command: dict[str, Any] = {
+        "id": "a" * 64,
+        "status": "queued",
+        "attempt_count": 0,
+        "instruction": instruction,
+        "continuation_revision": 0,
+        "continuation_stage": "resolving_pages",
+        "continuation_page": 0,
+        "continuation_completed_targets": 0,
+        "continuation_mutation_count": 0,
+        "target_count": 41,
+    }
+    targets = [{"index": index} for index in range(41)]
+    monkeypatch.setattr(worker, "_command_instruction", lambda _value: instruction)
+    monkeypatch.setattr(worker, "_load_authority", lambda *_args: (command, {}, targets))
+    monkeypatch.setattr(worker, "_credentials", lambda *_args: {})
+    selected_pages: list[list[int]] = []
+
+    def reconcile_page(
+        _configuration: object,
+        _credentials: object,
+        selected: list[dict[str, int]],
+        _reauthorize: object,
+    ) -> dict[str, int]:
+        selected_pages.append([target["index"] for target in selected])
+        return {"pageTargetCount": len(selected)}
+
+    monkeypatch.setattr(worker, "_reconcile_graph_page", reconcile_page)
+    finalizations: list[bool] = []
+
+    def finalize(*_args: object) -> tuple[bool, dict[str, object], int]:
+        finalizations.append(True)
+        return (
+            True,
+            {
+                "groupReferenceSha256": "1" * 64,
+                "appReferenceSha256": "2" * 64,
+                "assignmentReferenceSha256": "3" * 64,
+                "targetCount": 41,
+            },
+            0,
+        )
+
+    monkeypatch.setattr(worker, "_finalize_graph_continuation", finalize)
+
+    def transition(value: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        command.update(value)
+        command.update(
+            {
+                "status": kwargs["status"],
+                "attempt_count": kwargs["attempt"],
+                "failure_code": kwargs.get("reason"),
+                "provider_evidence": kwargs.get("evidence"),
+                **kwargs.get("continuation", {}),
+            }
+        )
+        return dict(command)
+
+    monkeypatch.setattr(worker, "_transition", transition)
+    enqueued: list[int] = []
+    monkeypatch.setattr(
+        worker,
+        "_enqueue_continuation",
+        lambda _tenant, _command_id, revision: enqueued.append(revision),
+    )
+    audits: list[dict[str, Any]] = []
+    monkeypatch.setattr(worker, "_audit_terminal", lambda _tenant, value: audits.append(value))
+
+    def event(revision: int) -> dict[str, list[dict[str, object]]]:
+        return {
+            "Records": [
+                {
+                    "eventSource": "aws:sqs",
+                    "body": json.dumps(
+                        {
+                            "tenantId": "tenant-1",
+                            "commandId": "a" * 64,
+                            "continuationRevision": revision,
+                        }
+                    ),
+                    "attributes": {"ApproximateReceiveCount": "1"},
+                }
+            ]
+        }
+
+    first = worker.handler(event(0), None)
+    second = worker.handler(event(1), None)
+    assert command["status"] == "continuing"
+    assert audits == []
+    third = worker.handler(event(2), None)
+
+    assert first["completedTargets"] == 40
+    assert second["completedTargets"] == 41
+    assert selected_pages == [list(range(40)), [40]]
+    assert enqueued == [1, 2]
+    assert finalizations == [True]
+    assert third == {"status": "assigned_reported", "commandId": "a" * 64, "targetCount": 41}
+    assert command["continuation_stage"] == "complete"
+    assert len(audits) == 1
