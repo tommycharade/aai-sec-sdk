@@ -14201,6 +14201,329 @@ def test_endpoint_detection_schedule_materializes_stale_health(monkeypatch: Any)
         module.handler({"source": "aai.endpoint-detection", "schemaVersion": 1}, None)
 
 
+def test_incident_credential_revocation_is_agent_scoped_live_and_recoverable(
+    monkeypatch: Any,
+) -> None:
+    """Case authority blocks every broker for one bound agent and no sibling."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-incident-credentials"
+    now = 2_175_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    responder = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["incident-responder"],
+        "sub": "responder-credentials",
+    }
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-credentials",
+    }
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    for agent_id in ("agent-a", "agent-b"):
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"deployment-a:{agent_id}")
+            | {
+                "tenant_id": tenant,
+                "id": agent_id,
+                "deployment_id": "deployment-a",
+                "host": "claude-code",
+                "project_root": f"/synthetic/{agent_id}",
+                "status": "connected",
+                "expires_at": now + 300,
+                "lifecycle_state": "active",
+                "lifecycle_revision": 1,
+            }
+        )
+    broker_fields = {
+        "tenant_id": tenant,
+        "name": "Synthetic workload broker",
+        "provider": "azure_workload_identity",
+        "principal": "11111111-2222-4333-8444-555555555555/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "audience": "https://vault.example.test",
+        "allowed_tools": ["read_metadata"],
+        "resource_ids": ["vault:synthetic"],
+        "max_ttl_seconds": 300,
+        "status": "active",
+        "revision": 1,
+        "revocation_epoch": 1,
+        "evidence_revision": 1,
+        "evidence_observed_at": now,
+        "evidence_expires_at": now + 600,
+        "evidence_digest": "b" * 64,
+    }
+    for broker_id in ("broker-a", "broker-b"):
+        table.put_item(
+            Item=module._item_key(tenant, "CREDENTIAL_BROKER", broker_id)
+            | {**broker_fields, "id": broker_id, "name": f"Broker {broker_id}"}
+        )
+    binding = {
+        "status": "bound",
+        "agentKey": "deployment-a:agent-a",
+        "deploymentId": "deployment-a",
+        "agentId": "agent-a",
+        "agentLifecycleRevision": 1,
+        "bindingDigest": "a" * 64,
+        "groupIds": ["group-a"],
+        "policyId": "policy-a",
+        "policyVersion": 1,
+    }
+    case_id = "case-credential-a"
+    alert_id = "alert-credential-a"
+    table.put_item(
+        Item=module._item_key(tenant, "ALERT", alert_id)
+        | {
+            "id": alert_id,
+            "source": "endpoint_evidence",
+            "reasonCode": "process_inactive",
+            "status": "acknowledged",
+            "revision": 1,
+            "severity": "high",
+            "deviceId": "device-a",
+            "message": "Synthetic runtime integrity alert.",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "CASE", case_id)
+        | {
+            "tenant_id": tenant,
+            "id": case_id,
+            "alertId": alert_id,
+            "title": "Synthetic credential incident",
+            "severity": "high",
+            "reasonCode": "process_inactive",
+            "deviceId": "device-a",
+            "alertSource": "endpoint_evidence",
+            "ownerId": "responder-credentials",
+            "status": "open",
+            "revision": 1,
+            "createdAt": now,
+            "updatedAt": now,
+            "binding": binding,
+            "containment": None,
+        }
+    )
+
+    def current_binding(_tenant: str, case: dict[str, Any]) -> dict[str, Any]:
+        assert _tenant == tenant
+        return dict(case["binding"])
+
+    monkeypatch.setattr(module, "_case_current_binding", current_binding)
+    revoked_response = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case_id}/credentials/revoke",
+            "POST",
+            body={
+                "expectedCaseRevision": 1,
+                "expectedBindingDigest": binding["bindingDigest"],
+                "reason": "Revoke brokered authority while the endpoint is investigated.",
+            },
+            claims=responder,
+        ),
+    )
+    assert revoked_response["statusCode"] == 200
+    revoked_case = json.loads(revoked_response["body"])
+    assert revoked_case["status"] == "investigating"
+    assert revoked_case["credentialRevocation"] == {
+        "active": True,
+        "agentKey": "deployment-a:agent-a",
+        "revision": 1,
+        "brokerCount": 2,
+        "brokerIds": ["broker-a", "broker-b"],
+        "activatedAt": now,
+        "activatedBy": "responder-credentials",
+    }
+    control = table.items[(f"TENANT#{tenant}", "CREDENTIAL_CONTROL#deployment-a:agent-a")]
+    assert control["active"] is True
+    assert {item["brokerId"] for item in control["brokerSnapshots"]} == {
+        "broker-a",
+        "broker-b",
+    }
+    serialized_case = json.dumps(revoked_case).lower()
+    assert "secret" not in serialized_case
+    assert "token" not in serialized_case
+    assert "synthetic-provider-token" not in serialized_case
+
+    authority_request = {
+        "schemaVersion": 1,
+        "deploymentId": "deployment-a",
+        "agentId": "agent-a",
+        "principalId": "user:alice",
+        "taskId": "task:synthetic",
+        "toolName": "read_metadata",
+        "resourceIds": ["vault:synthetic"],
+        "credentialId": None,
+    }
+    human_check = _invoke(
+        module,
+        _event(
+            "/api/enterprise/credential-brokers/broker-a/authority/check",
+            "POST",
+            body=authority_request,
+            claims=platform,
+        ),
+    )
+    assert human_check["statusCode"] == 403
+    service_identity = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/identity/service-identities",
+                "POST",
+                body={
+                    "serviceIdentityId": "incident-broker-runtime",
+                    "name": "Incident-aware broker runtime",
+                    "description": "Checks exact agent credential authority before provider use.",
+                    "purpose": (
+                        "Withhold brokered authority during a server-owned incident response."
+                    ),
+                    "capabilities": ["credential_broker_runtime"],
+                    "expiresInDays": 7,
+                },
+                claims=platform,
+            ),
+        )["body"]
+    )
+    machine_token = service_identity["credential"]["accessToken"]
+    machine_check = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/credential-brokers/broker-a/authority/check",
+            "POST",
+            body=authority_request,
+            token=machine_token,
+        ),
+    )
+    assert machine_check["statusCode"] == 200
+    assert json.loads(machine_check["body"])["reasonCode"] == "incident_case_revoked"
+    machine_mutation = _invoke(
+        module,
+        _event(
+            f"/machine/v1/enterprise/cases/{case_id}/credentials/restore",
+            "POST",
+            body={},
+            token=machine_token,
+        ),
+    )
+    assert machine_mutation["statusCode"] == 403
+    exact_denial = module._credential_authority_check(
+        tenant, "broker-a", authority_request, "service:broker-runtime"
+    )
+    assert exact_denial["executionAllowed"] is False
+    assert exact_denial["state"] == "revoked"
+    assert exact_denial["reasonCode"] == "incident_case_revoked"
+    assert exact_denial["caseId"] == case_id
+    sibling_allow = module._credential_authority_check(
+        tenant,
+        "broker-a",
+        {**authority_request, "agentId": "agent-b"},
+        "service:broker-runtime",
+    )
+    assert sibling_allow["executionAllowed"] is True
+    assert sibling_allow["reasonCode"] == "no_active_incident_control"
+    wrong_scope = module._credential_authority_check(
+        tenant,
+        "broker-a",
+        {**authority_request, "agentId": "agent-b", "resourceIds": ["vault:other"]},
+        "service:broker-runtime",
+    )
+    assert wrong_scope["executionAllowed"] is False
+    assert wrong_scope["reasonCode"] == "broker_scope_mismatch"
+
+    # A broker registered during the incident is also denied; the server-owned
+    # agent control cannot be bypassed by selecting a broker omitted from the
+    # original evidence snapshot.
+    table.put_item(
+        Item=module._item_key(tenant, "CREDENTIAL_BROKER", "broker-new")
+        | {**broker_fields, "id": "broker-new", "name": "Broker new"}
+    )
+    assert (
+        module._credential_authority_check(
+            tenant, "broker-new", authority_request, "service:broker-runtime"
+        )["reasonCode"]
+        == "incident_case_revoked"
+    )
+
+    blocked_transition = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case_id}/resolve",
+            "POST",
+            body={
+                "expectedCaseRevision": 2,
+                "reason": "Do not resolve while credential authority remains revoked.",
+            },
+            claims=responder,
+        ),
+    )
+    assert blocked_transition["statusCode"] == 409
+    assert "credential authority" in json.loads(blocked_transition["body"])["error"]
+    monkeypatch.setattr(
+        module,
+        "_verify_agent",
+        lambda *_args: {
+            "verified": True,
+            "checks": {
+                "identity": {"passed": True},
+                "heartbeat": {"passed": True},
+                "emergencyStop": {"passed": True},
+            },
+            "controlState": {"activeStopScopes": []},
+        },
+    )
+    table.items[(f"TENANT#{tenant}", f"ALERT#{alert_id}")]["status"] = "resolved"
+    restored_response = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case_id}/credentials/restore",
+            "POST",
+            body={
+                "expectedCaseRevision": 2,
+                "expectedCredentialControlRevision": 1,
+                "reason": "Fresh server evidence proves the endpoint is ready for broker access.",
+            },
+            claims=responder,
+        ),
+    )
+    assert restored_response["statusCode"] == 200, restored_response
+    restored_case = json.loads(restored_response["body"])
+    assert restored_case["credentialRevocation"]["active"] is False
+    assert restored_case["credentialRevocation"]["revision"] == 2
+    assert (
+        module._credential_authority_check(
+            tenant, "broker-a", authority_request, "service:broker-runtime"
+        )["executionAllowed"]
+        is True
+    )
+    assert [event["eventType"] for event in restored_case["timeline"]] == [
+        "agent_credentials_revoked",
+        "agent_credential_authority_restored",
+    ]
+
+    stale_restore = _invoke(
+        module,
+        _event(
+            f"/api/enterprise/cases/{case_id}/credentials/restore",
+            "POST",
+            body={
+                "expectedCaseRevision": 2,
+                "expectedCredentialControlRevision": 1,
+                "reason": "A replay cannot restore or alter current credential authority.",
+            },
+            claims=responder,
+        ),
+    )
+    assert stale_restore["statusCode"] == 409
+
+    other_tenant = "tenant-credential-other"
+    table.put_item(Item=module._item_key(other_tenant, "TENANT", "root") | {"id": other_tenant})
+    with pytest.raises(LookupError, match="broker not found"):
+        module._credential_authority_check(
+            other_tenant, "broker-a", authority_request, "service:other"
+        )
+
+
 def test_endpoint_alert_delivery_failure_remains_pending_and_retries(monkeypatch: Any) -> None:
     """A provider outage cannot erase an alert or falsely mark it delivered."""
     module, table = _load_handler(monkeypatch)

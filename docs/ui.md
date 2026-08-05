@@ -450,3 +450,17 @@ operator must acknowledge secure storage before dismissing them. Later reads
 never retrieve the bearer. Read-only operators receive posture without
 authority-changing controls. See
 [Scoped service identities and machine API](service-identities-design.md).
+
+## Incident credential response
+
+**Incidents → Cases** presents brokered cloud authority as a separate control
+from SDK quarantine and session revocation. The case card shows whether
+authority is live, the exact server-bound agent, an evidentiary broker snapshot
+and the effect on new mints and active callback-checked credentials. Operators
+never choose an agent or handle a token.
+
+**Revoke cloud credentials** requires an accountable rationale and warns that a
+provider operation already in flight may finish. **Restore cloud credentials**
+requests server-owned recovery checks and remains unavailable during
+quarantine. Active credential control disables case resolution. The browser
+cannot override binding, verification, stop-scope or source-alert recovery.

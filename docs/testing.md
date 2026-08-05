@@ -195,6 +195,15 @@ revocation, endpoint reopening and stable behavior grouping across evaluation
 windows. See [Governed alert suppression and
 deduplication](alert-suppression-design.md).
 
+Incident credential-authority contracts prove exact case-bound agent scope,
+current and future broker denial, unaffected sibling agents, cross-tenant
+isolation, human/machine capability separation, stale-revision denial,
+resolution blocking and recovery only after server verification and source
+alert recovery. SDK unit tests prove fail-closed checks before mint, after mint
+and before each credential callback, including checker outage and malformed
+responses. These remain synthetic software contracts; production acceptance
+requires real provider roles and measured revocation behavior.
+
 `scripts/test_aws_entra_scim.py` is the live Microsoft Entra provisioning
 acceptance command. It discovers Entra and SCIM status from the selected
 CloudFormation stack, resolves the dedicated bearer directly from Secrets

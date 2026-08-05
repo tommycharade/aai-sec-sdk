@@ -502,9 +502,19 @@ _CREDENTIAL_BROKER_EVIDENCE_FIELDS = frozenset(
         "evidenceDigest",
     }
 )
-_ISOLATION_PROVIDERS = frozenset(
-    {"docker_engine", "firecracker", "wasmtime", "endpoint_sandbox"}
+_CREDENTIAL_AUTHORITY_CHECK_FIELDS = frozenset(
+    {
+        "schemaVersion",
+        "deploymentId",
+        "agentId",
+        "principalId",
+        "taskId",
+        "toolName",
+        "resourceIds",
+        "credentialId",
+    }
 )
+_ISOLATION_PROVIDERS = frozenset({"docker_engine", "firecracker", "wasmtime", "endpoint_sandbox"})
 _ISOLATION_BOUNDARIES = frozenset({"container", "microvm", "wasm", "endpoint_sandbox"})
 _ISOLATION_PROVIDER_BOUNDARY = {
     "docker_engine": "container",
@@ -2877,6 +2887,8 @@ def _operator_roles(event):
 def _required_mutation_capability(path):
     """Classify a mutating route into one least-privilege capability."""
     normalized = path.removeprefix("/api")
+    if re.fullmatch(r"/enterprise/credential-brokers/[^/]+/authority/check", normalized):
+        return "credential_broker_runtime"
     if re.fullmatch(r"/enterprise/credential-brokers/[^/]+/evidence", normalized):
         return "credential_broker_runtime"
     if normalized.startswith("/enterprise/credential-brokers"):
@@ -3610,6 +3622,11 @@ def _machine_route_capability(method, path):
     service credential.
     """
     normalized = path.removeprefix("/api")
+    if method == "POST" and re.fullmatch(
+        r"/enterprise/credential-brokers/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/authority/check",
+        normalized,
+    ):
+        return "credential_broker_runtime"
     if (
         method in {"GET", "POST"}
         and re.fullmatch(
@@ -5109,6 +5126,117 @@ def _revoke_credential_broker(tenant, broker_id, body, actor):
     return _credential_broker_view(revoked, now=now)
 
 
+def _credential_control_record(tenant, agent_key):
+    """Load the current case-owned credential control for one exact agent."""
+    return TABLE.get_item(
+        Key=_item_key(tenant, "CREDENTIAL_CONTROL", agent_key), ConsistentRead=True
+    ).get("Item")
+
+
+def _credential_authority_request(body):
+    """Normalize one machine-supplied host binding without accepting authority."""
+    if not isinstance(body, dict) or set(body) != _CREDENTIAL_AUTHORITY_CHECK_FIELDS:
+        raise ValueError("credential authority check fields are invalid")
+    if body.get("schemaVersion") != 1:
+        raise ValueError("credential authority check schema version is unsupported")
+    credential_id = body.get("credentialId")
+    if credential_id is not None:
+        credential_id = _bounded_text(credential_id, "credentialId", 512)
+    request = {
+        "schemaVersion": 1,
+        "deploymentId": _bounded_identifier(body.get("deploymentId"), "deploymentId"),
+        "agentId": _bounded_identifier(body.get("agentId"), "agentId"),
+        "principalId": _bounded_text(body.get("principalId"), "principalId", 256),
+        "taskId": _bounded_text(body.get("taskId"), "taskId", 256),
+        "toolName": _bounded_identifier(body.get("toolName"), "toolName"),
+        "resourceIds": _credential_broker_values(
+            body.get("resourceIds"), "resourceIds", _CREDENTIAL_BROKER_RESOURCE_LIMIT
+        ),
+        "credentialId": credential_id,
+    }
+    # The hash is safe correlation evidence. It binds opaque identifiers but
+    # never provider material, tool arguments, prompts or result content.
+    return request, _configuration_hash(request)
+
+
+def _credential_authority_check(tenant, broker_id, body, actor):
+    """Check live broker and incident authority for one exact enrolled agent.
+
+    The caller is an independently authenticated deployment adapter with only
+    ``credential_broker_runtime`` authority. Its host facts are observations,
+    not authority: the server re-resolves the agent, broker scope and current
+    case-owned control before returning an allow decision.
+    """
+    identifier = _bounded_identifier(broker_id, "brokerId")
+    request, request_hash = _credential_authority_request(body)
+    broker = TABLE.get_item(
+        Key=_item_key(tenant, "CREDENTIAL_BROKER", identifier), ConsistentRead=True
+    ).get("Item")
+    if not broker:
+        raise LookupError("credential broker not found")
+    agent_key = f"{request['deploymentId']}:{request['agentId']}"
+    agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
+        "Item"
+    )
+    broker_view = _credential_broker_view(broker)
+    control = _credential_control_record(tenant, agent_key)
+    reason_code = "no_active_incident_control"
+    state = "active"
+    case_id = None
+    control_revision = int(control.get("revision", 0)) if control else 0
+    scope_matches = bool(
+        request["toolName"] in broker.get("allowed_tools", [])
+        and set(request["resourceIds"]).issubset(set(broker.get("resource_ids", [])))
+    )
+    if (
+        not agent
+        or _agent_lifecycle_state(agent) != "active"
+        or agent.get("deployment_id") != request["deploymentId"]
+        or agent.get("id") != request["agentId"]
+    ):
+        state = "unavailable"
+        reason_code = "agent_authority_unavailable"
+    elif control and control.get("active") is True:
+        state = "revoked"
+        reason_code = "incident_case_revoked"
+        case_id = control.get("caseId")
+    elif broker_view["executionAllowed"] is not True:
+        state = "unavailable"
+        reason_code = "broker_authority_unavailable"
+    elif not scope_matches:
+        state = "unavailable"
+        reason_code = "broker_scope_mismatch"
+    result = {
+        "schemaVersion": 1,
+        "brokerId": identifier,
+        "executionAllowed": state == "active",
+        "state": state,
+        "reasonCode": reason_code,
+        "controlRevision": control_revision,
+        "caseId": case_id,
+        "brokerRevision": broker_view["revision"],
+        "revocationEpoch": broker_view["revocationEpoch"],
+        "configurationHash": broker_view["configurationHash"],
+        "requestHash": request_hash,
+        "checkedAt": int(time.time()),
+    }
+    if state != "active":
+        _audit(
+            tenant,
+            "credential_authority_denied",
+            actor,
+            {
+                "broker_id": identifier,
+                "agent_key": agent_key,
+                "reason_code": reason_code,
+                "control_revision": control_revision,
+                "case_id": case_id,
+                "request_hash": request_hash,
+            },
+        )
+    return result
+
+
 def _isolation_destinations(value, network_mode):
     """Normalize exact network destinations without accepting wildcard egress."""
     if not isinstance(value, list) or len(value) > _ISOLATION_DESTINATION_LIMIT:
@@ -5188,9 +5316,7 @@ def _isolation_configuration(body):
     if _ISOLATION_PROVIDER_BOUNDARY.get(provider) != boundary:
         raise ValueError("isolation provider does not implement the selected boundary")
     workload_ref = body.get("workloadRef")
-    if not isinstance(workload_ref, str) or not re.fullmatch(
-        r"sha256:[0-9a-f]{64}", workload_ref
-    ):
+    if not isinstance(workload_ref, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", workload_ref):
         raise ValueError("isolation workload must use an immutable sha256 reference")
     return {
         "provider": provider,
@@ -16742,6 +16868,7 @@ def _case_view(tenant, case, *, detailed=False):
         "bindingCurrent": binding_current,
         "currentBindingStatus": current_binding.get("status"),
         "containment": case.get("containment"),
+        "credentialRevocation": case.get("credentialRevocation"),
         "sessionRevokedAt": case.get("sessionRevokedAt"),
         "resolvedAt": case.get("resolvedAt"),
         "closedAt": case.get("closedAt"),
@@ -19736,6 +19863,284 @@ def _revoke_case_sessions(tenant, case_id, body, actor):
     return _case_view(tenant, updated_case, detailed=True)
 
 
+def _case_credential_broker_snapshots(tenant):
+    """Snapshot current secret-free broker authority for incident evidence."""
+    snapshots = []
+    for broker in _list(tenant, "CREDENTIAL_BROKER", consistent_read=True):
+        if broker.get("status") != "active":
+            continue
+        snapshots.append(
+            {
+                "brokerId": broker.get("id", ""),
+                "provider": broker.get("provider", ""),
+                "revision": int(broker.get("revision", 0)),
+                "revocationEpoch": int(broker.get("revocation_epoch", 0)),
+                "configurationHash": _credential_broker_configuration_hash(broker),
+            }
+        )
+    snapshots.sort(key=lambda item: item["brokerId"])
+    if len(snapshots) > _CREDENTIAL_BROKER_LIMIT:
+        raise RuntimeError("credential broker inventory exceeds its safe bound")
+    return snapshots
+
+
+def _revoke_case_credentials(tenant, case_id, body, actor):
+    """Block current and future brokered credentials for the exact bound agent."""
+    if not isinstance(body, dict) or set(body) != {
+        "expectedCaseRevision",
+        "expectedBindingDigest",
+        "reason",
+    }:
+        raise ValueError("case credential revocation request has an invalid schema")
+    expected = _discovery_integer(
+        body.get("expectedCaseRevision"), "expectedCaseRevision", minimum=1
+    )
+    expected_binding = body.get("expectedBindingDigest")
+    if not isinstance(expected_binding, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_binding):
+        raise ValueError("expectedBindingDigest must be SHA-256")
+    reason = _case_reason(body.get("reason"))
+    case = _case_record(tenant, case_id)
+    if int(case.get("revision", 0)) != expected or case.get("status") in {
+        "resolved",
+        "closed",
+    }:
+        raise PolicyConflict("incident case is not active")
+    binding = _case_current_binding(tenant, case)
+    stored = case.get("binding", {})
+    if (
+        binding.get("status") != "bound"
+        or stored.get("status") != "bound"
+        or not secrets.compare_digest(str(binding.get("bindingDigest", "")), expected_binding)
+        or not secrets.compare_digest(str(stored.get("bindingDigest", "")), expected_binding)
+    ):
+        raise PolicyConflict("security-alert-to-agent binding is unavailable or changed")
+    agent_key = binding["agentKey"]
+    agent = TABLE.get_item(Key=_item_key(tenant, "AGENT", agent_key), ConsistentRead=True).get(
+        "Item"
+    )
+    if not agent or _agent_lifecycle_state(agent) != "active":
+        raise PolicyConflict("bound agent credential authority is unavailable")
+    key = _item_key(tenant, "CREDENTIAL_CONTROL", agent_key)
+    existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+    if existing and existing.get("active") is True:
+        raise PolicyConflict("bound agent already has active credential revocation")
+    now = int(time.time())
+    revision = int(existing.get("revision", 0)) + 1 if existing else 1
+    brokers = _case_credential_broker_snapshots(tenant)
+    control = {
+        **key,
+        "tenant_id": tenant,
+        "id": agent_key,
+        "agentKey": agent_key,
+        "deploymentId": binding["deploymentId"],
+        "agentId": binding["agentId"],
+        "caseId": case["id"],
+        "active": True,
+        "revision": revision,
+        "bindingDigest": expected_binding,
+        "brokerSnapshots": brokers,
+        "activatedAt": now,
+        "activatedBy": actor,
+        "reason": reason,
+    }
+    summary = {
+        "active": True,
+        "agentKey": agent_key,
+        "revision": revision,
+        "brokerCount": len(brokers),
+        "brokerIds": [item["brokerId"] for item in brokers],
+        "activatedAt": now,
+        "activatedBy": actor,
+    }
+    updated_case = {
+        **case,
+        "status": "contained" if case.get("status") == "contained" else "investigating",
+        "revision": expected + 1,
+        "updatedAt": now,
+        "credentialRevocation": summary,
+    }
+    event = _case_timeline_record(
+        tenant,
+        case["id"],
+        "agent_credentials_revoked",
+        actor,
+        {
+            "agentKey": agent_key,
+            "reason": reason,
+            "bindingDigest": expected_binding,
+            "brokerCount": len(brokers),
+            "brokerIds": [item["brokerId"] for item in brokers],
+            "controlRevision": revision,
+        },
+        now=now,
+        sequence=expected + 1,
+    )
+    control_condition = (
+        "revision = :revision AND active = :false" if existing else "attribute_not_exists(pk)"
+    )
+    control_values = (
+        {":revision": int(existing.get("revision", 0)), ":false": False} if existing else None
+    )
+    _transact_incident_response(
+        [
+            _transaction_condition(
+                _item_key(tenant, "AGENT", agent_key),
+                condition="lifecycle_state = :active AND lifecycle_revision = :revision",
+                values={":active": "active", ":revision": int(binding["agentLifecycleRevision"])},
+            ),
+            _transaction_put(
+                updated_case, condition="revision = :revision", values={":revision": expected}
+            ),
+            _transaction_put(control, condition=control_condition, values=control_values),
+            _transaction_put(event, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _audit(
+        tenant,
+        "incident_agent_credentials_revoked",
+        actor,
+        {
+            "case_id": case["id"],
+            "agent_key": agent_key,
+            "broker_count": len(brokers),
+            "control_revision": revision,
+        },
+    )
+    return _case_view(tenant, updated_case, detailed=True)
+
+
+def _case_credential_recovery_ready(tenant, case, control):
+    """Require current binding, healthy authority and resolved source evidence."""
+    if (case.get("containment") or {}).get("active") is True:
+        raise PolicyConflict("quarantine must be released before credential authority")
+    binding = _case_current_binding(tenant, case)
+    if binding.get("status") != "bound" or not secrets.compare_digest(
+        str(binding.get("bindingDigest", "")), str(control.get("bindingDigest", ""))
+    ):
+        raise PolicyConflict("security-alert-to-agent binding is not current")
+    verification = _verify_agent(tenant, binding["deploymentId"], binding["agentId"])
+    if not all(check.get("passed") is True for check in verification.get("checks", {}).values()):
+        raise PolicyConflict("bound agent has not passed credential recovery verification")
+    if (verification.get("controlState") or {}).get("activeStopScopes"):
+        raise PolicyConflict("response authority remains active for the bound agent")
+    alert = TABLE.get_item(
+        Key=_item_key(tenant, "ALERT", case.get("alertId", "")), ConsistentRead=True
+    ).get("Item")
+    if not alert:
+        raise PolicyConflict("source alert is unavailable")
+    if alert.get("reasonCode") in _ENDPOINT_EVENT_REASONS | _BEHAVIOR_EVENT_REASONS:
+        ready = alert.get("status") in {"acknowledged", "resolved"}
+    else:
+        ready = alert.get("status") == "resolved"
+    if not ready:
+        raise PolicyConflict("source alert is not ready for credential recovery")
+    return binding
+
+
+def _restore_case_credentials(tenant, case_id, body, actor):
+    """Restore broker checks only after exact server-derived recovery evidence."""
+    if not isinstance(body, dict) or set(body) != {
+        "expectedCaseRevision",
+        "expectedCredentialControlRevision",
+        "reason",
+    }:
+        raise ValueError("case credential restoration request has an invalid schema")
+    expected_case = _discovery_integer(
+        body.get("expectedCaseRevision"), "expectedCaseRevision", minimum=1
+    )
+    expected_control = _discovery_integer(
+        body.get("expectedCredentialControlRevision"),
+        "expectedCredentialControlRevision",
+        minimum=1,
+    )
+    reason = _case_reason(body.get("reason"))
+    case = _case_record(tenant, case_id)
+    summary = case.get("credentialRevocation") or {}
+    if (
+        int(case.get("revision", 0)) != expected_case
+        or case.get("status") in {"resolved", "closed"}
+        or summary.get("active") is not True
+        or int(summary.get("revision", 0)) != expected_control
+    ):
+        raise PolicyConflict("incident credential authority is not active")
+    agent_key = summary.get("agentKey")
+    control = _credential_control_record(tenant, agent_key or "")
+    if (
+        not control
+        or control.get("caseId") != case["id"]
+        or control.get("active") is not True
+        or int(control.get("revision", 0)) != expected_control
+    ):
+        raise PolicyConflict("incident credential control revision changed")
+    _case_credential_recovery_ready(tenant, case, control)
+    now = int(time.time())
+    restored_control = {
+        **control,
+        "active": False,
+        "revision": expected_control + 1,
+        "restoredAt": now,
+        "restoredBy": actor,
+        "restorationReason": reason,
+    }
+    restored_summary = {
+        **summary,
+        "active": False,
+        "revision": expected_control + 1,
+        "restoredAt": now,
+        "restoredBy": actor,
+    }
+    updated_case = {
+        **case,
+        "status": "investigating",
+        "revision": expected_case + 1,
+        "updatedAt": now,
+        "credentialRevocation": restored_summary,
+    }
+    event = _case_timeline_record(
+        tenant,
+        case["id"],
+        "agent_credential_authority_restored",
+        actor,
+        {
+            "agentKey": agent_key,
+            "reason": reason,
+            "controlRevision": expected_control + 1,
+        },
+        now=now,
+        sequence=expected_case + 1,
+    )
+    _transact_incident_response(
+        [
+            _transaction_put(
+                updated_case,
+                condition="revision = :revision",
+                values={":revision": expected_case},
+            ),
+            _transaction_put(
+                restored_control,
+                condition="revision = :revision AND active = :true AND caseId = :case_id",
+                values={
+                    ":revision": expected_control,
+                    ":true": True,
+                    ":case_id": case["id"],
+                },
+            ),
+            _transaction_put(event, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _audit(
+        tenant,
+        "incident_agent_credential_authority_restored",
+        actor,
+        {
+            "case_id": case["id"],
+            "agent_key": agent_key,
+            "control_revision": expected_control + 1,
+        },
+    )
+    return _case_view(tenant, updated_case, detailed=True)
+
+
 def _transition_case(tenant, case_id, body, actor, target):
     """Resolve or close a case while preserving response-state safeguards."""
     if target not in {"resolved", "closed"}:
@@ -19749,8 +20154,10 @@ def _transition_case(tenant, case_id, body, actor, target):
     case = _case_record(tenant, case_id)
     if int(case.get("revision", 0)) != expected:
         raise PolicyConflict("incident case revision changed")
-    if case.get("containment", {}).get("active") is True:
+    if (case.get("containment") or {}).get("active") is True:
         raise PolicyConflict("active containment must be released before case transition")
+    if (case.get("credentialRevocation") or {}).get("active") is True:
+        raise PolicyConflict("credential authority must be restored before case transition")
     if target == "resolved" and case.get("status") not in {"open", "investigating"}:
         raise PolicyConflict("incident case cannot be resolved from its current state")
     if target == "closed" and case.get("status") != "resolved":
@@ -23583,6 +23990,20 @@ def handler(event, context):
                 return _response(200, _revoke_case_sessions(tenant, parts[1], _body(event), actor))
             if (
                 method == "POST"
+                and len(parts) == 4
+                and parts[0] == "cases"
+                and parts[2] == "credentials"
+            ):
+                if parts[3] == "revoke":
+                    return _response(
+                        200, _revoke_case_credentials(tenant, parts[1], _body(event), actor)
+                    )
+                if parts[3] == "restore":
+                    return _response(
+                        200, _restore_case_credentials(tenant, parts[1], _body(event), actor)
+                    )
+            if (
+                method == "POST"
                 and len(parts) == 3
                 and parts[0] == "alerts"
                 and parts[2] == "acknowledge"
@@ -23786,6 +24207,21 @@ def handler(event, context):
                             "configurationHash": view["configurationHash"],
                         },
                     )
+                if method == "POST" and len(parts) == 4 and parts[2:] == ["authority", "check"]:
+                    if "credential_broker_runtime" not in machine_capabilities:
+                        return _response(
+                            403,
+                            {"error": "broker authority check requires machine runtime authority"},
+                        )
+                    return _response(
+                        200,
+                        _credential_authority_check(
+                            tenant,
+                            parts[1],
+                            _body(event),
+                            actor,
+                        ),
+                    )
                 if method == "POST" and len(parts) == 3 and parts[2] == "revoke":
                     if machine_capabilities:
                         return _response(
@@ -23799,9 +24235,7 @@ def handler(event, context):
                 machine_capabilities = _service_capabilities(event)
                 if method == "GET" and len(parts) == 1:
                     if not _operator_roles(event):
-                        return _response(
-                            403, {"error": "isolation posture requires a tenant role"}
-                        )
+                        return _response(403, {"error": "isolation posture requires a tenant role"})
                     profiles = [
                         _isolation_profile_view(item)
                         for item in _list(tenant, "ISOLATION_PROFILE", consistent_read=True)

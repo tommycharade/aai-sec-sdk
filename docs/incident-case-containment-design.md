@@ -84,6 +84,19 @@ Session revocation is deliberately not implicit in investigative quarantine:
 the evidence channel stays available unless the responder explicitly chooses
 the stronger action.
 
+## Brokered credential revocation
+
+A responder may also revoke brokered cloud authority for the exact case-bound
+agent. The browser supplies neither an agent ID nor broker list. The server
+creates a revisioned case-owned control, and the machine-only credential
+authority route denies new mints and callback-checked use across every current
+and future registered broker for that agent. Sibling agents are unaffected.
+
+Restoration requires the same current binding, all normal verification checks,
+no active quarantine or independent stop and a recovered source alert. An
+active credential control blocks case resolution and closure. See
+[Incident-driven credential revocation](incident-credential-revocation-design.md).
+
 ## Release safeguards
 
 Quarantine release requires all of the following live server evidence:
@@ -97,8 +110,8 @@ Quarantine release requires all of the following live server evidence:
   acknowledged by incident response.
 
 Release does not close the case. Resolution and closure are explicit, audited
-transitions, and closure is denied while any case-owned containment remains
-active.
+transitions, and both are denied while any case-owned containment or credential
+control remains active.
 
 ## API contract
 
@@ -111,6 +124,8 @@ GET  /api/enterprise/cases/{caseId}
 POST /api/enterprise/cases/{caseId}/contain
 POST /api/enterprise/cases/{caseId}/release
 POST /api/enterprise/cases/{caseId}/sessions/revoke
+POST /api/enterprise/cases/{caseId}/credentials/revoke
+POST /api/enterprise/cases/{caseId}/credentials/restore
 POST /api/enterprise/cases/{caseId}/resolve
 POST /api/enterprise/cases/{caseId}/close
 ```

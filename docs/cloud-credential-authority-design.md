@@ -80,6 +80,13 @@ The hosted control plane separates human configuration from machine evidence:
 5. A human revocation atomically advances revision and revocation epoch. Old
    evidence can no longer authorize new grants.
 
+An incident case can additionally create an exact-agent credential control.
+`RevocationAwareCredentialBroker` checks that authority before and after mint
+and before every credential callback. It applies across all current and future
+registered brokers for that agent without changing policy or exposing a token.
+Recovery is server-gated; see [Incident-driven credential
+revocation](incident-credential-revocation-design.md).
+
 Human browser authority cannot submit provider evidence. Machine authority
 cannot register, widen, or revoke a broker. Evidence older than five minutes,
 or with a validity period beyond fifteen minutes, fails closed.

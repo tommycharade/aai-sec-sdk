@@ -164,3 +164,10 @@ incident begins. Fleet, deployment, group, and agent stop scopes remain
 independent: clearing the fleet scope cannot silently clear a narrower stop.
 The operator dashboard derives its critical posture from the same durable
 state rather than from browser state or a cached presentation flag.
+
+Incident credential response is a second independent authority record. A case
+re-derives one exact current agent binding, then creates a tenant-scoped
+credential control. Credential adapters use a machine-only live check before
+mint, after mint and before use; the browser and agent cannot set or clear the
+result. This control composes with provider scope, broker revision, quarantine
+and emergency stops, and clearing it does not clear any other scope.

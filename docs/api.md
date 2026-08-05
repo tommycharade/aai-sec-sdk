@@ -829,6 +829,17 @@ behavior and independently derived integrity detections:
 - `POST /enterprise/cases/{caseId}/sessions/revoke` increments server-owned
   session authority. Existing sessions and unused bootstrap material then fail
   on their next live-authority check.
+- `POST /enterprise/cases/{caseId}/credentials/revoke` requires the current
+  case revision and binding digest. It creates an exact-agent control that
+  blocks all current and future registered credential brokers for that agent.
+- `POST /enterprise/cases/{caseId}/credentials/restore` requires exact case and
+  credential-control revisions. It restores brokered authority only after the
+  current binding, agent verification, source-alert recovery and absence of
+  quarantine or independent stop scopes are re-established.
+- `POST /machine/v1/enterprise/credential-brokers/{brokerId}/authority/check`
+  is restricted to `credential_broker_runtime`. Human sessions cannot call it,
+  and machine identities cannot create or restore incident controls. Runtime
+  adapters call it before mint, after mint and before credential use.
 - `POST /enterprise/cases/{caseId}/release` requires exact case and
   containment revisions. Release is denied unless binding remains current,
   non-response verification checks pass, no independent stop scope is active
@@ -836,12 +847,14 @@ behavior and independently derived integrity detections:
   endpoint evidence; behavior and integrity cases require the alert to be
   acknowledged or resolved.
 - `resolve` and `close` preserve the case timeline and cannot bypass active
-  containment.
+  containment or credential control.
 
 All mutations require `incident_response`, a 20–500 character redaction-safe
 rationale and optimistic concurrency. There is intentionally no `agentId` in a
 containment request. See
 [Incident case and containment design](incident-case-containment-design.md).
+Credential response and recovery are specified in [Incident-driven credential
+revocation](incident-credential-revocation-design.md).
 Artifact schema, refusal bounds and offline verification are specified in
 [Audit-ready incident case export](incident-case-export-design.md).
 

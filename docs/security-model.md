@@ -1384,3 +1384,14 @@ quarantine update binds the exact observed index and revision. Conditional
 conflicts preserve concurrent repair, while DynamoDB throttling and service
 failures fail the shard and leave valid records indexed; infrastructure
 failure is never treated as evidence of malformed tenant state.
+
+## Incident credential authority
+
+Brokered credentials remain subordinate to a case-owned exact-agent control.
+The incident responder identifies a case, not an agent or broker list; the
+server re-derives the current binding and enforces the control across current
+and future brokers. Only a `credential_broker_runtime` machine identity may
+read the decision, while only authenticated incident response may create or
+restore it. Missing, malformed, stale, cross-tenant or unavailable checks deny
+mint and use. Credential values never enter case, audit or UI state. See
+[Incident-driven credential revocation](incident-credential-revocation-design.md).
