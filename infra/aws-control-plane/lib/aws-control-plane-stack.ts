@@ -469,6 +469,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
       // these keys. Provider credentials never enter this index.
       projectionType: dynamodb.ProjectionType.ALL,
     });
+    table.addGlobalSecondaryIndex({
+      indexName: "EndpointDeliveryOutbox",
+      partitionKey: { name: "delivery_outbox_pk", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "delivery_outbox_sk", type: dynamodb.AttributeType.STRING },
+      // Only immutable commands awaiting the separately deployed provider
+      // worker carry these keys. The control-plane handler can create them but
+      // has no Microsoft Graph credentials or outbound provider authority.
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
 
     const presence = new dynamodb.Table(this, "PresenceTable", {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
@@ -919,6 +928,20 @@ export class AwsControlPlaneStack extends cdk.Stack {
       enableKeyRotation: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
+    const endpointDeliveryCredentialKey = new kms.Key(
+      this,
+      "EndpointDeliveryCredentialKey",
+      {
+        alias: "alias/aai-sec-endpoint-delivery-credentials",
+        description: "Encrypts tenant endpoint-delivery provider credentials in Secrets Manager",
+        enableKeyRotation: true,
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
+      },
+    );
+    const endpointDeliverySecretPrefix = "aai-sec/endpoint-delivery/";
+    const endpointDeliverySecretResources = [
+      `arn:${cdk.Aws.PARTITION}:secretsmanager:${this.region}:${this.account}:secret:${endpointDeliverySecretPrefix}*`,
+    ];
     // This key is staged before signer cutover so endpoint trust bundles can
     // carry both the current single-Region key and the future multi-Region key.
     // Deploying it does not change active policy authority. A reviewed DR
@@ -1089,6 +1112,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       WEBHOOK_SECRET_KMS_KEY_ARN: webhookSecretKey.keyArn,
       WORKFLOW_QUEUE_URL: workflowDeliveryQueue.queueUrl,
       WORKFLOW_SECRET_PREFIX: "aai-sec/workflows/",
+      ENDPOINT_DELIVERY_SECRET_PREFIX: endpointDeliverySecretPrefix,
+      ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN: endpointDeliveryCredentialKey.keyArn,
       DATA_BOUNDARY_STATUS: dataBoundaryConfigured ? "configured" : "not-configured",
       DATA_BOUNDARY_HOME_REGION: dataBoundaryHomeRegion || deploymentRegion,
       DATA_BOUNDARY_APPROVED_REGIONS: JSON.stringify(
@@ -1142,6 +1167,19 @@ export class AwsControlPlaneStack extends cdk.Stack {
       tracing: lambda.Tracing.PASS_THROUGH,
     });
     table.grantReadWriteData(handler);
+    // The API verifies secret identity, KMS provenance and exact tenant tags
+    // at draft and activation boundaries. It never receives decrypt or
+    // GetSecretValue authority; only the isolated delivery worker may later
+    // consume approved credentials.
+    handler.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["secretsmanager:DescribeSecret"],
+      resources: endpointDeliverySecretResources,
+      conditions: {
+        StringEquals: {
+          "secretsmanager:ResourceTag/aai-sec:purpose": "endpoint-delivery-provider",
+        },
+      },
+    }));
     policySigningKey.grant(handler, "kms:Sign", "kms:Verify", "kms:GetPublicKey");
     assuranceReportSigningKey.grant(handler, "kms:Sign", "kms:Verify");
     for (const historicalKey of historicalAssuranceKeys) {
@@ -2078,6 +2116,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "WorkflowDeliveryQueueArn", { value: workflowDeliveryQueue.queueArn });
     new cdk.CfnOutput(this, "WorkflowDeliveryDlqArn", { value: workflowDeliveryDlq.queueArn });
     new cdk.CfnOutput(this, "WorkflowCredentialKeyArn", { value: workflowCredentialKey.keyArn });
+    new cdk.CfnOutput(this, "EndpointDeliveryCredentialKeyArn", {
+      value: endpointDeliveryCredentialKey.keyArn,
+    });
     new cdk.CfnOutput(this, "WebhookDispatchDlqArn", { value: webhookDispatchDlq.queueArn });
     new cdk.CfnOutput(this, "WebhookSecretKmsKeyArn", { value: webhookSecretKey.keyArn });
     new cdk.CfnOutput(this, "DiscoverySecretKmsKeyArn", { value: discoverySecretKey.keyArn });

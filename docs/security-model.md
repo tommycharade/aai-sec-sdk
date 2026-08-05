@@ -1539,10 +1539,19 @@ therefore health evidence only; schema v2 signs normalized OS/architecture
 measured by the administrator process.
 
 This preflight is not dispatch authority. The existing runtime-remediation
-service bearer receives no package locator and cannot install software. Hosted
-Intune delivery remains disabled until dedicated IAM/provider credentials,
-transactional outbox and idempotency, online reauthorization and independent
-post-install attestation are implemented and accepted. See
+service bearer receives no package locator and cannot install software. Intune
+configuration now requires an immutable two-subject approval lifecycle. The
+API validates tenant/KMS/purpose-bound Secrets Manager metadata at draft and
+activation time but has no secret-read or decrypt permission. The rollout
+reconciler can transactionally create idempotent dormant commands bound to
+exact live provider, rollout, deployment, agent, signed endpoint evidence and
+package state, with primary audit evidence in the same commit.
+
+Hosted Intune delivery remains disabled: outbox records explicitly report that
+dispatch is off, no provider worker exists, and the handler has no Microsoft
+Graph authority. Online Entra identity resolution, Graph reauthorization,
+owned-group/assignment reconciliation and independent post-install attestation
+must still be implemented and accepted. See
 [Managed endpoint delivery authority](managed-endpoint-delivery-authority-design.md).
 
 ## Real Codex host acceptance boundary

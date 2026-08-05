@@ -682,8 +682,29 @@ route is read-only and is not Intune dispatch authority. See
 and [managed endpoint delivery user journeys](managed-endpoint-delivery-user-journeys.md).
 The provider-specific group-assignment and online identity-resolution boundary
 is documented in
-[Microsoft Intune managed delivery](intune-managed-delivery-design.md); no
-hosted provider mutation API is enabled yet.
+[Microsoft Intune managed delivery](intune-managed-delivery-design.md). Hosted
+Graph mutation remains disabled, but the following governed control-plane APIs
+are available:
+
+- `GET /api/enterprise/endpoint-delivery/providers` and `/providers/intune`
+  return secret-free provider lifecycle posture to `inventory_read` roles.
+- `POST /api/enterprise/endpoint-delivery/providers/intune/drafts` accepts only
+  canonical tenant identity, a tenant-tagged secret ARN, explicit deployment
+  IDs, permission-evidence SHA-256 and rationale. It validates secret metadata
+  with `DescribeSecret` and never reads its value.
+- `POST /api/enterprise/endpoint-delivery/providers/intune/versions/{version}/submit`
+  freezes the exact content hash under `integration_admin` authority.
+- `POST .../{version}/decision` requires `provider_approval`, an independent
+  subject and an approval/rejection rationale.
+- `POST .../{version}/activate` requires `provider_approval`, the expected
+  active version and a still-valid tenant/KMS/tag-bound secret.
+- `GET /api/enterprise/endpoint-delivery/commands?deploymentId=...` returns a
+  locator-free dormant outbox view with `dispatchEnabled: false`.
+
+The five-minute reconciler creates an outbox command automatically from exact
+live provider, rollout, deployment, agent, endpoint-evidence and package
+authority. There is no browser install endpoint, queue consumer or Graph write
+in this phase.
 
 `GET /enterprise/alerts` reconciles and returns content-minimised endpoint,
 explainable behavior and independently derived repository/configuration

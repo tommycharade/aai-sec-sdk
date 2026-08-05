@@ -628,6 +628,7 @@ _ROLE_CAPABILITIES = {
             "evidence_admin",
             "evidence_read",
             "inventory_read",
+            "provider_approval",
         }
     ),
     "policy-author": frozenset({"policy_write", "policy_simulation"}),
@@ -672,6 +673,18 @@ _WORKFLOW_EVENT_TYPES = frozenset({"case.opened", "case.contained", "case.resolv
 _WORKFLOW_CONNECTION_LIMIT = 20
 _WORKFLOW_OUTBOX_INDEX = "WorkflowOutbox"
 _WORKFLOW_DELIVERY_RETENTION_SECONDS = 30 * 24 * 60 * 60
+_ENDPOINT_PROVIDER_STATES = frozenset(
+    {"draft", "review", "approved", "active", "rejected", "retired"}
+)
+_ENDPOINT_PROVIDER_PENDING_STATES = frozenset({"draft", "review", "approved"})
+_ENDPOINT_PROVIDER_DEPLOYMENT_LIMIT = 250
+_ENDPOINT_DELIVERY_OUTBOX_INDEX = "EndpointDeliveryOutbox"
+_ENDPOINT_DELIVERY_COMMAND_LIMIT = 500
+_ENDPOINT_DELIVERY_COHORT_PAGE_SIZE = 40
+_ENDPOINT_DELIVERY_SECRET_PREFIX = os.environ.get(
+    "ENDPOINT_DELIVERY_SECRET_PREFIX", "aai-sec/endpoint-delivery/"
+)
+_ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN = os.environ.get("ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN", "")
 _CREDENTIAL_BROKER_PROVIDERS = frozenset(
     {"aws_sts", "azure_workload_identity", "gcp_workload_identity"}
 )
@@ -3172,6 +3185,17 @@ def _required_mutation_capability(path):
     if normalized.startswith("/enterprise/workflow-integrations"):
         # Provider credentials and case egress are platform-owned boundaries.
         # Delegated roles and external workflow state cannot establish them.
+        return "integration_admin"
+    if re.fullmatch(
+        r"/enterprise/endpoint-delivery/providers/intune/versions/[1-9][0-9]*/(decision|activate)",
+        normalized,
+    ):
+        # Endpoint software delivery crosses the fleet execution boundary. A
+        # platform administrator may author the provider configuration, but a
+        # separate security operator must approve and activate that exact
+        # immutable version before it can influence delivery reconciliation.
+        return "provider_approval"
+    if normalized.startswith("/enterprise/endpoint-delivery/providers"):
         return "integration_admin"
     if normalized.startswith("/enterprise/discovery/sources/"):
         # Population evidence can lower measured coverage and create leaver or
@@ -12717,10 +12741,10 @@ def _create_item(tenant, kind, identifier, item):
 
 def _is_conditional_conflict(error):
     """Return whether DynamoDB rejected a create/update precondition."""
-    return (
-        getattr(error, "response", {}).get("Error", {}).get("Code")
-        == "ConditionalCheckFailedException"
-    )
+    return getattr(error, "response", {}).get("Error", {}).get("Code") in {
+        "ConditionalCheckFailedException",
+        "TransactionCanceledException",
+    }
 
 
 def _list(tenant, kind, *, consistent_read=False):
@@ -17584,6 +17608,448 @@ def _endpoint_agent_binding(
     }
 
 
+def _endpoint_provider_version_id(provider, version):
+    """Return the immutable identifier for one delivery-provider version."""
+    return f"{provider}:{version}"
+
+
+def _endpoint_provider_versions(tenant, provider="intune", *, consistent_read=False):
+    """Return the bounded immutable configuration ledger for one provider."""
+    items = [
+        item
+        for item in _list(tenant, "ENDPOINT_PROVIDER_VERSION", consistent_read=consistent_read)
+        if item.get("provider") == provider and item.get("state") in _ENDPOINT_PROVIDER_STATES
+    ]
+    if len(items) > 100:
+        raise RuntimeError("endpoint provider version ledger exceeds its safe bound")
+    return sorted(items, key=lambda item: int(item.get("version", 0)), reverse=True)
+
+
+def _endpoint_provider_secret(tenant, arn):
+    """Validate delivery credential metadata without reading secret bytes.
+
+    The control-plane API receives only a reference and has DescribeSecret but
+    never GetSecretValue. Exact namespace, KMS and tag checks prevent one
+    tenant or integration from lending credentials to another.
+    """
+    partition = os.environ.get("AWS_PARTITION", "aws")
+    region = os.environ.get("AWS_REGION", "")
+    account_id = os.environ.get("AWS_ACCOUNT_ID", "")
+    expected_prefix = (
+        f"arn:{partition}:secretsmanager:{region}:{account_id}:secret:"
+        f"{_ENDPOINT_DELIVERY_SECRET_PREFIX}{tenant}/"
+    )
+    if (
+        not _ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN
+        or not isinstance(arn, str)
+        or len(arn) > 1_024
+        or not arn.startswith(expected_prefix)
+    ):
+        raise ValueError("providerSecretArn is outside the tenant delivery namespace")
+    try:
+        description = SECRETS_MANAGER.describe_secret(SecretId=arn)
+    except Exception as error:
+        raise ValueError("endpoint delivery provider secret is unavailable") from error
+    tags = {
+        item.get("Key"): item.get("Value")
+        for item in description.get("Tags", [])
+        if isinstance(item, dict)
+    }
+    if (
+        description.get("ARN") != arn
+        or description.get("DeletedDate") is not None
+        or description.get("KmsKeyId") != _ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN
+        or tags
+        != {
+            "aai-sec:tenant-id": tenant,
+            "aai-sec:purpose": "endpoint-delivery-provider",
+        }
+    ):
+        raise ValueError("provider secret encryption or tenant tags are invalid")
+    return arn
+
+
+def _endpoint_provider_configuration(tenant, value):
+    """Validate the complete, explicit Intune provider authority request."""
+    expected_fields = {
+        "providerTenantId",
+        "providerSecretArn",
+        "deploymentIds",
+        "permissionEvidenceSha256",
+        "reason",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise ValueError("Intune provider draft has an invalid schema")
+    try:
+        provider_tenant_id = str(uuid.UUID(value.get("providerTenantId")))
+    except (ValueError, TypeError, AttributeError) as error:
+        raise ValueError("providerTenantId must be a canonical UUID") from error
+    if provider_tenant_id != str(value.get("providerTenantId", "")).lower():
+        raise ValueError("providerTenantId must be a canonical UUID")
+    deployment_values = value.get("deploymentIds")
+    if (
+        not isinstance(deployment_values, list)
+        or not 1 <= len(deployment_values) <= _ENDPOINT_PROVIDER_DEPLOYMENT_LIMIT
+    ):
+        raise ValueError("deploymentIds must contain 1 to 250 explicit deployments")
+    deployment_ids = sorted(_bounded_identifier(item, "deploymentId") for item in deployment_values)
+    if len(set(deployment_ids)) != len(deployment_ids):
+        raise ValueError("deploymentIds must be unique")
+    known_deployments = {
+        item.get("id") for item in _list(tenant, "DEPLOYMENT", consistent_read=True)
+    }
+    if any(deployment_id not in known_deployments for deployment_id in deployment_ids):
+        raise ValueError("deploymentIds contains an unknown tenant deployment")
+    evidence_digest = value.get("permissionEvidenceSha256")
+    if not isinstance(evidence_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", evidence_digest):
+        raise ValueError("permissionEvidenceSha256 must be a lowercase SHA-256 digest")
+    reason = _bounded_text(value.get("reason"), "reason", 1_000)
+    if len(reason) < 20:
+        raise ValueError("reason must contain at least 20 characters")
+    secret_arn = _endpoint_provider_secret(tenant, value.get("providerSecretArn"))
+    return {
+        "schemaVersion": 1,
+        "provider": "intune",
+        "providerTenantId": provider_tenant_id,
+        "providerSecretArn": secret_arn,
+        "deploymentIds": deployment_ids,
+        "permissionEvidenceSha256": evidence_digest,
+        "reason": reason,
+    }
+
+
+def _endpoint_provider_version_view(record):
+    """Project one provider version without returning its credential locator."""
+    configuration = record.get("configuration", {})
+    secret_arn = configuration.get("providerSecretArn", "")
+    approved_by = (
+        record.get("decided_by")
+        if record.get("decision") == "approved" and record.get("state") in {"approved", "active"}
+        else None
+    )
+    return {
+        "provider": "intune",
+        "version": int(record.get("version", 0)),
+        "baseVersion": int(record.get("base_version", 0)),
+        "state": record.get("state"),
+        "contentHash": record.get("content_hash"),
+        "providerTenantId": configuration.get("providerTenantId"),
+        "deploymentIds": list(configuration.get("deploymentIds", [])),
+        "permissionEvidenceSha256": configuration.get("permissionEvidenceSha256"),
+        "reason": configuration.get("reason"),
+        "credentialConfigured": bool(secret_arn),
+        "credentialReferenceSha256": hashlib.sha256(str(secret_arn).encode()).hexdigest()
+        if secret_arn
+        else None,
+        "author": record.get("author"),
+        "createdAt": int(record.get("created_at", 0)),
+        "submittedBy": record.get("submitted_by"),
+        "submittedAt": record.get("submitted_at"),
+        "decidedBy": record.get("decided_by"),
+        "decidedAt": record.get("decided_at"),
+        "decision": record.get("decision"),
+        "decisionReason": record.get("decision_reason"),
+        "approvedBy": approved_by,
+        "activatedBy": record.get("activated_by"),
+        "activatedAt": record.get("activated_at"),
+    }
+
+
+def _endpoint_provider_summary(tenant):
+    """Return secret-free Intune lifecycle posture and its immutable ledger."""
+    root = TABLE.get_item(
+        Key=_item_key(tenant, "ENDPOINT_PROVIDER", "intune"), ConsistentRead=True
+    ).get("Item")
+    versions = _endpoint_provider_versions(tenant, consistent_read=True)
+    return {
+        "provider": "intune",
+        "configured": root is not None,
+        "activeVersion": int(root.get("active_version", 0)) if root else 0,
+        "latestVersion": int(root.get("latest_version", 0)) if root else 0,
+        "pendingVersion": int(root["pending_version"])
+        if root and root.get("pending_version") is not None
+        else None,
+        "governanceState": root.get("governance_state", "not_configured")
+        if root
+        else "not_configured",
+        "versions": [_endpoint_provider_version_view(item) for item in versions],
+    }
+
+
+def _endpoint_provider_version(tenant, version):
+    """Strongly read one exact Intune provider version."""
+    try:
+        version = int(version)
+    except (TypeError, ValueError) as error:
+        raise ValueError("endpoint provider version must be a positive integer") from error
+    version = _positive_policy_version(version)
+    record = TABLE.get_item(
+        Key=_item_key(
+            tenant,
+            "ENDPOINT_PROVIDER_VERSION",
+            _endpoint_provider_version_id("intune", version),
+        ),
+        ConsistentRead=True,
+    ).get("Item")
+    if not record or record.get("provider") != "intune":
+        raise LookupError("endpoint provider version not found")
+    return record
+
+
+def _create_endpoint_provider_draft(tenant, body, actor):
+    """Atomically append one inactive Intune configuration draft."""
+    configuration = _endpoint_provider_configuration(tenant, body)
+    root = TABLE.get_item(
+        Key=_item_key(tenant, "ENDPOINT_PROVIDER", "intune"), ConsistentRead=True
+    ).get("Item")
+    versions = _endpoint_provider_versions(tenant, consistent_read=True)
+    if any(item.get("state") in _ENDPOINT_PROVIDER_PENDING_STATES for item in versions):
+        raise PolicyConflict("Intune provider already has a pending governed version")
+    active_version = int(root.get("active_version", 0)) if root else 0
+    latest_version = int(root.get("latest_version", 0)) if root else 0
+    version = latest_version + 1
+    now = int(time.time())
+    record = {
+        **_item_key(
+            tenant,
+            "ENDPOINT_PROVIDER_VERSION",
+            _endpoint_provider_version_id("intune", version),
+        ),
+        "tenant_id": tenant,
+        "id": _endpoint_provider_version_id("intune", version),
+        "provider": "intune",
+        "version": version,
+        "base_version": active_version,
+        "configuration": configuration,
+        "content_hash": _configuration_hash(configuration),
+        "state": "draft",
+        "author": actor,
+        "created_at": now,
+    }
+    updated_root = {
+        **(root or _item_key(tenant, "ENDPOINT_PROVIDER", "intune")),
+        "tenant_id": tenant,
+        "id": "intune",
+        "provider": "intune",
+        "active_version": active_version,
+        "latest_version": version,
+        "pending_version": version,
+        "pending_author": actor,
+        "governance_state": "draft",
+        "updated_at": now,
+    }
+    root_condition = (
+        "attribute_not_exists(pk)"
+        if root is None
+        else "active_version = :active AND latest_version = :latest"
+    )
+    _transact_policy_records(
+        [
+            _transaction_put(record, condition="attribute_not_exists(pk)"),
+            _transaction_put(
+                updated_root,
+                condition=root_condition,
+                values=None
+                if root is None
+                else {":active": active_version, ":latest": latest_version},
+            ),
+        ]
+    )
+    _audit(
+        tenant,
+        "endpoint_provider_draft_created",
+        actor,
+        {"provider": "intune", "version": version, "content_hash": record["content_hash"]},
+    )
+    return _endpoint_provider_version_view(record)
+
+
+def _transition_endpoint_provider(
+    tenant,
+    record,
+    root,
+    expected_state,
+    state,
+    actor,
+    event,
+    *,
+    clear_pending=False,
+    root_state=None,
+):
+    """Atomically transition an exact version and its lifecycle pointer."""
+    updated_record = {**record, "state": state}
+    updated_root = {
+        **root,
+        "governance_state": state if root_state is None else root_state,
+        "updated_at": int(time.time()),
+    }
+    if clear_pending:
+        updated_root.update({"pending_version": None, "pending_author": None})
+    try:
+        _transact_policy_records(
+            [
+                _transaction_put(
+                    updated_record,
+                    condition="#state = :expected",
+                    names={"#state": "state"},
+                    values={":expected": expected_state},
+                ),
+                _transaction_put(
+                    updated_root,
+                    condition="pending_version = :version AND governance_state = :expected",
+                    values={":version": int(record["version"]), ":expected": expected_state},
+                ),
+            ]
+        )
+    except PolicyConflict:
+        raise
+    _audit(
+        tenant,
+        event,
+        actor,
+        {"provider": "intune", "version": int(record["version"])},
+    )
+    return _endpoint_provider_version_view(updated_record)
+
+
+def _submit_endpoint_provider(tenant, version, body, actor):
+    """Freeze an exact draft for independent review."""
+    if not isinstance(body, dict) or set(body) != {"expectedContentHash"}:
+        raise ValueError("provider submission request has an invalid schema")
+    record = _endpoint_provider_version(tenant, version)
+    if record.get("state") != "draft":
+        raise PolicyConflict("endpoint provider version is not a draft")
+    if not secrets.compare_digest(
+        str(record.get("content_hash", "")), str(body.get("expectedContentHash", ""))
+    ):
+        raise PolicyConflict("endpoint provider content changed before submission")
+    root = TABLE.get_item(
+        Key=_item_key(tenant, "ENDPOINT_PROVIDER", "intune"), ConsistentRead=True
+    ).get("Item")
+    if not root:
+        raise PolicyConflict("endpoint provider lifecycle is incomplete")
+    now = int(time.time())
+    record = {**record, "submitted_by": actor, "submitted_at": now}
+    return _transition_endpoint_provider(
+        tenant, record, root, "draft", "review", actor, "endpoint_provider_submitted"
+    )
+
+
+def _decide_endpoint_provider(tenant, version, body, actor):
+    """Approve or reject one immutable version with two-subject separation."""
+    if not isinstance(body, dict) or set(body) != {"decision", "reason"}:
+        raise ValueError("provider decision request has an invalid schema")
+    decision = body.get("decision")
+    if decision not in {"approved", "rejected"}:
+        raise ValueError("provider decision must be approved or rejected")
+    reason = _bounded_text(body.get("reason"), "reason", 1_000)
+    if len(reason) < 20:
+        raise ValueError("provider decision reason must contain at least 20 characters")
+    record = _endpoint_provider_version(tenant, version)
+    if record.get("state") != "review":
+        raise PolicyConflict("endpoint provider version is not awaiting review")
+    if secrets.compare_digest(str(record.get("author", "")), actor):
+        raise PermissionError("endpoint provider authors cannot decide their own version")
+    root = TABLE.get_item(
+        Key=_item_key(tenant, "ENDPOINT_PROVIDER", "intune"), ConsistentRead=True
+    ).get("Item")
+    if not root:
+        raise PolicyConflict("endpoint provider lifecycle is incomplete")
+    now = int(time.time())
+    record = {
+        **record,
+        "decision": decision,
+        "decided_by": actor,
+        "decided_at": now,
+        "decision_reason": reason,
+    }
+    return _transition_endpoint_provider(
+        tenant,
+        record,
+        root,
+        "review",
+        decision,
+        actor,
+        "endpoint_provider_decided",
+        clear_pending=decision == "rejected",
+        root_state=("active" if int(root.get("active_version", 0)) > 0 else "not_configured")
+        if decision == "rejected"
+        else None,
+    )
+
+
+def _activate_endpoint_provider(tenant, version, body, actor):
+    """Atomically make one independently approved configuration authoritative."""
+    if not isinstance(body, dict) or set(body) != {"expectedActiveVersion"}:
+        raise ValueError("provider activation request has an invalid schema")
+    expected = body.get("expectedActiveVersion")
+    if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
+        raise ValueError("expectedActiveVersion must be a non-negative integer")
+    record = _endpoint_provider_version(tenant, version)
+    root = TABLE.get_item(
+        Key=_item_key(tenant, "ENDPOINT_PROVIDER", "intune"), ConsistentRead=True
+    ).get("Item")
+    if not root:
+        raise PolicyConflict("endpoint provider lifecycle is incomplete")
+    if record.get("state") != "approved":
+        raise PolicyConflict("endpoint provider version is not approved")
+    if not record.get("decided_by") or secrets.compare_digest(
+        str(record.get("decided_by")), str(record.get("author", ""))
+    ):
+        raise PermissionError("endpoint provider version lacks independent approval")
+    if (
+        int(root.get("active_version", 0)) != expected
+        or int(record.get("base_version", -1)) != expected
+    ):
+        raise PolicyConflict("endpoint provider active version changed before activation")
+    # Revalidate the live secret metadata at the final authority boundary. A
+    # secret deleted, retagged or re-encrypted after review must fail closed.
+    _endpoint_provider_secret(tenant, record.get("configuration", {}).get("providerSecretArn"))
+    now = int(time.time())
+    active = {**record, "state": "active", "activated_by": actor, "activated_at": now}
+    active_root = {
+        **root,
+        "active_version": int(record["version"]),
+        "pending_version": None,
+        "pending_author": None,
+        "governance_state": "active",
+        "updated_at": now,
+    }
+    operations = [
+        _transaction_put(
+            active,
+            condition="#state = :approved",
+            names={"#state": "state"},
+            values={":approved": "approved"},
+        )
+    ]
+    if expected:
+        previous = _endpoint_provider_version(tenant, expected)
+        operations.append(
+            _transaction_put(
+                {**previous, "state": "retired"},
+                condition="#state = :active",
+                names={"#state": "state"},
+                values={":active": "active"},
+            )
+        )
+    operations.append(
+        _transaction_put(
+            active_root,
+            condition="active_version = :active AND pending_version = :pending",
+            values={":active": expected, ":pending": int(record["version"])},
+        )
+    )
+    _transact_policy_records(operations)
+    _audit(
+        tenant,
+        "endpoint_provider_activated",
+        actor,
+        {"provider": "intune", "version": int(record["version"]), "previous_version": expected},
+    )
+    return _endpoint_provider_summary(tenant)
+
+
 def _endpoint_delivery_readiness(tenant, deployment_id, *, now=None):
     """Derive dispatch readiness without granting endpoint execution authority.
 
@@ -17675,6 +18141,9 @@ def _endpoint_delivery_readiness(tenant, deployment_id, *, now=None):
                 "agentKey": agent_key,
                 "host": agent.get("host"),
                 "deviceId": binding.get("deviceId") if binding else None,
+                "directoryDeviceRegistrationId": (
+                    binding.get("directoryDeviceRegistrationId") if binding else None
+                ),
                 "installationId": (
                     binding["installationIds"][0]
                     if binding and len(binding.get("installationIds", [])) == 1
@@ -17703,6 +18172,506 @@ def _endpoint_delivery_readiness(tenant, deployment_id, *, now=None):
         "items": rows,
         "nextToken": None,
     }
+
+
+def _endpoint_delivery_command_view(record):
+    """Project one dormant delivery command without provider or object locators."""
+    return {
+        "id": record.get("id"),
+        "provider": record.get("provider"),
+        "deploymentId": record.get("deployment_id"),
+        "host": record.get("host"),
+        "releaseId": record.get("release_id"),
+        "packageId": record.get("package_id"),
+        "providerVersion": int(record.get("provider_version", 0)),
+        "rolloutRevision": int(record.get("rollout_revision", 0)),
+        "targetCount": int(record.get("target_count", 0)),
+        "cohortDigest": record.get("cohort_digest"),
+        "status": record.get("status"),
+        "dispatchEnabled": False,
+        "instructionDigest": record.get("instruction_digest"),
+        "createdAt": int(record.get("created_at", 0)),
+        "updatedAt": int(record.get("updated_at", 0)),
+    }
+
+
+def _endpoint_delivery_commands(tenant, deployment_id=None):
+    """Return bounded, locator-free Intune outbox posture for operators."""
+    if deployment_id is not None:
+        deployment_id = _bounded_identifier(deployment_id, "deploymentId")
+    records = [
+        item
+        for item in _list(tenant, "ENDPOINT_DELIVERY_COMMAND", consistent_read=True)
+        if deployment_id is None or item.get("deployment_id") == deployment_id
+    ]
+    if len(records) > _ENDPOINT_DELIVERY_COMMAND_LIMIT:
+        raise RuntimeError("endpoint delivery command inventory exceeds its safe bound")
+    records.sort(
+        key=lambda item: (int(item.get("created_at", 0)), item.get("id", "")), reverse=True
+    )
+    return {
+        "items": [_endpoint_delivery_command_view(item) for item in records],
+        "dispatchEnabled": False,
+        "nextCursor": None,
+    }
+
+
+def _endpoint_delivery_command_id(tenant, instruction):
+    """Derive an idempotent identifier from exact tenant-bound authority."""
+    material = {"tenantId": tenant, **instruction}
+    return hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _create_endpoint_delivery_commands(tenant, rollout):
+    """Materialize exact package cohorts while keeping dispatch disabled.
+
+    Target records are individually committed against live endpoint authority,
+    then sealed into bounded immutable pages. Only a complete package/cohort
+    command receives an outbox key. This matches Intune's group-assignment
+    model and prevents a future worker from treating one per-device write as a
+    complete desired group. This tranche creates no queue consumer and grants
+    no Microsoft Graph permission.
+    """
+    rollout = _validated_runtime_rollout(rollout, tenant)
+    if rollout.get("state") not in {"canary", "active", "rolling_back"}:
+        return 0
+    deployment_id = rollout["deploymentId"]
+    root = TABLE.get_item(
+        Key=_item_key(tenant, "ENDPOINT_PROVIDER", "intune"), ConsistentRead=True
+    ).get("Item")
+    if not root or root.get("governance_state") != "active":
+        return 0
+    provider_version = int(root.get("active_version", 0))
+    provider = _endpoint_provider_version(tenant, provider_version)
+    if provider.get("state") != "active":
+        raise RuntimeError("active endpoint provider pointer is inconsistent")
+    configuration = provider.get("configuration", {})
+    if deployment_id not in configuration.get("deploymentIds", []):
+        return 0
+    _endpoint_provider_secret(tenant, configuration.get("providerSecretArn"))
+    readiness = _endpoint_delivery_readiness(tenant, deployment_id)
+    readiness_items = readiness.get("items", [])
+    if (
+        not isinstance(readiness_items, list)
+        or len(readiness_items) > _ENDPOINT_DELIVERY_COMMAND_LIMIT
+    ):
+        raise RuntimeError("endpoint delivery target inventory exceeds its safe bound")
+    package_by_id = {
+        item.get("id"): item for item in readiness.get("packageAuthority", {}).get("packages", [])
+    }
+    deployment = TABLE.get_item(
+        Key=_item_key(tenant, "DEPLOYMENT", deployment_id), ConsistentRead=True
+    ).get("Item")
+    if not deployment:
+        raise LookupError("deployment not found")
+    targets_by_package = {}
+    now = int(time.time())
+    releases = _runtime_release_map()
+    for row in readiness_items:
+        if not row.get("readyForDispatch") or not row.get("directoryDeviceRegistrationId"):
+            continue
+        agent = TABLE.get_item(
+            Key=_item_key(tenant, "AGENT", row.get("agentKey", "")), ConsistentRead=True
+        ).get("Item")
+        if not agent or not _runtime_rollout_agent_selected(tenant, rollout, agent):
+            continue
+        release = releases.get(row.get("releaseId"))
+        if _runtime_agent_attests_release(
+            agent, release, now, not_before=int(rollout.get("startedAt", 0))
+        ):
+            continue
+        lifecycle_revision = _stored_agent_lifecycle_revision(agent.get("lifecycle_revision"))
+        if lifecycle_revision is None or _agent_lifecycle_state(agent) != "active":
+            continue
+        evidence = TABLE.get_item(
+            Key=_item_key(tenant, "ENDPOINT_EVIDENCE", row.get("deviceId", "")),
+            ConsistentRead=True,
+        ).get("Item")
+        package = package_by_id.get(row.get("packageId"))
+        if (
+            not evidence
+            or evidence.get("reportDigest") is None
+            or not package
+            or package.get("providerPackageIdentitySha256") is None
+        ):
+            continue
+        instruction = {
+            "schemaVersion": 1,
+            "provider": "intune",
+            "providerVersion": provider_version,
+            "providerContentHash": provider.get("content_hash"),
+            "deploymentId": deployment_id,
+            "agentId": row.get("agentId"),
+            "agentLifecycleRevision": lifecycle_revision,
+            "directoryDeviceRegistrationId": row.get("directoryDeviceRegistrationId"),
+            "releaseId": row.get("releaseId"),
+            "packageId": row.get("packageId"),
+            "packageManifestSha256": package.get("manifestSha256"),
+            "packageObjectSha256": package.get("objectSha256"),
+            "packageStorageIdentitySha256": package.get("storageIdentitySha256"),
+            "providerPackageIdentitySha256": package.get("providerPackageIdentitySha256"),
+            "packageSignatureEvidenceSha256": package.get("packageSignatureEvidenceSha256"),
+            "packageApproverEvidenceSha256": package.get("approverEvidenceSha256"),
+            "packageBundleSha256": readiness.get("packageAuthority", {}).get("packageBundleSha256"),
+            "packageApprovalBundleSha256": readiness.get("packageAuthority", {}).get(
+                "approvalBundleSha256"
+            ),
+            "bindingDigest": row.get("bindingDigest"),
+            "endpointEvidenceRevision": int(evidence.get("revision", 0)),
+            "endpointEvidenceDigest": evidence.get("reportDigest"),
+            "rolloutRevision": int(rollout["revision"]),
+            "rolloutState": rollout["state"],
+        }
+        target_id = _endpoint_delivery_command_id(tenant, instruction)
+        instruction_digest = _configuration_hash(instruction)
+        key = _item_key(tenant, "ENDPOINT_DELIVERY_TARGET", target_id)
+        existing = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+        if existing:
+            if not secrets.compare_digest(
+                str(existing.get("instruction_digest", "")), instruction_digest
+            ):
+                raise RuntimeError("endpoint delivery target identity collision")
+            targets_by_package.setdefault((row.get("releaseId"), row.get("packageId")), []).append(
+                existing
+            )
+            continue
+        record = {
+            **key,
+            "tenant_id": tenant,
+            "id": target_id,
+            "provider": "intune",
+            "provider_version": provider_version,
+            "deployment_id": deployment_id,
+            "agent_id": row.get("agentId"),
+            "host": row.get("host"),
+            "release_id": row.get("releaseId"),
+            "package_id": row.get("packageId"),
+            "rollout_revision": int(rollout["revision"]),
+            "instruction": instruction,
+            "instruction_digest": instruction_digest,
+            "status": "materialized",
+            "created_at": now,
+            "updated_at": now,
+        }
+        audit_payload = {
+            "target_id": target_id,
+            "deployment_id": deployment_id,
+            "agent_id": row.get("agentId"),
+            "rollout_revision": int(rollout["revision"]),
+            "provider_version": provider_version,
+            "instruction_digest": instruction_digest,
+        }
+        audit_record = _configuration_audit_record(
+            tenant,
+            "endpoint_delivery_target_materialized",
+            "system:rollout-reconciliation",
+            audit_payload,
+            now=now,
+        )
+        try:
+            DYNAMODB.transact_write_items(
+                TransactItems=[
+                    _transaction_condition(
+                        _item_key(tenant, "ENDPOINT_PROVIDER", "intune"),
+                        condition=(
+                            "active_version = :provider_version AND governance_state = :active"
+                        ),
+                        values={":provider_version": provider_version, ":active": "active"},
+                    ),
+                    _transaction_condition(
+                        _item_key(
+                            tenant,
+                            "ENDPOINT_PROVIDER_VERSION",
+                            _endpoint_provider_version_id("intune", provider_version),
+                        ),
+                        condition="#state = :active AND content_hash = :content_hash",
+                        names={"#state": "state"},
+                        values={
+                            ":active": "active",
+                            ":content_hash": provider.get("content_hash"),
+                        },
+                    ),
+                    _transaction_condition(
+                        _item_key(tenant, "RUNTIME_ROLLOUT", deployment_id),
+                        condition="revision = :revision AND #state = :state",
+                        names={"#state": "state"},
+                        values={":revision": int(rollout["revision"]), ":state": rollout["state"]},
+                    ),
+                    _transaction_condition(
+                        _item_key(tenant, "DEPLOYMENT", deployment_id),
+                        condition="sdk_version = :sdk_version",
+                        values={":sdk_version": deployment.get("sdk_version")},
+                    ),
+                    _transaction_condition(
+                        _item_key(tenant, "AGENT", row.get("agentKey", "")),
+                        condition=("lifecycle_state = :active AND lifecycle_revision = :revision"),
+                        values={":active": "active", ":revision": lifecycle_revision},
+                    ),
+                    _transaction_condition(
+                        _item_key(tenant, "ENDPOINT_EVIDENCE", row.get("deviceId", "")),
+                        condition="revision = :revision AND reportDigest = :digest",
+                        values={
+                            ":revision": int(evidence.get("revision", 0)),
+                            ":digest": evidence.get("reportDigest"),
+                        },
+                    ),
+                    _transaction_put(record, condition="attribute_not_exists(pk)"),
+                    _transaction_put(audit_record, condition="attribute_not_exists(pk)"),
+                ]
+            )
+        except Exception as error:
+            if _is_conditional_conflict(error):
+                current = TABLE.get_item(Key=key, ConsistentRead=True).get("Item")
+                if current and secrets.compare_digest(
+                    str(current.get("instruction_digest", "")), instruction_digest
+                ):
+                    continue
+                raise PolicyConflict(
+                    "endpoint delivery authority changed during target materialization"
+                ) from error
+            raise
+        _export_configuration_audit(
+            tenant,
+            "endpoint_delivery_target_materialized",
+            "system:rollout-reconciliation",
+            audit_payload,
+        )
+        targets_by_package.setdefault((row.get("releaseId"), row.get("packageId")), []).append(
+            record
+        )
+
+    created_commands = 0
+    for (release_id, package_id), targets in sorted(targets_by_package.items()):
+        targets.sort(key=lambda item: item["id"])
+        pages = []
+        for offset in range(0, len(targets), _ENDPOINT_DELIVERY_COHORT_PAGE_SIZE):
+            page_targets = targets[offset : offset + _ENDPOINT_DELIVERY_COHORT_PAGE_SIZE]
+            page_payload = {
+                "schemaVersion": 1,
+                "provider": "intune",
+                "providerVersion": provider_version,
+                "deploymentId": deployment_id,
+                "releaseId": release_id,
+                "packageId": package_id,
+                "rolloutRevision": int(rollout["revision"]),
+                "pageNumber": offset // _ENDPOINT_DELIVERY_COHORT_PAGE_SIZE,
+                "targets": [
+                    {"id": item["id"], "instructionDigest": item["instruction_digest"]}
+                    for item in page_targets
+                ],
+            }
+            page_digest = _configuration_hash(page_payload)
+            page_id = _endpoint_delivery_command_id(tenant, page_payload)
+            page_key = _item_key(tenant, "ENDPOINT_DELIVERY_COHORT_PAGE", page_id)
+            page_record = {
+                **page_key,
+                "tenant_id": tenant,
+                "id": page_id,
+                "provider": "intune",
+                "provider_version": provider_version,
+                "deployment_id": deployment_id,
+                "release_id": release_id,
+                "package_id": package_id,
+                "rollout_revision": int(rollout["revision"]),
+                "page_number": page_payload["pageNumber"],
+                "target_count": len(page_targets),
+                "payload": page_payload,
+                "page_digest": page_digest,
+                "created_at": now,
+            }
+            existing_page = TABLE.get_item(Key=page_key, ConsistentRead=True).get("Item")
+            if existing_page:
+                if not secrets.compare_digest(
+                    str(existing_page.get("page_digest", "")), page_digest
+                ):
+                    raise RuntimeError("endpoint delivery cohort page identity collision")
+                page_record = existing_page
+            else:
+                try:
+                    DYNAMODB.transact_write_items(
+                        TransactItems=[
+                            *[
+                                _transaction_condition(
+                                    _item_key(tenant, "ENDPOINT_DELIVERY_TARGET", target["id"]),
+                                    condition="instruction_digest = :digest",
+                                    values={":digest": target["instruction_digest"]},
+                                )
+                                for target in page_targets
+                            ],
+                            _transaction_put(page_record, condition="attribute_not_exists(pk)"),
+                        ]
+                    )
+                except Exception as error:
+                    if _is_conditional_conflict(error):
+                        current_page = TABLE.get_item(Key=page_key, ConsistentRead=True).get("Item")
+                        if not current_page or not secrets.compare_digest(
+                            str(current_page.get("page_digest", "")), page_digest
+                        ):
+                            raise PolicyConflict(
+                                "endpoint delivery targets changed during cohort sealing"
+                            ) from error
+                        page_record = current_page
+                    else:
+                        raise
+            pages.append(page_record)
+
+        target_refs = [
+            {"id": item["id"], "instructionDigest": item["instruction_digest"]} for item in targets
+        ]
+        cohort_digest = _configuration_hash(target_refs)
+        package = package_by_id[package_id]
+        command_instruction = {
+            "schemaVersion": 1,
+            "provider": "intune",
+            "providerVersion": provider_version,
+            "providerContentHash": provider.get("content_hash"),
+            "deploymentId": deployment_id,
+            "host": targets[0].get("host"),
+            "releaseId": release_id,
+            "packageId": package_id,
+            "packageManifestSha256": package.get("manifestSha256"),
+            "packageObjectSha256": package.get("objectSha256"),
+            "packageStorageIdentitySha256": package.get("storageIdentitySha256"),
+            "providerPackageIdentitySha256": package.get("providerPackageIdentitySha256"),
+            "packageSignatureEvidenceSha256": package.get("packageSignatureEvidenceSha256"),
+            "packageApproverEvidenceSha256": package.get("approverEvidenceSha256"),
+            "releaseEvidenceSha256": package.get("releaseEvidenceSha256"),
+            "packageBundleSha256": readiness.get("packageAuthority", {}).get("packageBundleSha256"),
+            "packageApprovalBundleSha256": readiness.get("packageAuthority", {}).get(
+                "approvalBundleSha256"
+            ),
+            "rolloutRevision": int(rollout["revision"]),
+            "rolloutState": rollout["state"],
+            "targetCount": len(targets),
+            "cohortDigest": cohort_digest,
+            "pages": [
+                {
+                    "id": page["id"],
+                    "pageDigest": page["page_digest"],
+                    "targetCount": int(page["target_count"]),
+                }
+                for page in pages
+            ],
+        }
+        command_id = _endpoint_delivery_command_id(tenant, command_instruction)
+        instruction_digest = _configuration_hash(command_instruction)
+        command_key = _item_key(tenant, "ENDPOINT_DELIVERY_COMMAND", command_id)
+        existing_command = TABLE.get_item(Key=command_key, ConsistentRead=True).get("Item")
+        if existing_command:
+            if not secrets.compare_digest(
+                str(existing_command.get("instruction_digest", "")), instruction_digest
+            ):
+                raise RuntimeError("endpoint delivery command identity collision")
+            continue
+        command = {
+            **command_key,
+            "tenant_id": tenant,
+            "id": command_id,
+            "provider": "intune",
+            "provider_version": provider_version,
+            "deployment_id": deployment_id,
+            "host": targets[0].get("host"),
+            "release_id": release_id,
+            "package_id": package_id,
+            "rollout_revision": int(rollout["revision"]),
+            "target_count": len(targets),
+            "cohort_digest": cohort_digest,
+            "instruction": command_instruction,
+            "instruction_digest": instruction_digest,
+            "status": "pending",
+            "attempt_count": 0,
+            "created_at": now,
+            "updated_at": now,
+            "delivery_outbox_pk": f"ENDPOINT_DELIVERY_OUTBOX#{tenant}",
+            "delivery_outbox_sk": f"{now:010d}#{command_id}",
+        }
+        audit_payload = {
+            "command_id": command_id,
+            "deployment_id": deployment_id,
+            "rollout_revision": int(rollout["revision"]),
+            "provider_version": provider_version,
+            "package_id": package_id,
+            "target_count": len(targets),
+            "cohort_digest": cohort_digest,
+            "instruction_digest": instruction_digest,
+        }
+        audit_record = _configuration_audit_record(
+            tenant,
+            "endpoint_delivery_command_created",
+            "system:rollout-reconciliation",
+            audit_payload,
+            now=now,
+        )
+        try:
+            DYNAMODB.transact_write_items(
+                TransactItems=[
+                    _transaction_condition(
+                        _item_key(tenant, "ENDPOINT_PROVIDER", "intune"),
+                        condition=(
+                            "active_version = :provider_version AND governance_state = :active"
+                        ),
+                        values={":provider_version": provider_version, ":active": "active"},
+                    ),
+                    _transaction_condition(
+                        _item_key(
+                            tenant,
+                            "ENDPOINT_PROVIDER_VERSION",
+                            _endpoint_provider_version_id("intune", provider_version),
+                        ),
+                        condition="#state = :active AND content_hash = :content_hash",
+                        names={"#state": "state"},
+                        values={
+                            ":active": "active",
+                            ":content_hash": provider.get("content_hash"),
+                        },
+                    ),
+                    _transaction_condition(
+                        _item_key(tenant, "RUNTIME_ROLLOUT", deployment_id),
+                        condition="revision = :revision AND #state = :state",
+                        names={"#state": "state"},
+                        values={
+                            ":revision": int(rollout["revision"]),
+                            ":state": rollout["state"],
+                        },
+                    ),
+                    _transaction_condition(
+                        _item_key(tenant, "DEPLOYMENT", deployment_id),
+                        condition="sdk_version = :sdk_version",
+                        values={":sdk_version": deployment.get("sdk_version")},
+                    ),
+                    *[
+                        _transaction_condition(
+                            _item_key(tenant, "ENDPOINT_DELIVERY_COHORT_PAGE", page["id"]),
+                            condition="page_digest = :digest",
+                            values={":digest": page["page_digest"]},
+                        )
+                        for page in pages
+                    ],
+                    _transaction_put(command, condition="attribute_not_exists(pk)"),
+                    _transaction_put(audit_record, condition="attribute_not_exists(pk)"),
+                ]
+            )
+        except Exception as error:
+            if _is_conditional_conflict(error):
+                current = TABLE.get_item(Key=command_key, ConsistentRead=True).get("Item")
+                if current and secrets.compare_digest(
+                    str(current.get("instruction_digest", "")), instruction_digest
+                ):
+                    continue
+                raise PolicyConflict(
+                    "endpoint delivery authority changed during command sealing"
+                ) from error
+            raise
+        _export_configuration_audit(
+            tenant,
+            "endpoint_delivery_command_created",
+            "system:rollout-reconciliation",
+            audit_payload,
+        )
+        created_commands += 1
+    return created_commands
 
 
 def _behavior_agent_binding(tenant, alert):
@@ -21976,6 +22945,7 @@ def _rollout_reconciliation_cycle():
     processed_tenants = 0
     processed_rollouts = 0
     processed_runtime_rollouts = 0
+    created_delivery_commands = 0
     failed = 0
     for registration in tenants:
         tenant = registration.get("endpoint_detection_sk")
@@ -21994,7 +22964,8 @@ def _rollout_reconciliation_cycle():
             if processed_runtime_rollouts > _ROLLOUT_CONFIGURATION_LIMIT:
                 raise RuntimeError("scheduled runtime rollout inventory exceeds its safe bound")
             for runtime_rollout in runtime_rollouts:
-                _reconcile_runtime_rollout_current(tenant, runtime_rollout)
+                reconciled = _reconcile_runtime_rollout_current(tenant, runtime_rollout)
+                created_delivery_commands += _create_endpoint_delivery_commands(tenant, reconciled)
             processed_tenants += 1
         except Exception:
             failed += 1
@@ -22004,6 +22975,7 @@ def _rollout_reconciliation_cycle():
         "processedTenants": processed_tenants,
         "processedRollouts": processed_rollouts,
         "processedRuntimeRollouts": processed_runtime_rollouts,
+        "createdDeliveryCommands": created_delivery_commands,
         "failedTenants": 0,
     }
 
@@ -25077,6 +26049,7 @@ def handler(event, context):
             capability = _required_mutation_capability(path)
             is_break_glass_governance = "/enterprise/identity/break-glass/requests" in path
             is_response_rule_governance = "/enterprise/response-rules" in path
+            is_endpoint_provider_governance = "/enterprise/endpoint-delivery/providers" in path
             is_identity_governance = is_break_glass_governance or any(
                 marker in path
                 for marker in (
@@ -25088,9 +26061,17 @@ def handler(event, context):
                 event,
                 capability,
                 tenant,
-                include_break_glass=not (is_break_glass_governance or is_response_rule_governance),
+                include_break_glass=not (
+                    is_break_glass_governance
+                    or is_response_rule_governance
+                    or is_endpoint_provider_governance
+                ),
                 resource_scope=_mutation_resource_scope(tenant, event, path),
-                include_delegated=not (is_identity_governance or is_response_rule_governance),
+                include_delegated=not (
+                    is_identity_governance
+                    or is_response_rule_governance
+                    or is_endpoint_provider_governance
+                ),
             ):
                 return _response(
                     403,
@@ -26217,6 +27198,68 @@ def handler(event, context):
                 except (TypeError, ValueError) as error:
                     return _response(400, {"error": str(error)})
                 return _response(200, page)
+            if parts[:2] == ["endpoint-delivery", "providers"]:
+                if method == "GET":
+                    if not _operator_authorized(event, "inventory_read", include_break_glass=False):
+                        return _response(
+                            403,
+                            {
+                                "error": (
+                                    "endpoint provider posture requires inventory-read authority"
+                                )
+                            },
+                        )
+                    if len(parts) == 2:
+                        return _response(
+                            200,
+                            {"items": [_endpoint_provider_summary(tenant)], "nextCursor": None},
+                        )
+                    if parts == ["endpoint-delivery", "providers", "intune"]:
+                        return _response(200, _endpoint_provider_summary(tenant))
+                    if len(parts) == 5 and parts[2] == "intune" and parts[3] == "versions":
+                        return _response(
+                            200,
+                            _endpoint_provider_version_view(
+                                _endpoint_provider_version(tenant, parts[4])
+                            ),
+                        )
+                if method == "POST" and parts == [
+                    "endpoint-delivery",
+                    "providers",
+                    "intune",
+                    "drafts",
+                ]:
+                    return _response(
+                        201, _create_endpoint_provider_draft(tenant, _body(event), actor)
+                    )
+                if (
+                    method == "POST"
+                    and len(parts) == 6
+                    and parts[:4] == ["endpoint-delivery", "providers", "intune", "versions"]
+                    and parts[5] in {"submit", "decision", "activate"}
+                ):
+                    operation = {
+                        "submit": _submit_endpoint_provider,
+                        "decision": _decide_endpoint_provider,
+                        "activate": _activate_endpoint_provider,
+                    }[parts[5]]
+                    return _response(
+                        200,
+                        operation(tenant, parts[4], _body(event), actor),
+                    )
+                return _response(404, {"error": "endpoint provider route not found"})
+            if method == "GET" and parts == ["endpoint-delivery", "commands"]:
+                if not _operator_authorized(event, "inventory_read", include_break_glass=False):
+                    return _response(
+                        403,
+                        {"error": "endpoint delivery commands require inventory-read authority"},
+                    )
+                query = event.get("queryStringParameters") or {}
+                if not isinstance(query, dict):
+                    return _response(400, {"error": "query parameters are invalid"})
+                return _response(
+                    200, _endpoint_delivery_commands(tenant, query.get("deploymentId"))
+                )
             if method == "GET" and parts in (
                 ["runtime-releases"],
                 ["version-compliance"],

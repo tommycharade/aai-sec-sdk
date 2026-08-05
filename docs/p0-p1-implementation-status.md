@@ -332,8 +332,14 @@ releases have independently approved manifests; deployment-owned delivery
 packages now bind an exact release, OS, architecture, immutable object version
 and separate package approval; schema-v2 endpoint reports sign platform
 identity; and the control plane/UI derive an exact device-installation-agent
-preflight without exposing package locators. Physical Intune distribution,
-provider credentials/outbox/idempotency, dispatch-time reauthorization and
+preflight without exposing package locators. Physical Intune distribution
+remains open, but provider governance and the dormant command boundary are now
+implemented. Intune configuration is an immutable two-subject lifecycle; the
+API validates a dedicated tenant-tagged credential reference without reading
+it. Reconciliation transactionally creates idempotent, locator-free outbox
+commands from exact provider, rollout, deployment, agent, signed endpoint
+evidence and package state. Dispatch remains explicitly disabled. The isolated
+Graph worker, online reauthorization, owned-group/assignment convergence and
 live upgrade/rollback acceptance remain open.
 
 ### P1-FLT-09 and P1-POL-10 implementation evidence

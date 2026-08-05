@@ -21,14 +21,20 @@ No secret value, package byte or Graph request body is pasted into the UI.
 **Actor:** platform administrator and independent approver
 
 1. Open **Integrations → Microsoft Intune → Hosted delivery**.
-2. Enter only the secret ARN and reviewed ownership metadata.
-3. Run **Verify configuration**. The server validates tags, KMS key, provider
-   tenant, package identity digests and least-privilege dry-run access.
-4. Review the exact affected deployments, packages, permission evidence and
+2. Enter only the secret ARN, canonical Microsoft tenant ID, explicit pilot
+   deployments, permission-evidence digest and rationale.
+3. Create the draft. The server validates the exact tenant namespace, tags,
+   dedicated KMS key and referenced deployments without reading the secret.
+4. Review the exact affected deployments, permission evidence and
    immutable configuration digest.
 5. Submit for approval.
 6. A different authorized person approves the exact revision.
-7. Enable one non-production deployment and leave all others disabled.
+7. Activate one non-production deployment and leave all others outside the
+   explicit configuration scope.
+
+The API lifecycle is implemented; this Integrations workspace is the next UI
+slice. Activation currently enables dormant outbox creation only, not Graph
+dispatch.
 
 Editing the configuration invalidates approval and returns it to draft.
 
@@ -51,10 +57,12 @@ Editing the configuration invalidates approval and returns it to draft.
 **Actor:** fleet engineer
 
 1. Start the normal revision-bound runtime canary.
-2. The control plane derives the cohort and commits exact outbox jobs
+2. The control plane derives the cohort and commits exact dormant outbox jobs
    automatically.
-3. Watch the provider progression: queued, resolving targets, converging
-   members, converging assignment and assigned reported.
+3. Until the worker phase is enabled, confirm the command says **Dispatch
+   disabled**. After worker acceptance, watch the provider progression: queued,
+   resolving targets, converging members, converging assignment and assigned
+   reported.
 4. Treat assigned reported as **Awaiting runtime attestation**.
 5. Expand only after the exact target release is freshly attested and rollout
    health remains inside the approved bounds.

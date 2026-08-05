@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added independently governed Microsoft Intune delivery configuration and a
+  dormant transactional outbox. Exact tenant/KMS/purpose-bound Secrets Manager
+  metadata is revalidated at draft and activation boundaries without secret
+  read or decrypt authority. A distinct security operator must approve the
+  immutable version. Scheduled rollout reconciliation now commits idempotent
+  commands and primary evidence only while provider, rollout, deployment,
+  agent, signed endpoint evidence and package authority still match. Dispatch
+  is explicitly disabled; no Microsoft Graph worker or mutation is enabled.
+
 - Documented the provider-correct Microsoft Intune delivery architecture:
   Graph app delivery is group-assignment based, so hosted rollout requires an
   exact AAI-owned cohort rather than a browser-selected managed device. Intune

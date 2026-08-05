@@ -243,12 +243,13 @@ attestation posture with release-bound enforcement evidence.
 ### Hosted endpoint-remediation provider
 
 Executable-free remediation coordination and its read-only operator view are
-implemented and synthetically tested. The software now validates an immutable
-package registry and derives a `1:1:1` endpoint readiness binding, but the
-checked-in package authority is intentionally empty and no customer device is
-claimed as ready. A hosted Intune, Jamf or equivalent
-dispatcher remains deliberately gated on provider-owned inputs that engineering
-must not invent:
+implemented and synthetically tested. The software validates an immutable
+package registry, derives a `1:1:1` endpoint readiness binding, governs an
+Intune credential reference through independent approval and can create exact
+dormant outbox commands transactionally. The checked-in package authority is
+intentionally empty, dispatch is explicitly disabled and no customer device is
+claimed as ready. A hosted Intune dispatcher remains deliberately gated on
+provider-owned inputs that engineering must not invent:
 
 - the approved endpoint-management provider and a non-production managed-device
   cohort;

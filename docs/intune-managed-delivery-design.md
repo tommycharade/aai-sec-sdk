@@ -18,10 +18,11 @@ not pretend that accepting a Graph mutation means the package installed.
 Provider convergence is `assigned_reported`; only fresh challenge-bound runtime
 attestation is `verified`.
 
-This design is intentionally staged. The first implementation adds the target
-identity and disabled-by-default adapter authority. Real Graph writes remain
-disabled until the group, package, credential, outbox, reconciliation and live
-acceptance gates in this document are all satisfied.
+This design is intentionally staged. The control plane now retains the target
+identity, independently governed Intune configuration and transactional dormant
+outbox. Real Graph writes remain disabled until the worker, owned group,
+provider reconciliation and live acceptance gates in this document are all
+satisfied.
 
 ## Provider constraint and identity chain
 
@@ -104,6 +105,47 @@ browser **Install** action. One DynamoDB transaction stores:
 Only the opaque job key is sent to the FIFO queue. Failure to enqueue leaves the
 outbox index intact for a bounded scheduled dispatcher. Acceptance by SQS
 removes only the pending index attributes; it does not alter provider status.
+
+### Implemented dormant phase
+
+The current implementation creates no queue consumer and performs no Graph
+request. The five-minute rollout reconciler first materializes each
+server-selected target only when all of these exact records still match in one
+DynamoDB transaction:
+
+- active Intune provider pointer and independently approved immutable version;
+- live rollout revision/state and deployment SDK version;
+- active agent lifecycle revision;
+- signed endpoint evidence revision and digest; and
+- deployment-owned package/app-identity digests.
+
+Targets are then sealed into immutable pages of at most 40 entries. A final
+transaction checks those exact page digests and creates one complete command
+per package/cohort, content-minimised primary audit evidence and an
+`EndpointDeliveryOutbox` index entry. This ensures the future group-assignment
+worker cannot mistake one device write for complete desired membership.
+Reconciliation is idempotent by exact tenant-bound target, page, cohort and
+instruction digests. The operator view states
+`dispatchEnabled: false` and omits the secret ARN, directory registration ID,
+package locator and complete instruction. The next phase may dispatch only the
+opaque command ID and must remove the outbox index attributes only after FIFO
+acceptance.
+
+## Governed provider configuration
+
+Intune configuration uses an immutable `draft -> review -> approved -> active`
+ledger. A platform administrator authors and submits a version. A different
+subject with `provider_approval` authority must approve or reject it; the author
+cannot self-approve even if they also hold platform-administrator authority.
+Activation compares the expected active version and atomically retires its
+predecessor.
+
+The closed draft schema contains the canonical Microsoft tenant UUID, explicit
+deployment IDs, permission-evidence SHA-256, rationale and a Secrets Manager
+ARN. The API validates exact tenant namespace, dedicated KMS key and exact tag
+set at both draft and activation boundaries using only `DescribeSecret`. The
+handler has neither `GetSecretValue` nor decrypt authority. API projections
+replace the ARN with a one-way reference digest.
 
 ## Dispatch-time online reauthorization
 
@@ -190,7 +232,7 @@ the role cannot mutate unowned groups or apps.
 
 No new primary navigation item is added.
 
-- **Integrations** configures the Intune delivery connection, secret ARN,
+- **Integrations** will configure the Intune delivery connection, secret ARN,
   package identities and owned-group posture. Secret values are never entered.
 - **Rollouts → Runtime releases → Delivery readiness** adds provider-target and
   assignment posture after package and binding readiness.
@@ -205,7 +247,7 @@ It never offers a free-form device ID, app ID, Graph URL or request-body field.
 
 ## Secure defaults and non-goals
 
-- Hosted dispatch is disabled by default.
+- Hosted dispatch is disabled; current outbox records have no consumer.
 - The checked-in package and provider catalogs are empty and not healthy.
 - Unknown Graph fields, redirects, origins, IDs, pagination links and response
   codes fail closed.
