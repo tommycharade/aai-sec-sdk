@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added a persistent deployment-owned enterprise data boundary for the AWS
+  control plane: strict customer-managed KMS key and approved retained-data
+  Region authority, fail-closed operator source-IP restrictions, customer-key
+  encryption for retained tenant stores and queues, deletion classes and a
+  focused read-only UI/API posture. PrivateLink, CMK-controlled CloudWatch logs
+  and live customer acceptance remain explicitly open.
+
 - Added governed ServiceNow, Jira Cloud and PagerDuty incident workflows.
   Platform administrators register only typed provider metadata and a
   tenant-scoped Secrets Manager ARN, prove the exact revision with a synthetic

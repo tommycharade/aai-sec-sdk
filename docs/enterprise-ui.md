@@ -227,3 +227,17 @@ browser never accepts an OIDC client secret, SCIM bearer, tenant authority or
 role claim. Configuration status is not acceptance evidence: the UI continues
 to distinguish deployed federation from completed OIDC, joiner/mover/leaver,
 role-denial and two-person MFA exercises.
+
+### Data boundaries
+
+Administration includes one focused read-only **Data boundaries** page. It
+shows encryption ownership and a redacted key fingerprint, primary and
+approved retained-data Regions, operator-network mode and count, Conditional
+Access evidence presence, deletion behavior by data class, and separate
+deployment-approval versus live-acceptance status. Every concept has
+keyboard-accessible contextual help.
+
+The page must state `PrivateLink not configured` while only source-IP
+restriction exists and must show the limits of residency and key-scope claims.
+It offers no KMS, Region or network editor: those controls remain reviewed
+deployment authority and cannot be weakened by a browser session.

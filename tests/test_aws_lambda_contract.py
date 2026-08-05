@@ -759,6 +759,70 @@ def _event(
     }
 
 
+def test_data_boundary_posture_and_operator_source_ip_fail_closed(monkeypatch: Any) -> None:
+    """Only API Gateway's source address can cross a configured human boundary."""
+    key_arn = "arn:aws:kms:eu-west-1:111111111111:key/11111111-1111-4111-8111-111111111111"
+    monkeypatch.setenv("DATA_BOUNDARY_STATUS", "configured")
+    monkeypatch.setenv("DATA_BOUNDARY_HOME_REGION", "eu-west-1")
+    monkeypatch.setenv("DATA_BOUNDARY_APPROVED_REGIONS", json.dumps(["eu-west-1", "eu-west-2"]))
+    monkeypatch.setenv("DATA_BOUNDARY_KEY_ARN", key_arn)
+    monkeypatch.setenv("DATA_BOUNDARY_KEY_OWNERSHIP", "customer-managed")
+    monkeypatch.setenv("DATA_BOUNDARY_OPERATOR_ACCESS_MODE", "ip-restricted")
+    monkeypatch.setenv("DATA_BOUNDARY_OPERATOR_IPV4_CIDRS", json.dumps(["93.184.216.34/32"]))
+    monkeypatch.setenv("DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_CONFIGURED", "true")
+    monkeypatch.setenv("DATA_BOUNDARY_APPROVAL_EVIDENCE_CONFIGURED", "true")
+    module, table = _load_handler(monkeypatch)
+    table.put_item(
+        Item=module._item_key("tenant-boundary", "TENANT", "root") | {"id": "tenant-boundary"}
+    )
+    claims = {
+        "custom:tenant_id": "tenant-boundary",
+        "cognito:groups": ["auditor"],
+        "sub": "auditor-a",
+    }
+
+    missing = _event("/api/enterprise/data-boundary", "GET", claims=claims)
+    missing["headers"]["x-forwarded-for"] = "93.184.216.34"
+    denied = _invoke(module, missing)
+    assert denied["statusCode"] == 403
+    assert json.loads(denied["body"])["requiredBoundary"] == "ip-restricted"
+
+    outside = _event("/api/enterprise/data-boundary", "GET", claims=claims)
+    outside["requestContext"]["http"]["sourceIp"] = "8.8.8.8"
+    assert _invoke(module, outside)["statusCode"] == 403
+
+    allowed = _event("/api/enterprise/data-boundary", "GET", claims=claims)
+    allowed["requestContext"]["http"]["sourceIp"] = "93.184.216.34"
+    response = _invoke(module, allowed)
+    assert response["statusCode"] == 200, response
+    posture = json.loads(response["body"])
+    assert posture["status"] == "configured"
+    assert posture["encryption"] == {
+        "ownership": "customer-managed",
+        "keyFingerprint": "11111111",
+        "scope": "retained-tenant-data-and-durable-queues",
+        "rotationRequired": True,
+    }
+    assert posture["operatorAccess"]["allowedNetworkCount"] == 1
+    assert "93.184.216.34" not in response["body"]
+    assert key_arn not in response["body"]
+    assert posture["operatorAccess"]["privateLinkConfigured"] is False
+
+
+def test_data_boundary_runtime_rejects_incomplete_configured_authority(
+    monkeypatch: Any,
+) -> None:
+    """A configured label cannot survive without its network and evidence boundary."""
+    monkeypatch.setenv("DATA_BOUNDARY_STATUS", "configured")
+    monkeypatch.setenv("DATA_BOUNDARY_HOME_REGION", "eu-west-1")
+    monkeypatch.setenv("DATA_BOUNDARY_APPROVED_REGIONS", json.dumps(["eu-west-1"]))
+    monkeypatch.setenv("DATA_BOUNDARY_KEY_OWNERSHIP", "customer-managed")
+    monkeypatch.setenv("DATA_BOUNDARY_OPERATOR_ACCESS_MODE", "ip-restricted")
+    monkeypatch.setenv("DATA_BOUNDARY_OPERATOR_IPV4_CIDRS", "[]")
+    with pytest.raises(RuntimeError, match="incomplete"):
+        _load_handler(monkeypatch)
+
+
 def _invoke(module: Any, event: dict[str, Any]) -> dict[str, Any]:
     """Invoke the Lambda with the context value unused by this handler."""
     return cast(dict[str, Any], module.handler(event, None))
@@ -15171,7 +15235,8 @@ def test_aws_integrity_baselines_are_private_versioned_and_handler_scoped() -> N
     end = stack.index("});", start)
     bucket = stack[start:end]
     assert "versioned: true" in bucket
-    assert "s3.BucketEncryption.S3_MANAGED" in bucket
+    assert "s3.BucketEncryption.KMS" in bucket
+    assert "encryptionKey: dataProtectionKey" in bucket
     assert "s3.BlockPublicAccess.BLOCK_ALL" in bucket
     assert "enforceSSL: true" in bucket
     assert "cdk.RemovalPolicy.RETAIN" in bucket
@@ -15183,6 +15248,21 @@ def test_aws_integrity_baselines_are_private_versioned_and_handler_scoped() -> N
     assert 'CfnOutput(this, "IntegrityBaselineBucketName"' in stack
 
 
+def test_aws_data_stores_and_queues_share_one_isolated_data_key_boundary() -> None:
+    """Retained tenant stores and durable transports cannot use weak defaults."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    assert stack.count("encryption: dynamodb.TableEncryption.CUSTOMER_MANAGED") == 4
+    assert stack.count("encryptionKey: dataProtectionKey") >= 8
+    assert "sqs.QueueEncryption.SQS_MANAGED" not in stack
+    assert "sqs.QueueEncryption.KMS_MANAGED" not in stack
+    assert stack.count("encryptionMasterKey: dataProtectionKey") >= 20
+    assert "masterKey: dataProtectionKey" in stack
+    assert 'new cdk.CfnOutput(this, "DataBoundaryStatus"' in stack
+    assert 'new cdk.CfnOutput(this, "DataBoundaryKeyOwnership"' in stack
+
+
 def test_aws_discovery_pages_are_private_versioned_and_handler_scoped() -> None:
     """Fleet inventory payloads require retained exact-version private storage."""
     stack = (
@@ -15192,7 +15272,8 @@ def test_aws_discovery_pages_are_private_versioned_and_handler_scoped() -> None:
     end = stack.index("});", start)
     bucket = stack[start:end]
     assert "versioned: true" in bucket
-    assert "s3.BucketEncryption.S3_MANAGED" in bucket
+    assert "s3.BucketEncryption.KMS" in bucket
+    assert "encryptionKey: dataProtectionKey" in bucket
     assert "s3.BlockPublicAccess.BLOCK_ALL" in bucket
     assert "enforceSSL: true" in bucket
     assert "cdk.RemovalPolicy.RETAIN" in bucket

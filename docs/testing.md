@@ -348,3 +348,20 @@ shape, binding, malformed-response handling, and fail-closed behavior. They do
 not certify an external deployment. Provider integrations should add
 ephemeral-service tests for authentication, timeouts, stale versions, replay,
 and service-unavailable responses.
+
+## Data-boundary contracts
+
+Deployment tests reject duplicate or unknown manifest fields, private or
+non-canonical source networks, wrong-account or wrong-Region keys, disabled
+keys and keys without rotation. They prove ambient environment values cannot
+replace persisted authority and a configured stack cannot deploy after that
+authority is lost. CDK synthesis tests bind customer-key encryption to retained
+DynamoDB, S3, SQS and SNS resources.
+
+Lambda adversarial tests deny missing and outside source context, ignore a
+spoofed forwarding header, admit an exact approved address, enforce tenant
+roles and prove no full key ARN or CIDR enters the response. UI tests verify the
+page remains read-only and distinguishes IP restriction, PrivateLink and live
+acceptance. Browser checks cover desktop, narrow layouts and keyboard-accessible
+context help. These tests are software evidence, not a completed customer KMS,
+deletion or private-connectivity acceptance exercise.

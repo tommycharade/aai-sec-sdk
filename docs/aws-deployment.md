@@ -73,6 +73,42 @@ The stack creates:
   alarms (subscribe the enterprise SOC endpoint before production);
 - a private S3 UI bucket behind CloudFront.
 
+## Enterprise data boundary
+
+Routine deployments create a retained rotating service-managed data key for
+retained control-plane stores. To bind a customer-managed key, approved
+retained-data Regions and operator source networks, copy
+`infra/aws-control-plane/data-boundary.example.json` to a protected path and
+replace every synthetic value. The KMS key must be enabled, symmetric,
+customer-owned, same-account and same-Region, with automatic rotation enabled.
+
+```bash
+python3 scripts/deploy_aws_control_plane.py check-data-boundary \
+  --config /protected/path/data-boundary.json \
+  --profile p1 --region eu-west-2
+
+python3 scripts/deploy_aws_control_plane.py configure-data-boundary \
+  --config /protected/path/data-boundary.json \
+  --confirm-data-boundary-review \
+  --profile p1 --region eu-west-2
+
+python3 scripts/deploy_aws_control_plane.py deploy \
+  --profile p1 --region eu-west-2
+```
+
+The configuration command persists only the secret-free reviewed manifest in
+an encrypted stack-specific SSM parameter. Deploy erases ambient boundary
+variables, re-verifies the key and recovery Region, then checks the resulting
+CloudFormation outputs. Losing this manifest after configuration blocks future
+deployment. The example CIDR is synthetic and must not be reused.
+
+The first implementation restricts authenticated human routes by API Gateway
+source IPv4 address. It is not AWS PrivateLink. The approved Region claim
+covers retained DynamoDB, tenant-data S3, SQS and SNS state; CloudFront,
+Cognito/Entra processing, CloudWatch logs, static assets, provider secrets and
+dedicated signing keys have separate boundaries. Review the deletion classes
+and acceptance requirements in [Enterprise data boundary](enterprise-data-boundary-design.md).
+
 API Gateway exposes JWT claim values to Lambda as strings even when Cognito's
 source claim is an array. The handler therefore applies bounded parsing to
 `cognito:groups` and compares only exact role names. Verify both an authorized

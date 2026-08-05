@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "homeRegion": "eu-west-2",
+  "approvedDataRegions": [
+    "eu-west-1",
+    "eu-west-2"
+  ],
+  "customerManagedDataKeyArn": "arn:aws:kms:eu-west-2:111111111111:key/11111111-1111-4111-8111-111111111111",
+  "operatorAccessMode": "ip-restricted",
+  "operatorAllowedIpv4Cidrs": [
+    "93.184.216.34/32"
+  ],
+  "keyPolicyEvidenceRef": "SEC-KMS-REVIEW-1234",
+  "residencyEvidenceRef": "LEGAL-RESIDENCY-1234",
+  "deletionEvidenceRef": "PRIVACY-DELETION-1234",
+  "conditionalAccessEvidenceRef": "ENTRA-CA-1234",
+  "approvalEvidenceRef": "CHANGE-1234"
+}

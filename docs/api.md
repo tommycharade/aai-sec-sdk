@@ -1012,3 +1012,23 @@ Supported events are `case.opened`, `case.contained`, `case.resolved` and
 `case.closed`. See [Governed incident workflow
 integrations](incident-workflow-integrations-design.md) for queue semantics,
 credential schemas, provider mappings and residual risks.
+
+## Enterprise data-boundary posture
+
+`GET /api/enterprise/data-boundary` is a read-only authenticated operator
+route. It returns deployment-owned encryption, residency, network-access,
+deletion and acceptance posture. The response exposes only the final eight
+characters of the KMS key identity and the count of approved networks; it does
+not return key ARNs, CIDRs or evidence-reference values.
+
+When a data boundary is configured, every human tenant route first checks API
+Gateway's `requestContext.http.sourceIp` against the persisted reviewed IPv4
+allow-list. Missing, malformed or outside source context returns HTTP 403
+before tenant resolution. Forwarding headers cannot override this decision.
+Machine, SCIM, enrollment, discovery, endpoint and agent routes keep their
+separate authentication boundaries.
+
+The route reports `privateLinkConfigured: false` until a private ingress is
+actually deployed. `approvedDataRegions` covers retained application data; it
+does not claim that CloudFront, Cognito, Entra or other global providers process
+only in those Regions. See [Enterprise data boundary](enterprise-data-boundary-design.md).
