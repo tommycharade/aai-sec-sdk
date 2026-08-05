@@ -446,7 +446,7 @@ def _validated_intune_graph_url(value: str) -> str:
     query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
     if (
         set(query) - {"$select", "$top", "$skiptoken"}
-        or query.get("$select") != ["id,userId"]
+        or query.get("$select") != ["id,userId,azureADDeviceId"]
         or query.get("$top") != ["100"]
         or len(query.get("$skiptoken", [])) > 1
         or any(len(item) > 1_024 for item in query.get("$skiptoken", []))
@@ -459,7 +459,7 @@ def _collect_intune_devices(token: str, business_units: dict[str, str]) -> list[
     """Collect managed devices without inferring agent installation evidence."""
     url: str | None = (
         "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices"
-        "?$select=id,userId&$top=100"
+        "?$select=id,userId,azureADDeviceId&$top=100"
     )
     observations: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -484,15 +484,23 @@ def _collect_intune_devices(token: str, business_units: dict[str, str]) -> list[
         if not isinstance(devices, list) or len(devices) > _MAX_USERS_PER_PAGE:
             raise ManagedDiscoveryError("provider_response_invalid")
         for device in devices:
-            if not isinstance(device, dict) or set(device) - {"id", "userId"}:
+            if not isinstance(device, dict) or set(device) - {
+                "id",
+                "userId",
+                "azureADDeviceId",
+            }:
                 raise ManagedDiscoveryError("provider_response_invalid")
             identifier = device.get("id")
             user_id = device.get("userId")
+            directory_registration_id = device.get("azureADDeviceId")
             if (
                 not isinstance(identifier, str)
                 or not _uuid_like(identifier)
                 or identifier != identifier.lower()
                 or identifier in seen
+                or not isinstance(directory_registration_id, str)
+                or not _uuid_like(directory_registration_id)
+                or directory_registration_id != directory_registration_id.lower()
                 or user_id not in (None, "")
                 and (
                     not isinstance(user_id, str)
@@ -508,6 +516,10 @@ def _collect_intune_devices(token: str, business_units: dict[str, str]) -> list[
                 # Membership of managedDevices is the provider fact. No binary,
                 # process or project evidence is inferred at this boundary.
                 "managed": True,
+                # Intune names this azureADDeviceId. It is the Entra deviceId
+                # alternate key, not the directory object ID used for group
+                # membership; the delivery worker must resolve it online.
+                "directoryDeviceRegistrationId": directory_registration_id,
                 "userIds": [user_id] if user_id else [],
             }
             if user_id in business_units:

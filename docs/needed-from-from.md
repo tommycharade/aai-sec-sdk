@@ -243,12 +243,13 @@ attestation posture with release-bound enforcement evidence.
 ### Hosted endpoint-remediation provider
 
 Executable-free remediation coordination and its read-only operator view are
-implemented and synthetically tested. The software now validates an immutable
-package registry and derives a `1:1:1` endpoint readiness binding, but the
-checked-in package authority is intentionally empty and no customer device is
-claimed as ready. A hosted Intune, Jamf or equivalent
-dispatcher remains deliberately gated on provider-owned inputs that engineering
-must not invent:
+implemented and synthetically tested. The software validates an immutable
+package registry, derives a `1:1:1` endpoint readiness binding, governs an
+Intune credential reference through independent approval and can create exact
+dormant outbox commands transactionally. The checked-in package authority is
+intentionally empty, dispatch is explicitly disabled and no customer device is
+claimed as ready. A hosted Intune dispatcher remains deliberately gated on
+provider-owned inputs that engineering must not invent:
 
 - the approved endpoint-management provider and a non-production managed-device
   cohort;
@@ -261,6 +262,12 @@ must not invent:
 - a tenant-tagged Secrets Manager resource and dedicated IAM execution role for
   the provider adapter, with no provider credentials exposed to the browser,
   model or enrolled agent;
+- separate read-only discovery and delivery application identities; the
+  discovery credential must not be widened silently;
+- customer-approved AAI-owned assigned-membership Entra device-group authority
+  and the Intune mobile-app IDs whose digests match the package manifests;
+- Graph permission and scope evidence proving the adapter can manage only the
+  intended device identities, AAI-owned groups and approved app assignments;
 - approved privilege, restart, retry and maintenance-window behavior; and
 - retained provider job evidence and a live acceptance window proving that a
   channel success remains `awaiting_attestation` until the governed host emits

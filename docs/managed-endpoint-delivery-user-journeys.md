@@ -53,9 +53,9 @@ No manual “force bind” control exists. Ambiguity is corrected at its source.
 4. Observe four independent states per endpoint:
    **release approved**, **package ready**, **target bound**, and
    **runtime verified**.
-5. If a customer-operated Intune worker is configured, it leases only exact
-   server-selected work. Otherwise export the executable-free coordination
-   queue to the customer-owned workflow.
+5. The server creates exact dormant outbox commands automatically. Until the
+   separately reviewed worker exists, confirm they remain **Dispatch disabled**;
+   do not export or manually execute their internal instruction.
 6. Treat channel success as **Awaiting attestation**.
 7. Expand only after every selected endpoint has fresh exact target
    attestation and the server reports canary convergence.
@@ -87,15 +87,17 @@ No manual “force bind” control exists. Ambiguity is corrected at its source.
 5. Observe delivery-channel reports without treating them as proof.
 6. Close the rollback only when the frozen cohort attests the retained release.
 
-## Journey 6 — connect Microsoft Intune later
+## Journey 6 — complete Microsoft Intune delivery
 
 **Actor:** platform administrator
 
 1. Register the approved Entra/Intune application outside the browser and put
    its credential in the tenant-tagged AWS Secrets Manager namespace.
-2. Deploy the dedicated least-privilege Intune worker role.
-3. Run synthetic provider verification without exposing the credential value.
-4. Enable one non-production deployment and a small managed-device cohort.
+2. Create, independently approve and activate the immutable provider
+   configuration for one non-production deployment.
+3. Confirm deterministic commands are created with **Dispatch disabled**.
+4. Deploy the dedicated least-privilege Intune worker role and run synthetic
+   provider verification without exposing the credential value.
 5. Exercise install, response loss, duplicate submission, provider outage,
    retry, rotation, revocation and rollback.
 6. Retain provider job evidence and independently verify endpoint attestation.

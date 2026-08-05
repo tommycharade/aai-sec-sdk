@@ -11,9 +11,12 @@ provider worker can dispatch privileged installation work:
 2. a current bijective binding between one managed device, one observed
    installation and one active enrolled agent.
 
-This tranche does **not** call Microsoft Graph, upload executable bytes, store
+This tranche does **not** call Microsoft Graph, upload executable bytes, read
 Intune credentials or claim that an endpoint installed anything. It adds a
-read-only preflight beside the existing runtime-remediation queue so an
+read-only preflight plus an independently approved credential reference and a
+dormant transactional outbox beside the existing runtime-remediation queue. The
+API stores only a tenant/KMS/tag-validated secret ARN and cannot read its value. A
+provider worker still does not exist. The preflight lets an
 operator can distinguish “release intent exists” from “release intent also has
 an exact approved delivery object and an unambiguous target identity.” The
 existing claim/report queue is unchanged and cannot retrieve package locators.
@@ -198,6 +201,13 @@ The next tranche may add hosted dispatch only after this authority is deployed:
 The worker must not accept executable bytes, commands, device IDs or package
 IDs from the browser or model.
 
+Microsoft Graph app deployment is group-assignment based rather than a generic
+per-managed-device install action. The provider adapter must therefore resolve
+the Intune `azureADDeviceId` alternate key to an exact Entra directory object
+online and converge only an AAI-owned rollout cohort group. See
+[Microsoft Intune managed delivery](intune-managed-delivery-design.md) and its
+[operator journeys](intune-managed-delivery-user-journeys.md).
+
 ## Threats and controls
 
 | Threat | Control |
@@ -211,6 +221,11 @@ IDs from the browser or model.
 | MDM channel success widens runtime authority | Channel observation remains separate; only attestation completes rollout. |
 | Service bearer becomes software-distribution credential | Existing remediation bearer receives no locator, command, executable or provider credential. |
 | Oversized fleet is presented as a complete preflight | Existing bounded tenant inventory and deployment population limits fail the read rather than truncating silently. |
+| Provider author self-approves privileged delivery | A different canonical security-operator subject must approve the immutable version; delegated and break-glass grants are excluded. |
+| Secret reference crosses tenant or purpose | Draft and activation validate exact ARN namespace, dedicated KMS key and exact tenant/purpose tags with metadata-only authority. |
+| Partial per-device work is mistaken for complete Intune desired state | Individually authorized targets are sealed into bounded pages; only a complete package/cohort command receives an outbox key. |
+| Provider, rollout, agent or evidence changes during materialization | Conditional DynamoDB transactions roll back stale target, page or command creation. |
+| An old complete command remains after target drift | Dispatch is disabled in this phase; the future worker must suppress predecessors and reauthorize the complete live cohort before any Graph write. |
 
 ## Verification
 
@@ -220,16 +235,22 @@ Automated evidence in this tranche:
 - unknown fields, duplicate platform identity, traversal-shaped object keys,
   mutable/missing object versions, release mismatch and approval drift denial;
 - exact ready binding and explicit missing-platform blocker projection;
+- two-subject provider lifecycle, closed schemas, secret-reference redaction and
+  activation-time metadata revalidation;
+- 40-target page boundaries, complete cohort sealing, idempotent replay and
+  concurrent provider-cutover rollback;
 - tenant-role and exact machine `inventory_read` route isolation;
 - content minimisation and credential/path/command absence;
 - UI loading, unavailable, ready and blocked states;
 - keyboard, automated accessibility and 390-pixel narrow-browser acceptance; and
 - full SDK and UI quality gates.
 
-The remaining provider tranche must prove stale, unmanaged, revoked,
-cross-deployment and duplicate binding denial again at dispatch time, package
-and binding reauthorization, outbox/idempotency behavior, permission-denied
-provider states, and causal post-dispatch evidence. Live completion still
-requires a real Intune tenant, dedicated provider role, managed pilot devices,
+The dormant outbox now proves exact-state transactional creation, idempotent
+reconciliation and concurrent provider-cutover denial. The remaining provider
+tranche must prove stale, unmanaged, revoked, cross-deployment and duplicate
+binding denial again at dispatch time, package and binding reauthorization,
+permission-denied provider states, stale-command suppression and causal
+post-dispatch evidence. Live completion still requires a real Intune tenant,
+dedicated provider role, managed pilot devices,
 immutable uploaded packages and upgrade/rollback acceptance. The software must
 continue to label those as outstanding.

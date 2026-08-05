@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,7 @@ def _device(value: Any) -> dict[str, Any]:
             "managed",
             "businessUnit",
             "userIds",
+            "directoryDeviceRegistrationId",
         }
     ):
         raise EndpointAssemblyError("authoritative device observation is invalid")
@@ -76,6 +78,19 @@ def _device(value: Any) -> dict[str, Any]:
         raise EndpointAssemblyError("authoritative device managed state is invalid")
     if "businessUnit" in value:
         result["businessUnit"] = _identifier(value["businessUnit"], "businessUnit")
+    if "directoryDeviceRegistrationId" in value:
+        registration_id = value["directoryDeviceRegistrationId"]
+        try:
+            normalized_registration_id = str(uuid.UUID(registration_id))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise EndpointAssemblyError(
+                "authoritative directory device registration identity is invalid"
+            ) from error
+        if registration_id != normalized_registration_id:
+            raise EndpointAssemblyError(
+                "authoritative directory device registration identity is invalid"
+            )
+        result["directoryDeviceRegistrationId"] = normalized_registration_id
     users = value.get("userIds", [])
     if not isinstance(users, list) or len(users) > 20:
         raise EndpointAssemblyError("authoritative device userIds are invalid")
@@ -260,7 +275,15 @@ def assemble_inventory(
         if device_id in reports_seen:
             raise EndpointAssemblyError("endpoint devices must have at most one current report")
         reports_seen.add(device_id)
-        expected_device = devices[device_id]
+        # The directory registration identity comes only from MDM authority.
+        # Endpoint evidence cannot echo or override it, so compare only the
+        # metadata the endpoint is allowed to attest while retaining the field
+        # in the assembled authoritative output.
+        expected_device = {
+            key: value
+            for key, value in devices[device_id].items()
+            if key != "directoryDeviceRegistrationId"
+        }
         if normalized_device != expected_device:
             raise EndpointAssemblyError(
                 "endpoint report device metadata differs from MDM authority"

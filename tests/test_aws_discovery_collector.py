@@ -326,11 +326,15 @@ def test_managed_intune_collector_publishes_only_minimised_device_facts(
         module,
         "_open_json",
         lambda *args, **kwargs: {
-            "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#deviceManagement/managedDevices(id,userId)",
+            "@odata.context": (
+                "https://graph.microsoft.com/v1.0/$metadata#deviceManagement/"
+                "managedDevices(id,userId,azureADDeviceId)"
+            ),
             "value": [
                 {
                     "id": "44444444-4444-4444-8444-444444444444",
                     "userId": user_id,
+                    "azureADDeviceId": "55555555-5555-4555-8555-555555555555",
                 }
             ],
         },
@@ -354,6 +358,7 @@ def test_managed_intune_collector_publishes_only_minimised_device_facts(
                 "kind": "device",
                 "id": "44444444-4444-4444-8444-444444444444",
                 "managed": True,
+                "directoryDeviceRegistrationId": ("55555555-5555-4555-8555-555555555555"),
                 "userIds": [user_id],
                 "businessUnit": "Platform",
             }
@@ -389,6 +394,7 @@ def test_intune_pagination_and_provider_fields_fail_closed(
                 {
                     "id": "44444444-4444-4444-8444-444444444444",
                     "userId": None,
+                    "azureADDeviceId": "55555555-5555-4555-8555-555555555555",
                     "deviceName": "must-not-be-accepted",
                 }
             ]
@@ -397,6 +403,23 @@ def test_intune_pagination_and_provider_fields_fail_closed(
     with pytest.raises(module.ManagedDiscoveryError) as overbroad:
         module._collect_intune_devices("synthetic-token", {})
     assert overbroad.value.code == "provider_response_invalid"
+
+    monkeypatch.setattr(
+        module,
+        "_open_json",
+        lambda *args, **kwargs: {
+            "value": [
+                {
+                    "id": "44444444-4444-4444-8444-444444444444",
+                    "userId": None,
+                    "azureADDeviceId": "not-a-directory-registration-id",
+                }
+            ]
+        },
+    )
+    with pytest.raises(module.ManagedDiscoveryError) as malformed_identity:
+        module._collect_intune_devices("synthetic-token", {})
+    assert malformed_identity.value.code == "provider_response_invalid"
 
 
 def test_intune_configuration_tamper_fails_before_secret_access(

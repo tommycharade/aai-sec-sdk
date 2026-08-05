@@ -598,6 +598,12 @@ class FakeSecretsManager:
         self.secrets[value["SecretId"]]["deleted"] = True
         return {"ARN": self.secrets[value["SecretId"]]["arn"]}
 
+    def describe_secret(self, **value: Any) -> dict[str, Any]:
+        record = self.secrets[value["SecretId"]]
+        if record.get("unavailable"):
+            raise LookupError("synthetic secret unavailable")
+        return dict(record["description"])
+
 
 class FakeKms:
     """Capture exact digest signing calls without exposing private key material."""
@@ -722,6 +728,13 @@ def _load_handler(monkeypatch: Any) -> Any:
     monkeypatch.setenv("WEBHOOK_SECRET_KMS_KEY_ARN", policy_key_id)
     monkeypatch.setenv("WORKFLOW_QUEUE_URL", "https://sqs.example.invalid/workflows.fifo")
     monkeypatch.setenv("WORKFLOW_SECRET_PREFIX", "aai-sec/workflows/")
+    monkeypatch.setenv("AWS_ACCOUNT_ID", "111111111111")
+    monkeypatch.setenv("AWS_PARTITION", "aws")
+    monkeypatch.setenv("ENDPOINT_DELIVERY_SECRET_PREFIX", "aai-sec/endpoint-delivery/")
+    monkeypatch.setenv(
+        "ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN",
+        "arn:aws:kms:eu-west-1:111111111111:key/22222222-2222-4222-8222-222222222222",
+    )
     path = Path(__file__).parents[1] / "infra/aws-control-plane/lambda/handler.py"
     monkeypatch.syspath_prepend(str(path.parent))
     spec = importlib.util.spec_from_file_location("aai_lambda_handler", path)
@@ -10415,6 +10428,34 @@ def test_endpoint_delivery_readiness_requires_signed_platform_and_exact_package(
     assert ambiguous["items"][0]["reasonCode"] == "endpoint_binding_missing"
 
 
+def test_endpoint_discovery_requires_canonical_directory_registration_identity(
+    monkeypatch: Any,
+) -> None:
+    """Provider target identity is canonical MDM authority, not arbitrary text."""
+    module, _table = _load_handler(monkeypatch)
+    valid = module._discovery_observation(
+        {
+            "kind": "device",
+            "id": "device-a",
+            "managed": True,
+            "directoryDeviceRegistrationId": ("22222222-2222-4222-8222-222222222222"),
+        },
+        "endpoint",
+    )
+    assert valid["directoryDeviceRegistrationId"] == ("22222222-2222-4222-8222-222222222222")
+    for invalid in ("not-a-uuid", "22222222-2222-4222-8222-22222222222A"):
+        with pytest.raises(ValueError, match="canonical UUID"):
+            module._discovery_observation(
+                {
+                    "kind": "device",
+                    "id": "device-a",
+                    "managed": True,
+                    "directoryDeviceRegistrationId": invalid,
+                },
+                "endpoint",
+            )
+
+
 def test_runtime_remediation_is_machine_scoped_revision_bound_and_attestation_verified(
     monkeypatch: Any,
 ) -> None:
@@ -14522,7 +14563,16 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
         }
     )
     snapshot = _discovery_snapshot(
-        "endpoint", [{"kind": "device", "id": "device-a", "managed": True}], now=now
+        "endpoint",
+        [
+            {
+                "kind": "device",
+                "id": "device-a",
+                "managed": True,
+                "directoryDeviceRegistrationId": ("22222222-2222-4222-8222-222222222222"),
+            }
+        ],
+        now=now,
     )
     assert (
         _invoke(
@@ -14587,6 +14637,7 @@ def test_incident_case_binds_contains_and_revokes_only_authoritative_agent(
     live_binding = module._endpoint_agent_binding(tenant, "device-a", now=now)
     assert live_binding["operatingSystem"] == "darwin"
     assert live_binding["architecture"] == "arm64"
+    assert live_binding["directoryDeviceRegistrationId"] == ("22222222-2222-4222-8222-222222222222")
     alert_id = "endpoint-alert-a"
     table.put_item(
         Item=module._item_key(tenant, "ALERT", alert_id)
@@ -15504,6 +15555,482 @@ def test_endpoint_alert_delivery_failure_remains_pending_and_retries(monkeypatch
     )["items"]
     assert delivered[0]["deliveryStatus"] == "delivered"
     assert len(module.SNS.messages) == 1
+
+
+def _endpoint_delivery_secret(module: Any, tenant: str) -> str:
+    """Register one synthetic tenant-tagged Intune credential reference."""
+    arn = (
+        "arn:aws:secretsmanager:eu-west-1:111111111111:secret:"
+        f"aai-sec/endpoint-delivery/{tenant}/intune-synthetic"
+    )
+    module._fake_secrets.secrets[arn] = {
+        "description": {
+            "ARN": arn,
+            "KmsKeyId": module._ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN,
+            "Tags": [
+                {"Key": "aai-sec:tenant-id", "Value": tenant},
+                {
+                    "Key": "aai-sec:purpose",
+                    "Value": "endpoint-delivery-provider",
+                },
+            ],
+        }
+    }
+    return arn
+
+
+def test_intune_provider_configuration_requires_independent_approval_and_hides_secret(
+    monkeypatch: Any,
+) -> None:
+    """Intune delivery authority is immutable, two-person and locator-free."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-intune-provider"
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "provider-author",
+    }
+    approver = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "provider-approver",
+    }
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "kratos") | {"id": "kratos", "name": "Kratos"}
+    )
+    secret_arn = _endpoint_delivery_secret(module, tenant)
+    draft_response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/endpoint-delivery/providers/intune/drafts",
+            "POST",
+            body={
+                "providerTenantId": "11111111-1111-4111-8111-111111111111",
+                "providerSecretArn": secret_arn,
+                "deploymentIds": ["kratos"],
+                "permissionEvidenceSha256": "a" * 64,
+                "reason": "Enable reviewed Intune delivery for the Kratos deployment.",
+            },
+            claims=author,
+        ),
+    )
+    assert draft_response["statusCode"] == 201, draft_response
+    draft = json.loads(draft_response["body"])
+    assert draft["state"] == "draft"
+    assert draft["credentialConfigured"] is True
+    assert secret_arn not in draft_response["body"]
+
+    submitted = _invoke(
+        module,
+        _event(
+            "/api/enterprise/endpoint-delivery/providers/intune/versions/1/submit",
+            "POST",
+            body={"expectedContentHash": draft["contentHash"]},
+            claims=author,
+        ),
+    )
+    assert submitted["statusCode"] == 200, submitted
+    table.put_item(
+        Item=module._item_key(tenant, "DELEGATED_GRANT", "provider-review")
+        | {
+            "id": "provider-review",
+            "principal_id": "delegated-reviewer",
+            "role": "security-operator",
+            "scope_type": "deployment",
+            "scope_id": "kratos",
+            "status": "active",
+            "expires_at": int(time.time()) + 300,
+        }
+    )
+    delegated_review = _invoke(
+        module,
+        _event(
+            "/api/enterprise/endpoint-delivery/providers/intune/versions/1/decision",
+            "POST",
+            body={
+                "decision": "approved",
+                "reason": "The delegated operator cannot approve provider-wide authority.",
+            },
+            claims={
+                "custom:tenant_id": tenant,
+                "aai:operator_id": "delegated-reviewer",
+                "sub": "delegated-reviewer",
+            },
+        ),
+    )
+    assert delegated_review["statusCode"] == 403
+    self_review = _invoke(
+        module,
+        _event(
+            "/api/enterprise/endpoint-delivery/providers/intune/versions/1/decision",
+            "POST",
+            body={
+                "decision": "approved",
+                "reason": "The least-privilege Graph permissions were independently verified.",
+            },
+            claims=author,
+        ),
+    )
+    assert self_review["statusCode"] == 403
+    approved = _invoke(
+        module,
+        _event(
+            "/api/enterprise/endpoint-delivery/providers/intune/versions/1/decision",
+            "POST",
+            body={
+                "decision": "approved",
+                "reason": "The least-privilege Graph permissions were independently verified.",
+            },
+            claims=approver,
+        ),
+    )
+    assert approved["statusCode"] == 200, approved
+    activated = _invoke(
+        module,
+        _event(
+            "/api/enterprise/endpoint-delivery/providers/intune/versions/1/activate",
+            "POST",
+            body={"expectedActiveVersion": 0},
+            claims=approver,
+        ),
+    )
+    assert activated["statusCode"] == 200, activated
+    posture = json.loads(activated["body"])
+    assert posture["activeVersion"] == 1
+    assert posture["pendingVersion"] is None
+    assert posture["versions"][0]["approvedBy"] == "provider-approver"
+    assert secret_arn not in activated["body"]
+
+
+def test_intune_provider_activation_revalidates_secret_and_fails_closed(
+    monkeypatch: Any,
+) -> None:
+    """Retagging a reviewed credential prevents it becoming delivery authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-intune-retag"
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "provider-author",
+    }
+    approver = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["security-operator"],
+        "sub": "provider-approver",
+    }
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(tenant, "DEPLOYMENT", "kratos") | {"id": "kratos"})
+    secret_arn = _endpoint_delivery_secret(module, tenant)
+    draft = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/endpoint-delivery/providers/intune/drafts",
+                "POST",
+                body={
+                    "providerTenantId": "11111111-1111-4111-8111-111111111111",
+                    "providerSecretArn": secret_arn,
+                    "deploymentIds": ["kratos"],
+                    "permissionEvidenceSha256": "b" * 64,
+                    "reason": "Enable reviewed Intune delivery for the Kratos deployment.",
+                },
+                claims=author,
+            ),
+        )["body"]
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/endpoint-delivery/providers/intune/versions/1/submit",
+                "POST",
+                body={"expectedContentHash": draft["contentHash"]},
+                claims=author,
+            ),
+        )["statusCode"]
+        == 200
+    )
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/endpoint-delivery/providers/intune/versions/1/decision",
+                "POST",
+                body={
+                    "decision": "approved",
+                    "reason": "The least-privilege Graph permissions were independently verified.",
+                },
+                claims=approver,
+            ),
+        )["statusCode"]
+        == 200
+    )
+    module._fake_secrets.secrets[secret_arn]["description"]["Tags"] = [
+        {"Key": "aai-sec:tenant-id", "Value": "another-tenant"},
+        {"Key": "aai-sec:purpose", "Value": "endpoint-delivery-provider"},
+    ]
+    denied = _invoke(
+        module,
+        _event(
+            "/api/enterprise/endpoint-delivery/providers/intune/versions/1/activate",
+            "POST",
+            body={"expectedActiveVersion": 0},
+            claims=approver,
+        ),
+    )
+    assert denied["statusCode"] == 400
+    root = table.items[(f"TENANT#{tenant}", "ENDPOINT_PROVIDER#intune")]
+    assert root["active_version"] == 0
+    assert (
+        table.items[(f"TENANT#{tenant}", "ENDPOINT_PROVIDER_VERSION#intune:1")]["state"]
+        == "approved"
+    )
+
+
+def test_intune_provider_infrastructure_separates_metadata_and_decrypt_authority() -> None:
+    """The API may inspect delivery secrets but cannot retrieve or decrypt them."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    assert 'new kms.Key(\n      this,\n      "EndpointDeliveryCredentialKey"' in stack
+    assert "ENDPOINT_DELIVERY_SECRET_PREFIX: endpointDeliverySecretPrefix" in stack
+    assert "ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN: endpointDeliveryCredentialKey.keyArn" in stack
+    segment_start = stack.index("The API verifies secret identity, KMS provenance")
+    segment = stack[segment_start : stack.index("policySigningKey.grant", segment_start)]
+    assert 'actions: ["secretsmanager:DescribeSecret"]' in segment
+    assert '"secretsmanager:GetSecretValue"' not in segment
+    assert "endpointDeliveryCredentialKey.grantDecrypt(handler)" not in stack
+    assert 'indexName: "EndpointDeliveryOutbox"' in stack
+    assert '"EndpointDeliveryWorker"' not in stack
+
+
+def test_intune_delivery_outbox_is_idempotent_and_authority_bound(monkeypatch: Any) -> None:
+    """Reconciliation freezes exact live authority without dispatching Graph writes."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-intune-outbox"
+    secret_arn = _endpoint_delivery_secret(module, tenant)
+    provider_configuration = {
+        "schemaVersion": 1,
+        "provider": "intune",
+        "providerTenantId": "11111111-1111-4111-8111-111111111111",
+        "providerSecretArn": secret_arn,
+        "deploymentIds": ["kratos"],
+        "permissionEvidenceSha256": "c" * 64,
+        "reason": "Approved endpoint delivery configuration for synthetic testing.",
+    }
+    provider_hash = module._configuration_hash(provider_configuration)
+    table.put_item(
+        Item=module._item_key(tenant, "ENDPOINT_PROVIDER", "intune")
+        | {
+            "id": "intune",
+            "provider": "intune",
+            "active_version": 1,
+            "latest_version": 1,
+            "pending_version": None,
+            "governance_state": "active",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "ENDPOINT_PROVIDER_VERSION", "intune:1")
+        | {
+            "id": "intune:1",
+            "provider": "intune",
+            "version": 1,
+            "state": "active",
+            "configuration": provider_configuration,
+            "content_hash": provider_hash,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "kratos")
+        | {"id": "kratos", "sdk_version": "1.0.1"}
+    )
+    rollout = {
+        **module._item_key(tenant, "RUNTIME_ROLLOUT", "kratos"),
+        "tenant_id": tenant,
+        "deploymentId": "kratos",
+        "revision": 7,
+        "state": "active",
+    }
+    table.put_item(Item=rollout)
+    for index in range(42):
+        agent_id = f"claude-{index:03d}"
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"kratos:{agent_id}")
+            | {
+                "id": agent_id,
+                "deployment_id": "kratos",
+                "host": "claude-code",
+                "lifecycle_state": "active",
+                "lifecycle_revision": 3,
+            }
+        )
+        table.put_item(
+            Item=module._item_key(tenant, "ENDPOINT_EVIDENCE", f"device-{index:03d}")
+            | {"revision": 5, "reportDigest": f"{index + 1:064x}"}
+        )
+    monkeypatch.setattr(module, "_validated_runtime_rollout", lambda value, _tenant: value)
+    monkeypatch.setattr(module, "_runtime_rollout_agent_selected", lambda *_value: True)
+    monkeypatch.setattr(
+        module,
+        "_runtime_agent_attests_release",
+        lambda agent, *_args, **_kwargs: agent.get("id") == "claude-000",
+    )
+    monkeypatch.setattr(
+        module,
+        "_endpoint_delivery_readiness",
+        lambda _tenant, _deployment: {
+            "packageAuthority": {
+                "packages": [
+                    {
+                        "id": "package-a",
+                        "manifestSha256": "e" * 64,
+                        "objectSha256": "f" * 64,
+                        "providerPackageIdentitySha256": "1" * 64,
+                    }
+                ]
+            },
+            "items": [
+                {
+                    "readyForDispatch": True,
+                    "directoryDeviceRegistrationId": (f"00000000-0000-4000-8000-{index + 1:012d}"),
+                    "deviceId": f"device-{index:03d}",
+                    "agentKey": f"kratos:claude-{index:03d}",
+                    "agentId": f"claude-{index:03d}",
+                    "host": "claude-code",
+                    "releaseId": "claude-code:1.0.1",
+                    "packageId": "package-a",
+                    "bindingDigest": f"{index + 100:064x}",
+                }
+                for index in range(42)
+            ],
+        },
+    )
+    assert module._create_endpoint_delivery_commands(tenant, rollout) == 1
+    assert module._create_endpoint_delivery_commands(tenant, rollout) == 0
+    commands = [
+        item
+        for item in table.items.values()
+        if item.get("sk", "").startswith("ENDPOINT_DELIVERY_COMMAND#")
+    ]
+    assert len(commands) == 1
+    command = commands[0]
+    targets = [
+        item
+        for item in table.items.values()
+        if item.get("sk", "").startswith("ENDPOINT_DELIVERY_TARGET#")
+    ]
+    assert len(targets) == 41
+    assert command["status"] == "pending"
+    assert command["instruction"]["providerVersion"] == 1
+    assert command["instruction"]["rolloutRevision"] == 7
+    assert command["instruction"]["targetCount"] == 41
+    assert len(command["instruction"]["pages"]) == 2
+    assert all(target["instruction"]["agentLifecycleRevision"] == 3 for target in targets)
+    assert command["delivery_outbox_pk"] == f"ENDPOINT_DELIVERY_OUTBOX#{tenant}"
+    assert secret_arn not in json.dumps(command)
+    assert secret_arn not in json.dumps(targets)
+    view = module._endpoint_delivery_commands(tenant, "kratos")
+    assert view["dispatchEnabled"] is False
+    assert view["items"][0]["dispatchEnabled"] is False
+
+
+def test_intune_delivery_outbox_rejects_concurrent_provider_change(monkeypatch: Any) -> None:
+    """A provider cutover during command creation cannot leave stale work queued."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-intune-outbox-race"
+    secret_arn = _endpoint_delivery_secret(module, tenant)
+    configuration = {
+        "providerSecretArn": secret_arn,
+        "deploymentIds": ["kratos"],
+    }
+    table.put_item(
+        Item=module._item_key(tenant, "ENDPOINT_PROVIDER", "intune")
+        | {
+            "active_version": 1,
+            "governance_state": "active",
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "ENDPOINT_PROVIDER_VERSION", "intune:1")
+        | {
+            "provider": "intune",
+            "version": 1,
+            "state": "active",
+            "configuration": configuration,
+            "content_hash": "a" * 64,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "DEPLOYMENT", "kratos")
+        | {"id": "kratos", "sdk_version": "1.0.1"}
+    )
+    rollout = module._item_key(tenant, "RUNTIME_ROLLOUT", "kratos") | {
+        "tenant_id": tenant,
+        "deploymentId": "kratos",
+        "revision": 1,
+        "state": "active",
+    }
+    table.put_item(Item=rollout)
+    table.put_item(
+        Item=module._item_key(tenant, "AGENT", "kratos:claude-a")
+        | {
+            "id": "claude-a",
+            "deployment_id": "kratos",
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        }
+    )
+    table.put_item(
+        Item=module._item_key(tenant, "ENDPOINT_EVIDENCE", "device-a")
+        | {"revision": 1, "reportDigest": "b" * 64}
+    )
+    monkeypatch.setattr(module, "_validated_runtime_rollout", lambda value, _tenant: value)
+    monkeypatch.setattr(module, "_runtime_rollout_agent_selected", lambda *_value: True)
+    monkeypatch.setattr(
+        module,
+        "_endpoint_delivery_readiness",
+        lambda *_value: {
+            "packageAuthority": {
+                "packages": [
+                    {
+                        "id": "package-a",
+                        "manifestSha256": "c" * 64,
+                        "objectSha256": "d" * 64,
+                        "providerPackageIdentitySha256": "e" * 64,
+                    }
+                ]
+            },
+            "items": [
+                {
+                    "readyForDispatch": True,
+                    "directoryDeviceRegistrationId": ("22222222-2222-4222-8222-222222222222"),
+                    "deviceId": "device-a",
+                    "agentKey": "kratos:claude-a",
+                    "agentId": "claude-a",
+                    "host": "claude-code",
+                    "releaseId": "claude-code:1.0.1",
+                    "packageId": "package-a",
+                    "bindingDigest": "f" * 64,
+                }
+            ],
+        },
+    )
+
+    def cut_over_provider() -> None:
+        table.items[(f"TENANT#{tenant}", "ENDPOINT_PROVIDER#intune")]["active_version"] = 2
+
+    module.DYNAMODB.before_transaction = cut_over_provider
+    with pytest.raises(module.PolicyConflict):
+        module._create_endpoint_delivery_commands(tenant, rollout)
+    assert not [
+        item
+        for item in table.items.values()
+        if item.get("sk", "").startswith(
+            ("ENDPOINT_DELIVERY_COMMAND#", "ENDPOINT_DELIVERY_TARGET#")
+        )
+    ]
 
 
 def test_aws_endpoint_detection_is_scheduled_bounded_and_monitored() -> None:

@@ -653,7 +653,9 @@ per-device signed installation/process report and
 authoritative MDM device inventory before producing one complete endpoint
 export. The `intune` mode of `collect_discovery_inventory.py` obtains that
 device file from the fixed Microsoft Graph v1.0 managed-devices query with only
-opaque device/user IDs and optional reviewed business-unit mappings.
+opaque managed-device/user IDs, the canonical Entra device registration ID
+needed for later online target resolution, and optional reviewed business-unit
+mappings. Endpoint reports cannot submit that registration identity.
 `publish_discovery_generation.py` performs the bounded three-phase upload. See
 [Endpoint evidence publisher](endpoint-evidence-publisher-design.md) for the
 manifest, key, privilege and freshness boundaries, and
@@ -678,6 +680,31 @@ bytes, installation command, signing material or provider credential. The
 route is read-only and is not Intune dispatch authority. See
 [Managed endpoint delivery authority](managed-endpoint-delivery-authority-design.md)
 and [managed endpoint delivery user journeys](managed-endpoint-delivery-user-journeys.md).
+The provider-specific group-assignment and online identity-resolution boundary
+is documented in
+[Microsoft Intune managed delivery](intune-managed-delivery-design.md). Hosted
+Graph mutation remains disabled, but the following governed control-plane APIs
+are available:
+
+- `GET /api/enterprise/endpoint-delivery/providers` and `/providers/intune`
+  return secret-free provider lifecycle posture to `inventory_read` roles.
+- `POST /api/enterprise/endpoint-delivery/providers/intune/drafts` accepts only
+  canonical tenant identity, a tenant-tagged secret ARN, explicit deployment
+  IDs, permission-evidence SHA-256 and rationale. It validates secret metadata
+  with `DescribeSecret` and never reads its value.
+- `POST /api/enterprise/endpoint-delivery/providers/intune/versions/{version}/submit`
+  freezes the exact content hash under `integration_admin` authority.
+- `POST .../{version}/decision` requires `provider_approval`, an independent
+  subject and an approval/rejection rationale.
+- `POST .../{version}/activate` requires `provider_approval`, the expected
+  active version and a still-valid tenant/KMS/tag-bound secret.
+- `GET /api/enterprise/endpoint-delivery/commands?deploymentId=...` returns a
+  locator-free dormant outbox view with `dispatchEnabled: false`.
+
+The five-minute reconciler creates an outbox command automatically from exact
+live provider, rollout, deployment, agent, endpoint-evidence and package
+authority. There is no browser install endpoint, queue consumer or Graph write
+in this phase.
 
 `GET /enterprise/alerts` reconciles and returns content-minimised endpoint,
 explainable behavior and independently derived repository/configuration

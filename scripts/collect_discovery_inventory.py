@@ -129,7 +129,7 @@ def _intune_url(value: str) -> str:
         or parsed.path != "/v1.0/deviceManagement/managedDevices"
         or parsed.fragment
         or set(query) - {"$select", "$top", "$skiptoken"}
-        or query.get("$select") != ["id,userId"]
+        or query.get("$select") != ["id,userId,azureADDeviceId"]
         or query.get("$top") != ["100"]
         or len(query.get("$skiptoken", [])) > 1
         or any(len(item) > 1_024 for item in query.get("$skiptoken", []))
@@ -179,7 +179,7 @@ def collect_intune_devices(
     business_units = _intune_business_units(mapping_path)
     url: str | None = (
         "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices"
-        "?$select=id,userId&$top=100"
+        "?$select=id,userId,azureADDeviceId&$top=100"
     )
     observations: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -197,14 +197,21 @@ def collect_intune_devices(
         if not isinstance(devices, list) or len(devices) > 100:
             raise DiscoveryCollectionError("Intune returned an invalid managed-devices page")
         for device in devices:
-            if not isinstance(device, dict) or set(device) - {"id", "userId"}:
+            if not isinstance(device, dict) or set(device) - {
+                "id",
+                "userId",
+                "azureADDeviceId",
+            }:
                 raise DiscoveryCollectionError("Intune device record has an unexpected schema")
             identifier = device.get("id")
             user_id = device.get("userId")
+            directory_registration_id = device.get("azureADDeviceId")
             if (
                 not isinstance(identifier, str)
                 or _UUID_PATTERN.fullmatch(identifier) is None
                 or identifier in seen
+                or not isinstance(directory_registration_id, str)
+                or _UUID_PATTERN.fullmatch(directory_registration_id) is None
                 or user_id not in (None, "")
                 and (not isinstance(user_id, str) or _UUID_PATTERN.fullmatch(user_id) is None)
             ):
@@ -214,6 +221,7 @@ def collect_intune_devices(
                 "kind": "device",
                 "id": identifier,
                 "managed": True,
+                "directoryDeviceRegistrationId": directory_registration_id,
                 "userIds": [user_id] if user_id else [],
             }
             if user_id in business_units:
@@ -318,7 +326,16 @@ def collect_endpoint_export(path: Path) -> list[dict[str, Any]]:
         raise DiscoveryCollectionError("endpoint export collections must be arrays")
     observations: list[dict[str, Any]] = []
     schemas = {
-        "device": ({"id", "managed"}, {"id", "managed", "businessUnit", "userIds"}),
+        "device": (
+            {"id", "managed"},
+            {
+                "id",
+                "managed",
+                "businessUnit",
+                "userIds",
+                "directoryDeviceRegistrationId",
+            },
+        ),
         "installation": (
             {"id", "deviceId", "host", "projectRootDigest", "binaryPresent", "processActive"},
             {
@@ -343,6 +360,15 @@ def collect_endpoint_export(path: Path) -> list[dict[str, Any]]:
                 or set(record) - allowed
             ):
                 raise DiscoveryCollectionError(f"endpoint {kind} record has an invalid schema")
+            if kind == "device" and "directoryDeviceRegistrationId" in record:
+                registration_id = record["directoryDeviceRegistrationId"]
+                if (
+                    not isinstance(registration_id, str)
+                    or _UUID_PATTERN.fullmatch(registration_id) is None
+                ):
+                    raise DiscoveryCollectionError(
+                        "endpoint directory device registration identity is invalid"
+                    )
             observations.append({"kind": kind, **record})
     identities = [(item["kind"], item.get("id")) for item in observations]
     if len(identities) != len(set(identities)):

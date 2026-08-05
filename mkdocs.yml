@@ -116,6 +116,8 @@ nav:
   - Runtime remediation coordination: runtime-remediation-coordination-design.md
   - Managed endpoint delivery authority: managed-endpoint-delivery-authority-design.md
   - Managed endpoint delivery user journeys: managed-endpoint-delivery-user-journeys.md
+  - Microsoft Intune managed delivery: intune-managed-delivery-design.md
+  - Microsoft Intune managed delivery user journeys: intune-managed-delivery-user-journeys.md
   - Managed host configuration: managed-host-configuration.md
   - Codex effective-control evidence: codex-effective-controls-design.md
   - Managed endpoint deployment design: managed-endpoint-deployment-design.md
