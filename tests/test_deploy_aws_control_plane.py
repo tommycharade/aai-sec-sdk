@@ -121,6 +121,19 @@ def _data_boundary_manifest(**updates: Any) -> dict[str, Any]:
     return value
 
 
+def _private_data_boundary_manifest(**updates: Any) -> dict[str, Any]:
+    """Return exact schema-v2 authority for synthetic PrivateLink tests."""
+    value = _data_boundary_manifest(
+        schemaVersion=2,
+        operatorAccessMode="private-link",
+        operatorAllowedIpv4Cidrs=[],
+        operatorVpcEndpointIds=["vpce-0123456789abcdef0"],
+        privateAccessEvidenceRef="NET-PRIVATE-1234",
+    )
+    value.update(updates)
+    return value
+
+
 def test_data_boundary_manifest_is_exact_secret_free_and_network_safe() -> None:
     module = _load()
     manifest = module.DataBoundaryDeploymentManifest.parse(json.dumps(_data_boundary_manifest()))
@@ -194,6 +207,110 @@ def test_data_boundary_preflight_requires_exact_customer_key_and_rotation() -> N
         module.verify_data_boundary(
             manifest, profile="synthetic", region="eu-west-1", runner=runner
         )
+
+
+def test_private_data_boundary_is_exact_and_requires_mutually_exclusive_networks() -> None:
+    module = _load()
+    manifest = module.DataBoundaryDeploymentManifest.parse(
+        json.dumps(_private_data_boundary_manifest())
+    )
+    assert manifest.operator_access_mode == "private-link"
+    assert manifest.operator_vpc_endpoint_ids == ("vpce-0123456789abcdef0",)
+    assert manifest.operator_allowed_ipv4_cidrs == ()
+    assert manifest.deployment_environment()["DATA_BOUNDARY_OPERATOR_VPC_ENDPOINT_IDS"] == (
+        '["vpce-0123456789abcdef0"]'
+    )
+    assert json.loads(manifest.canonical_json())["privateAccessEvidenceRef"] == ("NET-PRIVATE-1234")
+    invalid_networks: tuple[dict[str, Any], ...] = (
+        {"operatorAllowedIpv4Cidrs": ["93.184.216.34/32"]},
+        {"operatorVpcEndpointIds": []},
+        {"operatorVpcEndpointIds": ["vpce-not-an-id"]},
+    )
+    for changes in invalid_networks:
+        with pytest.raises(module.DeploymentConfigurationError):
+            module.DataBoundaryDeploymentManifest.parse(
+                json.dumps(_private_data_boundary_manifest(**changes))
+            )
+
+
+def test_private_data_boundary_preflight_requires_exact_available_execute_api_endpoint() -> None:
+    module = _load()
+    manifest = module.DataBoundaryDeploymentManifest.parse(
+        json.dumps(_private_data_boundary_manifest())
+    )
+
+    def runner(command: list[str], **_: Any) -> Any:
+        if "get-caller-identity" in command:
+            return _completed(json.dumps({"Account": "111111111111"}))
+        if "describe-key" in command:
+            return _completed(
+                json.dumps(
+                    {
+                        "KeyMetadata": {
+                            "Arn": manifest.customer_managed_data_key_arn,
+                            "AWSAccountId": "111111111111",
+                            "KeyManager": "CUSTOMER",
+                            "KeyState": "Enabled",
+                            "Enabled": True,
+                            "KeyUsage": "ENCRYPT_DECRYPT",
+                            "KeySpec": "SYMMETRIC_DEFAULT",
+                            "Origin": "AWS_KMS",
+                        }
+                    }
+                )
+            )
+        if "get-key-rotation-status" in command:
+            return _completed(json.dumps({"KeyRotationEnabled": True}))
+        if "describe-vpc-endpoints" in command:
+            return _completed(
+                json.dumps(
+                    {
+                        "VpcEndpoints": [
+                            {
+                                "VpcEndpointId": "vpce-0123456789abcdef0",
+                                "OwnerId": "111111111111",
+                                "ServiceName": "com.amazonaws.eu-west-2.execute-api",
+                                "VpcEndpointType": "Interface",
+                                "State": "available",
+                                "PrivateDnsEnabled": True,
+                            }
+                        ]
+                    }
+                )
+            )
+        raise AssertionError(command)
+
+    module.verify_data_boundary(manifest, profile="synthetic", region="eu-west-2", runner=runner)
+
+    for field, invalid in (
+        ("OwnerId", "222222222222"),
+        ("ServiceName", "com.amazonaws.eu-west-2.s3"),
+        ("VpcEndpointType", "Gateway"),
+        ("State", "pending"),
+        ("PrivateDnsEnabled", False),
+    ):
+
+        def invalid_endpoint(
+            command: list[str],
+            *,
+            _field: str = field,
+            _invalid: object = invalid,
+            **kwargs: Any,
+        ) -> Any:
+            result = runner(command, **kwargs)
+            if "describe-vpc-endpoints" in command:
+                value = json.loads(result.stdout)
+                value["VpcEndpoints"][0][_field] = _invalid
+                return _completed(json.dumps(value))
+            return result
+
+        with pytest.raises(module.DeploymentConfigurationError, match="posture"):
+            module.verify_data_boundary(
+                manifest,
+                profile="synthetic",
+                region="eu-west-2",
+                runner=invalid_endpoint,
+            )
 
 
 def _completed(stdout: str = "{}", *, returncode: int = 0, stderr: str = "") -> Any:

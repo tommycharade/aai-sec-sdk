@@ -70,7 +70,7 @@ _ASSURANCE_SIGNER_MANIFEST_FIELDS = {
     "recoveryRegion",
     "approvalEvidenceRef",
 }
-_DATA_BOUNDARY_MANIFEST_FIELDS = {
+_DATA_BOUNDARY_MANIFEST_V1_FIELDS = {
     "schemaVersion",
     "homeRegion",
     "approvedDataRegions",
@@ -82,6 +82,10 @@ _DATA_BOUNDARY_MANIFEST_FIELDS = {
     "deletionEvidenceRef",
     "conditionalAccessEvidenceRef",
     "approvalEvidenceRef",
+}
+_DATA_BOUNDARY_MANIFEST_V2_FIELDS = _DATA_BOUNDARY_MANIFEST_V1_FIELDS | {
+    "operatorVpcEndpointIds",
+    "privateAccessEvidenceRef",
 }
 _AWS_SECRET_NAME = re.compile(r"^[A-Za-z0-9/_+=.@-]{1,512}$")
 _AAI_TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -96,6 +100,7 @@ _KMS_KEY_ARN = re.compile(
     r"([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$",
     re.IGNORECASE,
 )
+_VPC_ENDPOINT_ID = re.compile(r"^vpce-(?:[0-9a-f]{8}|[0-9a-f]{17})$")
 _ENTRA_ENVIRONMENT_FIELDS = (
     "ENTRA_TENANT_ID",
     "ENTRA_CLIENT_ID",
@@ -501,12 +506,16 @@ class DataBoundaryDeploymentManifest:
     home_region: str
     approved_data_regions: tuple[str, ...]
     customer_managed_data_key_arn: str
+    operator_access_mode: str
     operator_allowed_ipv4_cidrs: tuple[str, ...]
+    operator_vpc_endpoint_ids: tuple[str, ...]
     key_policy_evidence_ref: str
     residency_evidence_ref: str
     deletion_evidence_ref: str
     conditional_access_evidence_ref: str
     approval_evidence_ref: str
+    private_access_evidence_ref: str = ""
+    schema_version: int = 2
 
     @classmethod
     def parse(cls, payload: str) -> DataBoundaryDeploymentManifest:
@@ -517,13 +526,23 @@ class DataBoundaryDeploymentManifest:
             value = json.loads(payload, object_pairs_hook=_strict_object)
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
             raise DeploymentConfigurationError("data-boundary manifest is invalid") from error
+        schema_version = value.get("schemaVersion") if isinstance(value, dict) else None
+        expected_fields = (
+            _DATA_BOUNDARY_MANIFEST_V1_FIELDS
+            if schema_version == 1
+            else _DATA_BOUNDARY_MANIFEST_V2_FIELDS
+        )
         if (
             not isinstance(value, dict)
-            or set(value) != _DATA_BOUNDARY_MANIFEST_FIELDS
-            or value.get("schemaVersion") != 1
-            or value.get("operatorAccessMode") != "ip-restricted"
+            or set(value) != expected_fields
+            or schema_version not in {1, 2}
         ):
             raise DeploymentConfigurationError("data-boundary manifest schema is invalid")
+        access_mode = value.get("operatorAccessMode")
+        if access_mode not in {"ip-restricted", "private-link"} or (
+            schema_version == 1 and access_mode != "ip-restricted"
+        ):
+            raise DeploymentConfigurationError("data-boundary operatorAccessMode is invalid")
         home_region = _bounded_string(value.get("homeRegion"), "homeRegion", maximum=32)
         regions = value.get("approvedDataRegions")
         if (
@@ -545,7 +564,7 @@ class DataBoundaryDeploymentManifest:
         cidrs = value.get("operatorAllowedIpv4Cidrs")
         if (
             not isinstance(cidrs, list)
-            or not 1 <= len(cidrs) <= 32
+            or len(cidrs) > 32
             or any(not isinstance(cidr, str) for cidr in cidrs)
         ):
             raise DeploymentConfigurationError("operator IPv4 CIDRs are invalid")
@@ -571,6 +590,23 @@ class DataBoundaryDeploymentManifest:
             canonical_cidrs.append(cidr)
         if canonical_cidrs != sorted(set(canonical_cidrs)):
             raise DeploymentConfigurationError("operator IPv4 CIDRs must be sorted and unique")
+        endpoint_ids = value.get("operatorVpcEndpointIds", [])
+        if (
+            not isinstance(endpoint_ids, list)
+            or len(endpoint_ids) > 8
+            or any(not isinstance(endpoint_id, str) for endpoint_id in endpoint_ids)
+            or endpoint_ids != sorted(set(endpoint_ids))
+            or any(not _VPC_ENDPOINT_ID.fullmatch(endpoint_id) for endpoint_id in endpoint_ids)
+        ):
+            raise DeploymentConfigurationError("operator VPC endpoint IDs are invalid")
+        if access_mode == "ip-restricted" and (not canonical_cidrs or endpoint_ids):
+            raise DeploymentConfigurationError(
+                "ip-restricted mode requires CIDRs and forbids VPC endpoint IDs"
+            )
+        if access_mode == "private-link" and (canonical_cidrs or not endpoint_ids):
+            raise DeploymentConfigurationError(
+                "private-link mode requires VPC endpoint IDs and forbids CIDRs"
+            )
         references = []
         for field in (
             "keyPolicyEvidenceRef",
@@ -583,13 +619,31 @@ class DataBoundaryDeploymentManifest:
             if not _EVIDENCE_REFERENCE.fullmatch(reference):
                 raise DeploymentConfigurationError(f"{field} is invalid")
             references.append(reference)
+        private_access_evidence_ref = ""
+        if schema_version == 2:
+            private_access_evidence_ref = _bounded_string(
+                value.get("privateAccessEvidenceRef"),
+                "privateAccessEvidenceRef",
+                maximum=512,
+            )
+            if not _EVIDENCE_REFERENCE.fullmatch(private_access_evidence_ref):
+                raise DeploymentConfigurationError("privateAccessEvidenceRef is invalid")
         assert isinstance(key_arn, str)
+        assert len(references) == 5
         return cls(
-            home_region,
-            tuple(regions),
-            key_arn,
-            tuple(canonical_cidrs),
-            *references,
+            home_region=home_region,
+            approved_data_regions=tuple(regions),
+            customer_managed_data_key_arn=key_arn,
+            operator_access_mode=access_mode,
+            operator_allowed_ipv4_cidrs=tuple(canonical_cidrs),
+            operator_vpc_endpoint_ids=tuple(endpoint_ids),
+            key_policy_evidence_ref=references[0],
+            residency_evidence_ref=references[1],
+            deletion_evidence_ref=references[2],
+            conditional_access_evidence_ref=references[3],
+            approval_evidence_ref=references[4],
+            private_access_evidence_ref=private_access_evidence_ref,
+            schema_version=schema_version,
         )
 
     @property
@@ -598,6 +652,13 @@ class DataBoundaryDeploymentManifest:
         match = _KMS_KEY_ARN.fullmatch(self.customer_managed_data_key_arn)
         assert match is not None
         return match.group(3)
+
+    @property
+    def partition(self) -> str:
+        """Return the AWS partition encoded by the validated data-key ARN."""
+        match = _KMS_KEY_ARN.fullmatch(self.customer_managed_data_key_arn)
+        assert match is not None
+        return match.group(1)
 
     def canonical_json(self) -> str:
         """Return stable secret-free deployment authority for Parameter Store."""
@@ -610,10 +671,18 @@ class DataBoundaryDeploymentManifest:
                 "deletionEvidenceRef": self.deletion_evidence_ref,
                 "homeRegion": self.home_region,
                 "keyPolicyEvidenceRef": self.key_policy_evidence_ref,
-                "operatorAccessMode": "ip-restricted",
+                "operatorAccessMode": self.operator_access_mode,
                 "operatorAllowedIpv4Cidrs": list(self.operator_allowed_ipv4_cidrs),
                 "residencyEvidenceRef": self.residency_evidence_ref,
-                "schemaVersion": 1,
+                "schemaVersion": self.schema_version,
+                **(
+                    {
+                        "operatorVpcEndpointIds": list(self.operator_vpc_endpoint_ids),
+                        "privateAccessEvidenceRef": self.private_access_evidence_ref,
+                    }
+                    if self.schema_version == 2
+                    else {}
+                ),
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -627,10 +696,14 @@ class DataBoundaryDeploymentManifest:
                 self.approved_data_regions, separators=(",", ":")
             ),
             "DATA_BOUNDARY_KMS_KEY_ARN": self.customer_managed_data_key_arn,
-            "DATA_BOUNDARY_OPERATOR_ACCESS_MODE": "ip-restricted",
+            "DATA_BOUNDARY_OPERATOR_ACCESS_MODE": self.operator_access_mode,
             "DATA_BOUNDARY_OPERATOR_IPV4_CIDRS": json.dumps(
                 self.operator_allowed_ipv4_cidrs, separators=(",", ":")
             ),
+            "DATA_BOUNDARY_OPERATOR_VPC_ENDPOINT_IDS": json.dumps(
+                self.operator_vpc_endpoint_ids, separators=(",", ":")
+            ),
+            "DATA_BOUNDARY_PRIVATE_ACCESS_EVIDENCE_REF": self.private_access_evidence_ref,
             "DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_REF": (self.conditional_access_evidence_ref),
             "DATA_BOUNDARY_APPROVAL_EVIDENCE_REF": self.approval_evidence_ref,
         }
@@ -1328,6 +1401,44 @@ def verify_data_boundary(
     )
     if rotation.get("KeyRotationEnabled") is not True:
         raise DeploymentConfigurationError("customer-managed data key rotation is not enabled")
+    if manifest.operator_access_mode == "private-link":
+        endpoint_response = _aws(
+            [
+                "ec2",
+                "describe-vpc-endpoints",
+                "--vpc-endpoint-ids",
+                *manifest.operator_vpc_endpoint_ids,
+            ],
+            profile=profile,
+            region=region,
+            runner=runner,
+        )
+        endpoints = endpoint_response.get("VpcEndpoints")
+        if not isinstance(endpoints, list) or len(endpoints) != len(
+            manifest.operator_vpc_endpoint_ids
+        ):
+            raise DeploymentConfigurationError("private operator VPC endpoints are incomplete")
+        service_prefix = "cn.com.amazonaws" if manifest.partition == "aws-cn" else "com.amazonaws"
+        expected_service = f"{service_prefix}.{region}.execute-api"
+        actual_ids: list[str] = []
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                raise DeploymentConfigurationError("private operator VPC endpoint is malformed")
+            endpoint_id = endpoint.get("VpcEndpointId")
+            if (
+                not isinstance(endpoint_id, str)
+                or endpoint.get("OwnerId") != manifest.account_id
+                or endpoint.get("ServiceName") != expected_service
+                or endpoint.get("VpcEndpointType") != "Interface"
+                or endpoint.get("State") != "available"
+                or endpoint.get("PrivateDnsEnabled") is not True
+            ):
+                raise DeploymentConfigurationError(
+                    "private operator VPC endpoint posture is invalid"
+                )
+            actual_ids.append(endpoint_id)
+        if tuple(sorted(actual_ids)) != manifest.operator_vpc_endpoint_ids:
+            raise DeploymentConfigurationError("private operator VPC endpoint identity differs")
 
 
 def persist_data_boundary_manifest(
@@ -1458,6 +1569,8 @@ def deploy(
         "DATA_BOUNDARY_KMS_KEY_ARN",
         "DATA_BOUNDARY_OPERATOR_ACCESS_MODE",
         "DATA_BOUNDARY_OPERATOR_IPV4_CIDRS",
+        "DATA_BOUNDARY_OPERATOR_VPC_ENDPOINT_IDS",
+        "DATA_BOUNDARY_PRIVATE_ACCESS_EVIDENCE_REF",
         "DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_REF",
         "DATA_BOUNDARY_APPROVAL_EVIDENCE_REF",
     ):
@@ -1530,7 +1643,16 @@ def deploy(
         or post.get("DataBoundaryApprovedRegions")
         != json.dumps(data_boundary.approved_data_regions, separators=(",", ":"))
         or post.get("DataBoundaryKeyArn") != data_boundary.customer_managed_data_key_arn
-        or post.get("DataBoundaryOperatorAccessMode") != "ip-restricted"
+        or post.get("DataBoundaryOperatorAccessMode") != data_boundary.operator_access_mode
+        or (
+            data_boundary.operator_access_mode == "private-link"
+            and (
+                post.get("PrivateOperatorApiStatus") != "configured"
+                or not post.get("PrivateOperatorApiUrl", "").startswith("https://")
+                or post.get("PrivateOperatorVpcEndpointCount")
+                != str(len(data_boundary.operator_vpc_endpoint_ids))
+            )
+        )
     ):
         raise DeploymentConfigurationError("deployed data-boundary posture is incomplete")
     return manifest

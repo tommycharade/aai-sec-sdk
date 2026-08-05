@@ -237,7 +237,9 @@ Access evidence presence, deletion behavior by data class, and separate
 deployment-approval versus live-acceptance status. Every concept has
 keyboard-accessible contextual help.
 
-The page must state `PrivateLink not configured` while only source-IP
-restriction exists and must show the limits of residency and key-scope claims.
+The page states `PrivateLink not configured` while only source-IP restriction
+exists. When private ingress is deployed it shows the approved endpoint count,
+explains that the operator API is private while machine/agent connectivity is a
+separate channel, and keeps live customer acceptance visibly pending.
 It offers no KMS, Region or network editor: those controls remain reviewed
 deployment authority and cannot be weakened by a browser session.

@@ -1021,14 +1021,18 @@ deletion and acceptance posture. The response exposes only the final eight
 characters of the KMS key identity and the count of approved networks; it does
 not return key ARNs, CIDRs or evidence-reference values.
 
-When a data boundary is configured, every human tenant route first checks API
-Gateway's `requestContext.http.sourceIp` against the persisted reviewed IPv4
-allow-list. Missing, malformed or outside source context returns HTTP 403
-before tenant resolution. Forwarding headers cannot override this decision.
+In `ip-restricted` mode, every human tenant route checks API Gateway's
+`requestContext.http.sourceIp` against the persisted IPv4 allow-list. In
+`private-link` mode, the private REST API first enforces an exact
+`aws:SourceVpce` resource-policy condition and Cognito authorization; Lambda
+then requires the exact private API ID and `requestContext.identity.vpceId`.
+Missing, malformed or mismatched context returns HTTP 403 before tenant
+resolution. Forwarding headers cannot override either decision.
 Machine, SCIM, enrollment, discovery, endpoint and agent routes keep their
 separate authentication boundaries.
 
-The route reports `privateLinkConfigured: false` until a private ingress is
-actually deployed. `approvedDataRegions` covers retained application data; it
+The route reports `allowedNetworkCount`, `allowedVpcEndpointCount` and
+`privateLinkConfigured` without exposing addresses or endpoint IDs.
+`approvedDataRegions` covers retained application data; it
 does not claim that CloudFront, Cognito, Entra or other global providers process
 only in those Regions. See [Enterprise data boundary](enterprise-data-boundary-design.md).

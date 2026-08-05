@@ -111,12 +111,15 @@ def _parse_data_boundary_runtime():
             )
         )
         cidrs = json.loads(os.environ.get("DATA_BOUNDARY_OPERATOR_IPV4_CIDRS", "[]"))
+        endpoint_ids = json.loads(
+            os.environ.get("DATA_BOUNDARY_OPERATOR_VPC_ENDPOINT_IDS", "[]")
+        )
     except json.JSONDecodeError as error:
         raise RuntimeError("data-boundary runtime registry is malformed") from error
     if (
         status not in {"configured", "not-configured"}
         or key_ownership not in {"customer-managed", "service-managed"}
-        or access_mode not in {"ip-restricted", "public-authenticated"}
+        or access_mode not in {"ip-restricted", "private-link", "public-authenticated"}
         or not isinstance(regions, list)
         or not 1 <= len(regions) <= 4
         or len(regions) != len(set(regions))
@@ -130,6 +133,14 @@ def _parse_data_boundary_runtime():
         or len(cidrs) > 32
         or any(not isinstance(cidr, str) for cidr in cidrs)
         or cidrs != sorted(set(cidrs))
+        or not isinstance(endpoint_ids, list)
+        or len(endpoint_ids) > 8
+        or any(
+            not isinstance(endpoint_id, str)
+            or not re.fullmatch(r"vpce-(?:[0-9a-f]{8}|[0-9a-f]{17})", endpoint_id)
+            for endpoint_id in endpoint_ids
+        )
+        or endpoint_ids != sorted(set(endpoint_ids))
     ):
         raise RuntimeError("data-boundary runtime registry is malformed")
     networks = []
@@ -152,14 +163,22 @@ def _parse_data_boundary_runtime():
         networks.append(network)
     if status == "configured" and (
         key_ownership != "customer-managed"
-        or access_mode != "ip-restricted"
         or not key_arn
-        or not networks
+        or (access_mode == "ip-restricted" and (not networks or endpoint_ids))
+        or (access_mode == "private-link" and (networks or not endpoint_ids))
         or os.environ.get("DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_CONFIGURED") != "true"
         or os.environ.get("DATA_BOUNDARY_APPROVAL_EVIDENCE_CONFIGURED") != "true"
+        or (
+            access_mode == "private-link"
+            and not re.fullmatch(
+                r"[a-z0-9]{10}", os.environ.get("DATA_BOUNDARY_PRIVATE_API_ID", "")
+            )
+        )
     ):
         raise RuntimeError("configured data boundary is incomplete")
-    if status == "not-configured" and (access_mode != "public-authenticated" or networks):
+    if status == "not-configured" and (
+        access_mode != "public-authenticated" or networks or endpoint_ids
+    ):
         raise RuntimeError("unconfigured data boundary cannot restrict operator authority")
     return {
         "status": status,
@@ -169,6 +188,8 @@ def _parse_data_boundary_runtime():
         "key_ownership": key_ownership,
         "access_mode": access_mode,
         "operator_networks": tuple(networks),
+        "operator_vpc_endpoint_ids": tuple(endpoint_ids),
+        "private_api_id": os.environ.get("DATA_BOUNDARY_PRIVATE_API_ID", "not-configured"),
         "conditional_access_evidence": (
             os.environ.get("DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_CONFIGURED") == "true"
         ),
@@ -182,17 +203,30 @@ DATA_BOUNDARY = _parse_data_boundary_runtime()
 
 
 def _operator_network_allowed(event):
-    """Trust only API Gateway source context for configured human access."""
+    """Trust only immutable API Gateway context for configured human access."""
     if DATA_BOUNDARY["status"] != "configured":
         return True
-    try:
-        source = event["requestContext"]["http"]["sourceIp"]
-        address = ipaddress.ip_address(source)
-    except (KeyError, TypeError, ValueError):
-        return False
-    return address.version == 4 and any(
-        address in network for network in DATA_BOUNDARY["operator_networks"]
-    )
+    if DATA_BOUNDARY["access_mode"] == "ip-restricted":
+        try:
+            source = event["requestContext"]["http"]["sourceIp"]
+            address = ipaddress.ip_address(source)
+        except (KeyError, TypeError, ValueError):
+            return False
+        return address.version == 4 and any(
+            address in network for network in DATA_BOUNDARY["operator_networks"]
+        )
+    if DATA_BOUNDARY["access_mode"] == "private-link":
+        context = event.get("requestContext", {})
+        identity = context.get("identity", {})
+        api_id = context.get("apiId")
+        endpoint_id = identity.get("vpceId") if isinstance(identity, dict) else None
+        return (
+            isinstance(api_id, str)
+            and isinstance(endpoint_id, str)
+            and secrets.compare_digest(api_id, DATA_BOUNDARY["private_api_id"])
+            and endpoint_id in DATA_BOUNDARY["operator_vpc_endpoint_ids"]
+        )
+    return False
 
 
 def _data_boundary_posture():
@@ -211,8 +245,9 @@ def _data_boundary_posture():
         "operatorAccess": {
             "mode": DATA_BOUNDARY["access_mode"],
             "allowedNetworkCount": len(DATA_BOUNDARY["operator_networks"]),
+            "allowedVpcEndpointCount": len(DATA_BOUNDARY["operator_vpc_endpoint_ids"]),
             "conditionalAccessEvidenceConfigured": DATA_BOUNDARY["conditional_access_evidence"],
-            "privateLinkConfigured": False,
+            "privateLinkConfigured": DATA_BOUNDARY["access_mode"] == "private-link",
         },
         "deletionClasses": [
             {"dataClass": "operational_state", "behavior": "retained-protected-offboarding"},
@@ -229,7 +264,12 @@ def _data_boundary_posture():
             "liveAcceptance": False,
         },
         "limitations": [
-            "IP restriction is not AWS PrivateLink.",
+            (
+                "PrivateLink requires customer validation of VPC routing, DNS, endpoint policy "
+                "and security groups."
+                if DATA_BOUNDARY["access_mode"] == "private-link"
+                else "IP restriction is not AWS PrivateLink."
+            ),
             (
                 "Approved Regions cover retained application data, not global identity "
                 "or CDN processing."
@@ -2971,7 +3011,13 @@ def _agent_identity(path, event):
 
 
 def _claims(event):
-    return event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+    """Return claims from authenticated HTTP API v2 or private REST API v1 context."""
+    authorizer = event.get("requestContext", {}).get("authorizer", {})
+    jwt_claims = authorizer.get("jwt", {}).get("claims", {})
+    if isinstance(jwt_claims, dict) and jwt_claims:
+        return jwt_claims
+    rest_claims = authorizer.get("claims", {})
+    return rest_claims if isinstance(rest_claims, dict) else {}
 
 
 def _tenant(event):
@@ -24784,7 +24830,7 @@ def handler(event, context):
                 403,
                 {
                     "error": "operator source is outside the configured data boundary",
-                    "requiredBoundary": "ip-restricted",
+                    "requiredBoundary": DATA_BOUNDARY["access_mode"],
                 },
             )
         tenant = _tenant(event)

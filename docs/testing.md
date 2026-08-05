@@ -351,16 +351,22 @@ and service-unavailable responses.
 
 ## Data-boundary contracts
 
-Deployment tests reject duplicate or unknown manifest fields, private or
-non-canonical source networks, wrong-account or wrong-Region keys, disabled
-keys and keys without rotation. They prove ambient environment values cannot
+Deployment tests preserve schema-v1 IP manifests and reject duplicate or
+unknown schema-v2 fields, mixed CIDR/VPC-endpoint authority, malformed endpoint
+IDs, private or non-canonical source networks, wrong-account or wrong-Region
+keys, disabled keys and keys without rotation. PrivateLink preflight tests
+reject missing endpoints and wrong account, service, type, state or private-DNS
+posture. They prove ambient environment values cannot
 replace persisted authority and a configured stack cannot deploy after that
 authority is lost. CDK synthesis tests bind customer-key encryption to retained
 DynamoDB, S3, SQS and SNS resources.
 
-Lambda adversarial tests deny missing and outside source context, ignore a
-spoofed forwarding header, admit an exact approved address, enforce tenant
-roles and prove no full key ARN or CIDR enters the response. UI tests verify the
+Lambda adversarial tests deny missing and outside source context, ignore
+spoofed forwarding/VPC-endpoint headers, admit only exact private API and
+endpoint context or an approved IP address, enforce tenant roles and prove no
+full key ARN, CIDR or endpoint ID enters the response. CDK synthesis proves the
+private REST endpoint association, `aws:SourceVpce` resource policy, Cognito
+authorizer and private output contract. UI tests verify the
 page remains read-only and distinguishes IP restriction, PrivateLink and live
 acceptance. Browser checks cover desktop, narrow layouts and keyboard-accessible
 context help. These tests are software evidence, not a completed customer KMS,

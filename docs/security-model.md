@@ -1455,9 +1455,12 @@ ambient shell variables cannot select them. A strict manifest is verified,
 persisted in encrypted Parameter Store and reloaded for deployment; once a
 stack reports a configured boundary, loss of that manifest blocks deployment.
 
-Configured operator requests trust only API Gateway's source-IP context and
-fail closed before tenant lookup when it is missing or outside the allow-list.
-This is an IP restriction, not PrivateLink. Customer-key scope also excludes
+Configured operator requests trust only API Gateway context and fail closed
+before tenant lookup. IP mode checks the source address. Private mode combines
+an exact `aws:SourceVpce` API resource policy, Cognito authorization and an
+independent Lambda check of the private API and endpoint IDs. The public API
+continues to serve separately authenticated machine and agent routes but cannot
+be used as a human fallback. Customer-key scope also excludes
 CloudWatch logs, static UI assets, dedicated signing keys and provider secrets;
 those remain separate boundaries and must never be described as covered by the
 tenant data key. See [Enterprise data boundary](enterprise-data-boundary-design.md).

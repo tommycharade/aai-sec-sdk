@@ -297,7 +297,8 @@ The following decisions can be supplied progressively:
 - required AWS regions and data-residency constraints;
 - recovery-time and recovery-point objectives;
 - customer-managed KMS key requirements; and
-- private networking requirements such as VPN-only access or AWS PrivateLink.
+- the approved execute-api VPC endpoint IDs, VPN or Direct Connect path, DNS,
+  endpoint policy and security-group design for live PrivateLink acceptance.
 
 ## Production security integrations
 
@@ -365,8 +366,8 @@ Engineering can continue autonomously on:
 - Terraform Registry namespace/repository authority, release-signing identity
   and an approved non-production tenant for live provider acceptance;
 - live acceptance inputs for the implemented customer-managed key, residency,
-  deletion and IP-restriction foundation, plus a decision and network design
-  for AWS PrivateLink or equivalent private ingress;
+  deletion and private operator ingress, including approved VPC endpoint IDs,
+  VPN/Direct Connect routing, private DNS, endpoint policy and security groups;
 - UI simplification, accessibility and responsive browser testing; and
 - documentation, threat models, automated tests, pull requests and synthetic
   acceptance evidence.

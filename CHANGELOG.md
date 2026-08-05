@@ -2,12 +2,20 @@
 
 ## Unreleased
 
+- Added production-shaped private operator ingress through AWS PrivateLink.
+  Schema-v2 deployment authority binds exact reviewed execute-api VPC endpoint
+  IDs; preflight verifies endpoint posture; API Gateway combines an exact
+  `aws:SourceVpce` resource policy with Cognito; and Lambda independently checks
+  private API and endpoint context. The public machine/agent channel remains
+  separate, the UI exposes secret-free posture, and live customer networking
+  acceptance remains explicitly open.
+
 - Added a persistent deployment-owned enterprise data boundary for the AWS
   control plane: strict customer-managed KMS key and approved retained-data
-  Region authority, fail-closed operator source-IP restrictions, customer-key
+  Region authority, fail-closed operator network restrictions, customer-key
   encryption for retained tenant stores and queues, deletion classes and a
-  focused read-only UI/API posture. PrivateLink, CMK-controlled CloudWatch logs
-  and live customer acceptance remain explicitly open.
+  focused read-only UI/API posture. CMK-controlled CloudWatch logs and live
+  customer acceptance remain explicitly open.
 
 - Added governed ServiceNow, Jira Cloud and PagerDuty incident workflows.
   Platform administrators register only typed provider metadata and a
