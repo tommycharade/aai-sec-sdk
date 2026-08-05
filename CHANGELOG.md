@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Added the first managed endpoint-delivery authority gates for Claude Code
+  and Codex. Deployment-owned package and approval bundles now bind exact
+  runtime release, OS, architecture, immutable S3 object version and evidence
+  digests at CDK synthesis and Lambda read time. Sensor schema v2 signs locally
+  measured platform identity, while a locator-free API and rollout UI expose
+  exact device/install/agent readiness and actionable blockers. This is a
+  read-only preflight; hosted Microsoft Intune dispatch remains explicitly
+  disabled pending dedicated credentials, outbox/idempotency,
+  reauthorization and post-install attestation.
+
 - Separated deterministic UI simulation from the HTTP-only production client,
   added emitted-asset purity and raw/gzip budget gates with adversarial tests,
   and moved incident detection-rule management behind an announced,

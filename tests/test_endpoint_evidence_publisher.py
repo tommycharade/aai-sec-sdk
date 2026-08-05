@@ -75,6 +75,7 @@ def _report(tmp_path: Path, *, observed_at: int = 1_000) -> dict[str, Any]:
             administrator_check=lambda: True,
             manifest_security_check=lambda _path: None,
             process_reader=lambda: {(binary, project)},
+            platform_reader=lambda: ("darwin", "arm64"),
         ),
     )
 
@@ -122,6 +123,9 @@ def _assembly_inputs(tmp_path: Path, report: dict[str, Any]) -> tuple[Path, Path
 def test_sensor_emits_signed_path_free_binary_and_process_evidence(tmp_path: Path) -> None:
     report = _report(tmp_path)
     encoded = json.dumps(report)
+    assert report["payload"]["schemaVersion"] == 2
+    assert report["payload"]["device"]["operatingSystem"] == "darwin"
+    assert report["payload"]["device"]["architecture"] == "arm64"
     assert report["payload"]["installations"][0]["binaryPresent"] is True
     assert report["payload"]["installations"][0]["processActive"] is True
     assert "sensitive-project-name" not in encoded
@@ -258,7 +262,12 @@ def test_fleet_assembly_verifies_signature_freshness_and_mdm_identity(
         now=1_100,
         max_age_seconds=300,
     )
-    assert result["devices"] == [report["payload"]["device"]]
+    expected_device = {
+        key: value
+        for key, value in report["payload"]["device"].items()
+        if key not in {"operatingSystem", "architecture"}
+    }
+    assert result["devices"] == [expected_device]
     assert result["installations"] == report["payload"]["installations"]
 
 

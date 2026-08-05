@@ -661,6 +661,24 @@ manifest, key, privilege and freshness boundaries, and
 ingestion and health APIs. The service derives health; endpoint reports never
 carry authority or a submitted health label.
 
+## Managed endpoint delivery preflight
+
+`GET /api/enterprise/endpoint-delivery?deploymentId=...` requires
+`inventory_read` and returns a complete deployment-scoped readiness projection.
+The same read is available to an exact `inventory_read` service identity at
+`/machine/v1/enterprise/endpoint-delivery`. Each active agent is `ready` only
+when the server derives one current managed device, one signed installation,
+one active enrolled agent, signed schema-v2 operating-system/architecture
+evidence, one approved runtime release and one matching approved delivery
+package.
+
+The response contains only stable IDs, status/reason codes, evidence times and
+SHA-256 identities. It never contains an S3 bucket/key/version, URL, executable
+bytes, installation command, signing material or provider credential. The
+route is read-only and is not Intune dispatch authority. See
+[Managed endpoint delivery authority](managed-endpoint-delivery-authority-design.md)
+and [managed endpoint delivery user journeys](managed-endpoint-delivery-user-journeys.md).
+
 `GET /enterprise/alerts` reconciles and returns content-minimised endpoint,
 explainable behavior and independently derived repository/configuration
 detections to authorized security operators. `POST

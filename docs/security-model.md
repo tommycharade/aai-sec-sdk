@@ -1506,6 +1506,30 @@ CloudWatch logs, static UI assets, dedicated signing keys and provider secrets;
 those remain separate boundaries and must never be described as covered by the
 tenant data key. See [Enterprise data boundary](enterprise-data-boundary-design.md).
 
+## Managed endpoint delivery authority
+
+Physical software delivery is a separate privileged boundary from runtime
+release approval. Delivery packages are deployment-owned closed manifests with
+exact release, platform, architecture, S3 object version and digest bindings;
+a separate approval bundle must cover them exactly. Lambda and CDK validate
+the same authority. Operator responses omit object locators, executable bytes,
+commands, signing material and provider credentials.
+
+The browser cannot bind an endpoint. Readiness is derived inside the tenant
+from current complete MDM discovery, a fresh signed endpoint report, exact host
+and project-root digest correlation, and active server-owned agent lifecycle.
+Anything other than one device, one installation and one agent blocks
+readiness. Schema-v1 sensor evidence has no signed platform identity and is
+therefore health evidence only; schema v2 signs normalized OS/architecture
+measured by the administrator process.
+
+This preflight is not dispatch authority. The existing runtime-remediation
+service bearer receives no package locator and cannot install software. Hosted
+Intune delivery remains disabled until dedicated IAM/provider credentials,
+transactional outbox and idempotency, online reauthorization and independent
+post-install attestation are implemented and accepted. See
+[Managed endpoint delivery authority](managed-endpoint-delivery-authority-design.md).
+
 ## Real Codex host acceptance boundary
 
 The acceptance runner treats the installed Codex executable and every event it
