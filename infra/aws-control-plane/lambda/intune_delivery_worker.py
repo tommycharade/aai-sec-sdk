@@ -30,12 +30,16 @@ from boto3.dynamodb.conditions import Key
 TABLE = boto3.resource("dynamodb").Table(os.environ["CONTROL_TABLE"])
 SECRETS = boto3.client("secretsmanager")
 S3 = boto3.client("s3")
+SQS = boto3.client("sqs")
 
 _MAX_RESPONSE_BYTES = 64 * 1024
 _MAX_PAGE_COUNT = 20
-# One invocation performs at most one sealed 40-target cohort. Larger commands
-# fail before credentials or Graph access until continuation authority exists.
-_MAX_TARGETS = 40
+# One continuation resolves one sealed page. The total bound matches the
+# control-plane's strongly bounded agent and command inventory.
+_MAX_TARGETS = 500
+_PAGE_SIZE = 40
+_MAX_MUTATIONS_PER_INVOCATION = 40
+_MAX_CONTINUATION_REVISIONS = 64
 _MAX_ATTEMPTS = 5
 _EVIDENCE_MAX_AGE_SECONDS = 15 * 60
 _EVIDENCE_FUTURE_SKEW_SECONDS = 5 * 60
@@ -208,7 +212,7 @@ def _command_instruction(value: object) -> dict[str, object]:
         _digest(page.get("id"), "page_id")
         _digest(page.get("pageDigest"), "page_digest")
         count = page.get("targetCount")
-        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 40:
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= _PAGE_SIZE:
             raise AuthorityError("command_page_count_invalid")
     if sum(int(page["targetCount"]) for page in pages) != value["targetCount"]:
         raise AuthorityError("command_page_coverage_invalid")
@@ -527,6 +531,7 @@ def _load_authority(
     if command.get("status") not in {
         "pending",
         "queued",
+        "continuing",
         "retryable",
         "resolving_targets",
     }:
@@ -886,14 +891,13 @@ def _resource_evidence(value: dict[str, object], fields: tuple[str, ...]) -> str
     return _hash({field: value[field] for field in fields})
 
 
-def _reconcile_graph(
-    configuration: dict[str, object],
-    credentials: dict[str, object],
-    targets: list[dict[str, object]],
-    reauthorize: Callable[[], object],
-) -> dict[str, object]:
-    """Converge one dedicated group and one independent required assignment."""
+def _provider_context(
+    configuration: dict[str, object], credentials: dict[str, object]
+) -> tuple[str, str, str]:
+    """Load and verify the reviewed provider group and application identity."""
     resource = credentials["resource"]
+    if not isinstance(resource, dict):
+        raise AuthorityError("provider_resource_schema_invalid")
     token = _token(str(configuration["providerTenantId"]), credentials)
     group_id = str(resource["groupId"])
     app_id = str(resource["mobileAppId"])
@@ -928,6 +932,17 @@ def _reconcile_graph(
         != resource["mobileAppEvidenceSha256"]
     ):
         raise AuthorityError("provider_app_identity_changed")
+    return token, group_id, app_id
+
+
+def _reconcile_graph(
+    configuration: dict[str, object],
+    credentials: dict[str, object],
+    targets: list[dict[str, object]],
+    reauthorize: Callable[[], object],
+) -> dict[str, object]:
+    """Converge one dedicated group and one independent required assignment."""
+    token, group_id, app_id = _provider_context(configuration, credentials)
     resolved = []
     for target in targets:
         registration = str(target["directoryDeviceRegistrationId"])
@@ -1023,6 +1038,195 @@ def _reconcile_graph(
     }
 
 
+def _group_member_inventory(token: str, group_id: str) -> list[tuple[str, str | None]]:
+    """Return bounded device members as validated object/registration identities."""
+    members = _collection(
+        f"{_GRAPH_ORIGIN}/v1.0/groups/{group_id}/members?$select=id,deviceId&$top=999",
+        token,
+    )
+    result: list[tuple[str, str | None]] = []
+    seen_objects: set[str] = set()
+    for member in members:
+        object_id = _uuid(member.get("id"), "group_member_id")
+        if object_id in seen_objects:
+            raise AuthorityError("provider_group_membership_ambiguous")
+        seen_objects.add(object_id)
+        registration_value = member.get("deviceId")
+        registration = (
+            _uuid(registration_value, "group_member_registration_id")
+            if registration_value is not None
+            else None
+        )
+        result.append((object_id, registration))
+    return result
+
+
+def _resolve_directory_target(target: dict[str, object], token: str) -> tuple[str, str]:
+    """Resolve one current Entra registration through the fixed Graph endpoint."""
+    registration = _uuid(
+        target.get("directoryDeviceRegistrationId"),
+        "directory_device_registration_id",
+    )
+    _, device = _request(
+        "GET",
+        f"{_GRAPH_ORIGIN}/v1.0/devices(deviceId='{quote(registration, safe='')}')"
+        "?$select=id,deviceId,accountEnabled",
+        token=token,
+    )
+    object_id = _uuid(device.get("id"), "directory_object_id")
+    if device.get("deviceId") != registration or device.get("accountEnabled") is False:
+        raise AuthorityError("provider_device_resolution_changed")
+    return object_id, registration
+
+
+def _reconcile_graph_page(
+    configuration: dict[str, object],
+    credentials: dict[str, object],
+    targets: list[dict[str, object]],
+    reauthorize: Callable[[], object],
+) -> dict[str, object]:
+    """Add and reproduce one immutable page without pruning the complete group."""
+    if not 1 <= len(targets) <= _PAGE_SIZE:
+        raise AuthorityError("continuation_page_target_count_invalid")
+    token, group_id, _app_id = _provider_context(configuration, credentials)
+    members = _group_member_inventory(token, group_id)
+    by_registration = {
+        registration: object_id for object_id, registration in members if registration is not None
+    }
+    if len(by_registration) != sum(registration is not None for _, registration in members):
+        raise AuthorityError("provider_group_membership_ambiguous")
+    object_ids = {object_id for object_id, _registration in members}
+    expected: dict[str, str] = {}
+    resolved_objects: set[str] = set()
+    for target in targets:
+        object_id, registration = _resolve_directory_target(target, token)
+        if (
+            registration in expected
+            or (registration in by_registration and by_registration[registration] != object_id)
+            or object_id in resolved_objects
+        ):
+            raise AuthorityError("provider_device_resolution_ambiguous")
+        if object_id in object_ids and by_registration.get(registration) != object_id:
+            raise AuthorityError("provider_device_resolution_changed")
+        expected[registration] = object_id
+        resolved_objects.add(object_id)
+        if registration not in by_registration:
+            reauthorize()
+            _request(
+                "POST",
+                f"{_GRAPH_ORIGIN}/v1.0/groups/{group_id}/members/$ref",
+                token=token,
+                body={"@odata.id": f"{_GRAPH_ORIGIN}/v1.0/directoryObjects/{object_id}"},
+            )
+    reproduced_members = _group_member_inventory(token, group_id)
+    reproduced = {
+        registration: object_id
+        for object_id, registration in reproduced_members
+        if registration is not None
+    }
+    if len(reproduced) != sum(
+        registration is not None for _object_id, registration in reproduced_members
+    ) or any(
+        reproduced.get(registration) != object_id for registration, object_id in expected.items()
+    ):
+        raise ProviderRetryable("provider_page_membership_not_converged")
+    return {
+        "pageTargetCount": len(expected),
+        "pageRegistrationDigest": _hash(sorted(expected)),
+    }
+
+
+def _finalize_graph_continuation(
+    configuration: dict[str, object],
+    credentials: dict[str, object],
+    targets: list[dict[str, object]],
+    reauthorize: Callable[[], object],
+) -> tuple[bool, dict[str, object] | None, int]:
+    """Prune bounded group drift, assign the app and reproduce exact provider state."""
+    token, group_id, app_id = _provider_context(configuration, credentials)
+    desired_registrations = [
+        _uuid(target.get("directoryDeviceRegistrationId"), "directory_device_registration_id")
+        for target in targets
+    ]
+    desired = set(desired_registrations)
+    if len(desired) != len(desired_registrations):
+        raise AuthorityError("provider_device_resolution_ambiguous")
+    members = _group_member_inventory(token, group_id)
+    observed = [registration for _object_id, registration in members if registration is not None]
+    if len(set(observed)) != len(observed):
+        raise AuthorityError("provider_group_membership_ambiguous")
+    if not desired.issubset(set(observed)):
+        raise ProviderRetryable("provider_membership_not_converged")
+    extras = sorted(object_id for object_id, registration in members if registration not in desired)
+    for object_id in extras[:_MAX_MUTATIONS_PER_INVOCATION]:
+        reauthorize()
+        _request(
+            "DELETE",
+            f"{_GRAPH_ORIGIN}/v1.0/groups/{group_id}/members/{object_id}/$ref",
+            token=token,
+        )
+    if len(extras) > _MAX_MUTATIONS_PER_INVOCATION:
+        return False, None, _MAX_MUTATIONS_PER_INVOCATION
+    reproduced_members = _group_member_inventory(token, group_id)
+    if {registration for _object_id, registration in reproduced_members} != desired:
+        raise ProviderRetryable("provider_membership_not_converged")
+    assignments = _collection(
+        f"{_GRAPH_ORIGIN}/v1.0/deviceAppManagement/mobileApps/{app_id}/assignments"
+        "?$select=id,intent,target",
+        token,
+    )
+    matching = [
+        item
+        for item in assignments
+        if isinstance(item.get("target"), dict) and item["target"].get("groupId") == group_id
+    ]
+    if len(matching) > 1:
+        raise AuthorityError("provider_assignment_ambiguous")
+    if matching and matching[0].get("intent") != "required":
+        raise AuthorityError("provider_assignment_intent_changed")
+    if not matching:
+        reauthorize()
+        _request(
+            "POST",
+            f"{_GRAPH_ORIGIN}/v1.0/deviceAppManagement/mobileApps/{app_id}/assignments",
+            token=token,
+            body={
+                "@odata.type": "#microsoft.graph.mobileAppAssignment",
+                "intent": "required",
+                "target": {
+                    "@odata.type": "#microsoft.graph.groupAssignmentTarget",
+                    "groupId": group_id,
+                },
+            },
+        )
+    reproduced_assignments = _collection(
+        f"{_GRAPH_ORIGIN}/v1.0/deviceAppManagement/mobileApps/{app_id}/assignments"
+        "?$select=id,intent,target",
+        token,
+    )
+    reproduced = [
+        item
+        for item in reproduced_assignments
+        if item.get("intent") == "required"
+        and isinstance(item.get("target"), dict)
+        and item["target"].get("groupId") == group_id
+    ]
+    if len(reproduced) != 1:
+        raise ProviderRetryable("provider_assignment_not_converged")
+    return (
+        True,
+        {
+            "groupReferenceSha256": hashlib.sha256(group_id.encode()).hexdigest(),
+            "appReferenceSha256": hashlib.sha256(app_id.encode()).hexdigest(),
+            "assignmentReferenceSha256": hashlib.sha256(
+                str(reproduced[0].get("id", "")).encode()
+            ).hexdigest(),
+            "targetCount": len(desired),
+        },
+        len(extras),
+    )
+
+
 def _transition(
     command: dict[str, object],
     *,
@@ -1030,6 +1234,7 @@ def _transition(
     attempt: int,
     reason: str | None = None,
     evidence: dict[str, object] | None = None,
+    continuation: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Optimistically persist one content-minimised worker transition."""
     updated = {
@@ -1039,6 +1244,7 @@ def _transition(
         "failure_code": reason,
         "provider_evidence": evidence,
         "updated_at": int(time.time()),
+        **(continuation or {}),
     }
     TABLE.put_item(
         Item=updated,
@@ -1067,6 +1273,10 @@ def _audit_terminal(tenant: str, command: dict[str, object]) -> None:
         "attemptCount": int(command.get("attempt_count", 0)),
         "failureCode": command.get("failure_code"),
         "providerEvidence": command.get("provider_evidence"),
+        "continuationRevision": int(command.get("continuation_revision", 0)),
+        "continuationStage": command.get("continuation_stage", "not_started"),
+        "completedTargets": int(command.get("continuation_completed_targets", 0)),
+        "mutationCount": int(command.get("continuation_mutation_count", 0)),
         "occurredAt": int(command.get("updated_at", time.time())),
     }
     body = json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
@@ -1084,7 +1294,214 @@ def _audit_terminal(tenant: str, command: dict[str, object]) -> None:
     )
 
 
-def _event_record(event: object) -> tuple[str, str, int]:
+def _continuation_queue_url() -> str:
+    """Validate the deployment-owned FIFO URL used only for opaque continuations."""
+    value = os.environ.get("ENDPOINT_DELIVERY_QUEUE_URL", "")
+    parsed = urlsplit(value)
+    region = os.environ.get("AWS_REGION", "")
+    account = os.environ.get("AWS_ACCOUNT_ID", "")
+    suffix = "amazonaws.com.cn" if os.environ.get("AWS_PARTITION") == "aws-cn" else "amazonaws.com"
+    expected_host = f"sqs.{region}.{suffix}"
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != expected_host
+        or parsed.username
+        or parsed.password
+        or parsed.port not in {None, 443}
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.startswith(f"/{account}/")
+        or not parsed.path.endswith(".fifo")
+    ):
+        raise RuntimeError("endpoint delivery continuation queue is invalid")
+    return value
+
+
+def _enqueue_continuation(tenant: str, command_id: str, revision: int) -> None:
+    """Send one idempotent opaque continuation after durable state advancement."""
+    if not 1 <= revision <= _MAX_CONTINUATION_REVISIONS:
+        raise AuthorityError("continuation_revision_invalid")
+    SQS.send_message(
+        QueueUrl=_continuation_queue_url(),
+        MessageBody=json.dumps(
+            {
+                "tenantId": tenant,
+                "commandId": command_id,
+                "continuationRevision": revision,
+            },
+            separators=(",", ":"),
+        ),
+        MessageGroupId=tenant,
+        MessageDeduplicationId=f"{command_id}:{revision}",
+    )
+
+
+def _page_targets(
+    instruction: dict[str, object], targets: list[dict[str, object]], page_index: int
+) -> list[dict[str, object]]:
+    """Select one immutable page from the already reauthorized complete cohort."""
+    pages = instruction["pages"]
+    if not isinstance(pages, list) or not 0 <= page_index < len(pages):
+        raise AuthorityError("continuation_page_invalid")
+    counts = [int(page["targetCount"]) for page in pages]
+    start = sum(counts[:page_index])
+    selected = targets[start : start + counts[page_index]]
+    if len(selected) != counts[page_index]:
+        raise AuthorityError("continuation_page_coverage_changed")
+    return selected
+
+
+def _advance_continuation(
+    tenant: str,
+    command: dict[str, object],
+    *,
+    attempt: int,
+    stage: str,
+    page: int,
+    completed_targets: int,
+    mutation_count: int,
+) -> dict[str, object]:
+    """Persist a monotonic continuation and then idempotently enqueue it."""
+    current_revision = int(command.get("continuation_revision", 0))
+    next_revision = current_revision + 1
+    if next_revision > _MAX_CONTINUATION_REVISIONS:
+        raise AuthorityError("continuation_revision_limit_exceeded")
+    updated = _transition(
+        command,
+        status="continuing",
+        attempt=attempt,
+        continuation={
+            "continuation_revision": next_revision,
+            "continuation_stage": stage,
+            "continuation_page": page,
+            "continuation_completed_targets": completed_targets,
+            "continuation_mutation_count": mutation_count,
+        },
+    )
+    try:
+        _enqueue_continuation(tenant, str(command["id"]), next_revision)
+    except Exception:
+        # The older FIFO record will be retried. It observes the durable newer
+        # revision and repairs this exact message without repeating a page.
+        try:
+            _transition(
+                updated,
+                status="retryable",
+                attempt=attempt,
+                reason="continuation_enqueue_failed",
+            )
+        except Exception:
+            # Preserve the first durable advancement if the diagnostic status
+            # races. The old record still repairs the same exact revision.
+            pass
+        raise RuntimeError("endpoint delivery continuation requires retry") from None
+    return updated
+
+
+def _continue_large_command(
+    tenant: str,
+    command: dict[str, object],
+    configuration: dict[str, object],
+    targets: list[dict[str, object]],
+    *,
+    attempt: int,
+) -> dict[str, object]:
+    """Resolve one page or one bounded prune step for a large sealed cohort."""
+    instruction = _command_instruction(_plain(command.get("instruction")))
+    pages = instruction["pages"]
+    if not isinstance(pages, list):
+        raise AuthorityError("command_pages_invalid")
+    stage = command.get("continuation_stage", "resolving_pages")
+    page = int(command.get("continuation_page", 0))
+    completed_targets = int(command.get("continuation_completed_targets", 0))
+    mutation_count = int(command.get("continuation_mutation_count", 0))
+    if (
+        stage not in {"resolving_pages", "pruning"}
+        or not 0 <= page <= len(pages)
+        or not 0 <= completed_targets <= len(targets)
+        or not 0 <= mutation_count <= _MAX_TARGETS * 2
+    ):
+        raise AuthorityError("continuation_state_invalid")
+    credentials = _credentials(tenant, configuration, command)
+
+    def reauthorize() -> object:
+        """Reload the complete live cohort before one provider mutation."""
+        return _load_authority(tenant, str(command["id"]))
+
+    if stage == "resolving_pages":
+        selected = _page_targets(instruction, targets, page)
+        progress = _reconcile_graph_page(
+            configuration,
+            credentials,
+            selected,
+            reauthorize,
+        )
+        next_completed = completed_targets + int(progress["pageTargetCount"])
+        next_page = page + 1
+        next_stage = "pruning" if next_page == len(pages) else "resolving_pages"
+        advanced = _advance_continuation(
+            tenant,
+            command,
+            attempt=attempt,
+            stage=next_stage,
+            page=next_page,
+            completed_targets=next_completed,
+            mutation_count=mutation_count,
+        )
+        return {
+            "status": "continuing",
+            "commandId": command["id"],
+            "continuationRevision": advanced["continuation_revision"],
+            "completedTargets": next_completed,
+            "targetCount": len(targets),
+        }
+    complete, evidence, removed = _finalize_graph_continuation(
+        configuration,
+        credentials,
+        targets,
+        reauthorize,
+    )
+    if not complete:
+        advanced = _advance_continuation(
+            tenant,
+            command,
+            attempt=attempt,
+            stage="pruning",
+            page=page,
+            completed_targets=completed_targets,
+            mutation_count=mutation_count + removed,
+        )
+        return {
+            "status": "continuing",
+            "commandId": command["id"],
+            "continuationRevision": advanced["continuation_revision"],
+            "completedTargets": completed_targets,
+            "targetCount": len(targets),
+        }
+    # Provider convergence is channel evidence only. Reproduce all server-owned
+    # authority once more before sealing that evidence as terminal.
+    reauthorize()
+    completed = _transition(
+        command,
+        status="assigned_reported",
+        attempt=attempt,
+        evidence=evidence,
+        continuation={
+            "continuation_stage": "complete",
+            "continuation_page": page,
+            "continuation_completed_targets": len(targets),
+            "continuation_mutation_count": mutation_count + removed,
+        },
+    )
+    _audit_terminal(tenant, completed)
+    return {
+        "status": "assigned_reported",
+        "commandId": command["id"],
+        "targetCount": len(targets),
+    }
+
+
+def _event_record(event: object) -> tuple[str, str, int, int]:
     """Validate the exact single-record FIFO invocation contract."""
     if not isinstance(event, dict) or set(event) != {"Records"}:
         raise ValueError("endpoint delivery worker event is invalid")
@@ -1099,23 +1516,57 @@ def _event_record(event: object) -> tuple[str, str, int]:
         receive_count = int(record.get("attributes", {}).get("ApproximateReceiveCount", "0"))
     except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ValueError("endpoint delivery worker envelope is malformed") from error
-    if not isinstance(body, dict) or set(body) != {"tenantId", "commandId"}:
+    if not isinstance(body, dict) or set(body) not in (
+        {"tenantId", "commandId"},
+        {"tenantId", "commandId", "continuationRevision"},
+    ):
         raise ValueError("endpoint delivery worker body is invalid")
     tenant = _identifier(body.get("tenantId"), "tenant_id")
     command_id = _digest(body.get("commandId"), "command_id")
     if not 1 <= receive_count <= _MAX_ATTEMPTS:
         raise ValueError("endpoint delivery receive count is invalid")
-    return tenant, command_id, receive_count
+    continuation_revision = body.get("continuationRevision", 0)
+    if (
+        isinstance(continuation_revision, bool)
+        or not isinstance(continuation_revision, int)
+        or not 0 <= continuation_revision <= _MAX_CONTINUATION_REVISIONS
+    ):
+        raise ValueError("endpoint delivery continuation revision is invalid")
+    return tenant, command_id, receive_count, continuation_revision
 
 
 def handler(event, context):  # noqa: ANN001, ANN201, ARG001
     """Reauthorize and converge one opaque Intune package/cohort command."""
     _deployment_gate()
-    tenant, command_id, receive_count = _event_record(event)
+    tenant, command_id, receive_count, message_revision = _event_record(event)
     command: dict[str, object] | None = None
+    attempt = receive_count
     try:
         command, configuration, targets = _load_authority(tenant, command_id)
-        command = _transition(command, status="resolving_targets", attempt=receive_count)
+        current_revision = int(command.get("continuation_revision", 0))
+        if message_revision != current_revision:
+            if message_revision < current_revision and command.get("status") in {
+                "continuing",
+                "retryable",
+                "resolving_targets",
+            }:
+                _enqueue_continuation(tenant, command_id, current_revision)
+                return {
+                    "status": "continuation_repaired",
+                    "commandId": command_id,
+                    "continuationRevision": current_revision,
+                }
+            raise AuthorityError("continuation_revision_changed")
+        attempt = int(command.get("attempt_count", 0)) + 1
+        command = _transition(command, status="resolving_targets", attempt=attempt)
+        if len(targets) > _PAGE_SIZE:
+            return _continue_large_command(
+                tenant,
+                command,
+                configuration,
+                targets,
+                attempt=attempt,
+            )
         credentials = _credentials(tenant, configuration, command)
         evidence = _reconcile_graph(
             configuration,
@@ -1129,7 +1580,7 @@ def handler(event, context):  # noqa: ANN001, ANN201, ARG001
         completed = _transition(
             command,
             status="assigned_reported",
-            attempt=receive_count,
+            attempt=attempt,
             evidence=evidence,
         )
         _audit_terminal(tenant, completed)
@@ -1146,13 +1597,14 @@ def handler(event, context):  # noqa: ANN001, ANN201, ARG001
         if command and command.get("status") in {
             "pending",
             "queued",
+            "continuing",
             "retryable",
             "resolving_targets",
         }:
             terminal = _transition(
                 command,
                 status="superseded" if error.code == "command_superseded" else "blocked",
-                attempt=receive_count,
+                attempt=attempt,
                 reason=error.code,
             )
             _audit_terminal(tenant, terminal)
@@ -1165,7 +1617,7 @@ def handler(event, context):  # noqa: ANN001, ANN201, ARG001
             terminal = _transition(
                 command,
                 status="blocked",
-                attempt=receive_count,
+                attempt=attempt,
                 reason="provider_redirect_denied",
             )
             _audit_terminal(tenant, terminal)
@@ -1174,7 +1626,7 @@ def handler(event, context):  # noqa: ANN001, ANN201, ARG001
             terminal = _transition(
                 command,
                 status="blocked",
-                attempt=receive_count,
+                attempt=attempt,
                 reason=f"provider_http_{error.code}",
             )
             _audit_terminal(tenant, terminal)
@@ -1185,7 +1637,7 @@ def handler(event, context):  # noqa: ANN001, ANN201, ARG001
         failed = _transition(
             command,
             status="failed" if receive_count >= _MAX_ATTEMPTS else "retryable",
-            attempt=receive_count,
+            attempt=attempt,
             reason=reason,
         )
         if receive_count >= _MAX_ATTEMPTS:

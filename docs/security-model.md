@@ -1556,9 +1556,14 @@ credential/decrypt authority. On each bounded command the worker reconstructs
 fresh endpoint binding, resolves Entra device alternate keys online, verifies
 pre-provisioned group/app metadata, reauthorizes before mutation, converges
 exact dedicated-group membership, preserves unrelated assignments and writes
-content-minimised Object Lock evidence. Commands above 40 targets fail before
-credential access until continuation authority is implemented. Live customer
-acceptance and independent post-install attestation remain mandatory. See
+content-minimised Object Lock evidence. Commands up to 500 targets use
+revision-bound, tenant-ordered FIFO continuations with at most one 40-target
+page or 40 stale-member removals per invocation. Raw Graph IDs remain in worker
+memory; persisted and operator-visible progress is content-minimised. A stale
+message can repair only the latest durable revision, assignment waits for exact
+group reproduction, and provider success still cannot satisfy runtime
+attestation. Live customer acceptance and independent post-install attestation
+remain mandatory. See
 [Managed endpoint delivery authority](managed-endpoint-delivery-authority-design.md).
 
 ## Real Codex host acceptance boundary

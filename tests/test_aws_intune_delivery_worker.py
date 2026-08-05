@@ -27,9 +27,10 @@ def worker(monkeypatch: pytest.MonkeyPatch) -> Any:
     table = _Client()
     secrets = _Client()
     s3 = _Client()
+    sqs = _Client()
     boto3 = types.ModuleType("boto3")
     boto3.resource = lambda _name: types.SimpleNamespace(Table=lambda _table: table)  # type: ignore[attr-defined]
-    boto3.client = lambda name: {"secretsmanager": secrets, "s3": s3}[name]  # type: ignore[attr-defined]
+    boto3.client = lambda name: {"secretsmanager": secrets, "s3": s3, "sqs": sqs}[name]  # type: ignore[attr-defined]
     dynamodb = types.ModuleType("boto3.dynamodb")
     conditions = types.ModuleType("boto3.dynamodb.conditions")
     conditions.Key = lambda name: types.SimpleNamespace(eq=lambda value: (name, value))  # type: ignore[attr-defined]
@@ -330,3 +331,332 @@ def test_provider_redirect_is_terminal_and_content_minimised(
     assert result == {"status": "blocked", "failureCode": "provider_redirect_denied"}
     assert audits[0]["failure_code"] == "provider_redirect_denied"
     assert "untrusted" not in json.dumps(audits)
+
+
+def test_large_page_adds_only_missing_members_and_reproduces_before_progress(
+    worker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One continuation page is idempotent and cannot prune the wider cohort."""
+    group_id = "22222222-2222-4222-8222-222222222222"
+    first_registration = "11111111-1111-4111-8111-111111111111"
+    second_registration = "33333333-3333-4333-8333-333333333333"
+    first_object = "44444444-4444-4444-8444-444444444444"
+    second_object = "55555555-5555-4555-8555-555555555555"
+    inventories = iter(
+        [
+            [(first_object, first_registration)],
+            [(first_object, first_registration), (second_object, second_registration)],
+        ]
+    )
+    monkeypatch.setattr(
+        worker,
+        "_provider_context",
+        lambda *_args: ("synthetic-token", group_id, "66666666-6666-4666-8666-666666666666"),
+    )
+    monkeypatch.setattr(worker, "_group_member_inventory", lambda *_args: next(inventories))
+    monkeypatch.setattr(
+        worker,
+        "_resolve_directory_target",
+        lambda target, _token: {
+            first_registration: (first_object, first_registration),
+            second_registration: (second_object, second_registration),
+        }[target["directoryDeviceRegistrationId"]],
+    )
+    calls: list[tuple[str, str, object]] = []
+
+    def request(method: str, url: str, **kwargs: Any) -> tuple[int, dict[str, Any]]:
+        calls.append((method, url, kwargs.get("body")))
+        return 204, {}
+
+    monkeypatch.setattr(worker, "_request", request)
+    reauthorizations: list[bool] = []
+
+    progress = worker._reconcile_graph_page(
+        {},
+        {},
+        [
+            {"directoryDeviceRegistrationId": first_registration},
+            {"directoryDeviceRegistrationId": second_registration},
+        ],
+        lambda: reauthorizations.append(True),
+    )
+
+    assert progress["pageTargetCount"] == 2
+    assert len(reauthorizations) == 1
+    assert [method for method, _url, _body in calls] == ["POST"]
+    assert second_object in json.dumps(calls)
+    assert first_object not in json.dumps(calls)
+    assert set(progress) == {"pageTargetCount", "pageRegistrationDigest"}
+
+
+def test_large_finalize_prunes_only_one_bounded_chunk_before_assignment(
+    worker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A large stale group cannot reach assignment before bounded exact pruning."""
+    group_id = "22222222-2222-4222-8222-222222222222"
+    desired_registration = "11111111-1111-4111-8111-111111111111"
+    desired_object = "33333333-3333-4333-8333-333333333333"
+    extras = [
+        (f"{index:08x}-0000-4000-8000-{index:012x}", None)
+        for index in range(1, worker._MAX_MUTATIONS_PER_INVOCATION + 2)
+    ]
+    monkeypatch.setattr(
+        worker,
+        "_provider_context",
+        lambda *_args: ("synthetic-token", group_id, "44444444-4444-4444-8444-444444444444"),
+    )
+    monkeypatch.setattr(
+        worker,
+        "_group_member_inventory",
+        lambda *_args: [(desired_object, desired_registration), *extras],
+    )
+    calls: list[tuple[str, str]] = []
+
+    def request(method: str, url: str, **_kwargs: Any) -> tuple[int, dict[str, Any]]:
+        calls.append((method, url))
+        return 204, {}
+
+    monkeypatch.setattr(worker, "_request", request)
+    monkeypatch.setattr(
+        worker,
+        "_collection",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("assignment read was premature")),
+    )
+    reauthorizations: list[bool] = []
+
+    complete, evidence, removed = worker._finalize_graph_continuation(
+        {},
+        {},
+        [{"directoryDeviceRegistrationId": desired_registration}],
+        lambda: reauthorizations.append(True),
+    )
+
+    assert complete is False
+    assert evidence is None
+    assert removed == worker._MAX_MUTATIONS_PER_INVOCATION
+    assert len(reauthorizations) == worker._MAX_MUTATIONS_PER_INVOCATION
+    assert len(calls) == worker._MAX_MUTATIONS_PER_INVOCATION
+    assert all(method == "DELETE" and "/members/" in url for method, url in calls)
+
+
+def test_stale_continuation_repairs_current_revision_without_repeating_work(
+    worker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A redelivered old FIFO message can only repair the latest durable step."""
+    monkeypatch.setenv("ENDPOINT_DELIVERY_DISPATCH_ENABLED", "true")
+    monkeypatch.setenv("ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256", "f" * 64)
+    command = {
+        "id": "a" * 64,
+        "status": "continuing",
+        "continuation_revision": 2,
+        "attempt_count": 1,
+    }
+    monkeypatch.setattr(worker, "_load_authority", lambda *_args: (command, {}, [{}] * 41))
+    enqueued: list[tuple[str, str, int]] = []
+    monkeypatch.setattr(
+        worker,
+        "_enqueue_continuation",
+        lambda tenant, command_id, revision: enqueued.append((tenant, command_id, revision)),
+    )
+    monkeypatch.setattr(
+        worker,
+        "_transition",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("stale work repeated")),
+    )
+    event = {
+        "Records": [
+            {
+                "eventSource": "aws:sqs",
+                "body": json.dumps(
+                    {
+                        "tenantId": "tenant-1",
+                        "commandId": "a" * 64,
+                        "continuationRevision": 1,
+                    }
+                ),
+                "attributes": {"ApproximateReceiveCount": "2"},
+            }
+        ]
+    }
+
+    result = worker.handler(event, None)
+
+    assert result["status"] == "continuation_repaired"
+    assert result["continuationRevision"] == 2
+    assert enqueued == [("tenant-1", "a" * 64, 2)]
+
+
+def test_continuation_queue_is_fixed_and_message_is_opaque(
+    worker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Self-continuation cannot choose an origin or include provider identity."""
+    monkeypatch.setenv("AWS_REGION", "eu-west-2")
+    monkeypatch.setenv("AWS_ACCOUNT_ID", "111111111111")
+    monkeypatch.setenv(
+        "ENDPOINT_DELIVERY_QUEUE_URL",
+        "https://sqs.eu-west-2.amazonaws.com/111111111111/endpoint-delivery.fifo",
+    )
+    messages: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        worker,
+        "SQS",
+        types.SimpleNamespace(send_message=lambda **value: messages.append(value)),
+    )
+
+    worker._enqueue_continuation("tenant-1", "a" * 64, 3)
+
+    assert json.loads(messages[0]["MessageBody"]) == {
+        "tenantId": "tenant-1",
+        "commandId": "a" * 64,
+        "continuationRevision": 3,
+    }
+    assert messages[0]["MessageDeduplicationId"] == f"{'a' * 64}:3"
+    monkeypatch.setenv("ENDPOINT_DELIVERY_QUEUE_URL", "https://untrusted.invalid/a.fifo")
+    with pytest.raises(RuntimeError, match="queue is invalid"):
+        worker._enqueue_continuation("tenant-1", "a" * 64, 4)
+
+
+def test_large_sealed_command_is_admitted_but_remains_bounded(worker: Any) -> None:
+    """Forty-one targets use continuation while an oversized cohort fails closed."""
+    instruction = {
+        "schemaVersion": 1,
+        "provider": "intune",
+        "providerVersion": 1,
+        "providerContentHash": "0" * 64,
+        "deploymentId": "deployment-1",
+        "host": "claude-code",
+        "releaseId": "release-1",
+        "packageId": "package-1",
+        "packageManifestSha256": "1" * 64,
+        "packageObjectSha256": "2" * 64,
+        "packageStorageIdentitySha256": "3" * 64,
+        "providerPackageIdentitySha256": "4" * 64,
+        "packageSignatureEvidenceSha256": "5" * 64,
+        "packageApproverEvidenceSha256": "6" * 64,
+        "releaseEvidenceSha256": "7" * 64,
+        "packageBundleSha256": "8" * 64,
+        "packageApprovalBundleSha256": "9" * 64,
+        "rolloutRevision": 1,
+        "rolloutState": "canary",
+        "targetCount": 41,
+        "cohortDigest": "a" * 64,
+        "pages": [
+            {"id": "b" * 64, "pageDigest": "c" * 64, "targetCount": 40},
+            {"id": "d" * 64, "pageDigest": "e" * 64, "targetCount": 1},
+        ],
+    }
+
+    assert worker._command_instruction(instruction)["targetCount"] == 41
+    with pytest.raises(worker.AuthorityError, match="command_target_limit_exceeded"):
+        worker._command_instruction({**instruction, "targetCount": 501})
+
+
+def test_large_command_advances_exact_pages_then_enters_pruning(
+    worker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Server-owned page state advances monotonically and never skips a target."""
+    pages = [
+        {"id": "b" * 64, "pageDigest": "c" * 64, "targetCount": 40},
+        {"id": "d" * 64, "pageDigest": "e" * 64, "targetCount": 1},
+    ]
+    instruction = {"pages": pages}
+    command: dict[str, Any] = {
+        "id": "a" * 64,
+        "instruction": instruction,
+        "continuation_revision": 0,
+        "continuation_stage": "resolving_pages",
+        "continuation_page": 0,
+        "continuation_completed_targets": 0,
+        "continuation_mutation_count": 0,
+    }
+    targets = [{"index": index} for index in range(41)]
+    monkeypatch.setattr(worker, "_command_instruction", lambda _value: instruction)
+    monkeypatch.setattr(worker, "_credentials", lambda *_args: {})
+    selected_pages: list[list[int]] = []
+
+    def reconcile_page(
+        _configuration: object,
+        _credentials: object,
+        selected: list[dict[str, int]],
+        _reauthorize: object,
+    ) -> dict[str, int]:
+        selected_pages.append([target["index"] for target in selected])
+        return {"pageTargetCount": len(selected)}
+
+    monkeypatch.setattr(worker, "_reconcile_graph_page", reconcile_page)
+    advances: list[dict[str, Any]] = []
+
+    def advance(_tenant: str, value: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        advances.append(kwargs)
+        return {**value, "continuation_revision": int(value["continuation_revision"]) + 1}
+
+    monkeypatch.setattr(worker, "_advance_continuation", advance)
+
+    first = worker._continue_large_command("tenant-1", command, {}, targets, attempt=1)
+    command.update(
+        {
+            "continuation_revision": 1,
+            "continuation_page": 1,
+            "continuation_completed_targets": 40,
+        }
+    )
+    second = worker._continue_large_command("tenant-1", command, {}, targets, attempt=2)
+
+    assert selected_pages == [list(range(40)), [40]]
+    assert advances[0] == {
+        "attempt": 1,
+        "stage": "resolving_pages",
+        "page": 1,
+        "completed_targets": 40,
+        "mutation_count": 0,
+    }
+    assert advances[1]["stage"] == "pruning"
+    assert advances[1]["page"] == 2
+    assert advances[1]["completed_targets"] == 41
+    assert first["continuationRevision"] == 1
+    assert second["continuationRevision"] == 2
+
+
+def test_lost_continuation_send_preserves_new_revision_as_retryable(
+    worker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Persist-before-send failure remains visible and repairable without page replay."""
+    command: dict[str, Any] = {
+        "id": "a" * 64,
+        "status": "resolving_targets",
+        "attempt_count": 1,
+        "continuation_revision": 0,
+    }
+    transitions: list[dict[str, Any]] = []
+
+    def transition(value: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        updated = {
+            **value,
+            "status": kwargs["status"],
+            "failure_code": kwargs.get("reason"),
+            **kwargs.get("continuation", {}),
+        }
+        transitions.append(updated)
+        return updated
+
+    monkeypatch.setattr(worker, "_transition", transition)
+    monkeypatch.setattr(
+        worker,
+        "_enqueue_continuation",
+        lambda *_args: (_ for _ in ()).throw(OSError("synthetic queue outage")),
+    )
+
+    with pytest.raises(RuntimeError, match="continuation requires retry"):
+        worker._advance_continuation(
+            "tenant-1",
+            command,
+            attempt=1,
+            stage="resolving_pages",
+            page=1,
+            completed_targets=40,
+            mutation_count=0,
+        )
+
+    assert transitions[0]["continuation_revision"] == 1
+    assert transitions[1]["status"] == "retryable"
+    assert transitions[1]["failure_code"] == "continuation_enqueue_failed"

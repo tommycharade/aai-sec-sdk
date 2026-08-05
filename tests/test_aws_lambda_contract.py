@@ -15804,6 +15804,9 @@ def test_intune_provider_infrastructure_separates_api_and_worker_authority() -> 
     assert 'indexName: "EndpointDeliveryOutbox"' in stack
     assert '"EndpointDeliveryWorker"' in stack
     assert "endpointDeliveryCredentialKey.grantDecrypt(endpointDeliveryWorker)" in stack
+    assert "endpointDeliveryWorkerQueue.grantSendMessages(endpointDeliveryWorker)" in stack
+    assert "ENDPOINT_DELIVERY_QUEUE_URL: endpointDeliveryWorkerQueue.queueUrl" in stack
+    assert "recursiveLoop: lambda.RecursiveLoop.ALLOW" in stack
     assert "enabled: endpointDeliveryDispatchEnabled" in stack
     assert 'ENDPOINT_DELIVERY_DISPATCH_ENABLED?.trim() ?? "false"' in stack
     assert (
@@ -15945,6 +15948,8 @@ def test_intune_delivery_outbox_is_idempotent_and_authority_bound(monkeypatch: A
     assert view["items"][0]["attemptCount"] == 0
     assert view["items"][0]["failureCode"] is None
     assert view["items"][0]["providerEvidence"] is None
+    assert view["items"][0]["continuationStage"] == "not_started"
+    assert view["items"][0]["completedTargets"] == 0
 
 
 def test_endpoint_delivery_command_view_is_content_minimised_and_fails_closed(
@@ -15982,6 +15987,9 @@ def test_endpoint_delivery_command_view_is_content_minimised_and_fails_closed(
 
     assert view["attemptCount"] == 2
     assert view["providerEvidence"] == record["provider_evidence"]
+    assert view["continuationRevision"] == 0
+    assert view["continuationStage"] == "not_started"
+    assert view["completedTargets"] == 0
     assert "groupId" not in json.dumps(view)
     with pytest.raises(RuntimeError, match="provider evidence is invalid"):
         module._endpoint_delivery_command_view(
@@ -15989,6 +15997,8 @@ def test_endpoint_delivery_command_view_is_content_minimised_and_fails_closed(
         )
     with pytest.raises(RuntimeError, match="failure code is invalid"):
         module._endpoint_delivery_command_view({**record, "failure_code": "raw URL"})
+    with pytest.raises(RuntimeError, match="continuation state is invalid"):
+        module._endpoint_delivery_command_view({**record, "continuation_completed_targets": 4})
 
 
 def test_intune_delivery_dispatch_is_gated_and_latest_authority_bound(
@@ -16032,7 +16042,9 @@ def test_intune_delivery_dispatch_is_gated_and_latest_authority_bound(
     assert json.loads(module._fake_sqs.messages[0]["MessageBody"]) == {
         "tenantId": tenant,
         "commandId": command_id,
+        "continuationRevision": 0,
     }
+    assert module._fake_sqs.messages[0]["MessageDeduplicationId"] == f"{command_id}:0"
     stored = table.items[(command["pk"], command["sk"])]
     assert stored["status"] == "queued"
     assert "delivery_outbox_pk" not in stored
