@@ -46,6 +46,17 @@ from .claude_code import (
     exact_tool_rule,
     path_within_rule,
 )
+from .cloud_credentials import (
+    AzureWorkloadIdentityCredentialBroker,
+    CloudCredentialProvider,
+    CloudProviderGrant,
+    CloudScopeBuilder,
+    CloudScopePolicy,
+    CloudTokenExchangeClient,
+    CloudWorkloadCredentialBroker,
+    GcpWorkloadIdentityCredentialBroker,
+    GrantRevocationChecker,
+)
 from .codex_cli import (
     CodexCliHook,
     CodexHookDecision,
@@ -308,6 +319,15 @@ __all__ = [
     "DynamoDbIdempotencyStore",
     "AwsScopePolicy",
     "AwsStsCredentialBroker",
+    "AzureWorkloadIdentityCredentialBroker",
+    "CloudCredentialProvider",
+    "CloudProviderGrant",
+    "CloudScopeBuilder",
+    "CloudScopePolicy",
+    "CloudTokenExchangeClient",
+    "CloudWorkloadCredentialBroker",
+    "GcpWorkloadIdentityCredentialBroker",
+    "GrantRevocationChecker",
     "ClaudeCodeHook",
     "ClaudeHookDecision",
     "ClaudeHookResult",

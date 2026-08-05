@@ -283,6 +283,13 @@ are required before an enterprise production claim:
 
 - AWS, Azure and GCP production role inventories for the credential broker;
 - approved test accounts and roles for issuance and revocation evidence;
+- exact AWS role ARNs, Entra tenant/client UUID pairs and GCP service-account
+  identities, with approved audiences, tools, resources, scopes and maximum
+  session lifetimes;
+- a deployment-owned token-exchange endpoint/client and live revocation source
+  for each provider, plus a secret-manager location for any provider material;
+- an independent cloud-IAM reviewer and an operator authorized to run the
+  allowed, widened-scope, expiry, outage and revocation acceptance exercises;
 - production isolation choice: container, microVM, endpoint sandbox or
   customer-owned runner;
 - endpoint credential-revocation mechanism;

@@ -15,6 +15,14 @@ fields, so `object.__new__` objects and copied fields cannot authorize a
 handler call. This protects the SDK boundary from accidental forgery; code
 with authority to modify the running Python interpreter remains trusted.
 
+Cloud credential authority is also host-owned. Provider principal, audience,
+scope policy, token-exchange client and revocation evidence cannot come from
+model output. Azure, GCP and AWS grants are exact-scope and short-lived; a
+failed or unavailable live revocation check prevents mint or subsequent
+secret use. The capability limits exposure inside the SDK but does not revoke
+provider work already in flight. See [Cloud credential
+authority](cloud-credential-authority-design.md).
+
 Bounded provider and handler waits are admitted through
 `BoundedOperationTracker`. A timeout retains its worker slot until completion;
 `BoundedOperationExecutor` emits the typed timeout phase, while

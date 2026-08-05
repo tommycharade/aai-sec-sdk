@@ -221,7 +221,7 @@ def test_reference_persistence_is_explicitly_rejected_for_ha_requirements(tmp_pa
     assert store.persistence_capabilities() == {
         "adapter": "sqlite-reference",
         "highAvailability": False,
-        "schemaVersion": 9,
+        "schemaVersion": 10,
     }
     store.close()
     with pytest.raises(FleetConfigurationError):
@@ -1481,6 +1481,100 @@ def call_api(
     return status[0], json.loads(payload or b"{}")
 
 
+def test_local_credential_broker_lifecycle_is_tenant_scoped_and_honestly_unverified(
+    tmp_path: Path,
+) -> None:
+    """Local lifecycle works without pretending SQLite has cloud-provider evidence."""
+    store = EnterpriseFleetStore(tmp_path / "brokers.sqlite")
+    token_a = "fleet-admin-token-a1234"  # noqa: S105 - synthetic test credential
+    token_b = "fleet-admin-token-b1234"  # noqa: S105 - synthetic test credential
+    app = EnterpriseFleetApplication(
+        store,
+        authenticator=StaticFleetAuthenticator(
+            {token_a: identity("org-a"), token_b: identity("org-b", subject="operator-b")}
+        ),
+    )
+    for token, organization_id in ((token_a, "org-a"), (token_b, "org-b")):
+        assert call_api(
+            app,
+            "POST",
+            "/api/enterprise/organizations",
+            {"organizationId": organization_id, "name": organization_id.upper()},
+            token=token,
+        )[0].startswith("201")
+    request = {
+        "brokerId": "azure-read",
+        "name": "Azure metadata read",
+        "provider": "azure_workload_identity",
+        "principal": ("11111111-2222-4333-8444-555555555555/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
+        "audience": "https://vault.example.test",
+        "allowedTools": ["read_metadata"],
+        "resourceIds": ["vault:synthetic"],
+        "maxTtlSeconds": 300,
+    }
+    status, created = call_api(
+        app, "POST", "/api/enterprise/credential-brokers", request, token=token_a
+    )
+    assert status.startswith("201")
+    assert created["verificationStatus"] == "unverified"
+    assert created["executionAllowed"] is False
+    assert created["revocationEpoch"] == 1
+    assert "clientSecret" not in created
+
+    _, integrations_a = call_api(app, "GET", "/api/enterprise/integrations", token=token_a)
+    _, integrations_b = call_api(app, "GET", "/api/enterprise/integrations", token=token_b)
+    assert [item["id"] for item in integrations_a["credentialBrokers"]] == ["azure-read"]
+    assert integrations_b["credentialBrokers"] == []
+
+    rejected_status, _ = call_api(
+        app,
+        "POST",
+        "/api/enterprise/credential-brokers",
+        {**request, "brokerId": "secret-attempt", "clientSecret": "synthetic"},  # noqa: S106
+        token=token_a,
+    )
+    assert rejected_status.startswith("400")
+    for broker_id, field, value in (
+        ("bad-principal", "principal", "not-an-entra-identity"),
+        ("bad-audience", "audience", "sts.amazonaws.com"),
+    ):
+        malformed_status, _ = call_api(
+            app,
+            "POST",
+            "/api/enterprise/credential-brokers",
+            {**request, "brokerId": broker_id, field: value},
+            token=token_a,
+        )
+        assert malformed_status.startswith("400")
+    aws_ttl_status, _ = call_api(
+        app,
+        "POST",
+        "/api/enterprise/credential-brokers",
+        {
+            **request,
+            "brokerId": "aws-too-short",
+            "provider": "aws_sts",
+            "principal": "arn:aws:iam::123456789012:role/aai-sec-scoped-tool",
+            "audience": "sts.amazonaws.com",
+            "maxTtlSeconds": 300,
+        },
+        token=token_a,
+    )
+    assert aws_ttl_status.startswith("400")
+    revoked_status, revoked = call_api(
+        app,
+        "POST",
+        "/api/enterprise/credential-brokers/azure-read/revoke",
+        {"expectedRevision": 1, "reason": "Synthetic provider role retired."},
+        token=token_a,
+    )
+    assert revoked_status.startswith("200")
+    assert revoked["status"] == "revoked"
+    assert revoked["revision"] == 2
+    assert revoked["revocationEpoch"] == 2
+    assert revoked["executionAllowed"] is False
+
+
 def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> None:
     """The HTTP boundary exposes inventory without leaking bearer sessions."""
     store = EnterpriseFleetStore(tmp_path / "fleet.sqlite")
@@ -1516,6 +1610,8 @@ def test_enterprise_api_is_authenticated_and_tenant_scoped(tmp_path: Path) -> No
     assert integration_status.startswith("200")
     assert integration_payload["splunk"]["status"] == "stub"
     assert integration_payload["splunk"]["deliveryVerified"] is False
+    assert integration_payload["credentialBrokers"] == []
+    assert integration_payload["credentialBrokerEvidenceTtlSeconds"] == 900
 
     assert call_api(
         app, "POST", "/api/enterprise/organizations", {"organizationId": "org-a", "name": "Alpha"}

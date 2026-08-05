@@ -1,5 +1,13 @@
 # Changelog
 
+- Added provider-neutral Azure and GCP workload-identity credential brokers,
+  live AWS STS and cloud-grant revocation checks, and a secret-free hosted
+  credential-authority lifecycle. Human registration remains blocked until a
+  least-privilege machine identity submits fresh exact-configuration evidence;
+  revocation advances a server-owned epoch. The enterprise UI now provides a
+  typed cloud-credential workspace without accepting secret material. Real
+  customer cloud-role acceptance remains explicitly open.
+
 - Made Codex process-loaded evidence a server-owned execution-authority gate.
   Evidence now binds the exact managed bundle hash; the local and AWS control
   planes independently compare current desired host/version/platform and

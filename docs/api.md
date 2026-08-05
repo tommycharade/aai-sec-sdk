@@ -392,6 +392,32 @@ modified action.
 
 ::: agentic_security.credentials.ScopedCredential
 
+::: agentic_security.cloud_credentials.CloudCredentialProvider
+
+::: agentic_security.cloud_credentials.CloudScopePolicy
+
+::: agentic_security.cloud_credentials.CloudProviderGrant
+
+::: agentic_security.cloud_credentials.CloudTokenExchangeClient
+
+::: agentic_security.cloud_credentials.CloudScopeBuilder
+
+::: agentic_security.cloud_credentials.GrantRevocationChecker
+
+::: agentic_security.cloud_credentials.CloudWorkloadCredentialBroker
+
+::: agentic_security.cloud_credentials.AzureWorkloadIdentityCredentialBroker
+
+::: agentic_security.cloud_credentials.GcpWorkloadIdentityCredentialBroker
+
+`AwsStsCredentialBroker` and the cloud workload brokers can receive a live
+revocation callback. A false result or callback failure denies mint and blocks
+callback-checked use. See [Cloud credential
+authority](cloud-credential-authority-design.md) for the hosted evidence and
+revocation lifecycle. AWS STS requests must be 900–3,600 seconds because STS
+cannot issue a shorter role session; Azure and GCP support the SDK's 1–3,600
+second mint range.
+
 ## UI control plane adapter
 
 The optional management UI talks to an authenticated control-plane adapter.

@@ -97,6 +97,14 @@ as completed SIEM integration.
 | Configuration backups | Show backup status and provide controlled restore operations. |
 | Executive and auditor assurance | Present server-derived, content-hashed posture summaries with explicit blind spots; restrict entity-level evidence lineage to evidence readers and export the exact viewed snapshot. |
 
+The **Connect agents → Cloud credentials** workspace implements the credential
+rows above as a typed, secret-free workflow. It distinguishes registration
+from verified execution authority, shows exact scope and evidence expiry, and
+requires an accountable human revocation. Only a machine identity scoped to
+`credential_broker_runtime` can submit provider evidence. Local reference
+registrations remain visibly blocked because SQLite cannot verify a cloud
+identity.
+
 ## Assurance workspace
 
 **Assurance** is the reporting surface for leadership and assessors. It is not

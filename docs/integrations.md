@@ -171,6 +171,12 @@ servers, but it does not provide an approval prompt before using their tools,
 so the SDK gateway remains deny-by-default and policy-authoritative. The UI
 labels this integration admin-managed until that broker is present.
 
+For AWS, Azure or GCP access, keep provider secrets and token exchange outside
+the repository and MCP request. Register exact secret-free authority centrally,
+then let a service identity with only `credential_broker_runtime` attest the
+deployment-owned adapter. Registration alone remains blocked. See [Cloud
+credential authority](cloud-credential-authority-design.md).
+
 ## Live Claude presence
 
 The optional control-plane integration can show a Claude Code project as a

@@ -22,6 +22,7 @@
     "src/agentic_security/approvals.py",
     "src/agentic_security/budgets.py",
     "src/agentic_security/credentials.py",
+    "src/agentic_security/cloud_credentials.py",
     "src/agentic_security/idempotency.py",
     "src/agentic_security/isolation.py",
     "src/agentic_security/policies.py",
@@ -41,7 +42,10 @@
     "runtime_boundary": ["src/agentic_security/components.py", "src/agentic_security/runtime.py"],
     "approvals": ["src/agentic_security/approvals.py"],
     "budgets": ["src/agentic_security/budgets.py"],
-    "credentials": ["src/agentic_security/credentials.py"],
+    "credentials": [
+      "src/agentic_security/credentials.py",
+      "src/agentic_security/cloud_credentials.py"
+    ],
     "idempotency": ["src/agentic_security/idempotency.py"],
     "isolation": ["src/agentic_security/isolation.py"],
     "policies": ["src/agentic_security/policies.py", "src/agentic_security/policy_adapters.py"],

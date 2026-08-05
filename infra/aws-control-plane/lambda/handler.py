@@ -462,6 +462,46 @@ _WEBHOOK_EVENT_TYPES = frozenset(
 _WEBHOOK_DESTINATION_LIMIT = 20
 _WEBHOOK_ROTATION_MIN_SECONDS = 60 * 60
 _WEBHOOK_ROTATION_MAX_SECONDS = 7 * 24 * 60 * 60
+_CREDENTIAL_BROKER_PROVIDERS = frozenset(
+    {"aws_sts", "azure_workload_identity", "gcp_workload_identity"}
+)
+_CREDENTIAL_BROKER_LIMIT = 50
+_CREDENTIAL_BROKER_TOOL_LIMIT = 50
+_CREDENTIAL_BROKER_RESOURCE_LIMIT = 100
+_CREDENTIAL_BROKER_EVIDENCE_MAX_AGE_SECONDS = 5 * 60
+_CREDENTIAL_BROKER_EVIDENCE_MAX_TTL_SECONDS = 15 * 60
+_CREDENTIAL_BROKER_CHECKS = frozenset(
+    {"identityBound", "scopeBound", "ttlBound", "revocationReady"}
+)
+_CREDENTIAL_BROKER_REGISTRATION_FIELDS = frozenset(
+    {
+        "brokerId",
+        "name",
+        "provider",
+        "principal",
+        "audience",
+        "allowedTools",
+        "resourceIds",
+        "maxTtlSeconds",
+    }
+)
+_CREDENTIAL_BROKER_EVIDENCE_FIELDS = frozenset(
+    {
+        "schemaVersion",
+        "expectedRevision",
+        "provider",
+        "principal",
+        "audience",
+        "allowedTools",
+        "resourceIds",
+        "maxTtlSeconds",
+        "configurationHash",
+        "observedAt",
+        "expiresAt",
+        "checks",
+        "evidenceDigest",
+    }
+)
 
 # Machine identities are deliberately narrower than human roles. They can
 # automate bounded operational work but can never approve their own policy,
@@ -469,6 +509,7 @@ _WEBHOOK_ROTATION_MAX_SECONDS = 7 * 24 * 60 * 60
 _SERVICE_IDENTITY_CAPABILITIES = frozenset(
     {
         "evidence_read",
+        "credential_broker_runtime",
         "fleet_write",
         "inventory_read",
         "policy_draft_write",
@@ -479,6 +520,7 @@ _SERVICE_IDENTITY_CAPABILITIES = frozenset(
 )
 _SERVICE_IDENTITY_MAX_SECONDS = 90 * 24 * 60 * 60
 _SERVICE_CAPABILITY_GRANTS = {
+    "credential_broker_runtime": frozenset({"credential_broker_runtime"}),
     "evidence_read": frozenset({"evidence_read"}),
     "fleet_write": frozenset({"fleet_write"}),
     "inventory_read": frozenset({"inventory_read"}),
@@ -2772,6 +2814,10 @@ def _operator_roles(event):
 def _required_mutation_capability(path):
     """Classify a mutating route into one least-privilege capability."""
     normalized = path.removeprefix("/api")
+    if re.fullmatch(r"/enterprise/credential-brokers/[^/]+/evidence", normalized):
+        return "credential_broker_runtime"
+    if normalized.startswith("/enterprise/credential-brokers"):
+        return "integration_admin"
     if normalized.startswith("/enterprise/identity/service-identities"):
         return "identity_admin"
     if normalized == "/enterprise/identity/break-glass/requests":
@@ -3497,6 +3543,19 @@ def _machine_route_capability(method, path):
     service credential.
     """
     normalized = path.removeprefix("/api")
+    if (
+        method in {"GET", "POST"}
+        and re.fullmatch(
+            r"/enterprise/credential-brokers/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/"
+            r"(?:authority|evidence)",
+            normalized,
+        )
+        and (
+            (method == "GET" and normalized.endswith("/authority"))
+            or (method == "POST" and normalized.endswith("/evidence"))
+        )
+    ):
+        return "credential_broker_runtime"
     inventory_paths = {
         "/enterprise/agents",
         "/enterprise/deployment-config",
@@ -4637,8 +4696,13 @@ def _access_certification(tenant, event):
     return {**artifact, "generatedAt": generated_at, "contentHash": digest}
 
 
-def _enterprise_integrations():
+def _enterprise_integrations(tenant):
     """Return honest integration posture without exposing destination secrets."""
+    brokers = [
+        _credential_broker_view(item)
+        for item in _list(tenant, "CREDENTIAL_BROKER", consistent_read=True)
+    ]
+    brokers.sort(key=lambda item: (item["name"].lower(), item["id"]))
     return {
         "splunk": {
             "provider": "splunk_hec",
@@ -4647,8 +4711,314 @@ def _enterprise_integrations():
             "description": (
                 "Schema and operator workflow placeholder only; no event delivery is configured."
             ),
-        }
+        },
+        "credentialBrokers": brokers,
+        "credentialBrokerProviders": sorted(_CREDENTIAL_BROKER_PROVIDERS),
+        "credentialBrokerEvidenceTtlSeconds": _CREDENTIAL_BROKER_EVIDENCE_MAX_TTL_SECONDS,
     }
+
+
+def _credential_broker_values(value, field, limit):
+    """Return a bounded, unique list of secret-free exact identifiers."""
+    if (
+        not isinstance(value, list)
+        or not value
+        or len(value) > limit
+        or any(not isinstance(item, str) or not item.strip() or len(item) > 512 for item in value)
+    ):
+        raise ValueError(f"{field} must be a bounded non-empty string list")
+    normalized = [item.strip() for item in value]
+    if len(set(normalized)) != len(normalized):
+        raise ValueError(f"{field} must not contain duplicates")
+    return sorted(normalized)
+
+
+def _credential_broker_principal(provider, value):
+    """Validate one deployment-owned provider principal without credentials."""
+    if not isinstance(value, str) or len(value) > 512:
+        raise ValueError("credential broker principal is invalid")
+    principal = value.strip().lower()
+    uuid_pattern = (
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+    )
+    valid = {
+        "aws_sts": re.fullmatch(
+            r"arn:(?:aws|aws-us-gov|aws-cn):iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]{1,400}",
+            value.strip(),
+        ),
+        "azure_workload_identity": re.fullmatch(rf"{uuid_pattern}/{uuid_pattern}", principal),
+        "gcp_workload_identity": re.fullmatch(
+            r"[a-z][a-z0-9-]{4,28}@[a-z][a-z0-9-]{4,28}\.iam\.gserviceaccount\.com",
+            principal,
+        ),
+    }.get(provider)
+    if valid is None:
+        raise ValueError("credential broker principal does not match its provider")
+    return value.strip() if provider == "aws_sts" else principal
+
+
+def _credential_broker_audience(provider, value):
+    """Validate a non-secret provider token audience."""
+    if not isinstance(value, str) or not value.strip() or len(value) > 512:
+        raise ValueError("credential broker audience is invalid")
+    audience = value.strip()
+    valid = (
+        (provider == "aws_sts" and audience == "sts.amazonaws.com")
+        or (
+            provider == "azure_workload_identity"
+            and (audience.startswith("api://") or audience.startswith("https://"))
+        )
+        or (provider == "gcp_workload_identity" and audience.startswith("//iam.googleapis.com/"))
+    )
+    if not valid:
+        raise ValueError("credential broker audience does not match its provider")
+    return audience
+
+
+def _credential_broker_configuration(body):
+    """Normalize one browser-submitted secret-free broker registration."""
+    if not isinstance(body, dict) or set(body) != _CREDENTIAL_BROKER_REGISTRATION_FIELDS:
+        raise ValueError("credential broker registration fields are invalid")
+    provider = body.get("provider")
+    if provider not in _CREDENTIAL_BROKER_PROVIDERS:
+        raise ValueError("credential broker provider is unsupported")
+    maximum_ttl = body.get("maxTtlSeconds")
+    if not isinstance(maximum_ttl, int) or isinstance(maximum_ttl, bool):
+        raise ValueError("maxTtlSeconds must be an integer")
+    if not 60 <= maximum_ttl <= 3600:
+        raise ValueError("maxTtlSeconds must be between 60 and 3600")
+    if provider == "aws_sts" and maximum_ttl < 900:
+        raise ValueError("AWS STS maxTtlSeconds must be at least 900")
+    return {
+        "provider": provider,
+        "principal": _credential_broker_principal(provider, body.get("principal")),
+        "audience": _credential_broker_audience(provider, body.get("audience")),
+        "allowed_tools": _credential_broker_values(
+            body.get("allowedTools"), "allowedTools", _CREDENTIAL_BROKER_TOOL_LIMIT
+        ),
+        "resource_ids": _credential_broker_values(
+            body.get("resourceIds"), "resourceIds", _CREDENTIAL_BROKER_RESOURCE_LIMIT
+        ),
+        "max_ttl_seconds": maximum_ttl,
+    }
+
+
+def _credential_broker_configuration_hash(item):
+    """Return a stable digest of authority-relevant broker configuration."""
+    payload = {
+        "provider": item.get("provider"),
+        "principal": item.get("principal"),
+        "audience": item.get("audience"),
+        "allowedTools": sorted(item.get("allowed_tools", [])),
+        "resourceIds": sorted(item.get("resource_ids", [])),
+        "maxTtlSeconds": int(item.get("max_ttl_seconds", 0)),
+        "revision": int(item.get("revision", 0)),
+        "revocationEpoch": int(item.get("revocation_epoch", 0)),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _credential_broker_view(item, *, now=None):
+    """Project current broker authority without provider credentials."""
+    current = int(time.time()) if now is None else int(now)
+    status = item.get("status", "disabled")
+    evidence_revision = int(item.get("evidence_revision", 0))
+    evidence_expires = int(item.get("evidence_expires_at", 0))
+    revision = int(item.get("revision", 0))
+    if status != "active":
+        posture = "revoked" if status == "revoked" else "disabled"
+    elif not item.get("evidence_digest"):
+        posture = "unverified"
+    elif evidence_revision != revision or evidence_expires <= current:
+        posture = "stale"
+    else:
+        posture = "verified"
+    return {
+        "id": item.get("id", ""),
+        "name": item.get("name", ""),
+        "provider": item.get("provider", ""),
+        "principal": item.get("principal", ""),
+        "audience": item.get("audience", ""),
+        "allowedTools": sorted(item.get("allowed_tools", [])),
+        "resourceIds": sorted(item.get("resource_ids", [])),
+        "maxTtlSeconds": int(item.get("max_ttl_seconds", 0)),
+        "status": status,
+        "verificationStatus": posture,
+        "executionAllowed": status == "active" and posture == "verified",
+        "revision": revision,
+        "revocationEpoch": int(item.get("revocation_epoch", 0)),
+        "configurationHash": _credential_broker_configuration_hash(item),
+        "createdAt": int(item.get("created_at", 0)),
+        "createdBy": item.get("created_by", ""),
+        "verifiedAt": int(item.get("evidence_observed_at", 0)) or None,
+        "verificationExpiresAt": evidence_expires or None,
+        "evidenceDigest": item.get("evidence_digest"),
+        "revokedAt": int(item.get("revoked_at", 0)) or None,
+        "revokedBy": item.get("revoked_by"),
+    }
+
+
+def _create_credential_broker(tenant, body, actor):
+    """Register provider authority without accepting provider credentials."""
+    if len(_list(tenant, "CREDENTIAL_BROKER", consistent_read=True)) >= _CREDENTIAL_BROKER_LIMIT:
+        raise ValueError("credential broker registration limit reached")
+    broker_id = _bounded_identifier(body.get("brokerId"), "brokerId")
+    name = _bounded_text(body.get("name"), "name", 160)
+    configuration = _credential_broker_configuration(body)
+    now = int(time.time())
+    item = {
+        **_item_key(tenant, "CREDENTIAL_BROKER", broker_id),
+        "tenant_id": tenant,
+        "id": broker_id,
+        "name": name,
+        **configuration,
+        "status": "active",
+        "revision": 1,
+        "revocation_epoch": 1,
+        "created_at": now,
+        "created_by": actor,
+    }
+    TABLE.put_item(Item=item, ConditionExpression="attribute_not_exists(pk)")
+    _audit(
+        tenant,
+        "credential_broker_registered",
+        actor,
+        {
+            "broker_id": broker_id,
+            "provider": configuration["provider"],
+            "configuration_hash": _credential_broker_configuration_hash(item),
+        },
+    )
+    return _credential_broker_view(item, now=now)
+
+
+def _attest_credential_broker(tenant, broker_id, body, actor):
+    """Bind short-lived deployment-adapter evidence to current broker authority."""
+    if not isinstance(body, dict) or set(body) != _CREDENTIAL_BROKER_EVIDENCE_FIELDS:
+        raise ValueError("credential broker evidence fields are invalid")
+    identifier = _bounded_identifier(broker_id, "brokerId")
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "CREDENTIAL_BROKER", identifier), ConsistentRead=True
+    ).get("Item")
+    if not item:
+        raise LookupError("credential broker not found")
+    expected_revision = body.get("expectedRevision")
+    checks = body.get("checks")
+    now = int(time.time())
+    observed_at = body.get("observedAt")
+    expires_at = body.get("expiresAt")
+    digest = body.get("evidenceDigest")
+    if body.get("schemaVersion") != 1 or expected_revision != int(item.get("revision", 0)):
+        raise PolicyConflict("credential broker authority changed")
+    if (
+        not isinstance(checks, dict)
+        or set(checks) != _CREDENTIAL_BROKER_CHECKS
+        or any(checks.get(check) is not True for check in _CREDENTIAL_BROKER_CHECKS)
+    ):
+        raise ValueError("credential broker evidence checks are incomplete")
+    if (
+        not isinstance(observed_at, int)
+        or isinstance(observed_at, bool)
+        or not now - _CREDENTIAL_BROKER_EVIDENCE_MAX_AGE_SECONDS <= observed_at <= now
+        or not isinstance(expires_at, int)
+        or isinstance(expires_at, bool)
+        or not now < expires_at <= now + _CREDENTIAL_BROKER_EVIDENCE_MAX_TTL_SECONDS
+    ):
+        raise ValueError("credential broker evidence lifetime is invalid")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("credential broker evidence digest is invalid")
+    expected = {
+        "provider": item.get("provider"),
+        "principal": item.get("principal"),
+        "audience": item.get("audience"),
+        "allowedTools": sorted(item.get("allowed_tools", [])),
+        "resourceIds": sorted(item.get("resource_ids", [])),
+        "maxTtlSeconds": int(item.get("max_ttl_seconds", 0)),
+        "configurationHash": _credential_broker_configuration_hash(item),
+    }
+    observed = {
+        "provider": body.get("provider"),
+        "principal": body.get("principal"),
+        "audience": body.get("audience"),
+        "allowedTools": _credential_broker_values(
+            body.get("allowedTools"), "allowedTools", _CREDENTIAL_BROKER_TOOL_LIMIT
+        ),
+        "resourceIds": _credential_broker_values(
+            body.get("resourceIds"), "resourceIds", _CREDENTIAL_BROKER_RESOURCE_LIMIT
+        ),
+        "maxTtlSeconds": body.get("maxTtlSeconds"),
+        "configurationHash": body.get("configurationHash"),
+    }
+    if observed != expected:
+        raise ValueError("credential broker evidence does not match current authority")
+    attested = {
+        **item,
+        "evidence_revision": int(expected_revision),
+        "evidence_observed_at": observed_at,
+        "evidence_expires_at": expires_at,
+        "evidence_digest": digest,
+        "evidence_actor": actor,
+    }
+    TABLE.put_item(
+        Item=attested,
+        ConditionExpression="#status = :active AND revision = :revision",
+        ExpressionAttributeNames={"#status": "status"},
+        ExpressionAttributeValues={":active": "active", ":revision": expected_revision},
+    )
+    _audit(
+        tenant,
+        "credential_broker_verified",
+        actor,
+        {"broker_id": identifier, "revision": expected_revision, "evidence_digest": digest},
+    )
+    return _credential_broker_view(attested, now=now)
+
+
+def _revoke_credential_broker(tenant, broker_id, body, actor):
+    """Revoke new and callback-checked active broker authority immediately."""
+    if not isinstance(body, dict) or set(body) != {"expectedRevision", "reason"}:
+        raise ValueError("credential broker revocation fields are invalid")
+    identifier = _bounded_identifier(broker_id, "brokerId")
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "CREDENTIAL_BROKER", identifier), ConsistentRead=True
+    ).get("Item")
+    if not item:
+        raise LookupError("credential broker not found")
+    expected_revision = body.get("expectedRevision")
+    if not isinstance(expected_revision, int) or isinstance(expected_revision, bool):
+        raise ValueError("expectedRevision must be an integer")
+    reason = _bounded_text(body.get("reason"), "reason", 500)
+    now = int(time.time())
+    revoked = {
+        **item,
+        "status": "revoked",
+        "revision": expected_revision + 1,
+        "revocation_epoch": int(item.get("revocation_epoch", 0)) + 1,
+        "revoked_at": now,
+        "revoked_by": actor,
+        "revocation_reason": reason,
+    }
+    TABLE.put_item(
+        Item=revoked,
+        ConditionExpression="#status = :active AND revision = :revision",
+        ExpressionAttributeNames={"#status": "status"},
+        ExpressionAttributeValues={":active": "active", ":revision": expected_revision},
+    )
+    _audit(
+        tenant,
+        "credential_broker_revoked",
+        actor,
+        {
+            "broker_id": identifier,
+            "revision": revoked["revision"],
+            "revocation_epoch": revoked["revocation_epoch"],
+            "reason": reason,
+        },
+    )
+    return _credential_broker_view(revoked, now=now)
 
 
 def _webhook_endpoint(value):
@@ -22931,7 +23301,78 @@ def handler(event, context):
                     return _response(404, {"error": "SCIM group not found"})
                 return _response(200, _identity_access(tenant, event))
             if method == "GET" and parts == ["integrations"]:
-                return _response(200, _enterprise_integrations())
+                return _response(200, _enterprise_integrations(tenant))
+            if parts and parts[0] == "credential-brokers":
+                machine_capabilities = _service_capabilities(event)
+                if method == "GET" and len(parts) == 1:
+                    if not _operator_roles(event):
+                        return _response(
+                            403, {"error": "credential broker posture requires a tenant role"}
+                        )
+                    brokers = [
+                        _credential_broker_view(item)
+                        for item in _list(tenant, "CREDENTIAL_BROKER", consistent_read=True)
+                    ]
+                    brokers.sort(key=lambda item: (item["name"].lower(), item["id"]))
+                    return _response(200, {"items": brokers, "nextCursor": None})
+                if method == "POST" and len(parts) == 1:
+                    if machine_capabilities:
+                        return _response(
+                            403, {"error": "machine identity cannot register broker authority"}
+                        )
+                    return _response(201, _create_credential_broker(tenant, _body(event), actor))
+                if method == "POST" and len(parts) == 3 and parts[2] == "evidence":
+                    if "credential_broker_runtime" not in machine_capabilities:
+                        return _response(
+                            403,
+                            {"error": "broker evidence requires machine runtime authority"},
+                        )
+                    return _response(
+                        200,
+                        _attest_credential_broker(
+                            tenant,
+                            parts[1],
+                            _body(event),
+                            actor,
+                        ),
+                    )
+                if method == "GET" and len(parts) == 3 and parts[2] == "authority":
+                    if "credential_broker_runtime" not in machine_capabilities:
+                        return _response(
+                            403,
+                            {"error": "broker authority requires machine runtime authority"},
+                        )
+                    item = TABLE.get_item(
+                        Key=_item_key(
+                            tenant,
+                            "CREDENTIAL_BROKER",
+                            _bounded_identifier(parts[1], "brokerId"),
+                        ),
+                        ConsistentRead=True,
+                    ).get("Item")
+                    if not item:
+                        return _response(404, {"error": "credential broker not found"})
+                    view = _credential_broker_view(item)
+                    return _response(
+                        200,
+                        {
+                            "brokerId": view["id"],
+                            "executionAllowed": view["executionAllowed"],
+                            "verificationStatus": view["verificationStatus"],
+                            "revision": view["revision"],
+                            "revocationEpoch": view["revocationEpoch"],
+                            "configurationHash": view["configurationHash"],
+                        },
+                    )
+                if method == "POST" and len(parts) == 3 and parts[2] == "revoke":
+                    if machine_capabilities:
+                        return _response(
+                            403, {"error": "machine identity cannot revoke broker authority"}
+                        )
+                    return _response(
+                        200,
+                        _revoke_credential_broker(tenant, parts[1], _body(event), actor),
+                    )
             if parts and parts[0] == "webhooks":
                 # Secret-free posture is visible to authenticated tenant roles;
                 # all mutations were already restricted to platform authority

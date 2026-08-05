@@ -45,6 +45,19 @@ from .policy_sources import (
 _MAX_TEXT = 256
 _MAX_PAGE_SIZE = 200
 _MAX_MANAGED_PACKAGE_BYTES = 280 * 1024
+_CLOUD_BROKER_PROVIDERS = frozenset({"aws_sts", "azure_workload_identity", "gcp_workload_identity"})
+_CLOUD_BROKER_REGISTRATION_FIELDS = frozenset(
+    {
+        "brokerId",
+        "name",
+        "provider",
+        "principal",
+        "audience",
+        "allowedTools",
+        "resourceIds",
+        "maxTtlSeconds",
+    }
+)
 _COMMAND_PATTERN_FIELDS = frozenset(
     {"allowedCommandPatterns", "deniedCommandPatterns", "approvalCommandPatterns"}
 )
@@ -856,7 +869,7 @@ class EnterpriseFleetStore:
         return {
             "adapter": self.persistence.name,
             "highAvailability": self.persistence.supports_high_availability,
-            "schemaVersion": 9,
+            "schemaVersion": 10,
         }
 
     def close(self) -> None:
@@ -920,6 +933,244 @@ class EnterpriseFleetStore:
             except sqlite3.IntegrityError as exc:
                 raise FleetConfigurationError("organization already exists") from exc
         return {"id": organization_id, "name": name}
+
+    def create_credential_broker(
+        self, identity: FleetIdentity, request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Register secret-free cloud authority in the local reference store.
+
+        Local persistence exercises lifecycle and tenant isolation but cannot
+        claim live cloud verification. The hosted machine adapter owns that
+        production evidence boundary.
+        """
+        if frozenset(request) != _CLOUD_BROKER_REGISTRATION_FIELDS:
+            raise FleetConfigurationError("credential broker registration schema is invalid")
+        provider = request.get("provider")
+        if provider not in _CLOUD_BROKER_PROVIDERS:
+            raise FleetConfigurationError("credential broker provider is unsupported")
+        provider = str(provider)
+        broker_id = _text(request.get("brokerId"), "brokerId")
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", broker_id) is None:
+            raise FleetConfigurationError("credential broker ID is invalid")
+        name = _text(request.get("name"), "name")
+        principal = self._cloud_broker_principal(provider, request.get("principal"))
+        audience = self._cloud_broker_audience(provider, request.get("audience"))
+        tools = self._cloud_broker_values(request.get("allowedTools"), "allowedTools", 50)
+        resources = self._cloud_broker_values(request.get("resourceIds"), "resourceIds", 100)
+        maximum_ttl = request.get("maxTtlSeconds")
+        if (
+            not isinstance(maximum_ttl, int)
+            or isinstance(maximum_ttl, bool)
+            or not 60 <= maximum_ttl <= 3600
+        ):
+            raise FleetConfigurationError(
+                "credential broker maximum TTL must be between 60 and 3600 seconds"
+            )
+        if provider == "aws_sts" and maximum_ttl < 900:
+            raise FleetConfigurationError(
+                "AWS STS credential broker maximum TTL must be at least 900 seconds"
+            )
+        now = self._now()
+        with self._lock:
+            try:
+                self._connection.execute(
+                    "INSERT INTO credential_brokers(organization_id,id,name,provider,principal,"
+                    "audience,allowed_tools,resource_ids,max_ttl_seconds,status,revision,"
+                    "revocation_epoch,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        identity.organization_id,
+                        broker_id,
+                        name,
+                        provider,
+                        principal,
+                        audience,
+                        json.dumps(tools, separators=(",", ":")),
+                        json.dumps(resources, separators=(",", ":")),
+                        maximum_ttl,
+                        "active",
+                        1,
+                        1,
+                        now,
+                        identity.subject,
+                    ),
+                )
+                self._connection.commit()
+            except sqlite3.IntegrityError as exc:
+                raise FleetConfigurationError("credential broker already exists") from exc
+        result = self.credential_broker(identity, broker_id)
+        self._audit(
+            "credential_broker_registered",
+            identity.subject,
+            {
+                "brokerId": broker_id,
+                "provider": provider,
+                "configurationHash": result["configurationHash"],
+            },
+            identity.organization_id,
+        )
+        return result
+
+    def list_credential_brokers(self, identity: FleetIdentity) -> list[dict[str, Any]]:
+        """Return secret-free broker lifecycle for only the caller's tenant."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM credential_brokers WHERE organization_id=? ORDER BY name,id",
+                (identity.organization_id,),
+            ).fetchall()
+        return [self._cloud_broker_view(row) for row in rows]
+
+    def credential_broker(self, identity: FleetIdentity, broker_id: str) -> dict[str, Any]:
+        """Load one tenant-bound broker without exposing credential material."""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM credential_brokers WHERE organization_id=? AND id=?",
+                (identity.organization_id, _text(broker_id, "brokerId")),
+            ).fetchone()
+        if row is None:
+            raise FleetNotFoundError("credential broker not found")
+        return self._cloud_broker_view(row)
+
+    def revoke_credential_broker(
+        self,
+        identity: FleetIdentity,
+        broker_id: str,
+        expected_revision: int,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Advance the local revocation epoch with optimistic concurrency."""
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+            raise FleetConfigurationError("credential broker revision must be an integer")
+        rationale = _text(reason, "reason")
+        now = self._now()
+        with self._lock:
+            cursor = self._connection.execute(
+                "UPDATE credential_brokers SET status='revoked',revision=revision+1,"
+                "revocation_epoch=revocation_epoch+1,revoked_at=?,revoked_by=? "
+                "WHERE organization_id=? AND id=? AND status='active' AND revision=?",
+                (
+                    now,
+                    identity.subject,
+                    identity.organization_id,
+                    _text(broker_id, "brokerId"),
+                    expected_revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                self._connection.rollback()
+                raise FleetConflictError("credential broker authority changed")
+            self._connection.commit()
+        result = self.credential_broker(identity, broker_id)
+        self._audit(
+            "credential_broker_revoked",
+            identity.subject,
+            {
+                "brokerId": broker_id,
+                "revision": result["revision"],
+                "revocationEpoch": result["revocationEpoch"],
+                "reason": rationale,
+            },
+            identity.organization_id,
+        )
+        return result
+
+    @staticmethod
+    def _cloud_broker_values(value: object, field: str, limit: int) -> list[str]:
+        """Normalize a bounded exact scope list without duplicates."""
+        if (
+            not isinstance(value, list)
+            or not value
+            or len(value) > limit
+            or any(not isinstance(item, str) or not item.strip() for item in value)
+        ):
+            raise FleetConfigurationError(f"{field} must be a bounded non-empty list")
+        normalized = sorted(item.strip() for item in value)
+        if len(set(normalized)) != len(normalized):
+            raise FleetConfigurationError(f"{field} must not contain duplicates")
+        return normalized
+
+    @staticmethod
+    def _cloud_broker_principal(provider: str, value: object) -> str:
+        """Validate a secret-free provider principal exactly as the hosted boundary does."""
+        if not isinstance(value, str) or not value.strip() or len(value) > 512:
+            raise FleetConfigurationError("credential broker principal is invalid")
+        raw, principal = value.strip(), value.strip().lower()
+        uuid_pattern = (
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+        )
+        patterns = {
+            "aws_sts": r"arn:(?:aws|aws-us-gov|aws-cn):iam::[0-9]{12}:role/"
+            r"[A-Za-z0-9+=,.@_/-]{1,400}",
+            "azure_workload_identity": rf"{uuid_pattern}/{uuid_pattern}",
+            "gcp_workload_identity": (
+                r"[a-z][a-z0-9-]{4,28}@[a-z][a-z0-9-]{4,28}"
+                r"\.iam\.gserviceaccount\.com"
+            ),
+        }
+        pattern = patterns.get(provider)
+        candidate = raw if provider == "aws_sts" else principal
+        if pattern is None or re.fullmatch(pattern, candidate) is None:
+            raise FleetConfigurationError("credential broker principal does not match its provider")
+        return candidate
+
+    @staticmethod
+    def _cloud_broker_audience(provider: str, value: object) -> str:
+        """Validate a non-secret token audience exactly as the hosted boundary does."""
+        if not isinstance(value, str) or not value.strip() or len(value) > 512:
+            raise FleetConfigurationError("credential broker audience is invalid")
+        audience = value.strip()
+        valid = (
+            (provider == "aws_sts" and audience == "sts.amazonaws.com")
+            or (
+                provider == "azure_workload_identity"
+                and (audience.startswith("api://") or audience.startswith("https://"))
+            )
+            or (
+                provider == "gcp_workload_identity" and audience.startswith("//iam.googleapis.com/")
+            )
+        )
+        if not valid:
+            raise FleetConfigurationError("credential broker audience does not match its provider")
+        return audience
+
+    @staticmethod
+    def _cloud_broker_view(row: Mapping[str, Any]) -> dict[str, Any]:
+        """Derive honest local posture; local state never verifies cloud authority."""
+        configuration = {
+            "provider": row["provider"],
+            "principal": row["principal"],
+            "audience": row["audience"],
+            "allowedTools": json.loads(row["allowed_tools"]),
+            "resourceIds": json.loads(row["resource_ids"]),
+            "maxTtlSeconds": int(row["max_ttl_seconds"]),
+            "revision": int(row["revision"]),
+            "revocationEpoch": int(row["revocation_epoch"]),
+        }
+        digest = hashlib.sha256(
+            json.dumps(configuration, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        status = str(row["status"])
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            **{key: configuration[key] for key in ("provider", "principal", "audience")},
+            "allowedTools": configuration["allowedTools"],
+            "resourceIds": configuration["resourceIds"],
+            "maxTtlSeconds": configuration["maxTtlSeconds"],
+            "status": status,
+            "verificationStatus": "revoked" if status == "revoked" else "unverified",
+            "executionAllowed": False,
+            "revision": configuration["revision"],
+            "revocationEpoch": configuration["revocationEpoch"],
+            "configurationHash": digest,
+            "createdAt": row["created_at"],
+            "createdBy": row["created_by"],
+            "verifiedAt": None,
+            "verificationExpiresAt": None,
+            "evidenceDigest": None,
+            "revokedAt": row["revoked_at"],
+            "revokedBy": row["revoked_by"],
+        }
 
     def create_project(self, organization_id: str, project_id: str, name: str) -> dict[str, Any]:
         """Create a project within an existing organization."""
@@ -3321,6 +3572,17 @@ class EnterpriseFleetStore:
                     environment_references TEXT NOT NULL, enabled INTEGER NOT NULL,
                     created_at REAL NOT NULL, created_by TEXT NOT NULL DEFAULT 'system',
                     UNIQUE(organization_id,name));
+                CREATE TABLE IF NOT EXISTS credential_brokers(
+                    organization_id TEXT NOT NULL REFERENCES organizations(id),
+                    id TEXT NOT NULL, name TEXT NOT NULL, provider TEXT NOT NULL,
+                    principal TEXT NOT NULL, audience TEXT NOT NULL,
+                    allowed_tools TEXT NOT NULL, resource_ids TEXT NOT NULL,
+                    max_ttl_seconds INTEGER NOT NULL, status TEXT NOT NULL,
+                    revision INTEGER NOT NULL, revocation_epoch INTEGER NOT NULL,
+                    created_at REAL NOT NULL, created_by TEXT NOT NULL,
+                    revoked_at REAL, revoked_by TEXT,
+                    PRIMARY KEY(organization_id,id),
+                    UNIQUE(organization_id,name));
                 CREATE TABLE IF NOT EXISTS agent_groups(
                     id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id),
                     name TEXT NOT NULL, policy_id TEXT NOT NULL REFERENCES policies(id),
@@ -3389,6 +3651,7 @@ class EnterpriseFleetStore:
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(5);
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(6);
                 INSERT OR IGNORE INTO schema_migrations(version) VALUES(7);
+                INSERT OR IGNORE INTO schema_migrations(version) VALUES(10);
                 """
             )
             deployment_columns = {
@@ -3485,6 +3748,7 @@ class EnterpriseFleetStore:
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(4)")
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(8)")
             self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(9)")
+            self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES(10)")
             self._connection.commit()
 
     @staticmethod
@@ -4527,7 +4791,19 @@ class EnterpriseFleetApplication:
                     )
                 if resource == "integrations":
                     self._authorize(identity, "read")
-                    return self._respond(start_response, 200, self._development_integrations())
+                    return self._respond(
+                        start_response, 200, self._development_integrations(identity)
+                    )
+                if resource == "credential-brokers":
+                    self._authorize(identity, "read")
+                    return self._respond(
+                        start_response,
+                        200,
+                        {
+                            "items": self.store.list_credential_brokers(identity),
+                            "nextCursor": None,
+                        },
+                    )
                 if resource.startswith("policies/imports/"):
                     self._authorize(identity, "read")
                     parts = resource.split("/")
@@ -4789,6 +5065,35 @@ class EnterpriseFleetApplication:
                 deployment_id = _text(body.get("deploymentId"), "deploymentId")
                 return self._respond(
                     start_response, 201, self.store.record_slo_sample(identity, deployment_id)
+                )
+            if method == "POST" and path == "/api/enterprise/credential-brokers":
+                self._authorize(identity, "manage_configuration")
+                return self._respond(
+                    start_response,
+                    201,
+                    self.store.create_credential_broker(identity, body),
+                )
+            broker_prefix = "/api/enterprise/credential-brokers/"
+            if method == "POST" and path.startswith(broker_prefix) and path.endswith("/revoke"):
+                self._authorize(identity, "manage_configuration")
+                if frozenset(body) != {"expectedRevision", "reason"}:
+                    raise FleetConfigurationError("credential broker revocation schema is invalid")
+                expected_revision = body.get("expectedRevision")
+                reason = body.get("reason")
+                if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+                    raise FleetConfigurationError("credential broker revision must be an integer")
+                if not isinstance(reason, str):
+                    raise FleetConfigurationError("credential broker reason must be text")
+                broker_id = path[len(broker_prefix) : -len("/revoke")].strip("/")
+                return self._respond(
+                    start_response,
+                    200,
+                    self.store.revoke_credential_broker(
+                        identity,
+                        broker_id,
+                        expected_revision,
+                        reason,
+                    ),
                 )
             if method == "POST" and path == "/api/enterprise/templates/validate":
                 self._authorize(identity, "manage_configuration")
@@ -5308,9 +5613,8 @@ class EnterpriseFleetApplication:
             ],
         }
 
-    @staticmethod
-    def _development_integrations() -> dict[str, Any]:
-        """Report the Splunk placeholder without claiming local delivery."""
+    def _development_integrations(self, identity: FleetIdentity) -> dict[str, Any]:
+        """Report local integration posture without claiming cloud verification."""
         return {
             "splunk": {
                 "provider": "splunk_hec",
@@ -5320,7 +5624,10 @@ class EnterpriseFleetApplication:
                     "Schema and operator workflow placeholder only; "
                     "no event delivery is configured."
                 ),
-            }
+            },
+            "credentialBrokers": self.store.list_credential_brokers(identity),
+            "credentialBrokerProviders": sorted(_CLOUD_BROKER_PROVIDERS),
+            "credentialBrokerEvidenceTtlSeconds": 900,
         }
 
     def _authorize_any(self, identity: FleetIdentity, actions: set[str]) -> None:
