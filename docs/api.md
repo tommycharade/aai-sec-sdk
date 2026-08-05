@@ -813,8 +813,13 @@ behavior and independently derived integrity detections:
   finding grants containment authority.
 - `GET /enterprise/cases` and `GET /enterprise/cases/{caseId}` return case
   metadata, authoritative binding state, a content-minimised timeline and
-  correlated decision/approval references. Raw endpoint payloads, project
-  roots and credentials are excluded.
+  correlated decision/approval references. Detailed reads additionally return
+  a typed unified investigation timeline covering identity, policy, tool, MCP,
+  approval, credential, isolation, evidence and operator facts. The server
+  supplies provenance, category counts, correlation-window metadata and an
+  explicit completeness result; the browser does not join these sources. Raw
+  endpoint payloads, free-form narrative, project roots and credentials are
+  excluded. See [Unified investigation timeline](unified-investigation-timeline-design.md).
 - `GET /enterprise/cases/{caseId}/export` returns schema-version `1` audit-ready
   JSON to a canonical `platform-admin`, `security-operator`,
   `incident-responder` or `auditor`. The control plane strongly reads the case,
