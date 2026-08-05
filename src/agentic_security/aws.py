@@ -340,20 +340,33 @@ class AwsStsCredentialBroker:
     and never exposes it as a public attribute.
     """
 
-    def __init__(self, sts_client: Any, role_arn: str, policy_builder: Any) -> None:
-        """Create a broker with an explicit role and trusted policy builder."""
+    def __init__(
+        self,
+        sts_client: Any,
+        role_arn: str,
+        policy_builder: Any,
+        revocation_checker: Any | None = None,
+    ) -> None:
+        """Create a broker with an explicit role and optional live revocation.
+
+        ``revocation_checker`` receives a non-secret grant identity immediately
+        after STS issuance and before every use. Production deployments should
+        supply one backed by their server-owned broker registry; callback
+        failure or a non-true result fails closed.
+        """
         if not role_arn.startswith("arn:"):
             raise ValueError("AWS role ARN is required")
         self._sts = sts_client
         self._role_arn = role_arn
         self._policy_builder = policy_builder
+        self._revocation_checker = revocation_checker
 
     def mint(
         self, context: Any, tool: Any, resources: tuple[Any, ...], ttl_seconds: int
     ) -> ScopedCredential:
         """Assume the role only after the policy binding matches the request."""
-        if ttl_seconds <= 0:
-            raise ValueError("credential TTL must be positive")
+        if not 900 <= ttl_seconds <= 3600:
+            raise ValueError("AWS STS credential TTL must be between 900 and 3600 seconds")
         resource_ids = tuple(str(getattr(resource, "id", resource)) for resource in resources)
         scope = self._policy_builder(tool.name, resource_ids)
         if (
@@ -362,7 +375,7 @@ class AwsStsCredentialBroker:
             or scope.resources != resource_ids
         ):
             raise ValueError("AWS policy builder returned an invalid scope binding")
-        duration = min(max(ttl_seconds, 900), 3600)
+        duration = ttl_seconds
         session_name = "aai-" + sha256(f"{context.task_id}:{tool.name}".encode()).hexdigest()[:24]
         response = self._sts.assume_role(
             RoleArn=self._role_arn,
@@ -389,9 +402,21 @@ class AwsStsCredentialBroker:
             separators=(",", ":"),
         )
         issued_at = datetime.now(UTC)
+        if expires_at - issued_at > timedelta(seconds=ttl_seconds):
+            raise ValueError("STS returned credentials exceeding the requested lifetime")
+        grant_id = (
+            f"{session_name}:" + sha256(str(credentials["AccessKeyId"]).encode()).hexdigest()[:16]
+        )
+        if self._revocation_checker is not None and self._revocation_checker(grant_id) is not True:
+            raise ValueError("AWS credential grant is not active")
 
         def provider(serialized: str = value) -> str:
             return serialized
+
+        def remains_active(identity: str = grant_id) -> bool:
+            if self._revocation_checker is None:
+                return True
+            return self._revocation_checker(identity) is True
 
         return ScopedCredential(
             credential_id=f"aws:{context.task_id}:{session_name}",
@@ -400,6 +425,7 @@ class AwsStsCredentialBroker:
             issued_at=issued_at,
             expires_at=min(issued_at + timedelta(seconds=ttl_seconds), expires_at),
             _secret_provider=provider,
+            _validity_provider=remains_active,
         )
 
 

@@ -59,6 +59,14 @@ configuration. Guided activation remains unavailable until the deployment has
 a credential broker that can renew short-lived sessions across cloud-agent
 restarts; use the documented deployment adapter for controlled pilots.
 
+The page's **Cloud credentials** workspace registers secret-free AWS, Azure
+and GCP authority. Provider-aware fields capture only principal, audience,
+exact tool/resource scope and maximum TTL. Registration never implies
+authority: a separate least-privilege machine identity must provide fresh
+bound evidence. The UI exposes evidence age, configuration digest, revision
+and revocation epoch, and never offers a client-secret field. See [Cloud
+credential authority](cloud-credential-authority-design.md).
+
 ## Managed controls
 
 The console keeps the operator's mental model explicit:

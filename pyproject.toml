@@ -109,6 +109,7 @@ only_mutate = [
   "src/agentic_security/approvals.py",
   "src/agentic_security/budgets.py",
   "src/agentic_security/credentials.py",
+  "src/agentic_security/cloud_credentials.py",
   "src/agentic_security/idempotency.py",
   "src/agentic_security/isolation.py",
   "src/agentic_security/policies.py",

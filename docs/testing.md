@@ -44,6 +44,18 @@ source-only routing, real access-denial evidence and recovery. Cognito and
 unrecognized provider failures fail closed. These are infrastructure and
 protocol contracts; they are not live AWS dependency-failure evidence.
 
+Cloud-credential contracts cover Azure, GCP and AWS exact scope, wrong-tool and
+wrong-resource denial, policy-widening denial, bounded TTL, malformed provider
+identity, revocation, checker failure and secret-free projections. Hosted
+control-plane tests additionally prove human/machine authority separation,
+tenant isolation, evidence expiry, exact configuration binding and revocation
+epoch advancement. These deterministic tests are not live cloud-role
+acceptance; run the checklist in [Cloud credential
+authority](cloud-credential-authority-design.md) for each production provider.
+The contracts also reject provider tokens whose underlying lifetime exceeds
+the requested SDK lifetime and reject AWS STS registrations below the
+provider's fifteen-minute minimum.
+
 The optional live PostgreSQL path is exercised by the `postgres-integration`
 GitHub Actions job. Locally, install `.[postgres]`, set
 `AAI_SEC_POSTGRES_DSN`, and run:

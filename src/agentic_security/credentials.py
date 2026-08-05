@@ -41,6 +41,7 @@ TokenMinter = Callable[[ExecutionContext, ToolDefinition, tuple[Resource, ...]],
 """Callback that obtains an authenticated provider token with scope evidence."""
 
 _PROVIDER_REGISTRY: WeakKeyDictionary[object, Callable[[], str]] = WeakKeyDictionary()
+_VALIDITY_REGISTRY: WeakKeyDictionary[object, Callable[[], bool]] = WeakKeyDictionary()
 
 
 @dataclass(frozen=True, slots=True, weakref_slot=True, eq=False)
@@ -63,14 +64,21 @@ class ScopedCredential:
     # the callback on the credential object. The weak registry keeps it out of
     # the handler-visible object graph while allowing expiry checks here.
     _secret_provider: InitVar[Callable[[], str]]
+    _validity_provider: InitVar[Callable[[], bool] | None] = None
 
-    def __post_init__(self, _secret_provider: Callable[[], str]) -> None:
+    def __post_init__(
+        self,
+        _secret_provider: Callable[[], str],
+        _validity_provider: Callable[[], bool] | None,
+    ) -> None:
         """Prevent credentials with empty scopes or non-positive lifetimes."""
         if not self.credential_id or not self.tool_name:
             raise ValueError("credential identity and tool scope are required")
         if self.expires_at <= self.issued_at:
             raise ValueError("credential expiry must be after issue time")
         _PROVIDER_REGISTRY[self] = _secret_provider
+        if _validity_provider is not None:
+            _VALIDITY_REGISTRY[self] = _validity_provider
 
     def valid_for(
         self,
@@ -80,12 +88,23 @@ class ScopedCredential:
     ) -> bool:
         """Return whether this credential is live and exactly scope-matched."""
         current = now or datetime.now(UTC)
-        return (
+        locally_valid = (
             self.issued_at <= current
             and current < self.expires_at
             and tool_name == self.tool_name
             and resources == self.resources
         )
+        if not locally_valid:
+            return False
+        validator = _VALIDITY_REGISTRY.get(self)
+        if validator is None:
+            return True
+        try:
+            # Revocation is live execution authority. A lookup failure cannot
+            # silently reuse the last known grant state.
+            return validator() is True
+        except Exception:
+            return False
 
     def with_secret(self, operation: Callable[[str], object], now: datetime | None = None) -> None:
         """Pass live provider material to a non-returning provider operation.
@@ -98,8 +117,8 @@ class ScopedCredential:
         or a stronger OS/container sandbox.
         """
         current = now or datetime.now(UTC)
-        if not self.issued_at <= current < self.expires_at:
-            raise ValueError("credential is expired or not yet valid")
+        if not self.valid_for(self.tool_name, self.resources, current):
+            raise ValueError("credential is expired, revoked, or not yet valid")
         provider = _PROVIDER_REGISTRY.get(self)
         if provider is None:
             raise ValueError("credential material is unavailable")

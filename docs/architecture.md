@@ -109,6 +109,12 @@ They accept injected evaluators, serialize the same live identity/argument/
 resource request, and map only explicit external decisions. Transport errors,
 malformed responses, and unknown decisions are denied.
 
+Cloud credentials use the same adapter rule. Azure and GCP token exchange is
+injected behind `CloudTokenExchangeClient`; AWS uses the STS adapter. Exact
+provider, principal, audience, tool, resource, scope and lifetime checks occur
+before minting, and a live revocation callback is checked both at mint and use.
+See [Cloud credential authority](cloud-credential-authority-design.md).
+
 ## Enterprise fleet control plane
 
 The optional `EnterpriseFleetStore` and `EnterpriseFleetApplication` add a

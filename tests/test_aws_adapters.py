@@ -192,7 +192,7 @@ def test_aws_sts_broker_passes_exact_scope_and_hides_temporary_material() -> Non
                     "AccessKeyId": "synthetic-access",
                     "SecretAccessKey": "synthetic-secret",
                     "SessionToken": "synthetic-session",
-                    "Expiration": datetime.now(UTC) + timedelta(minutes=20),
+                    "Expiration": datetime.now(UTC) + timedelta(minutes=15),
                 }
             }
 
@@ -205,7 +205,7 @@ def test_aws_sts_broker_passes_exact_scope_and_hides_temporary_material() -> Non
     broker = AwsStsCredentialBroker(sts, "arn:aws:iam::123456789012:role/scoped", lambda *_: scope)
     resource = Resource("bucket/object", "s3", "tenant-a")
     credential = broker.mint(
-        SimpleNamespace(task_id="task-a"), SimpleNamespace(name="write"), (resource,), 120
+        SimpleNamespace(task_id="task-a"), SimpleNamespace(name="write"), (resource,), 900
     )
     assert sts.request["RoleSessionName"].startswith("aai-")
     assert json.loads(sts.request["Policy"])["Statement"][0]["Resource"] == "bucket/object"
@@ -226,7 +226,49 @@ def test_aws_sts_broker_rejects_scope_mismatch_and_incomplete_response() -> None
                 ("bucket/object",),
                 {"Version": "2012-10-17", "Statement": []},
             ),
-        ).mint(SimpleNamespace(task_id="task"), SimpleNamespace(name="write"), (resource,), 120)
+        ).mint(SimpleNamespace(task_id="task"), SimpleNamespace(name="write"), (resource,), 900)
+
+
+def test_aws_sts_broker_rechecks_live_revocation_before_credential_use() -> None:
+    """A server revocation epoch can invalidate already-issued STS material."""
+    resource = Resource("bucket/object", "s3", "tenant-a")
+    policy = AwsScopePolicy(
+        "write",
+        (resource.id,),
+        {"Version": "2012-10-17", "Statement": []},
+    )
+    active = {"value": True}
+    observed_grants: list[str] = []
+
+    def checker(grant_id: str) -> bool:
+        observed_grants.append(grant_id)
+        return active["value"]
+
+    broker = AwsStsCredentialBroker(
+        SimpleNamespace(
+            assume_role=lambda **_: {
+                "Credentials": {
+                    "AccessKeyId": "synthetic-key",
+                    "SecretAccessKey": "synthetic-secret",
+                    "SessionToken": "synthetic-session",
+                    "Expiration": datetime.now(UTC) + timedelta(minutes=15),
+                }
+            }
+        ),
+        "arn:aws:iam::123456789012:role/scoped",
+        lambda *_: policy,
+        checker,
+    )
+    credential = broker.mint(
+        SimpleNamespace(task_id="task"), SimpleNamespace(name="write"), (resource,), 900
+    )
+    credential.with_secret(lambda _: None)
+    assert len(set(observed_grants)) == 1
+
+    active["value"] = False
+    assert not credential.valid_for("write", (resource,))
+    with pytest.raises(ValueError, match="revoked"):
+        credential.with_secret(lambda _: None)
 
 
 def test_aws_scope_policy_and_sts_input_validation() -> None:
@@ -249,19 +291,45 @@ def test_aws_scope_policy_and_sts_input_validation() -> None:
                     "AccessKeyId": "key",
                     "SecretAccessKey": "secret",
                     "SessionToken": "session",
-                    "Expiration": (datetime.now(UTC) + timedelta(minutes=20)).isoformat(),
+                    "Expiration": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
                 }
             }
         ),
         "arn:aws:iam::123456789012:role/scoped",
         lambda *_: policy,
     )
-    with pytest.raises(ValueError, match="positive"):
+    with pytest.raises(ValueError, match="between 900 and 3600"):
         broker.mint(SimpleNamespace(task_id="task"), SimpleNamespace(name="write"), (resource,), 0)
+    with pytest.raises(ValueError, match="between 900 and 3600"):
+        broker.mint(
+            SimpleNamespace(task_id="task"),
+            SimpleNamespace(name="write"),
+            (resource,),
+            3601,
+        )
     credential = broker.mint(
-        SimpleNamespace(task_id="task"), SimpleNamespace(name="write"), (resource,), 120
+        SimpleNamespace(task_id="task"), SimpleNamespace(name="write"), (resource,), 900
     )
     assert credential.tool_name == "write"
+
+    overlong = AwsStsCredentialBroker(
+        SimpleNamespace(
+            assume_role=lambda **_: {
+                "Credentials": {
+                    "AccessKeyId": "key",
+                    "SecretAccessKey": "secret",
+                    "SessionToken": "session",
+                    "Expiration": datetime.now(UTC) + timedelta(minutes=20),
+                }
+            }
+        ),
+        "arn:aws:iam::123456789012:role/scoped",
+        lambda *_: policy,
+    )
+    with pytest.raises(ValueError, match="exceeding the requested lifetime"):
+        overlong.mint(
+            SimpleNamespace(task_id="task"), SimpleNamespace(name="write"), (resource,), 900
+        )
 
     with pytest.raises(ValueError):
         AwsStsCredentialBroker(
@@ -272,7 +340,7 @@ def test_aws_scope_policy_and_sts_input_validation() -> None:
                 ("bucket/object",),
                 {"Version": "2012-10-17", "Statement": []},
             ),
-        ).mint(SimpleNamespace(task_id="task"), SimpleNamespace(name="write"), (resource,), 120)
+        ).mint(SimpleNamespace(task_id="task"), SimpleNamespace(name="write"), (resource,), 900)
 
 
 def test_dynamodb_adapter_rehydrates_runtime_execution_results() -> None:

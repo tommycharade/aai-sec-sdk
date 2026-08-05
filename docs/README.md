@@ -24,6 +24,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Testing and assurance](testing.md)
 - [Production readiness](production-readiness.md)
 - [Architecture](architecture.md)
+- [Cloud credential authority](cloud-credential-authority-design.md)
 - [Agent integrations](integrations.md)
 - [Claude Code example](claude-code.md)
 - [Management UI](ui.md)
@@ -133,6 +134,10 @@ drafts, groups, Skills and MCP registrations through the separately scoped
 machine API. Optimistic revisions detect drift, while approval and activation
 remain human-owned; see [Terraform provider and declarative
 management](terraform-provider-design.md).
+Azure, GCP and AWS cloud credential adapters bind short-lived grants to exact
+tools, resources, scopes and live revocation state. The hosted control plane
+keeps human registration separate from machine evidence and exposes no cloud
+secret; see [Cloud credential authority](cloud-credential-authority-design.md).
 
 ## Development
 

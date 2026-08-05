@@ -4860,6 +4860,256 @@ def test_identity_and_splunk_stub_report_truthful_enterprise_posture(monkeypatch
     assert splunk["deliveryVerified"] is False
 
 
+def test_cloud_credential_broker_authority_is_machine_attested_and_live_revocable(
+    monkeypatch: Any,
+) -> None:
+    """Provider scope is inert until a machine adapter proves it and remains revocable."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-cloud-broker"
+    other_tenant = "tenant-cloud-other"
+    now = 1_800_000_000
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    for tenant_id in (tenant, other_tenant):
+        table.put_item(Item=module._item_key(tenant_id, "TENANT", "root") | {"id": tenant_id})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-cloud-admin",
+    }
+    broker_request = {
+        "brokerId": "azure-production-read",
+        "name": "Azure production metadata",
+        "provider": "azure_workload_identity",
+        "principal": ("11111111-2222-4333-8444-555555555555/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
+        "audience": "https://vault.example.test",
+        "allowedTools": ["read_secret_metadata"],
+        "resourceIds": ["vault:synthetic"],
+        "maxTtlSeconds": 300,
+    }
+    created_response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/credential-brokers",
+            "POST",
+            claims=platform,
+            body=broker_request,
+        ),
+    )
+    assert created_response["statusCode"] == 201
+    created = json.loads(created_response["body"])
+    assert created["verificationStatus"] == "unverified"
+    assert created["executionAllowed"] is False
+    assert not {
+        "clientSecret",
+        "accessToken",
+        "subjectToken",
+        "credential",
+        "credentialKey",
+    } & set(created)
+
+    integrations = json.loads(
+        _invoke(module, _event("/api/enterprise/integrations", "GET", claims=platform))["body"]
+    )
+    assert integrations["credentialBrokers"] == [created]
+    other_integrations = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/integrations",
+                "GET",
+                claims={
+                    "custom:tenant_id": other_tenant,
+                    "cognito:groups": ["platform-admin"],
+                    "sub": "other-cloud-admin",
+                },
+            ),
+        )["body"]
+    )
+    assert other_integrations["credentialBrokers"] == []
+
+    service_identity = json.loads(
+        _invoke(
+            module,
+            _event(
+                "/api/enterprise/identity/service-identities",
+                "POST",
+                claims=platform,
+                body={
+                    "serviceIdentityId": "azure-broker-adapter",
+                    "name": "Azure broker adapter",
+                    "description": "Attests exact synthetic cloud scope for the runtime.",
+                    "purpose": "Bind cloud provider evidence to server-owned broker authority.",
+                    "capabilities": ["credential_broker_runtime"],
+                    "expiresInDays": 30,
+                },
+            ),
+        )["body"]
+    )
+    token = service_identity["credential"]["accessToken"]
+    evidence = {
+        "schemaVersion": 1,
+        "expectedRevision": created["revision"],
+        "provider": created["provider"],
+        "principal": created["principal"],
+        "audience": created["audience"],
+        "allowedTools": created["allowedTools"],
+        "resourceIds": created["resourceIds"],
+        "maxTtlSeconds": created["maxTtlSeconds"],
+        "configurationHash": created["configurationHash"],
+        "observedAt": now,
+        "expiresAt": now + 900,
+        "checks": {
+            "identityBound": True,
+            "scopeBound": True,
+            "ttlBound": True,
+            "revocationReady": True,
+        },
+        "evidenceDigest": "a" * 64,
+    }
+    human_forgery = _invoke(
+        module,
+        _event(
+            "/api/enterprise/credential-brokers/azure-production-read/evidence",
+            "POST",
+            claims=platform,
+            body=evidence,
+        ),
+    )
+    assert human_forgery["statusCode"] == 403
+
+    for invalid_evidence in (
+        {**evidence, "observedAt": now + 1},
+        {**evidence, "allowedTools": [1]},
+    ):
+        assert (
+            _invoke(
+                module,
+                _event(
+                    "/machine/v1/enterprise/credential-brokers/azure-production-read/evidence",
+                    "POST",
+                    token=token,
+                    body=invalid_evidence,
+                ),
+            )["statusCode"]
+            == 400
+        )
+
+    verified_response = _invoke(
+        module,
+        _event(
+            "/machine/v1/enterprise/credential-brokers/azure-production-read/evidence",
+            "POST",
+            token=token,
+            body=evidence,
+        ),
+    )
+    assert verified_response["statusCode"] == 200
+    verified = json.loads(verified_response["body"])
+    assert verified["verificationStatus"] == "verified"
+    assert verified["executionAllowed"] is True
+    authority_path = "/machine/v1/enterprise/credential-brokers/azure-production-read/authority"
+    authority = json.loads(_invoke(module, _event(authority_path, "GET", token=token))["body"])
+    assert authority == {
+        "brokerId": "azure-production-read",
+        "executionAllowed": True,
+        "verificationStatus": "verified",
+        "revision": 1,
+        "revocationEpoch": 1,
+        "configurationHash": created["configurationHash"],
+    }
+
+    monkeypatch.setattr(module.time, "time", lambda: now + 901)
+    stale = json.loads(_invoke(module, _event(authority_path, "GET", token=token))["body"])
+    assert stale["verificationStatus"] == "stale"
+    assert stale["executionAllowed"] is False
+
+    evidence["observedAt"] = now + 901
+    evidence["expiresAt"] = now + 1801
+    assert (
+        _invoke(
+            module,
+            _event(
+                "/machine/v1/enterprise/credential-brokers/azure-production-read/evidence",
+                "POST",
+                token=token,
+                body=evidence,
+            ),
+        )["statusCode"]
+        == 200
+    )
+    revoked_response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/credential-brokers/azure-production-read/revoke",
+            "POST",
+            claims=platform,
+            body={"expectedRevision": 1, "reason": "Synthetic incident containment."},
+        ),
+    )
+    assert revoked_response["statusCode"] == 200
+    revoked = json.loads(revoked_response["body"])
+    assert revoked["status"] == "revoked"
+    assert revoked["revocationEpoch"] == 2
+    assert revoked["executionAllowed"] is False
+    after_revoke = json.loads(_invoke(module, _event(authority_path, "GET", token=token))["body"])
+    assert after_revoke["verificationStatus"] == "revoked"
+    assert after_revoke["executionAllowed"] is False
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"provider": "unsupported"},
+        {"principal": "client-secret-value"},
+        {"audience": "http://unsafe.example.test"},
+        {"allowedTools": ["read", "read"]},
+        {"resourceIds": []},
+        {"maxTtlSeconds": 3601},
+        {
+            "provider": "aws_sts",
+            "principal": "arn:aws:iam::123456789012:role/aai-sec-scoped-tool",
+            "audience": "sts.amazonaws.com",
+            "maxTtlSeconds": 300,
+        },
+        {"clientSecret": "synthetic-value"},  # noqa: S106 - rejected test input
+    ],
+)
+def test_cloud_credential_broker_registration_rejects_unsafe_authority(
+    monkeypatch: Any, override: dict[str, Any]
+) -> None:
+    """Malformed, duplicated, or unbounded scope never enters tenant state."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-cloud-invalid"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    platform = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "platform-cloud-admin",
+    }
+    request = {
+        "brokerId": "azure-invalid",
+        "name": "Invalid synthetic broker",
+        "provider": "azure_workload_identity",
+        "principal": ("11111111-2222-4333-8444-555555555555/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
+        "audience": "https://vault.example.test",
+        "allowedTools": ["read"],
+        "resourceIds": ["vault:synthetic"],
+        "maxTtlSeconds": 300,
+        **override,
+    }
+    response = _invoke(
+        module,
+        _event(
+            "/api/enterprise/credential-brokers",
+            "POST",
+            claims=platform,
+            body=request,
+        ),
+    )
+    assert response["statusCode"] == 400
+    assert module._list(tenant, "CREDENTIAL_BROKER", consistent_read=True) == []
+
+
 def test_entra_pre_token_trigger_uses_only_cognito_federation_identity(
     monkeypatch: Any,
 ) -> None:
