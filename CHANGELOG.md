@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added exact-binary real Codex CLI acceptance for process-loaded controls,
+  native command and patch boundaries, guarded MCP execution and content-free
+  audit. The live 0.147.0-alpha.1.2 macOS arm64 run passed 10 checks with zero
+  failures and correctly remained deployment-blocked by missing administrator
+  requirements. Fixed Codex's normalized MCP hook namespace and constrained
+  headless MCP approval to the one explicitly enabled guarded tool.
+
 - Added a bounded real Claude Code host acceptance runner and an exact,
   default-deny supported-version matrix. The disposable-project runner proves
   native allow, denial, approval, project scope and guarded MCP behavior,

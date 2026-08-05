@@ -94,8 +94,10 @@ policy for every process invocation. It then applies ordered rules:
 2. approval-required command patterns deny the native call and direct it to
    the governed MCP workflow;
 3. explicitly allowed command patterns allow;
-4. calls under `mcp__agentic-security__` reach the gateway, which performs its
-   own live authorization;
+4. calls under the exact `mcp__agentic-security__` namespace, or Codex's
+   normalized `mcp__agentic_security__` form, reach the gateway, which performs
+   its own live authorization; lookalike prefixes deny, and production process
+   identity still depends on administrator-managed MCP configuration;
 5. `apply_patch` is allowed only when policy permits editing, the live hook
    working directory and every declared path remain inside the project root,
    and no target is SDK security state
@@ -219,3 +221,10 @@ Test all of these in a synthetic repository before rollout:
 
 `tests/test_codex_cli.py` and `tests/test_onboard_codex.py` provide the
 executable reference contract.
+
+Use the [real Codex CLI acceptance harness](real-codex-cli-acceptance-harness.md)
+to verify an exact supported executable, process-loaded controls, native
+allow/deny/approval/scope behavior, guarded MCP execution and the local audit
+chain. The [2026-08-05 evidence](real-codex-cli-acceptance-evidence-2026-08-05.md)
+records 10 passing observations and the remaining machine-level requirements
+blocker. A project-only pass does not replace administrator or MDM deployment.

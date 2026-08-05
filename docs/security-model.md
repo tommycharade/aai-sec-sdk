@@ -1489,3 +1489,21 @@ be used as a human fallback. Customer-key scope also excludes
 CloudWatch logs, static UI assets, dedicated signing keys and provider secrets;
 those remain separate boundaries and must never be described as covered by the
 tenant data key. See [Enterprise data boundary](enterprise-data-boundary-design.md).
+
+## Real Codex host acceptance boundary
+
+The acceptance runner treats the installed Codex executable and every event it
+emits as untrusted input. Only an exact version, operating system, architecture
+and SHA-256 tuple is admitted. Streams, time, output size, record count, report
+fields and local audit size are bounded; malformed, incomplete, changed or
+oversized evidence fails closed. Tool prompts, arguments, output, paths and
+credentials are never persisted.
+
+Codex normalizes MCP server ID `agentic-security` to hook namespace
+`mcp__agentic_security__`. The native hook permits only the literal and this
+exact normalized prefix; near-prefix identities deny. Namespace matching is
+not process identity: production use also requires administrator-owned MCP
+configuration and fresh app-server evidence. Headless approval is enabled only
+for the explicitly allow-listed synthetic MCP tool, after which both the
+native hook and SDK gateway still authorize independently. See [Real Codex CLI
+acceptance](real-codex-cli-acceptance-harness.md).

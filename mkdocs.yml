@@ -49,6 +49,8 @@ nav:
   - Real Claude Code acceptance harness: real-claude-code-acceptance-harness.md
   - Real Claude Code acceptance evidence — 2026-08-05: real-claude-code-acceptance-evidence-2026-08-05.md
   - Codex CLI example: codex-cli.md
+  - Real Codex CLI acceptance harness: real-codex-cli-acceptance-harness.md
+  - Real Codex CLI acceptance evidence — 2026-08-05: real-codex-cli-acceptance-evidence-2026-08-05.md
   - Management UI: ui.md
   - Enterprise fleet: enterprise-fleet.md
   - Agent population discovery: agent-discovery-design.md

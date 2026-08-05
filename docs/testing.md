@@ -393,3 +393,15 @@ workspace. Desktop and 390-pixel browser checks must show no document-level
 horizontal overflow or browser console errors. These checks prove information
 architecture and route compatibility; they do not prove that an operator has
 the server-side role required to mutate a protected resource.
+
+## Real Codex CLI host acceptance
+
+`scripts/test_real_codex_cli.py` admits only an exact executable from the
+default-deny support matrix and operates exclusively in a disposable synthetic
+Git project. It verifies process-loaded controls, native command and patch
+decisions, scope confinement, guarded MCP execution and the content-free local
+audit chain. `tests/test_real_codex_cli_acceptance.py` covers changed-binary
+rejection, matrix bounds, malformed streams, failed MCP status, report
+minimisation and the distinction between passing project controls and missing
+administrator authority. See the [harness contract](real-codex-cli-acceptance-harness.md)
+and [current evidence](real-codex-cli-acceptance-evidence-2026-08-05.md).

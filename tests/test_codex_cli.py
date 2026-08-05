@@ -94,6 +94,29 @@ def test_codex_tool_prefix_rule_is_scoped_to_one_registered_server() -> None:
         codex_tool_prefix_rule({"mcp__unsafe"})
 
 
+def test_codex_example_allows_normalized_gateway_namespace_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real Codex namespace mapping admits the gateway, not lookalike servers."""
+    monkeypatch.setenv("AAI_SEC_PROJECT_ROOT", str(tmp_path))
+    for name in (
+        "AAI_SEC_ENTERPRISE_CONTROL_PLANE_URL",
+        "AAI_SEC_AGENT_TOKEN",
+        "AAI_SEC_DEPLOYMENT_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    hook = codex_hook_example._build_hook()
+
+    assert hook.handle(event("mcp__agentic_security__lookup_record", {}, cwd=str(tmp_path))) == {}
+    for lookalike in (
+        "mcp__agentic_security_evil__lookup_record",
+        "mcp__agentic__security__lookup_record",
+        "mcp__agentic_security_lookup_record",
+    ):
+        result = hook.handle(event(lookalike, {}, cwd=str(tmp_path)))
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
 def test_codex_hook_orders_command_rules_and_converts_ask_to_deny() -> None:
     """An approval rule cannot use Codex's unsupported, fail-open ask value."""
     hook = CodexCliHook(

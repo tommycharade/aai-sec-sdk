@@ -15,6 +15,13 @@ This closes the gap between “the expected file exists” and “Codex loaded t
 expected restrictions” for controls exposed by Codex's supported app-server
 API. Controls not exposed with enough detail remain explicitly unverified.
 
+The real-host acceptance harness now composes this process observation with
+real `codex exec` turns. The 2026-08-05 run proved native command, patch, scope,
+approval-routing and local guarded-MCP behavior, while the same process probe
+truthfully reported `administrator-requirements-missing`. This is stronger than
+synthetic protocol evidence but still cannot convert project configuration
+into administrator authority. See [real Codex CLI acceptance](real-codex-cli-acceptance-harness.md).
+
 ## Trust boundaries and threat model
 
 The endpoint probe crosses three boundaries:
