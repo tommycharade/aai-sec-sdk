@@ -18,7 +18,8 @@ The latest published `aws-cdk-lib@2.263.0` bundle contains
 `GHSA-rgw5-rvv9-x895` as high severity and requires `5.0.9`. The package is a
 build/deployment-only dependency and is absent from the SDK, UI and Lambda
 runtime, but the previous dated exception covers a different advisory and must
-not be silently widened.
+not be silently widened. [GitHub issue #146](https://github.com/tommycharade/aai-sec-sdk/issues/146)
+tracks the exact affected path, enforcement and exit criteria.
 
 Choose one of these paths:
 
