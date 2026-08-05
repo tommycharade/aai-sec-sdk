@@ -371,3 +371,14 @@ page remains read-only and distinguishes IP restriction, PrivateLink and live
 acceptance. Browser checks cover desktop, narrow layouts and keyboard-accessible
 context help. These tests are software evidence, not a completed customer KMS,
 deletion or private-connectivity acceptance exercise.
+
+## Console navigation contracts
+
+The UI suite asserts that the primary sidebar contains exactly the seven
+Product Owner-approved workspaces. Route-level tests prove contextual controls
+remain reachable, workspace and tab selections expose `aria-current`, and old
+hash routes retain their exact destination while selecting the correct parent
+workspace. Desktop and 390-pixel browser checks must show no document-level
+horizontal overflow or browser console errors. These checks prove information
+architecture and route compatibility; they do not prove that an operator has
+the server-side role required to mutate a protected resource.

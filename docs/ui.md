@@ -210,10 +210,19 @@ surfaces:
 - credential and high-risk isolation requirements; and
 - sensitive-data redaction and optional content capture.
 
-Primary console destinations are hash-addressable (for example, `#fleet` or
+The primary sidebar exposes seven stable workspaces: **Overview**, **Fleet**,
+**Rollouts**, **Incidents**, **Policy**, **Evidence** and **Admin**. Existing
+capabilities remain available as contextual tabs inside their owning
+workspace; this reduces navigation choice without removing controls. The
+workspace-to-route mapping is compiled into the client rather than supplied by
+the control plane, so an API response cannot conceal a security surface.
+
+All contextual destinations remain hash-addressable (for example, `#fleet` or
 `#policy`) so an operator can bookmark or share a working view without losing
-the current workspace context. Entity searches preserve the selected object in
-the hash too, such as `#agents/agent/<deployment-id>%3A<agent-id>`; reloading
+the current workspace context. Legacy destination hashes such as `#agents` and
+`#data-boundaries` remain valid and select the owning workspace. Entity searches
+preserve the selected object in the hash too, such as
+`#agents/agent/<deployment-id>%3A<agent-id>`; reloading
 that link opens the same inspector or filtered deployment view. Browser
 back/forward navigation follows those destination changes. The trial and
 activation banner intentionally appears on Overview only; operational pages

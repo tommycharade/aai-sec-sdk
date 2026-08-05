@@ -98,6 +98,7 @@ nav:
   - Signed policy bundle acceptance: signed-policy-acceptance-2026-08-01.md
   - Managed Claude resources: claude-managed-resources.md
   - Wider enterprise UI: enterprise-ui.md
+  - Enterprise console navigation: console-navigation-design.md
   - Enterprise assurance reports: enterprise-assurance-reports-design.md
   - Scoped service identities and machine API: service-identities-design.md
   - Terraform provider and declarative management: terraform-provider-design.md

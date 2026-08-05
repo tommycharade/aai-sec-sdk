@@ -262,3 +262,24 @@ object or incident. Approve a controlled design-partner rollout now only where
 the deployment-owned controls are explicitly bounded. Do not describe the
 product as ready for enterprise-wide consequential use until the nine launch
 gates have retained evidence.
+
+## Resolution update — 2026-08-05
+
+The approved information architecture is now implemented in the UI branch.
+The sidebar contains exactly seven primary workspaces: Overview, Fleet,
+Rollouts, Incidents, Policy, Evidence and Admin. The previous peer destinations
+are preserved as contextual tabs:
+
+- Fleet owns Groups, Agents, Coverage and Connect agents;
+- Incidents owns Cases, Approvals and Workflows;
+- Policy owns Policies and Skills & MCP;
+- Evidence owns Decision history and Assurance; and
+- Admin owns Identity & access, API access, Webhooks, Data boundaries and SDK
+  runtime.
+
+Deployments remains the focused Rollouts destination and keeps its existing
+internal rollout and runtime-release views. Every prior hash route remains
+valid, and a regression test proves a legacy Data boundaries deep link selects
+Admin without changing the route. This resolves the navigation-consolidation
+item; it does not by itself satisfy the live host, identity, provider, fleet
+scale or disaster-recovery acceptance gates above.

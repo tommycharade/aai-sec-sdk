@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Consolidated the enterprise console into seven task-oriented workspaces:
+  Overview, Fleet, Rollouts, Incidents, Policy, Evidence and Admin. All prior
+  destinations remain reachable as contextual tabs, legacy hash links remain
+  valid, and responsive navigation tests prevent capability loss while reducing
+  sidebar choice from eighteen destinations to seven.
+
 - Added production-shaped private operator ingress through AWS PrivateLink.
   Schema-v2 deployment authority binds exact reviewed execute-api VPC endpoint
   IDs; preflight verifies endpoint posture; API Gateway combines an exact
