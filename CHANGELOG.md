@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Separated deterministic UI simulation from the HTTP-only production client,
+  added emitted-asset purity and raw/gzip budget gates with adversarial tests,
+  and moved incident detection-rule management behind an announced,
+  failure-contained lazy boundary. Customer builds now fail quality checks if
+  simulation enrollment capabilities leak into their JavaScript.
+
 - Hardened the enterprise console's shared accessibility and responsive
   contract: first-focus skip navigation, explicit landmarks, route-aware page
   titles, keyboard-roving workspace tabs, modal focus containment/restoration,

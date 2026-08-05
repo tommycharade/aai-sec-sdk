@@ -401,6 +401,15 @@ architecture and interaction quality; they do not prove that an operator has
 the server-side role required to mutate a protected resource or replace a
 screen-reader and 200% zoom acceptance exercise.
 
+The UI production gate additionally resolves the HTTP-only client, builds the
+actual customer assets, rejects simulation enrollment/bootstrap markers, and
+enforces explicit raw/gzip budgets. Negative tests prove contaminated and
+oversized fixture bundles fail. Route tests open the lazy detection-rule
+workspace; a focused error-boundary test proves an optional chunk failure keeps
+a recovery action visible instead of blanking the console. The size gate is a
+regression alarm, not field performance evidence; representative real-user
+monitoring remains deployment-owned.
+
 ## Real Codex CLI host acceptance
 
 `scripts/test_real_codex_cli.py` admits only an exact executable from the
