@@ -43,9 +43,21 @@
     },
     {
       "id": "ISOLATION",
-      "invariant": "Isolation is nonce-bound and independently host-verified before execution.",
-      "symbols": ["agentic_security.components.ActionPreparation.verify_isolation"],
-      "test_ids": ["ISOLATION_001", "ISOLATION_002", "ISOLATION_005"],
+      "invariant": "Isolation is action-bound, fresh, signed, matched to an immutable reviewed profile, and live at execution.",
+      "symbols": [
+        "agentic_security.components.ActionPreparation.verify_isolation",
+        "agentic_security.isolation.ProductionIsolationVerifier.verify"
+      ],
+      "test_ids": [
+        "ISOLATION_001",
+        "ISOLATION_002",
+        "ISOLATION_005",
+        "ISOLATION_PROFILE_001",
+        "ISOLATION_ACTION_001",
+        "ISOLATION_FRESHNESS_001",
+        "ISOLATION_SIGNATURE_001",
+        "ISOLATION_REVOCATION_001"
+      ],
       "required_kill_percent": 100
     },
     {

@@ -363,11 +363,11 @@ class GuardedRuntime:
                 )
             except PreExecutionAuthorizationError as exc:
                 return self._deny(request_id, proposal, str(exc))
-            isolation_attested = False
+            isolation_evidence = None
             if tool.requires_isolation:
                 isolation_nonce = str(uuid.uuid4())
                 try:
-                    isolation_attested = self._preparation.verify_isolation(
+                    isolation_evidence = self._preparation.verify_isolation(
                         tool,
                         self.context,
                         resources,
@@ -611,7 +611,7 @@ class GuardedRuntime:
                     policy_result,
                     approval_result,
                     credential if tool.requires_credential else None,
-                    isolation_attested,
+                    isolation_evidence,
                     handler_context,
                     cancellation,
                 )
@@ -678,6 +678,11 @@ class GuardedRuntime:
                     "policy_decision": policy_result.decision.value,
                     "policy_version": policy_result.policy_version,
                     "policy_provenance": policy_result.provenance,
+                    "isolation": (
+                        permit.evidence.isolation_evidence.audit_fields()
+                        if permit.evidence.isolation_evidence is not None
+                        else None
+                    ),
                 },
             )
             if not recorded:

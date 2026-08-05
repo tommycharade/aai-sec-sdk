@@ -83,6 +83,7 @@ _ALLOW_INTERSECTION = frozenset(
         "claudeCode.fileTools",
         "claudeCode.allowedSkills",
         "claudeCode.allowedMcpServers",
+        "isolation.acceptedProfiles",
     }
 )
 _DENY_UNION = frozenset({"tools.denied", "claudeCode.deniedCommandPatterns"})

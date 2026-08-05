@@ -67,6 +67,15 @@ bound evidence. The UI exposes evidence age, configuration digest, revision
 and revocation epoch, and never offers a client-secret field. See [Cloud
 credential authority](cloud-credential-authority-design.md).
 
+The adjacent **Isolation profiles** workspace registers immutable container,
+microVM, WASM or endpoint-sandbox desired state. It displays filesystem,
+network, process, resource, credential and privilege controls; clearly
+separates configured from verified authority; and exposes evidence expiry,
+configuration hash, workload digest, revision and revocation epoch. The form
+cannot disable mandatory safeguards or submit proof. Policies select active
+profiles in the typed **Accepted isolation profiles** control. See [Production
+isolation authority](production-isolation-authority-design.md).
+
 ## Managed controls
 
 The console keeps the operator's mental model explicit:

@@ -177,6 +177,15 @@ then let a service identity with only `credential_broker_runtime` attest the
 deployment-owned adapter. Registration alone remains blocked. See [Cloud
 credential authority](cloud-credential-authority-design.md).
 
+For hostile or generated code, register an immutable profile under **Connect
+agents → Isolation profiles**, deploy a platform adapter with only
+`isolation_runtime`, and select the profile in the governed policy. Human
+registration remains blocked until fresh machine evidence matches every
+constraint. The included Docker adapter is a live restrictive container
+contract, but production daemon/host hardening and independent escape testing
+remain required. See [Production isolation
+authority](production-isolation-authority-design.md).
+
 ## Live Claude presence
 
 The optional control-plane integration can show a Claude Code project as a

@@ -3199,3 +3199,102 @@ def test_agent_verification_reports_each_enrollment_prerequisite(tmp_path: Path)
     stopped = store.verify_agent(operator, deployment_id="deploy-a", agent_id="claude-a")
     assert stopped["verified"] is False
     assert stopped["checks"]["emergencyStop"]["passed"] is False
+
+
+def test_local_isolation_profile_lifecycle_is_tenant_scoped_and_honestly_unverified(
+    tmp_path: Path,
+) -> None:
+    """SQLite manages desired profiles but never claims a sandbox was observed."""
+    store = EnterpriseFleetStore(tmp_path / "isolation-profiles.sqlite")
+    token_a = "fleet-admin-isolation-a1234"  # noqa: S105 - synthetic test credential
+    token_b = "fleet-admin-isolation-b1234"  # noqa: S105 - synthetic test credential
+    app = EnterpriseFleetApplication(
+        store,
+        authenticator=StaticFleetAuthenticator(
+            {token_a: identity("org-a"), token_b: identity("org-b", subject="operator-b")}
+        ),
+    )
+    for token, organization_id in ((token_a, "org-a"), (token_b, "org-b")):
+        assert call_api(
+            app,
+            "POST",
+            "/api/enterprise/organizations",
+            {"organizationId": organization_id, "name": organization_id.upper()},
+            token=token,
+        )[0].startswith("201")
+    constraints = {
+        "filesystemReadOnly": True,
+        "networkMode": "none",
+        "allowedNetworkDestinations": [],
+        "processNamespace": True,
+        "maxMemoryMib": 256,
+        "maxPids": 64,
+        "cpuLimitMillicores": 1000,
+        "maxDurationSeconds": 30,
+        "credentialMode": "none",
+        "noNewPrivileges": True,
+        "capabilitiesDropped": True,
+    }
+    request = {
+        "profileId": "docker-hostile-code",
+        "name": "Docker hostile code",
+        "provider": "docker_engine",
+        "boundary": "container",
+        "workloadRef": "sha256:" + "a" * 64,
+        "allowedTools": ["compile_untrusted"],
+        "constraints": constraints,
+    }
+    status, created = call_api(
+        app, "POST", "/api/enterprise/isolation-profiles", request, token=token_a
+    )
+    assert status.startswith("201")
+    assert created["verificationStatus"] == "unverified"
+    assert created["executionAllowed"] is False
+    assert created["revocationEpoch"] == 1
+    policy = store.create_policy(
+        identity("org-a"),
+        policy_id="policy-attested-code",
+        name="Attested code execution",
+        configuration={
+            "tools": {"allowed": ["compile_untrusted"]},
+            "isolation": {
+                "verifier": "deployment_attested",
+                "requiredForHighRisk": True,
+                "mode": "required",
+                "acceptedProfiles": [created["id"]],
+            },
+        },
+    )
+    assert policy["pendingVersion"] == 1
+    with pytest.raises(FleetConfigurationError, match="unavailable isolation profile"):
+        store.create_policy(
+            identity("org-a"),
+            policy_id="policy-unknown-isolation",
+            name="Unknown isolation",
+            configuration={"isolation": {"acceptedProfiles": ["missing-profile"]}},
+        )
+
+    _, integrations_a = call_api(app, "GET", "/api/enterprise/integrations", token=token_a)
+    _, integrations_b = call_api(app, "GET", "/api/enterprise/integrations", token=token_b)
+    assert [item["id"] for item in integrations_a["isolationProfiles"]] == ["docker-hostile-code"]
+    assert integrations_b["isolationProfiles"] == []
+
+    rejected, _ = call_api(
+        app,
+        "POST",
+        "/api/enterprise/isolation-profiles",
+        {**request, "profileId": "mutable", "workloadRef": "worker:latest"},
+        token=token_a,
+    )
+    assert rejected.startswith("400")
+    revoked_status, revoked = call_api(
+        app,
+        "POST",
+        "/api/enterprise/isolation-profiles/docker-hostile-code/revoke",
+        {"expectedRevision": 1, "reason": "Synthetic profile retirement."},
+        token=token_a,
+    )
+    assert revoked_status.startswith("200")
+    assert revoked["verificationStatus"] == "revoked"
+    assert revoked["executionAllowed"] is False
+    assert revoked["revocationEpoch"] == 2

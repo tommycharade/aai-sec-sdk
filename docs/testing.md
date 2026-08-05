@@ -56,6 +56,17 @@ The contracts also reject provider tokens whose underlying lifetime exceeds
 the requested SDK lifetime and reject AWS STS registrations below the
 provider's fifteen-minute minimum.
 
+Isolation-authority tests cover immutable profile hashing, malformed and
+unbounded constraints, exact action/profile/workload binding, future/stale/
+overlong/expired evidence, signature failure, revocation, dependency outage,
+permit evidence and content-minimised audit. Docker contract tests prove that
+the attested profile matches fixed filesystem, network, PID, CPU, memory,
+credential, privilege and timeout controls. Hosted tests prove tenant
+isolation, human/machine evidence separation, exact evidence checks, expiry,
+policy reference validation and live revocation. These tests do not replace a
+production hostile-code assessment; use [Production isolation
+authority](production-isolation-authority-design.md).
+
 The optional live PostgreSQL path is exercised by the `postgres-integration`
 GitHub Actions job. Locally, install `.[postgres]`, set
 `AAI_SEC_POSTGRES_DSN`, and run:

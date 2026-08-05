@@ -115,6 +115,14 @@ provider, principal, audience, tool, resource, scope and lifetime checks occur
 before minting, and a live revocation callback is checked both at mint and use.
 See [Cloud credential authority](cloud-credential-authority-design.md).
 
+Isolation uses a separate typed authority path. Reviewed profiles bind one
+immutable workload to explicit filesystem, network, process, resource and
+credential constraints. `ProductionIsolationVerifier` checks exact action
+binding, freshness, signature, accepted profile/boundary and live revocation
+before a permit is issued. The attested Docker handler refuses a profile whose
+digest or controls differ from its fixed launch command. See [Production
+isolation authority](production-isolation-authority-design.md).
+
 ## Enterprise fleet control plane
 
 The optional `EnterpriseFleetStore` and `EnterpriseFleetApplication` add a

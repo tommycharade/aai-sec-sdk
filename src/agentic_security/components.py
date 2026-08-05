@@ -28,6 +28,7 @@ from .idempotency import (
     IdempotencyStore,
     new_record,
 )
+from .isolation import IsolationVerification
 from .policies import PolicyDecision, PolicyResult
 from .tools import ToolDefinition
 from .types import (
@@ -167,10 +168,10 @@ class ActionPreparation:
         resources: tuple[Resource, ...],
         verifier: Any,
         nonce: str,
-    ) -> bool:
-        """Verify a nonce-bound attestation supplied by the registered handler."""
+    ) -> IsolationVerification:
+        """Verify and retain nonce-bound evidence supplied by the registered handler."""
         if not tool.requires_isolation:
-            return False
+            return IsolationVerification(False, "tool does not require isolation")
         provider = getattr(tool.handler, "get_isolation_attestation", None)
         if verifier is None or not callable(provider):
             raise PreExecutionAuthorizationError(
@@ -181,9 +182,23 @@ class ActionPreparation:
 
         if not validate_attestation(attestation, context, tool.name, resources, nonce):
             raise PreExecutionAuthorizationError("isolation attestation is invalid")
-        if not verifier.verify(attestation, context, tool.name, resources, nonce):
+        verification = verifier.verify(attestation, context, tool.name, resources, nonce)
+        if isinstance(verification, IsolationVerification):
+            if not verification:
+                raise PreExecutionAuthorizationError("isolation attestation is invalid")
+            return verification
+        if verification is not True:
             raise PreExecutionAuthorizationError("isolation attestation is invalid")
-        return True
+        # Compatibility callbacks can establish the original boolean contract,
+        # but they cannot invent production profile identity. Keep that
+        # distinction explicit in permit evidence and operator documentation.
+        return IsolationVerification(
+            True,
+            "deployment callback accepted legacy isolation evidence",
+            evidence_id=attestation.workload_id,
+            provider=attestation.provider,
+            expires_at=attestation.expires_at,
+        )
 
 
 class PolicyPreparation:
@@ -260,6 +275,7 @@ class AuthorizationEvidence:
     approval: ApprovalConsumption | None
     credential_attested: bool
     isolation_attested: bool
+    isolation_evidence: IsolationVerification | None = None
 
 
 @dataclass(frozen=True, slots=True, init=False, eq=False, weakref_slot=True)
@@ -312,7 +328,7 @@ class PreExecutionAuthorizer:
         policy: PolicyResult,
         approval: ApprovalConsumption | None,
         credential: ScopedCredential | None,
-        isolation_attested: bool,
+        isolation_evidence: IsolationVerification | bool | None,
         handler_context: ExecutionContext,
         cancellation: CancellationToken,
     ) -> ExecutionPermit:
@@ -335,6 +351,7 @@ class PreExecutionAuthorizer:
             credential is None or not credential.valid_for(facts.tool.name, facts.resources)
         ):
             raise PreExecutionAuthorizationError("credential scope is invalid")
+        isolation_attested = bool(isolation_evidence)
         if facts.tool.requires_isolation and not isolation_attested:
             raise PreExecutionAuthorizationError("isolation attestation is invalid")
         evidence = AuthorizationEvidence(
@@ -342,6 +359,11 @@ class PreExecutionAuthorizer:
             approval=approval,
             credential_attested=credential_attested,
             isolation_attested=isolation_attested,
+            isolation_evidence=(
+                isolation_evidence
+                if isinstance(isolation_evidence, IsolationVerification)
+                else None
+            ),
         )
         # Construct and register the capability only after every mandatory
         # host-owned authorization check above has passed. There is no separate

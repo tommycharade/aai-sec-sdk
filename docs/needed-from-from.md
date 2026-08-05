@@ -292,6 +292,11 @@ are required before an enterprise production claim:
   allowed, widened-scope, expiry, outage and revocation acceptance exercises;
 - production isolation choice: container, microVM, endpoint sandbox or
   customer-owned runner;
+- immutable worker/runtime identities, exact filesystem/network/process/
+  resource/credential constraints, platform evidence issuer and revocation
+  source for that isolation choice;
+- independent hostile-code assessor and an authorized operator who can retain
+  escape, forbidden-access, exhaustion, outage and revocation evidence;
 - endpoint credential-revocation mechanism;
 - case-management or SOAR destination;
 - vulnerability owner and remediation SLA; and

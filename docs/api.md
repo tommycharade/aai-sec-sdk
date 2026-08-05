@@ -326,6 +326,26 @@ uncertain records.
 
 ::: agentic_security.isolation.CallbackIsolationVerifier
 
+::: agentic_security.isolation.IsolationBoundary
+
+::: agentic_security.isolation.IsolationNetworkMode
+
+::: agentic_security.isolation.IsolationCredentialMode
+
+::: agentic_security.isolation.IsolationConstraints
+
+::: agentic_security.isolation.IsolationProfile
+
+::: agentic_security.isolation.IsolationRequirement
+
+::: agentic_security.isolation.IsolationVerification
+
+::: agentic_security.isolation.ProductionIsolationVerifier
+
+::: agentic_security.isolation.isolation_action_binding
+
+::: agentic_security.isolation.isolation_attestation_payload
+
 ## Policies
 
 ::: agentic_security.policies.PolicyEngine

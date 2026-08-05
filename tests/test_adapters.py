@@ -424,6 +424,7 @@ def test_docker_sandbox_handler_constructs_restrictive_container_boundary(
             "--user=65532:65532",
             "--memory=256m",
             "--pids-limit=32",
+            "--cpus=1.000",
             "--tmpfs=/tmp:rw,noexec,nosuid,size=64m",
             "registry.example.test/worker@sha256:" + "a" * 64,
         )
@@ -436,6 +437,16 @@ def test_docker_sandbox_handler_constructs_restrictive_container_boundary(
         DockerSandboxToolHandler(
             "registry.example.test/worker@sha256:" + "a" * 64,
             timeout_seconds=float("inf"),
+        )
+    with pytest.raises(ValueError, match="positive m or g"):
+        DockerSandboxToolHandler(
+            "registry.example.test/worker@sha256:" + "a" * 64,
+            memory_limit="256mb",
+        )
+    with pytest.raises(ValueError, match="safety bound"):
+        DockerSandboxToolHandler(
+            "registry.example.test/worker@sha256:" + "a" * 64,
+            memory_limit="257g",
         )
 
 
