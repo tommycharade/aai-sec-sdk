@@ -57,6 +57,23 @@ zoom, screen-reader or representative operator testing; those remain release
 acceptance activities. Accessibility state is presentation only and never
 changes API authorization or runtime authority.
 
+Production delivery also has an asset and first-load contract. Customer builds
+resolve an HTTP-only control-plane client and must not contain deterministic
+simulation enrollment, bootstrap or fleet capabilities. Simulation remains an
+explicit development/demo build, is visibly labelled, and is never a fallback
+for a failed live request. The build gate scans emitted JavaScript for
+simulation-only markers and enforces reviewed raw and gzip budgets for the
+initial entry, all JavaScript and CSS.
+
+Large optional workspaces are loaded on demand. Each boundary must announce
+loading, contain a chunk or network failure to the selected panel, and offer a
+dependable recovery action rather than blanking the console. The first boundary
+is **Incidents → Detection rules**. A size budget may change only with measured
+evidence and architectural review; increasing it to silence a bundler warning
+does not meet this contract. These controls improve delivery integrity and
+operator recovery. They do not make browser code an authorization boundary,
+guarantee network availability, or replace real-user performance monitoring.
+
 The **Admin → Identity and access** page must not be one continuous
 administration form. Its overview shows verified identity foundations and one
 next-best action. Separate workspaces cover **Entra setup**, **Directory & roles**,

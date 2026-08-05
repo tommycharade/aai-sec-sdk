@@ -849,6 +849,13 @@ short-lived, scoped to one deployment, agent and canonical project root, and
 excluded from inventory responses. Every lifecycle and rollout mutation is auditable. Provider-backed
 authentication, policy, IAM, approval, audit retention, isolation, and runtime
 activation remain explicit adapters and are not simulated by the UI.
+Production UI assets therefore resolve an HTTP-only client and are inspected to
+exclude deterministic enrollment and bootstrap capabilities. This asset
+boundary reduces accidental demo deployment; it is not a security sandbox,
+proof that a CDN object is current, or protection against a compromised build
+pipeline. Optional workspace loading failures are contained in the browser and
+expose a reload path, but every resulting API operation still requires
+independent server authorization.
 Managed rollout requests are also untrusted proposals. The API derives
 eligible active endpoints from server inventory, selects canaries from a
 stable tenant/agent hash, binds an immutable desired configuration and managed

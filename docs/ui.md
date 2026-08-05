@@ -428,6 +428,14 @@ no registered deployment, the enrollment action is disabled and the operator
 is directed to **Deployments & rollout** first. The local deployment fallback
 is reserved for simulation mode.
 
+Production browser assets use a separate HTTP-only client entry; deterministic
+simulation state and enrollment behavior are not imported into customer
+builds. CI inspects emitted files for simulation-only markers and enforces
+initial-entry, total-JavaScript and CSS gzip budgets. Detection-rule management
+is an on-demand workspace with announced loading and panel-local failure
+recovery. This reduces first-load work without changing server-side authority:
+a successfully loaded browser remains an untrusted operator client.
+
 The first-run host flow ends at central enrollment and verification. Claude
 Code hook fields, generated `settings.json`, and native-tool rules are grouped
 under **Advanced Claude Code settings** so they remain available without
