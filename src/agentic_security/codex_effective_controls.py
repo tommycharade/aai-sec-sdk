@@ -428,7 +428,6 @@ class CodexAppServerEffectiveControlProbe:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
-                bufsize=0,
             )
         except OSError:
             raise SecurityConfigurationError("Codex app-server could not be started") from None
