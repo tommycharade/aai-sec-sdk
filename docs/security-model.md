@@ -1170,13 +1170,14 @@ endpoint root compromise and stolen device secrets remain deployment risks.
 See [Endpoint evidence publisher](endpoint-evidence-publisher-design.md).
 
 Hosted Intune delivery is a separate privileged boundary. Intune app
-deployment is group-assignment based, so the control plane must derive and own
-an exact rollout cohort rather than treating a managed-device ID as a command
-target. A future worker requires a dedicated role and tenant-tagged delivery
-secret, exact package-app digest binding, transactional outbox, online rollout
-and endpoint reauthorization, bounded unknown-outcome reconciliation and
-independent runtime attestation. The read-only discovery credential cannot be
-silently widened. See
+deployment is group-assignment based, so the control plane derives an exact
+rollout cohort rather than treating a managed-device ID as a command target.
+An isolated, disabled-by-default worker now uses a dedicated role and
+tenant-tagged delivery secret, exact package-app digest binding, transactional
+FIFO outbox, online rollout/endpoint reauthorization and bounded
+unknown-outcome reconciliation. It reports only provider assignment; fresh
+independent runtime attestation remains the sole installation proof. The
+read-only discovery credential cannot be silently widened. See
 [Microsoft Intune managed delivery](intune-managed-delivery-design.md).
 The [hosted endpoint evidence channel](hosted-endpoint-evidence.md) stores only
 credential digests, binds reports to current MDM devices, rejects altered,
@@ -1547,11 +1548,17 @@ reconciler can transactionally create idempotent dormant commands bound to
 exact live provider, rollout, deployment, agent, signed endpoint evidence and
 package state, with primary audit evidence in the same commit.
 
-Hosted Intune delivery remains disabled: outbox records explicitly report that
-dispatch is off, no provider worker exists, and the handler has no Microsoft
-Graph authority. Online Entra identity resolution, Graph reauthorization,
-owned-group/assignment reconciliation and independent post-install attestation
-must still be implemented and accepted. See
+Hosted Intune delivery remains deployment-disabled by default. The isolated
+worker and encrypted FIFO/DLQ are present, but the event source and repair
+schedule are disabled unless deployment owners set the exact enablement flag
+and a reviewed SHA-256 evidence identity together. The API still has no Graph
+credential/decrypt authority. On each bounded command the worker reconstructs
+fresh endpoint binding, resolves Entra device alternate keys online, verifies
+pre-provisioned group/app metadata, reauthorizes before mutation, converges
+exact dedicated-group membership, preserves unrelated assignments and writes
+content-minimised Object Lock evidence. Commands above 40 targets fail before
+credential access until continuation authority is implemented. Live customer
+acceptance and independent post-install attestation remain mandatory. See
 [Managed endpoint delivery authority](managed-endpoint-delivery-authority-design.md).
 
 ## Real Codex host acceptance boundary

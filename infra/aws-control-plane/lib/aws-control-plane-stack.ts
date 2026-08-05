@@ -236,6 +236,25 @@ export class AwsControlPlaneStack extends cdk.Stack {
       throw new Error("ENTRA_STRONG_AUTH_ENFORCED must be true or false");
     }
     const entraStrongAuthEnforced = entraStrongAuthValue === "true";
+    const endpointDeliveryDispatchValue =
+      process.env.ENDPOINT_DELIVERY_DISPATCH_ENABLED?.trim() ?? "false";
+    const endpointDeliveryEnablementEvidence =
+      process.env.ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256?.trim() ?? "";
+    if (!["true", "false"].includes(endpointDeliveryDispatchValue)) {
+      throw new Error("ENDPOINT_DELIVERY_DISPATCH_ENABLED must be true or false");
+    }
+    const endpointDeliveryDispatchEnabled = endpointDeliveryDispatchValue === "true";
+    if (
+      endpointDeliveryDispatchEnabled
+      && !/^[0-9a-f]{64}$/.test(endpointDeliveryEnablementEvidence)
+    ) {
+      throw new Error(
+        "enabled endpoint delivery requires ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256",
+      );
+    }
+    if (!endpointDeliveryDispatchEnabled && endpointDeliveryEnablementEvidence) {
+      throw new Error("endpoint delivery evidence cannot be staged while dispatch is disabled");
+    }
     const runtimeManifestPath = path.join(__dirname, "../lambda/runtime-manifests.json");
     const runtimeManifestBundle = fs.readFileSync(runtimeManifestPath, "utf8");
     validateRuntimeManifests(runtimeManifestBundle);
@@ -756,6 +775,23 @@ export class AwsControlPlaneStack extends cdk.Stack {
       deadLetterQueue: { queue: workflowDeliveryDlq, maxReceiveCount: 5 },
       enforceSSL: true,
     });
+    const endpointDeliveryWorkerDlq = new sqs.Queue(this, "EndpointDeliveryWorkerDlq", {
+      fifo: true,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const endpointDeliveryWorkerQueue = new sqs.Queue(this, "EndpointDeliveryWorkerQueue", {
+      fifo: true,
+      contentBasedDeduplication: false,
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
+      visibilityTimeout: cdk.Duration.minutes(6),
+      retentionPeriod: cdk.Duration.days(4),
+      deadLetterQueue: { queue: endpointDeliveryWorkerDlq, maxReceiveCount: 5 },
+      enforceSSL: true,
+    });
     const workflowDispatchDlq = new sqs.Queue(this, "WorkflowDispatchDlq", {
       encryption: sqs.QueueEncryption.KMS,
       encryptionMasterKey: dataProtectionKey,
@@ -763,6 +799,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
       enforceSSL: true,
     });
     const webhookDispatchDlq = new sqs.Queue(this, "WebhookDispatchDlq", {
+      encryption: sqs.QueueEncryption.KMS,
+      encryptionMasterKey: dataProtectionKey,
+      retentionPeriod: cdk.Duration.days(14),
+      enforceSSL: true,
+    });
+    const endpointDeliveryDispatchDlq = new sqs.Queue(this, "EndpointDeliveryDispatchDlq", {
       encryption: sqs.QueueEncryption.KMS,
       encryptionMasterKey: dataProtectionKey,
       retentionPeriod: cdk.Duration.days(14),
@@ -1114,6 +1156,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
       WORKFLOW_SECRET_PREFIX: "aai-sec/workflows/",
       ENDPOINT_DELIVERY_SECRET_PREFIX: endpointDeliverySecretPrefix,
       ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN: endpointDeliveryCredentialKey.keyArn,
+      ENDPOINT_DELIVERY_QUEUE_URL: endpointDeliveryWorkerQueue.queueUrl,
+      ENDPOINT_DELIVERY_DISPATCH_ENABLED: endpointDeliveryDispatchEnabled ? "true" : "false",
+      ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256: endpointDeliveryEnablementEvidence,
       DATA_BOUNDARY_STATUS: dataBoundaryConfigured ? "configured" : "not-configured",
       DATA_BOUNDARY_HOME_REGION: dataBoundaryHomeRegion || deploymentRegion,
       DATA_BOUNDARY_APPROVED_REGIONS: JSON.stringify(
@@ -1264,6 +1309,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
     securityAlerts.grantPublish(handler);
     webhookDeliveryQueue.grantSendMessages(handler);
     workflowDeliveryQueue.grantSendMessages(handler);
+    endpointDeliveryWorkerQueue.grantSendMessages(handler);
     webhookSecretKey.grantEncrypt(handler);
     handler.addToRolePolicy(new iam.PolicyStatement({
       actions: [
@@ -1443,6 +1489,55 @@ export class AwsControlPlaneStack extends cdk.Stack {
       reportBatchItemFailures: false,
     }));
 
+    // Provider credentials and Graph egress are isolated from the API. The
+    // worker is physically present but receives no events until a deployment-
+    // owned enablement review supplies an exact evidence digest.
+    const endpointDeliveryWorker = new lambda.Function(this, "EndpointDeliveryWorker", {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: lambda.Architecture.ARM_64,
+      handler: "intune_delivery_worker.handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 512,
+      reservedConcurrentExecutions: 5,
+      environment: {
+        CONTROL_TABLE: table.tableName,
+        AUDIT_BUCKET: audit.bucketName,
+        DISCOVERY_PAGE_BUCKET: discoveryPages.bucketName,
+        AWS_ACCOUNT_ID: this.account,
+        AWS_PARTITION: cdk.Aws.PARTITION,
+        ENDPOINT_DELIVERY_SECRET_PREFIX: endpointDeliverySecretPrefix,
+        ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN: endpointDeliveryCredentialKey.keyArn,
+        ENDPOINT_DELIVERY_DISPATCH_ENABLED: endpointDeliveryDispatchEnabled ? "true" : "false",
+        ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256: endpointDeliveryEnablementEvidence,
+      },
+      tracing: lambda.Tracing.PASS_THROUGH,
+    });
+    table.grantReadWriteData(endpointDeliveryWorker);
+    discoveryPages.grantRead(endpointDeliveryWorker);
+    audit.grantPut(endpointDeliveryWorker);
+    endpointDeliveryWorker.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["s3:PutObjectRetention"],
+      resources: [audit.arnForObjects("tenant=*/endpoint-delivery/*")],
+    }));
+    endpointDeliveryCredentialKey.grantDecrypt(endpointDeliveryWorker);
+    endpointDeliveryWorker.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"],
+      resources: endpointDeliverySecretResources,
+      conditions: {
+        StringEquals: {
+          "secretsmanager:ResourceTag/aai-sec:purpose": "endpoint-delivery-provider",
+        },
+      },
+    }));
+    endpointDeliveryWorker.addEventSource(
+      new lambdaEventSources.SqsEventSource(endpointDeliveryWorkerQueue, {
+        batchSize: 1,
+        reportBatchItemFailures: false,
+        enabled: endpointDeliveryDispatchEnabled,
+      }),
+    );
+
     const evidenceRetentionWorker = new lambda.Function(this, "EvidenceRetentionWorker", {
       runtime: lambda.Runtime.PYTHON_3_13,
       architecture: lambda.Architecture.ARM_64,
@@ -1554,6 +1649,26 @@ export class AwsControlPlaneStack extends cdk.Stack {
           schemaVersion: 1,
         }),
         deadLetterQueue: workflowDispatchDlq,
+        maxEventAge: cdk.Duration.minutes(15),
+        retryAttempts: 2,
+      }),
+    );
+    const endpointDeliveryDispatchRule = new events.Rule(
+      this,
+      "EndpointDeliveryDispatchSchedule",
+      {
+        description: "Repair persisted Intune delivery commands awaiting FIFO dispatch",
+        schedule: events.Schedule.rate(cdk.Duration.minutes(1)),
+        enabled: endpointDeliveryDispatchEnabled,
+      },
+    );
+    endpointDeliveryDispatchRule.addTarget(
+      new eventTargets.LambdaFunction(handler, {
+        event: events.RuleTargetInput.fromObject({
+          source: "aai.endpoint-delivery-dispatch",
+          schemaVersion: 1,
+        }),
+        deadLetterQueue: endpointDeliveryDispatchDlq,
         maxEventAge: cdk.Duration.minutes(15),
         retryAttempts: 2,
       }),
@@ -2001,6 +2116,8 @@ export class AwsControlPlaneStack extends cdk.Stack {
       ["WebhookDispatchDeadLetters", webhookDispatchDlq, "Webhook outbox dispatch exhausted bounded retries."],
       ["WorkflowDeliveryDeadLetters", workflowDeliveryDlq, "Incident workflow delivery exhausted bounded retries."],
       ["WorkflowDispatchDeadLetters", workflowDispatchDlq, "Incident workflow outbox dispatch exhausted bounded retries."],
+      ["EndpointDeliveryWorkerDeadLetters", endpointDeliveryWorkerDlq, "Intune endpoint delivery exhausted bounded retries."],
+      ["EndpointDeliveryDispatchDeadLetters", endpointDeliveryDispatchDlq, "Intune endpoint delivery outbox dispatch exhausted bounded retries."],
     ] as const) {
       const alarm = new cloudwatch.Alarm(this, id, {
         metric: queue.metricApproximateNumberOfMessagesVisible({
@@ -2118,6 +2235,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
     new cdk.CfnOutput(this, "WorkflowCredentialKeyArn", { value: workflowCredentialKey.keyArn });
     new cdk.CfnOutput(this, "EndpointDeliveryCredentialKeyArn", {
       value: endpointDeliveryCredentialKey.keyArn,
+    });
+    new cdk.CfnOutput(this, "EndpointDeliveryWorkerQueueArn", {
+      value: endpointDeliveryWorkerQueue.queueArn,
+    });
+    new cdk.CfnOutput(this, "EndpointDeliveryWorkerDlqArn", {
+      value: endpointDeliveryWorkerDlq.queueArn,
+    });
+    new cdk.CfnOutput(this, "EndpointDeliveryDispatchStatus", {
+      value: endpointDeliveryDispatchEnabled ? "enabled" : "disabled",
     });
     new cdk.CfnOutput(this, "WebhookDispatchDlqArn", { value: webhookDispatchDlq.queueArn });
     new cdk.CfnOutput(this, "WebhookSecretKmsKeyArn", { value: webhookSecretKey.keyArn });

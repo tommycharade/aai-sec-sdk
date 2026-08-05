@@ -15788,8 +15788,8 @@ def test_intune_provider_activation_revalidates_secret_and_fails_closed(
     )
 
 
-def test_intune_provider_infrastructure_separates_metadata_and_decrypt_authority() -> None:
-    """The API may inspect delivery secrets but cannot retrieve or decrypt them."""
+def test_intune_provider_infrastructure_separates_api_and_worker_authority() -> None:
+    """Only a disabled-by-default isolated worker can decrypt delivery credentials."""
     stack = (
         Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
     ).read_text(encoding="utf-8")
@@ -15802,7 +15802,15 @@ def test_intune_provider_infrastructure_separates_metadata_and_decrypt_authority
     assert '"secretsmanager:GetSecretValue"' not in segment
     assert "endpointDeliveryCredentialKey.grantDecrypt(handler)" not in stack
     assert 'indexName: "EndpointDeliveryOutbox"' in stack
-    assert '"EndpointDeliveryWorker"' not in stack
+    assert '"EndpointDeliveryWorker"' in stack
+    assert "endpointDeliveryCredentialKey.grantDecrypt(endpointDeliveryWorker)" in stack
+    assert "enabled: endpointDeliveryDispatchEnabled" in stack
+    assert 'ENDPOINT_DELIVERY_DISPATCH_ENABLED?.trim() ?? "false"' in stack
+    assert (
+        "enabled endpoint delivery requires ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256" in stack
+    )
+    assert 'handler: "intune_delivery_worker.handler"' in stack
+    assert "batchSize: 1" in stack
 
 
 def test_intune_delivery_outbox_is_idempotent_and_authority_bound(monkeypatch: Any) -> None:
@@ -15934,6 +15942,124 @@ def test_intune_delivery_outbox_is_idempotent_and_authority_bound(monkeypatch: A
     view = module._endpoint_delivery_commands(tenant, "kratos")
     assert view["dispatchEnabled"] is False
     assert view["items"][0]["dispatchEnabled"] is False
+    assert view["items"][0]["attemptCount"] == 0
+    assert view["items"][0]["failureCode"] is None
+    assert view["items"][0]["providerEvidence"] is None
+
+
+def test_endpoint_delivery_command_view_is_content_minimised_and_fails_closed(
+    monkeypatch: Any,
+) -> None:
+    """Operators receive fixed evidence, while malformed worker state is denied."""
+    module, _table = _load_handler(monkeypatch)
+    provider_evidence: dict[str, Any] = {
+        "groupReferenceSha256": "c" * 64,
+        "appReferenceSha256": "d" * 64,
+        "assignmentReferenceSha256": "e" * 64,
+        "targetCount": 3,
+    }
+    record: dict[str, Any] = {
+        "id": "a" * 64,
+        "provider": "intune",
+        "deployment_id": "deployment-1",
+        "host": "claude-code",
+        "release_id": "release-1",
+        "package_id": "package-1",
+        "provider_version": 1,
+        "rollout_revision": 2,
+        "target_count": 3,
+        "cohort_digest": "b" * 64,
+        "status": "assigned_reported",
+        "attempt_count": 2,
+        "failure_code": None,
+        "provider_evidence": provider_evidence,
+        "instruction_digest": "f" * 64,
+        "created_at": 1_800_000_000,
+        "updated_at": 1_800_000_010,
+    }
+
+    view = module._endpoint_delivery_command_view(record)
+
+    assert view["attemptCount"] == 2
+    assert view["providerEvidence"] == record["provider_evidence"]
+    assert "groupId" not in json.dumps(view)
+    with pytest.raises(RuntimeError, match="provider evidence is invalid"):
+        module._endpoint_delivery_command_view(
+            {**record, "provider_evidence": {**provider_evidence, "groupId": "raw"}}
+        )
+    with pytest.raises(RuntimeError, match="failure code is invalid"):
+        module._endpoint_delivery_command_view({**record, "failure_code": "raw URL"})
+
+
+def test_intune_delivery_dispatch_is_gated_and_latest_authority_bound(
+    monkeypatch: Any,
+) -> None:
+    """Only an evidenced cutover may send an opaque latest command to FIFO."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-intune-dispatch"
+    command_id = "a" * 64
+    digest = "b" * 64
+    cohort = "c" * 64
+    command = {
+        "pk": f"TENANT#{tenant}",
+        "sk": f"ENDPOINT_DELIVERY_COMMAND#{command_id}",
+        "tenant_id": tenant,
+        "id": command_id,
+        "status": "pending",
+        "instruction_digest": digest,
+        "cohort_digest": cohort,
+        "instruction": {"deploymentId": "deployment-1", "packageId": "package-1"},
+        "delivery_outbox_pk": f"ENDPOINT_DELIVERY_OUTBOX#{tenant}",
+        "delivery_outbox_sk": f"1#{command_id}",
+    }
+    table.items[(command["pk"], command["sk"])] = dict(command)
+    authority = {
+        "pk": f"TENANT#{tenant}",
+        "sk": "ENDPOINT_DELIVERY_AUTHORITY#deployment-1:package-1",
+        "command_id": command_id,
+        "instruction_digest": digest,
+        "cohort_digest": cohort,
+    }
+    table.items[(authority["pk"], authority["sk"])] = authority
+
+    assert module._dispatch_endpoint_delivery_command(command) is False
+    assert module._fake_sqs.messages == []
+
+    module._ENDPOINT_DELIVERY_DISPATCH_ENABLED = True
+    module._ENDPOINT_DELIVERY_QUEUE_URL = "https://sqs.example.invalid/intune.fifo"
+    module._ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256 = "d" * 64
+    assert module._dispatch_endpoint_delivery_command(command) is True
+    assert json.loads(module._fake_sqs.messages[0]["MessageBody"]) == {
+        "tenantId": tenant,
+        "commandId": command_id,
+    }
+    stored = table.items[(command["pk"], command["sk"])]
+    assert stored["status"] == "queued"
+    assert "delivery_outbox_pk" not in stored
+
+
+def test_intune_delivery_dispatch_rejects_superseded_command(monkeypatch: Any) -> None:
+    """A stale immutable command never reaches the provider queue."""
+    module, table = _load_handler(monkeypatch)
+    module._ENDPOINT_DELIVERY_DISPATCH_ENABLED = True
+    module._ENDPOINT_DELIVERY_QUEUE_URL = "https://sqs.example.invalid/intune.fifo"
+    module._ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256 = "d" * 64
+    tenant = "tenant-intune-stale"
+    command = {
+        "tenant_id": tenant,
+        "id": "a" * 64,
+        "status": "pending",
+        "instruction_digest": "b" * 64,
+        "cohort_digest": "c" * 64,
+        "instruction": {"deploymentId": "deployment-1", "packageId": "package-1"},
+    }
+    table.items[(f"TENANT#{tenant}", "ENDPOINT_DELIVERY_AUTHORITY#deployment-1:package-1")] = {
+        "command_id": "e" * 64,
+        "instruction_digest": "f" * 64,
+        "cohort_digest": "0" * 64,
+    }
+    assert module._dispatch_endpoint_delivery_command(command) is False
+    assert module._fake_sqs.messages == []
 
 
 def test_intune_delivery_outbox_rejects_concurrent_provider_change(monkeypatch: Any) -> None:

@@ -18,11 +18,12 @@ not pretend that accepting a Graph mutation means the package installed.
 Provider convergence is `assigned_reported`; only fresh challenge-bound runtime
 attestation is `verified`.
 
-This design is intentionally staged. The control plane now retains the target
-identity, independently governed Intune configuration and transactional dormant
-outbox. Real Graph writes remain disabled until the worker, owned group,
-provider reconciliation and live acceptance gates in this document are all
-satisfied.
+This design is intentionally staged. The control plane retains target identity,
+independently governed Intune configuration and a transactional outbox. An
+isolated worker, FIFO queue, DLQ and repair schedule are implemented but
+deployment-disabled by default. Real Graph writes require an explicit
+deployment flag plus a separately reviewed enablement-evidence SHA-256; live
+customer acceptance remains open.
 
 ## Provider constraint and identity chain
 
@@ -106,10 +107,9 @@ Only the opaque job key is sent to the FIFO queue. Failure to enqueue leaves the
 outbox index intact for a bounded scheduled dispatcher. Acceptance by SQS
 removes only the pending index attributes; it does not alter provider status.
 
-### Implemented dormant phase
+### Implemented worker phase
 
-The current implementation creates no queue consumer and performs no Graph
-request. The five-minute rollout reconciler first materializes each
+The five-minute rollout reconciler first materializes each
 server-selected target only when all of these exact records still match in one
 DynamoDB transaction:
 
@@ -126,10 +126,18 @@ per package/cohort, content-minimised primary audit evidence and an
 worker cannot mistake one device write for complete desired membership.
 Reconciliation is idempotent by exact tenant-bound target, page, cohort and
 instruction digests. The operator view states
-`dispatchEnabled: false` and omits the secret ARN, directory registration ID,
-package locator and complete instruction. The next phase may dispatch only the
-opaque command ID and must remove the outbox index attributes only after FIFO
-acceptance.
+`dispatchEnabled` from deployment-owned state and omits the secret ARN,
+directory registration ID, package locator and complete instruction. When
+enabled, the dispatcher sends only tenant and opaque command identity and
+removes outbox attributes only after FIFO acceptance. The worker is isolated
+from API authority, validates tenant/KMS/purpose-bound secret metadata before
+decrypting, and reauthorizes current provider, rollout, agent, discovery,
+signed endpoint and latest-command authority before every mutation.
+
+One invocation currently admits at most 40 targets, matching one sealed cohort
+page. A larger command is blocked before secret or Graph access. This honest
+pilot bound avoids a timeout-dependent partial rollout; continuation authority
+is required before raising the enterprise cohort limit.
 
 ## Governed provider configuration
 
@@ -149,8 +157,8 @@ replace the ARN with a one-way reference digest.
 
 ## Dispatch-time online reauthorization
 
-Immediately before every Graph mutation, the worker must strongly and
-independently recheck:
+Immediately before every Graph mutation, the worker strongly and independently
+rechecks:
 
 1. tenant and provider configuration are active and exact-revision matched;
 2. rollout state/revision/release and deterministic cohort are unchanged;
@@ -228,6 +236,33 @@ and group membership through
 The pilot must record the final least-privilege permission set and prove that
 the role cannot mutate unowned groups or apps.
 
+The secret value uses a closed schema. `providerPackageIdentitySha256` is the
+SHA-256 of the canonical lowercase `mobileAppId`; relabelling another app is
+rejected. `mobileAppEvidenceSha256` hashes exactly `id`, `displayName`,
+`publisher`, `createdDateTime` and `lastModifiedDateTime`. Group evidence hashes
+exactly `id`, `displayName`, `description`, `securityEnabled` and `mailEnabled`.
+The worker reproduces both metadata projections online before mutation.
+
+```json
+{
+  "schemaVersion": 1,
+  "clientId": "11111111-1111-4111-8111-111111111111",
+  "clientSecret": "stored-only-in-secrets-manager",
+  "resources": [
+    {
+      "deploymentId": "synthetic-pilot",
+      "providerPackageIdentitySha256": "b454f82c5857ebabf342b7258e5cf7def78b7cd975814119462973de9a38df10",
+      "mobileAppId": "22222222-2222-4222-8222-222222222222",
+      "mobileAppEvidenceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "groupId": "33333333-3333-4333-8333-333333333333",
+      "groupEvidenceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ]
+}
+```
+
+The example is synthetic; its metadata evidence values are not deployable.
+
 ## UI placement
 
 No new primary navigation item is added.
@@ -247,7 +282,10 @@ It never offers a free-form device ID, app ID, Graph URL or request-body field.
 
 ## Secure defaults and non-goals
 
-- Hosted dispatch is disabled; current outbox records have no consumer.
+- Hosted dispatch, its event source and repair schedule are disabled by default.
+- Enabling requires both `ENDPOINT_DELIVERY_DISPATCH_ENABLED=true` and a
+  lowercase SHA-256 `ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256`; incomplete
+  or contradictory CDK input fails synthesis.
 - The checked-in package and provider catalogs are empty and not healthy.
 - Unknown Graph fields, redirects, origins, IDs, pagination links and response
   codes fail closed.

@@ -32,9 +32,10 @@ No secret value, package byte or Graph request body is pasted into the UI.
 7. Activate one non-production deployment and leave all others outside the
    explicit configuration scope.
 
-The API lifecycle is implemented; this Integrations workspace is the next UI
-slice. Activation currently enables dormant outbox creation only, not Graph
-dispatch.
+The API lifecycle and typed Integrations workspace are implemented. Activation
+enables outbox creation only. Graph dispatch remains a separate
+deployment-owned cutover with reviewed enablement evidence; the browser has no
+enablement switch and never receives a provider secret value.
 
 Editing the configuration invalidates approval and returns it to draft.
 
@@ -59,8 +60,8 @@ Editing the configuration invalidates approval and returns it to draft.
 1. Start the normal revision-bound runtime canary.
 2. The control plane derives the cohort and commits exact dormant outbox jobs
    automatically.
-3. Until the worker phase is enabled, confirm the command says **Dispatch
-   disabled**. After worker acceptance, watch the provider progression: queued,
+3. Until the deployment cutover is approved, confirm the command says
+   **Dispatch disabled**. After worker acceptance and enablement, watch the provider progression: queued,
    resolving targets, converging members, converging assignment and assigned
    reported.
 4. Treat assigned reported as **Awaiting runtime attestation**.

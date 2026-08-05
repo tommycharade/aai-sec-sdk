@@ -683,8 +683,8 @@ and [managed endpoint delivery user journeys](managed-endpoint-delivery-user-jou
 The provider-specific group-assignment and online identity-resolution boundary
 is documented in
 [Microsoft Intune managed delivery](intune-managed-delivery-design.md). Hosted
-Graph mutation remains disabled, but the following governed control-plane APIs
-are available:
+Graph mutation is deployment-disabled by default, while the following governed
+control-plane APIs are available:
 
 - `GET /api/enterprise/endpoint-delivery/providers` and `/providers/intune`
   return secret-free provider lifecycle posture to `inventory_read` roles.
@@ -699,12 +699,18 @@ are available:
 - `POST .../{version}/activate` requires `provider_approval`, the expected
   active version and a still-valid tenant/KMS/tag-bound secret.
 - `GET /api/enterprise/endpoint-delivery/commands?deploymentId=...` returns a
-  locator-free dormant outbox view with `dispatchEnabled: false`.
+  locator-free outbox view. Each command includes its bounded attempt count,
+  fixed failure code and, after provider convergence, only hashed group, app
+  and assignment references plus the reproduced target count. Raw Graph IDs,
+  provider payloads and credentials are excluded. `dispatchEnabled` reflects
+  immutable deployment state; it is not browser-controlled.
 
 The five-minute reconciler creates an outbox command automatically from exact
 live provider, rollout, deployment, agent, endpoint-evidence and package
-authority. There is no browser install endpoint, queue consumer or Graph write
-in this phase.
+authority. There is no browser install endpoint. The isolated FIFO worker and
+repair schedule remain inert unless deployment owners supply both the exact
+enablement flag and a reviewed evidence SHA-256. A worker invocation admits at
+most 40 targets and reauthorizes live state before each Graph mutation.
 
 `GET /enterprise/alerts` reconciles and returns content-minimised endpoint,
 explainable behavior and independently derived repository/configuration
