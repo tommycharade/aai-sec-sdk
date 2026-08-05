@@ -14,6 +14,8 @@ The SDK is built around one boundary:
 - [Architecture](architecture.md)
 - [End-to-end example](end-to-end-example.md)
 - [Production readiness](production-readiness.md)
+- [Customer assurance pack](customer-assurance-pack.md)
+- [Vulnerability management](vulnerability-management.md)
 - [Approved runtime releases and version compliance](runtime-release-compliance-design.md)
 - [Measured runtime-release rollouts](runtime-release-rollout-design.md)
 - [API design](api.md)

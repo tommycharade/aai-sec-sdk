@@ -27,6 +27,11 @@ def test_required_guardrail_files_exist() -> None:
         "NOTICE",
         "TRADEMARKS.md",
         "docs/license.md",
+        "assurance/customer-assurance-pack.json",
+        "docs/customer-assurance-pack.md",
+        "docs/vulnerability-management.md",
+        "docs/data-processing-and-subprocessors.md",
+        "docs/compliance-roadmap.md",
     ):
         assert (ROOT / path).is_file(), path
 

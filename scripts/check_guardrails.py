@@ -16,6 +16,11 @@ REQUIRED = (
     "critical-mutants.json",
     "docs/runbooks.md",
     "docs/testing.md",
+    "assurance/customer-assurance-pack.json",
+    "docs/customer-assurance-pack.md",
+    "docs/vulnerability-management.md",
+    "docs/data-processing-and-subprocessors.md",
+    "docs/compliance-roadmap.md",
 )
 
 
