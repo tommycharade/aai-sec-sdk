@@ -12,7 +12,8 @@ enrolled agents.
 Policy JSON, names, version identifiers, transition requests and browser role
 claims are untrusted. An author may try to approve their own change, mutate a
 reviewed version, activate against a newer base, bypass staging through a
-legacy route, replay a decision, or use a cross-tenant policy identifier.
+legacy route, replay a decision, use a cross-tenant policy identifier, or make
+the SDK and Claude/Codex native layers express contradictory authority.
 
 The control plane therefore:
 
@@ -28,6 +29,12 @@ The control plane therefore:
 - requires `review -> approved -> staged -> active` in order;
 - compares the version's `baseVersion` with the current active version at
   staging and activation, so concurrent policy changes fail closed;
+- computes a content-minimised `nativeControlAnalysis` from the exact composed
+  configuration and refuses staging or activation when SDK and native
+  authority contradict each other;
+- repeats native-control analysis at activation from authoritative stored
+  content, so a browser result, acknowledgement, or stale report grants no
+  authority;
 - updates the active policy snapshot and retires the prior active ledger entry
   in one transaction or conditional write; and
 - keeps group and runtime policy resolution bound only to the active snapshot.
@@ -89,9 +96,12 @@ creates a draft; no policy-write route directly mutates active authority.
 4. The author submits the version. The editor becomes read-only.
 5. Another authenticated subject approves or rejects it with a rationale.
 6. An approver stages the approved version after confirming the active base.
-7. The UI requires a current simulation bound to the staged content hash before
+7. The UI shows the server-computed Claude Code/Codex compatibility report and
+   requires zero blocking conflicts. Warnings explain safe-but-inoperative
+   settings without claiming a live endpoint was inspected.
+8. The UI requires a current simulation bound to the staged content hash before
    opening activation confirmation.
-8. Activation atomically changes fleet authority; agent convergence remains a
+9. Activation atomically changes fleet authority; agent convergence remains a
    separate rollout and enforcement measurement.
 
 The UI must not imply that approval, staging or activation proves endpoint
@@ -104,7 +114,9 @@ policies, immutable submitted/active content, self-approval denial, exact role
 checks, cross-tenant denial, replay and out-of-order transition denial,
 stale-base conflicts, atomic activation, group rejection for inactive policy,
 active policy resolution during review, complete audit attribution and honest
-UI state. The AWS adapter uses conditional writes for lifecycle steps and one
+UI state. Native-control tests prove SDK/AWS parity, content minimisation,
+managed-host scoping, warning behavior, staging denial and activation recheck.
+The AWS adapter uses conditional writes for lifecycle steps and one
 DynamoDB transaction for activation, so a concurrent activation cannot
 partially update the candidate, retired predecessor, or active policy snapshot.
 

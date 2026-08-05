@@ -111,6 +111,19 @@ or an MCP call whose server identity was not retained. The activation dialogue
 opens only after a simulation has been run for the exact pending content hash
 and selected lookback window.
 
+The same view shows a server-owned **Native-control compatibility** gate for
+Claude Code and Codex. It compares the composed SDK and native built-in/file
+tool boundaries, detects exact command expressions assigned to more than one
+decision, and detects configured controls that are disabled or inoperative.
+Blocking contradictions disable staging and activation and include a specific
+remediation. Safe-but-inoperative settings are warnings. Findings identify
+fields and hosts but never echo command expressions, paths, credentials, or
+resource values. Missing analysis also disables staging and activation.
+
+This is static policy analysis, not endpoint evidence. A clear result means the
+candidate is internally consistent; enrolled hosts must still report effective
+native controls and convergence after activation.
+
 Saving a policy is not the same as activating it. Activation should be an
 explicit, audited operation with validation, version selection and a clear
 rollback path.

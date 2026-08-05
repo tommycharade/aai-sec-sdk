@@ -8251,6 +8251,44 @@ def test_policy_exception_invalidates_on_base_change_and_rejects_unsafe_input(
     assert (f"TENANT#{tenant}", "POLICY_EXCEPTION#exception-b") not in table.items
 
 
+def test_native_control_analysis_is_returned_and_blocks_aws_authority(
+    monkeypatch: Any,
+) -> None:
+    """AWS review views explain conflicts and the authority gate rejects them."""
+    module, _table = _load_handler(monkeypatch)
+    secret_pattern = r"^deploy --token synthetic-never-return$"  # noqa: S105
+    configuration = {
+        "tools": {"builtIn": ["Read"]},
+        "claudeCode": {
+            "enabled": True,
+            "allowedBuiltInTools": ["Read", "Bash"],
+            "allowedCommandPatterns": [secret_pattern],
+            "deniedCommandPatterns": [secret_pattern],
+        },
+        "managedHost": {"host": "codex-cli"},
+    }
+    record = {
+        "policy_id": "policy-conflict",
+        "organization_id": "org-a",
+        "version": 1,
+        "base_version": 0,
+        "name": "Conflict",
+        "configuration": configuration,
+        "content_hash": module._configuration_hash(configuration),
+        "state": "approved",
+        "author": "author-a",
+        "created_at": 2_100_000_000,
+    }
+
+    view = module._policy_version_view("tenant-a", record, [record])
+
+    assert view["nativeControlAnalysis"]["status"] == "blocked"
+    assert view["nativeControlAnalysis"]["evaluatedHosts"] == ["codex-cli"]
+    assert secret_pattern not in str(view["nativeControlAnalysis"])
+    with pytest.raises(module.PolicyConflict, match="native-control conflicts"):
+        module._assert_native_control_compatibility(configuration)
+
+
 def test_policy_semantic_diff_and_historical_simulation_are_bounded_and_honest(
     monkeypatch: Any,
 ) -> None:

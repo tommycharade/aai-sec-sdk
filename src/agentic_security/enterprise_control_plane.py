@@ -32,6 +32,7 @@ from .audit import AuditSink
 from .codex_effective_controls import codex_effective_control_evidence_from_wire
 from .errors import SecurityConfigurationError
 from .managed_deployment import ManagedDeploymentPackage
+from .native_control_conflicts import analyze_native_control_conflicts
 from .policy_composition import PolicyComponent, PolicyCompositionError, compose_policy
 from .policy_sources import (
     PolicyExportSigner,
@@ -2295,6 +2296,7 @@ class EnterpriseFleetStore:
             if current["baseVersion"] != policy["version"]:
                 raise FleetConflictError("policy active version changed before staging")
             self._assert_policy_composition_integrity(current)
+            self._assert_native_control_compatibility(current["configuration"])
         return self._transition_policy_version(
             identity,
             policy_id,
@@ -2331,6 +2333,9 @@ class EnterpriseFleetStore:
             if candidate["approvedBy"] in {None, candidate["author"]}:
                 raise FleetAuthorizationError("policy version lacks independent approval")
             self._assert_policy_composition_integrity(candidate)
+            # Recompute from the immutable candidate at the final authority
+            # boundary. A stale UI report can never bypass this server-side gate.
+            self._assert_native_control_compatibility(candidate["configuration"])
             if (
                 policy["version"] != expected_active_version
                 or candidate["baseVersion"] != expected_active_version
@@ -4480,7 +4485,17 @@ class EnterpriseFleetStore:
                 "explanation": json.loads(row["composition_explanation"]),
             },
             "sourceProvenance": json.loads(row["source_provenance"]) or None,
+            "nativeControlAnalysis": analyze_native_control_conflicts(configuration).to_dict(),
         }
+
+    @staticmethod
+    def _assert_native_control_compatibility(configuration: Mapping[str, Any]) -> None:
+        """Fail closed when static SDK/native authority contradicts itself."""
+        analysis = analyze_native_control_conflicts(configuration)
+        if analysis.blocking_count:
+            raise FleetConflictError(
+                "policy has blocking native-control conflicts; review nativeControlAnalysis"
+            )
 
     @staticmethod
     def _policy_import(row: Any) -> dict[str, Any]:

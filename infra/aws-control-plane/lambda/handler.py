@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from native_control_conflicts import analyze_native_control_conflicts
 from policy_composition import PolicyComponent, PolicyCompositionError, compose_policy
 from policy_signing import bundle_from_record, sign_policy_bundle, verify_policy_bundle
 from policy_sources import (
@@ -9151,6 +9152,7 @@ def _policy_version_view(tenant, record, versions=None):
         "changeSummary": semantic_change,
         "composition": composition,
         "sourceProvenance": _json(record.get("source_provenance", {})) or None,
+        "nativeControlAnalysis": analyze_native_control_conflicts(configuration).to_dict(),
         "integrity": {
             "status": "signed" if isinstance(integrity, dict) else "unsigned",
             "contentHash": record.get("effective_content_hash"),
@@ -10034,6 +10036,15 @@ def _decide_policy_version(tenant, policy_id, version, body, actor):
     )
 
 
+def _assert_native_control_compatibility(configuration):
+    """Fail closed on static SDK/native contradictions at authority boundaries."""
+    analysis = analyze_native_control_conflicts(configuration)
+    if analysis.blocking_count:
+        raise PolicyConflict(
+            "policy has blocking native-control conflicts; review nativeControlAnalysis"
+        )
+
+
 def _stage_policy_version(tenant, policy_id, version, actor):
     """Stage an independently approved version against its exact active base."""
     record = _policy_version_record(tenant, policy_id, version)
@@ -10050,6 +10061,7 @@ def _stage_policy_version(tenant, policy_id, version, actor):
     if int(record.get("base_version", -1)) != int(policy.get("version", 0)):
         raise PolicyConflict("policy active version changed before staging")
     _assert_governed_policy_composition(tenant, record)
+    _assert_native_control_compatibility(_json(record["configuration"]))
     updated = {
         **record,
         "state": "staged",
@@ -10087,6 +10099,9 @@ def _activate_policy_version(tenant, policy_id, version, body, actor):
     ):
         raise PolicyConflict("policy active version changed before activation")
     _assert_governed_policy_composition(tenant, candidate)
+    # The authoritative candidate is re-analysed here; a client-provided or
+    # previously displayed report can never become activation authority.
+    _assert_native_control_compatibility(_json(candidate["configuration"]))
     now = int(time.time())
     effective_configuration = _managed_policy_configuration(tenant, candidate["configuration"])
     bundle = _sign_policy_bundle(tenant, policy_id, version, effective_configuration, now)
