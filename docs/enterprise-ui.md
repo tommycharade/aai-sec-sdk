@@ -11,28 +11,28 @@ the central team's operating workflows.
 
 ## Enterprise navigation
 
-The recommended navigation is:
+The console uses seven stable, task-oriented workspaces:
 
-- Dashboard
-- Assurance
-- Coverage
-- Groups
-- Agents
-- Approvals
-- Incidents
-- Audit trail
-- Policies
-- Skills and MCP
-- Connect agents
-- Identity and access
-- Deployments
-- SDK runtime
-- Webhooks
-- Incident workflows
+| Workspace | Contextual destinations |
+| --- | --- |
+| **Overview** | Actionable posture and next actions. |
+| **Fleet** | Groups, Agents, Coverage and Connect agents. |
+| **Rollouts** | Deployments, including rollout and runtime-release views. |
+| **Incidents** | Cases, Approvals and Workflows. |
+| **Policy** | Policies and Skills & MCP. |
+| **Evidence** | Decision history and Assurance. |
+| **Admin** | Identity & access, API access, Webhooks, Data boundaries and SDK runtime. |
 
-The **Identity and access** page must not be one continuous administration
-form. Its overview shows verified identity foundations and one next-best
-action. Separate workspaces cover **Entra setup**, **Directory & roles**,
+Only these seven workspaces appear in the primary sidebar. Destinations within
+the selected workspace appear in a secondary tab row. Existing hash routes are
+retained, so bookmarks such as `#agents` and `#data-boundaries` continue to open
+the exact destination and select its owning workspace. The mapping is
+code-owned and cannot be changed by control-plane responses. See
+[Enterprise console navigation](console-navigation-design.md).
+
+The **Admin → Identity and access** page must not be one continuous
+administration form. Its overview shows verified identity foundations and one
+next-best action. Separate workspaces cover **Entra setup**, **Directory & roles**,
 **Delegated access**, **Emergency access**, and **Access reviews**. This keeps
 rare emergency and certification work out of the routine federation journey.
 The parked Splunk stub belongs to integration posture, not identity readiness,
