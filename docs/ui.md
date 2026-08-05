@@ -360,9 +360,13 @@ are not part of this contract and are never represented as guessed values.
 
 For Codex agents, the inspector also separates protected-file delivery from
 **process-loaded controls**. The latter shows effective approval and sandbox
-modes, managed-hook proof, approved MCP names, freshness, and fixed mismatch or
-observability-gap codes. Missing, stale, conflicting, and partially observable
-states are visually blocked and never presented as effective authority. Raw
+modes, assigned-versus-observed bundle digests, effective native action sets,
+managed-hook proof, approved MCP names, freshness, and fixed mismatch or
+observability-gap codes. Its headline is the server-owned execution-authority
+result: missing, stale, conflicting, and partially observable states block
+governed Codex routes, not merely the browser controls. The remediation explains
+that exact-package retrieval remains available while policy and decision
+authority stays closed. Raw
 Codex configuration, paths, hook commands, MCP URLs, headers, environment
 variables, and host error messages do not enter the browser contract.
 

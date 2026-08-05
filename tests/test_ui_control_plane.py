@@ -1158,6 +1158,7 @@ def _missing_codex_effective_evidence(now: int = 100) -> CodexEffectiveControlEv
             "host": "codex-cli",
             "hostVersion": "0.146.0",
             "platform": "macos",
+            "bundleHash": "d" * 64,
             "state": "missing",
             "reason": "administrator-requirements-missing",
             "expectedDigest": "a" * 64,

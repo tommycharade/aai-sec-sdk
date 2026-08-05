@@ -894,6 +894,16 @@ external server. Claude Code has no equivalent supported machine-readable API
 and remains explicitly unverified at this boundary. See
 [Codex effective-control evidence](codex-effective-controls-design.md).
 
+For Codex, the server binds every process observation to the current desired
+bundle hash, host version and platform before accepting the endpoint-reconciled
+state. A forged positive state for another bundle is a conflict. Missing,
+future-dated, expired, conflicting and partially observable evidence adds the
+fixed `native_effective_controls` authority blocker and denies governed policy
+and decision routes. The authenticated managed-package route remains available
+only as a repair path and continues to enforce exact agent identity, rollout,
+runtime attestation, emergency stop and quarantine. This exception supplies
+configuration bytes; it never grants action authority.
+
 Host limitations remain visible as coverage rather than being silently
 promoted to enforcement. Claude command/path behavior routed through the AAI
 hook is labelled SDK-enforced; Codex experimental network controls require a

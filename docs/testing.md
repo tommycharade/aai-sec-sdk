@@ -291,6 +291,17 @@ and denied authority cannot become execution. The enrolled AWS client treats a
 missing or false `controlState.executionAllowed` as a dependency failure after
 submitting heartbeat evidence.
 
+Codex native-authority contracts bind evidence to current server desired state,
+not merely the endpoint's state label. Positive tests require exact bundle,
+host version, platform, freshness and an `enforced` projection. Adversarial
+tests submit an otherwise valid `enforced` observation for another bundle and
+prove the server derives `conflict`, emits the fixed
+`native_effective_controls` blocker and denies governed routes. Expiry and
+missing desired state also fail closed. A paired repair test proves the exact
+attested agent can still retrieve its current canonical managed package while
+native authority is blocked; emergency stop and quarantine do not receive that
+exception.
+
 Case-export contracts additionally prove canonical evidence-role enforcement,
 exact captured-binding correlation, strong bounded reads, no raw project paths
 or approval narrative, deterministic package hashes and immutable-audit

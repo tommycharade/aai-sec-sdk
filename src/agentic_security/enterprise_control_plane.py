@@ -1069,7 +1069,7 @@ class EnterpriseFleetStore:
                         row["deployment_id"], row["host"], row["metadata"]
                     )
                     item["native_effective_controls"] = self._native_effective_control_posture(
-                        row["host"], row["metadata"]
+                        row["deployment_id"], row["host"], row["metadata"]
                     )
                     projected.append(item)
                 items = tuple(projected)
@@ -2037,6 +2037,11 @@ class EnterpriseFleetStore:
                 and managed_configuration["status"] != "enforced"
             ):
                 raise FleetConfigurationError("managed host configuration is not freshly enforced")
+            native_effective_controls = agent["native_effective_controls"]
+            if agent["host"] == "codex-cli" and native_effective_controls["status"] != "enforced":
+                raise FleetConfigurationError(
+                    "Codex native effective controls are not freshly enforced"
+                )
             rows = self._connection.execute(
                 "SELECT g.id,g.name,g.policy_id FROM agent_group_members m "
                 "JOIN agent_groups g ON g.id=m.group_id "
@@ -2147,6 +2152,19 @@ class EnterpriseFleetStore:
                         "Exact managed host bundle is freshly observed."
                         if agent["managed_configuration"]["status"] == "enforced"
                         else "Managed host configuration is not freshly proven."
+                    ),
+                },
+                "nativeEffectiveControls": {
+                    "passed": agent["native_effective_controls"]["status"]
+                    in {"enforced", "not_applicable"},
+                    "detail": (
+                        "Codex process-effective controls match the current managed bundle."
+                        if agent["native_effective_controls"]["status"] == "enforced"
+                        else (
+                            "Native effective-control evidence is not required for this host."
+                            if agent["native_effective_controls"]["status"] == "not_applicable"
+                            else "Codex process-effective controls are not freshly proven."
+                        )
                     ),
                 },
                 "emergencyStop": {
@@ -4281,14 +4299,36 @@ class EnterpriseFleetStore:
             row["deployment_id"], row["host"], row["metadata"]
         )
         result["native_effective_controls"] = self._native_effective_control_posture(
-            row["host"], row["metadata"]
+            row["deployment_id"], row["host"], row["metadata"]
         )
         return result
 
-    def _native_effective_control_posture(self, host: str, metadata: object) -> dict[str, Any]:
-        """Return server-derived freshness for safe Codex process evidence."""
+    def _native_effective_control_posture(
+        self, deployment_id: str, host: str, metadata: object
+    ) -> dict[str, Any]:
+        """Bind safe Codex process evidence to current server-owned authority."""
         if host != "codex-cli":
-            return {"status": "not_applicable", "observed": None}
+            return {"status": "not_applicable", "desired": None, "observed": None}
+        desired: dict[str, Any] | None = None
+        desired_row = self._connection.execute(
+            "SELECT desired_configuration FROM deployment_configs WHERE deployment_id=?",
+            (deployment_id,),
+        ).fetchone()
+        if desired_row is not None:
+            try:
+                configuration = json.loads(desired_row["desired_configuration"])
+                candidate = (
+                    configuration.get("managedHost") if isinstance(configuration, Mapping) else None
+                )
+                if isinstance(candidate, Mapping):
+                    managed = _normalize_managed_host(candidate)
+                    desired = {
+                        "bundleHash": managed["bundleHash"],
+                        "hostVersion": managed["hostVersion"],
+                        "platform": managed["platform"],
+                    }
+            except (FleetConfigurationError, TypeError, ValueError):
+                desired = None
         report: dict[str, Any] | None = None
         if isinstance(metadata, str):
             try:
@@ -4300,12 +4340,17 @@ class EnterpriseFleetStore:
                     report = _normalize_native_effective_controls(candidate)
             except (FleetConfigurationError, TypeError, ValueError):
                 report = None
-        if report is None:
-            return {"status": "missing", "observed": None}
-        status = report["state"]
-        if report["verifiedAt"] > self._now() or report["expiresAt"] <= self._now():
+        if desired is None or report is None:
+            return {"status": "missing", "desired": desired, "observed": report}
+        if any(
+            report[field] != desired[field] for field in ("bundleHash", "hostVersion", "platform")
+        ):
+            status = "conflict"
+        elif report["verifiedAt"] > self._now() or report["expiresAt"] <= self._now():
             status = "stale"
-        return {"status": status, "observed": report}
+        else:
+            status = report["state"]
+        return {"status": status, "desired": desired, "observed": report}
 
     def _managed_configuration_posture(
         self, deployment_id: str, host: str, metadata: object

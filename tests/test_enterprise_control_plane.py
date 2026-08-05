@@ -368,8 +368,10 @@ def seed(store: EnterpriseFleetStore) -> None:
     )
 
 
-def managed_package(*, policy_version: int = 1) -> tuple[ManagedDeploymentPackage, dict[str, Any]]:
-    """Build one synthetic canonical Claude package and matching desired target."""
+def managed_package(
+    *, policy_version: int = 1, host: AgentHost = AgentHost.CLAUDE_CODE
+) -> tuple[ManagedDeploymentPackage, dict[str, Any]]:
+    """Build one synthetic canonical host package and matching desired target."""
     hook_path = "/opt/aai-security/hooks/native-policy"
     bundle = ManagedConfigurationCompiler().compile(
         ManagedPolicyIntent(
@@ -377,8 +379,8 @@ def managed_package(*, policy_version: int = 1) -> tuple[ManagedDeploymentPackag
             policy_version,
             action_rules=(NativeActionRule("Read", NativeActionDecision.ALLOW, "synthetic read"),),
         ),
-        host=AgentHost.CLAUDE_CODE,
-        host_version="2.1.220",
+        host=host,
+        host_version="0.146.0" if host is AgentHost.CODEX_CLI else "2.1.220",
         platform=ManagedPlatform.LINUX,
         hook_command=hook_path,
     )
@@ -395,6 +397,49 @@ def managed_package(*, policy_version: int = 1) -> tuple[ManagedDeploymentPackag
         "bundleHash": package.bundle_hash,
         "policyId": package.policy_id,
         "policyVersion": package.policy_version,
+    }
+
+
+def native_enforced_evidence(now: int, bundle_hash: str) -> dict[str, Any]:
+    """Build complete synthetic positive Codex process evidence."""
+    return {
+        "host": "codex-cli",
+        "hostVersion": "0.146.0",
+        "platform": "linux",
+        "bundleHash": bundle_hash,
+        "state": "enforced",
+        "reason": "effective-controls-match",
+        "expectedDigest": "a" * 64,
+        "observedDigest": "b" * 64,
+        "approvalPolicy": "on-request",
+        "sandboxMode": "workspace-write",
+        "defaultPermissions": ":workspace",
+        "webSearchMode": "cached",
+        "managedMcpServerNames": [],
+        "unexpectedMcpServerCount": 0,
+        "preToolHookSha256": ["c" * 64],
+        "requirements": {
+            "allowedApprovalPolicies": ["on-request"],
+            "defaultPermissions": ":workspace",
+            "allowedPermissionProfiles": {":workspace": True},
+            "allowedSandboxModes": [],
+            "allowedWebSearchModes": ["cached"],
+            "allowManagedHooksOnly": True,
+            "featureRequirements": {"hooks": True},
+            "network": {
+                "enabled": None,
+                "managedAllowedDomainsOnly": None,
+                "domains": {},
+            },
+        },
+        "securityOrigins": {"approval_policy": "system"},
+        "mismatches": [],
+        "unverifiedControls": [],
+        "allowedActions": ["Read"],
+        "deniedActions": ["Bash(rm *)"],
+        "approvalRequiredActions": [],
+        "verifiedAt": now,
+        "expiresAt": now + 60,
     }
 
 
@@ -718,10 +763,32 @@ def test_codex_native_effective_controls_are_validated_and_expire(tmp_path: Path
         host="codex-cli",
         project_root="/workspace/payments",
     )
+    _package, desired = managed_package(host=AgentHost.CODEX_CLI)
+    store.create_template(
+        operator,
+        template_id="managed-codex",
+        name="Managed Codex",
+        configuration={"managedHost": desired},
+    )
+    store.assign_template(operator, "deploy-a", "managed-codex")
+    create_active_policy(
+        store,
+        operator,
+        policy_id="policy-safe",
+        name="Safe",
+        configuration={"tools": {"allowed": ["lookup_record"]}},
+    )
+    store.create_group(
+        operator, group_id="group-platform", name="Platform", policy_id="policy-safe"
+    )
+    store.add_agent_to_group(
+        operator, group_id="group-platform", deployment_id="deploy-a", agent_id="codex-a"
+    )
     evidence = {
         "host": "codex-cli",
         "hostVersion": "0.146.0",
         "platform": "linux",
+        "bundleHash": desired["bundleHash"],
         "state": "missing",
         "reason": "administrator-requirements-missing",
         "expectedDigest": "a" * 64,
@@ -749,11 +816,25 @@ def test_codex_native_effective_controls_are_validated_and_expire(tmp_path: Path
         "deploy-a",
         "codex-a",
         registered["sessionId"],
+        managed_configuration={
+            **desired,
+            "source": "codex-system",
+            "verifiedAt": 1_000,
+            "expiresAt": 1_300,
+        },
         native_effective_controls=evidence,
     )
 
     assert result["native_effective_controls"]["status"] == "missing"
+    assert result["native_effective_controls"]["desired"] == {
+        "bundleHash": desired["bundleHash"],
+        "hostVersion": desired["hostVersion"],
+        "platform": desired["platform"],
+    }
     assert result["native_effective_controls"]["observed"] == evidence
+    codex_identity = FleetIdentity("codex-a", "org-a", frozenset({"agent"}))
+    with pytest.raises(FleetConfigurationError, match="Codex native effective controls"):
+        store.effective_agent_policy(codex_identity, deployment_id="deploy-a", agent_id="codex-a")
     hostile = dict(evidence, rawConfig={"Authorization": "Bearer synthetic-secret"})
     with pytest.raises(FleetConfigurationError, match="invalid schema") as caught:
         store.heartbeat(
@@ -767,6 +848,40 @@ def test_codex_native_effective_controls_are_validated_and_expire(tmp_path: Path
     clock.value = 1_100
     agent = store.list_inventory(operator, "agents").items[0]
     assert agent["native_effective_controls"]["status"] == "stale"
+
+    clock.value = 1_050
+    forged = dict(
+        evidence,
+        bundleHash="e" * 64,
+        verifiedAt=1_050,
+        expiresAt=1_110,
+    )
+    result = store.heartbeat(
+        operator,
+        "deploy-a",
+        "codex-a",
+        registered["sessionId"],
+        native_effective_controls=forged,
+    )
+    assert result["native_effective_controls"]["status"] == "conflict"
+    with pytest.raises(FleetConfigurationError, match="Codex native effective controls"):
+        store.effective_agent_policy(codex_identity, deployment_id="deploy-a", agent_id="codex-a")
+    result = store.heartbeat(
+        operator,
+        "deploy-a",
+        "codex-a",
+        registered["sessionId"],
+        native_effective_controls=native_enforced_evidence(1_050, desired["bundleHash"]),
+    )
+    assert result["native_effective_controls"]["status"] == "enforced"
+    assert (
+        store.effective_agent_policy(codex_identity, deployment_id="deploy-a", agent_id="codex-a")[
+            "policy"
+        ]["id"]
+        == "policy-safe"
+    )
+    verification = store.verify_agent(operator, deployment_id="deploy-a", agent_id="codex-a")
+    assert verification["checks"]["nativeEffectiveControls"]["passed"] is True
 
 
 def test_managed_package_publication_and_agent_repair_are_digest_bound(tmp_path: Path) -> None:

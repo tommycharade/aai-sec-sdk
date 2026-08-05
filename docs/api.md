@@ -170,6 +170,38 @@ credentials and is never returned, logged, or included in errors. A successful
 probe can still return `deployment_required` when Codex does not expose enough
 runtime detail to prove every requested control.
 
+`CodexEffectiveControlEvidence.bundle_hash` binds the observation to the exact
+managed bundle passed to the probe. The control plane does not trust the
+submitted state in isolation: it compares bundle, host version and platform
+with current desired state and derives freshness with the server clock.
+
+For an enrolled Codex agent, heartbeat `controlState` contains:
+
+```json
+{
+  "executionAllowed": false,
+  "evidenceAllowed": true,
+  "activeStopScopes": [],
+  "authorityBlockers": ["native_effective_controls"],
+  "nativeEffectiveControls": {
+    "required": true,
+    "status": "missing",
+    "desired": {
+      "bundleHash": "<lowercase SHA-256>",
+      "hostVersion": "0.146.0",
+      "platform": "macos"
+    }
+  },
+  "quarantine": null
+}
+```
+
+`authorityBlockers` uses only `missing_agent`, `emergency_stop`, `quarantine`,
+and `native_effective_controls`. Clients must treat absent or false
+`executionAllowed` as closed. The managed-package GET route is the only repair
+exception to the native evidence blocker; response controls and runtime
+attestation still apply.
+
 ::: agentic_security.codex_effective_controls.CodexAppServerEffectiveControlProbe
 
 ::: agentic_security.codex_effective_controls.CodexEffectiveControlEvidence
