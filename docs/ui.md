@@ -412,6 +412,17 @@ the icon to see the setting's purpose, security effect and any important
 operational constraint. The same help pattern is used across Policy, Runtime
 settings, Integrations, templates and fleet registration forms.
 
+The shared console shell is keyboard-first. The first Tab exposes a skip link;
+the seven workspaces are named navigation controls; contextual destinations use
+roving ARIA tabs; and route changes update the browser title. Consequential
+modal workflows move focus inside, contain Tab and restore focus to the
+invoking control when closed. Status messages are announced without exposing
+raw control-plane content. At the 390-pixel release breakpoint, compact controls
+retain 44-pixel targets and the workspace rail remains pinned while long pages
+scroll. Operating-system reduced-motion preferences disable non-essential
+animation. See [Wider enterprise UI](enterprise-ui.md#console-quality-contract)
+for the test and non-guarantee boundary.
+
 Host onboarding never invents a deployment boundary. In a live workspace with
 no registered deployment, the enrollment action is disabled and the operator
 is directed to **Deployments & rollout** first. The local deployment fallback

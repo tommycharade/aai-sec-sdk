@@ -387,12 +387,19 @@ deletion or private-connectivity acceptance exercise.
 
 The UI suite asserts that the primary sidebar contains exactly the seven
 Product Owner-approved workspaces. Route-level tests prove contextual controls
-remain reachable, workspace and tab selections expose `aria-current`, and old
+remain reachable, workspace selection exposes `aria-current`, contextual tabs
+expose one `aria-selected` destination with roving keyboard focus, and old
 hash routes retain their exact destination while selecting the correct parent
-workspace. Desktop and 390-pixel browser checks must show no document-level
-horizontal overflow or browser console errors. These checks prove information
-architecture and route compatibility; they do not prove that an operator has
-the server-side role required to mutate a protected resource.
+workspace. The primary authenticated shell also runs `axe-core` in CI; focused
+tests prove the first-focus skip path, named landmarks, route-aware document
+title, modal focus entry/containment/restoration and atomic status copy.
+Desktop and 390-pixel browser checks must show no document-level horizontal
+overflow, sub-44-pixel compact operator controls or browser console errors.
+Manual browser review covers visual hierarchy and contrast because JSDOM
+cannot calculate rendered color contrast. These checks prove information
+architecture and interaction quality; they do not prove that an operator has
+the server-side role required to mutate a protected resource or replace a
+screen-reader and 200% zoom acceptance exercise.
 
 ## Real Codex CLI host acceptance
 
