@@ -1992,10 +1992,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#api-contract" class="md-nav__link">
+  <a href="#api-and-authorization-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API contract
+        API and authorization contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scheduled-signed-snapshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduled signed snapshots
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retention-integrity-and-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retention, integrity and recovery
       
     </span>
   </a>
@@ -2007,6 +2029,17 @@
     <span class="md-ellipsis">
       
         Operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#distribution-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Distribution boundary
       
     </span>
   </a>
@@ -3189,10 +3222,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#api-contract" class="md-nav__link">
+  <a href="#api-and-authorization-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API contract
+        API and authorization contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scheduled-signed-snapshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduled signed snapshots
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retention-integrity-and-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retention, integrity and recovery
       
     </span>
   </a>
@@ -3204,6 +3259,17 @@
     <span class="md-ellipsis">
       
         Operator journey
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#distribution-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Distribution boundary
       
     </span>
   </a>
@@ -3242,8 +3308,8 @@
 
 
 <h1 id="enterprise-assurance-reports">Enterprise assurance reports</h1>
-<p>This design defines the first production-shaped implementation of P1-ADM-05.
-It gives executives and auditors purpose-specific views of the same bounded,
+<p>This design defines the production-shaped implementation of P1-ADM-05. It
+gives executives and auditors purpose-specific views of the same bounded,
 tenant-owned evidence without presenting an operational dashboard as a
 compliance certificate.</p>
 <h2 id="security-boundary">Security boundary</h2>
@@ -3254,8 +3320,8 @@ reads server-owned records and never accepts report facts from the caller.</p>
 <p>The control plane therefore:</p>
 <ul>
 <li>exposes only two fixed report profiles: <code>executive</code> and <code>auditor</code>;</li>
-<li>requires a canonical tenant role and requires <code>evidence_read</code> for the auditor
-  profile;</li>
+<li>requires a canonical tenant role for executive content and <code>evidence_read</code>
+  for auditor content, schedule metadata and retained history;</li>
 <li>derives every count from bounded tenant reads and fails instead of silently
   truncating a population;</li>
 <li>returns unavailable percentages when discovery evidence is incomplete;</li>
@@ -3263,15 +3329,15 @@ reads server-owned records and never accepts report facts from the caller.</p>
   arguments;</li>
 <li>labels observation gaps and non-guarantees next to the affected metric;</li>
 <li>includes section hashes and existing evidence endpoints so an auditor can
-  trace a summary to detailed, independently retained evidence;</li>
-<li>hashes the complete canonical report so a downloaded snapshot can be checked
-  for alteration; and</li>
-<li>performs no mutation, policy decision, approval, containment or agent action.</li>
+  trace a summary to detailed, independently retained evidence; and</li>
+<li>performs no policy decision, approval, containment or agent action.</li>
 </ul>
-<p>The content hash proves only that a downloaded report has not changed since it
-was generated. It is not a signature, timestamp authority or compliance
-attestation. Immutable audit evidence remains in the Object Lock evidence
-store and is verified through the existing evidence-assurance workflow.</p>
+<p>A live report has a canonical content hash. An operator can additionally create
+or schedule a <strong>signed snapshot</strong>. The snapshot binds report content plus its
+tenant, snapshot, profile, source, schedule revision and timestamps to a
+domain-separated AWS KMS ECDSA P-256 signature. This proves control-plane
+origin and alteration detection; it is not a timestamp-authority statement,
+compliance certification or independent attestation.</p>
 <h2 id="report-profiles">Report profiles</h2>
 <h3 id="executive-posture">Executive posture</h3>
 <p>The executive view is aggregate-only. It shows known-population coverage,
@@ -3283,46 +3349,143 @@ identifiers.</p>
 <p>The auditor view contains the same aggregate posture plus bounded breakdowns,
 policy and group references, exception/approval lifecycle counts and evidence
 trace references. It still excludes raw sensitive content. Detailed immutable
-records remain behind their existing least-privilege APIs rather than being
-copied into the report.</p>
-<h2 id="api-contract">API contract</h2>
+records remain behind their existing least-privilege APIs.</p>
+<h2 id="api-and-authorization-contract">API and authorization contract</h2>
 <pre><code class="language-text">GET /api/enterprise/reports/executive
 GET /api/enterprise/reports/auditor
+GET|PUT /api/enterprise/reports/schedule
+GET|POST /api/enterprise/reports/snapshots
+GET /api/enterprise/reports/snapshots/{snapshotId}
+POST /api/enterprise/reports/snapshots/{snapshotId}/verify
 </code></pre>
-<p>Both responses contain:</p>
+<p>Schedule and history reads require <code>evidence_read</code>. Creating a snapshot or
+changing a schedule requires <code>evidence_admin</code>. An executive snapshot download
+requires a canonical tenant role; auditor snapshots require <code>evidence_read</code>.
+Service identities remain constrained by their separately versioned route
+capability.</p>
+<p>Live report responses contain a fixed profile, generation time, posture,
+bounded summaries, explicit blind spots/non-guarantees and content-addressed
+section traces. Auditor responses add bounded business-unit/repository
+breakdowns and least-privilege evidence routes.</p>
+<h2 id="scheduled-signed-snapshots">Scheduled signed snapshots</h2>
+<p>A tenant may select a daily or weekly UTC schedule and either report profile.
+Schedule changes use optimistic revisions and retain only a SHA-256 digest of
+the operator rationale. A due-time GSI partitions enabled schedules into
+sixteen fixed shards. Sixteen EventBridge rules invoke bounded dispatchers
+every fifteen minutes. A dispatcher claims an occurrence before enqueueing it
+and never builds reports itself. Schedule, request-claim and snapshot metadata
+use a separate <code>ASSURANCE#{tenant}</code> partition. The worker's only DynamoDB write
+grant is confined to that leading key and cannot mutate policy, identity,
+enrollment or agent authority.</p>
+<p>The claim contains the exact tenant, due time, profile, snapshot identity and
+schedule revision. A dedicated standard SQS queue invokes a 60-second worker
+with reserved concurrency and a monitored DLQ. The worker reloads the exact
+claim before deriving any report. Duplicate delivery returns the same retained
+snapshot. A crash after S3 but before DynamoDB adopts only an already valid,
+KMS-verified object; a crash after metadata but before schedule completion is
+also safe to retry.</p>
+<p>While a fresh occurrence is claimed, schedule changes fail with a revision
+conflict. This defines whether generation or the operator change happened
+first; an old profile can never be generated after a successful schedule
+change. Claims older than fifteen minutes may be replaced, exceeding the
+worker timeout and bounded retry window.</p>
+<p>One corrupt schedule is conditionally removed from the due index, marked with
+a content-minimised quarantine reason and reported to the durable
+security-alert topic without blocking valid tenants. A concurrent repair wins
+over quarantine. Deterministic record validation is separate from the
+DynamoDB claim operation: throttling or another provider failure fails the
+shard and leaves a valid schedule indexed for retry; only malformed stored
+content can trigger quarantine. The schedule API and UI expose quarantine,
+timestamp and reason, and a reviewed revisioned save is the repair path. Each
+cycle processes one bounded page of at most 250 due records. Successfully queued records leave the
+due index, exposing the next page on the following cycle; the 251st and later
+tenants therefore make progress even when the entire preceding page is
+malformed. The dispatcher has a 60-second bound. A partial SQS result removes
+only acknowledged records. Missing, duplicate or unknown result IDs fail
+closed and leave claims safe for idempotent retry.</p>
+<p>Malformed string, boolean, missing and oversized revisions are bound using
+their exact observed DynamoDB value or absence. The API projects opaque
+revision zero for reviewed repair and the replacement condition still binds
+the malformed value, so neither coercion nor a concurrent update can win.</p>
+<h2 id="retention-integrity-and-recovery">Retention, integrity and recovery</h2>
+<p>Snapshots use the tenant-prefixed audit bucket rather than the short-lived
+derived-report bucket. The store has versioning, a 365-day S3 Object Lock
+COMPLIANCE floor, tenant-configured longer retention where applicable, private
+access and cross-Region replication. DynamoDB stores the exact object version
+and digest. Every download and verification re-reads that version, limits the
+body to 1,000,000 bytes before parsing, validates a closed schema and recomputes
+all hashes. Amazon S3 replication retains source version IDs; while that exact
+version is unavailable because replication is pending or impaired, the API
+returns <code>503</code> and never substitutes the current version of the key.</p>
+<p>The signed payload domain is <code>aai-sec-assurance-snapshot-v1</code> and contains:</p>
 <ul>
-<li>schema version, fixed profile, generation time and canonical content hash;</li>
-<li>an overall <code>ready</code>, <code>attention</code> or <code>evidence_incomplete</code> posture;</li>
-<li>population, runtime, policy, exception, incident and evidence summaries;</li>
-<li>explicit blind spots and non-guarantees; and</li>
-<li>content-addressed trace entries for the report sections.</li>
+<li>schema version, tenant ID and snapshot ID;</li>
+<li>executive or auditor profile and operator or schedule source;</li>
+<li>generated/signed timestamp and claimed schedule revision; and</li>
+<li>SHA-256 of the canonical report.</li>
 </ul>
-<p>The auditor response additionally contains bounded business-unit and
-repository breakdowns, policy/group references and routes to the current
-discovery, endpoint, access-certification and immutable-evidence views.</p>
+<p>Operator creation first commits a conditional request claim binding actor,
+profile and rationale digest before signing or S3 writes. Snapshot creation
+then retains immutable bytes and an idempotent Object Lock audit record before
+committing metadata. Concurrent changed first use is therefore rejected, and
+an audit outage cannot leave successful state without evidence. Retries
+validate exact existing bytes and do not assume ECDSA signatures are
+deterministic.</p>
+<p>Reports use a dedicated retained multi-Region KMS signing key, never the
+executable-policy signer. The report worker receives only <code>kms:Sign</code> and
+<code>kms:Verify</code> for that key, and its environment contains no policy-signing key
+ARN. Snapshot metadata stores the Region-stable <code>mrk-…</code> identity. Each cell
+owns a validated local-Region verification registry containing the current key
+and retained historical report keys. Rotation adds the new local replica while
+retaining old entries. No key or replica may be removed until every snapshot
+it signed has exceeded its longest configured retention.</p>
+<p>Primary deployments accept up to eight reviewed historical local key ARNs in
+<code>ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS</code>. The recovery deployment
+creates retained replicas for the matching primary keys and passes their
+resolved local ARNs through
+<code>RECOVERY_ASSURANCE_REPORT_HISTORICAL_VERIFICATION_KEY_ARNS</code>. Active-cell
+verification requires the exact ordered registry and verify-only IAM grants;
+historical keys cannot sign new snapshots.</p>
+<p>The activated recovery cell has the same queue, worker, schedules and dedicated
+assurance-key replica against the replicated audit namespace. Historical
+verification uses recovery-Region replica ARNs for the same MRK identities. In
+standby, all four Lambdas have zero concurrency, all 21 schedule rules and
+three event-source mappings are disabled, and no active signing grant exists.
+Deployment verification checks the exact worker role, partition-bound write,
+S3 prefixes, dedicated key, mappings and schedule count before routing changes.</p>
 <h2 id="operator-journey">Operator journey</h2>
 <ol>
-<li>Open <strong>Assurance</strong> and choose Executive or Auditor view.</li>
-<li>Read the posture statement and unresolved blind spots before interpreting a
-   percentage.</li>
-<li>Review coverage, runtime trust, policy governance, exceptions, incidents and
-   evidence readiness.</li>
-<li>In Auditor view, follow a trace entry to the least-privilege detailed source.</li>
-<li>Download the current JSON snapshot and retain its SHA-256 value with the
-   review record.</li>
-<li>Use the evidence-assurance export—not this summary—as the immutable evidence
-   package for an audit.</li>
+<li>Open <strong>Assurance</strong> and choose Executive or Auditor.</li>
+<li>Read posture, blind spots and non-guarantees before interpreting metrics.</li>
+<li>Enter an approved review rationale and create a signed snapshot, or enable a
+   daily/weekly UTC schedule.</li>
+<li>Open retained history and verify the exact S3 version and KMS signature.</li>
+<li>Download the signed JSON document only after successful verification.</li>
+<li>Use the evidence-assurance export—not this summary—as the detailed immutable
+   evidence package for an audit.</li>
 </ol>
+<p>If the UI reports a snapshot as temporarily unavailable, check source
+replication status, destination <code>REPLICA</code> status and the report worker/DLQ
+alarms. Never recreate a retained snapshot under the same identity or download
+an unversioned object as a workaround.</p>
+<h2 id="distribution-boundary">Distribution boundary</h2>
+<p>The UI provides secure tenant-authenticated history, verification and download.
+It does not send reports by email or to a SIEM. Splunk remains an explicit
+non-production stub. Compliance-framework mapping and independent attestation
+still require a reviewed controls catalogue and customer assurance process.</p>
 <h2 id="acceptance-evidence">Acceptance evidence</h2>
-<p>Contract tests must prove role separation, tenant isolation, fail-closed
-coverage, bounded reads, deterministic hashes for a fixed clock, no sensitive
-fields, no mutation, honest empty-state behavior and hash changes when source
-evidence changes. UI tests must prove the two profiles have visibly different
-information density, blind spots cannot be hidden, JSON download uses the
-server-produced snapshot and mobile layouts do not overflow.</p>
-<p>This slice does not implement a compliance framework mapping, signed report,
-scheduled distribution or independent attestation. Those claims require a
-reviewed controls catalogue and customer assurance process.</p>
+<p>Contract tests cover authorization, tenant isolation, pre-signing request
+claims, identity-envelope tampering, wrong KMS key/algorithm responses,
+historical-key recovery verification, exact-version reads, crash recovery,
+duplicate delivery, concurrent schedule changes, corrupt-record isolation,
+251-plus due schedules, a fully corrupt 250-record page, partial/malformed SQS
+batches, real overlapping request claims, corrupt KMS responses and bounded
+history truncation. Synthesized-template verification covers the due-time GSI,
+queue/DLQ, worker concurrency, Object Lock reuse, dedicated MRK, exact worker
+IAM, current-plus-historical replica deployment, verify-only historical grants,
+recovery parity and disabled standby authority. UI tests cover failed or absent
+verification/download prevention, evidence-role gating, contextual help and
+responsive layouts.</p>
 
 
 
