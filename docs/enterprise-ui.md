@@ -30,6 +30,33 @@ the exact destination and select its owning workspace. The mapping is
 code-owned and cannot be changed by control-plane responses. See
 [Enterprise console navigation](console-navigation-design.md).
 
+### Console quality contract
+
+Every enterprise workspace must remain operable with a keyboard and at a
+390-pixel viewport before it can be treated as shipped. The shared console
+shell provides:
+
+- a first-focus **Skip to main content** link and explicit navigation, main,
+  tab-list and tab-panel landmarks;
+- route-aware document titles so browser history and assistive technology name
+  the current destination;
+- one selected, tabbable workspace tab with Arrow, Home and End navigation;
+- modal focus entry, containment and restoration to the invoking control;
+- polite, atomic announcements for fresh control-plane status without
+  repeatedly interrupting the operator;
+- a visible focus indicator, minimum 44-pixel compact touch targets and a
+  pinned mobile workspace rail; and
+- reduced-motion behavior that removes non-essential animation when requested
+  by the operating system.
+
+Automated `axe-core` checks cover the primary authenticated shell. Unit tests
+also exercise the skip path, tab semantics, modal focus and route title.
+Desktop and 390-pixel browser reviews verify hierarchy, overflow, touch target
+size and console errors. Automated checks do not replace manual contrast,
+zoom, screen-reader or representative operator testing; those remain release
+acceptance activities. Accessibility state is presentation only and never
+changes API authorization or runtime authority.
+
 The **Admin → Identity and access** page must not be one continuous
 administration form. Its overview shows verified identity foundations and one
 next-best action. Separate workspaces cover **Entra setup**, **Directory & roles**,

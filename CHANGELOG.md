@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Hardened the enterprise console's shared accessibility and responsive
+  contract: first-focus skip navigation, explicit landmarks, route-aware page
+  titles, keyboard-roving workspace tabs, modal focus containment/restoration,
+  atomic status announcements, visible focus, reduced motion, 44-pixel mobile
+  targets and a pinned compact workspace rail. The UI gate now includes an
+  automated `axe-core` shell scan plus desktop and 390-pixel browser review.
+
 - Added server-owned native-control conflict analysis for governed Claude Code
   and Codex policy. Policy views explain content-minimised blockers and
   warnings, while provider-neutral and AWS control planes recompute the exact
