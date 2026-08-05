@@ -823,6 +823,73 @@ def test_data_boundary_runtime_rejects_incomplete_configured_authority(
         _load_handler(monkeypatch)
 
 
+def test_private_operator_boundary_requires_gateway_api_and_endpoint_context(
+    monkeypatch: Any,
+) -> None:
+    """Public ingress and spoofed headers cannot impersonate PrivateLink context."""
+    monkeypatch.setenv("DATA_BOUNDARY_STATUS", "configured")
+    monkeypatch.setenv("DATA_BOUNDARY_HOME_REGION", "eu-west-1")
+    monkeypatch.setenv("DATA_BOUNDARY_APPROVED_REGIONS", json.dumps(["eu-west-1"]))
+    monkeypatch.setenv(
+        "DATA_BOUNDARY_KEY_ARN",
+        "arn:aws:kms:eu-west-1:111111111111:key/11111111-1111-4111-8111-111111111111",
+    )
+    monkeypatch.setenv("DATA_BOUNDARY_KEY_OWNERSHIP", "customer-managed")
+    monkeypatch.setenv("DATA_BOUNDARY_OPERATOR_ACCESS_MODE", "private-link")
+    monkeypatch.setenv("DATA_BOUNDARY_OPERATOR_IPV4_CIDRS", "[]")
+    monkeypatch.setenv("DATA_BOUNDARY_OPERATOR_VPC_ENDPOINT_IDS", '["vpce-0123456789abcdef0"]')
+    monkeypatch.setenv("DATA_BOUNDARY_PRIVATE_API_ID", "a1b2c3d4e5")
+    monkeypatch.setenv("DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_CONFIGURED", "true")
+    monkeypatch.setenv("DATA_BOUNDARY_APPROVAL_EVIDENCE_CONFIGURED", "true")
+    module, table = _load_handler(monkeypatch)
+    table.put_item(
+        Item=module._item_key("tenant-private", "TENANT", "root") | {"id": "tenant-private"}
+    )
+    claims = {
+        "custom:tenant_id": "tenant-private",
+        "cognito:groups": ["auditor"],
+        "sub": "auditor-a",
+    }
+
+    public = _event("/api/enterprise/data-boundary", "GET", claims=claims)
+    public["headers"]["x-amzn-vpce-id"] = "vpce-0123456789abcdef0"
+    denied = _invoke(module, public)
+    assert denied["statusCode"] == 403
+    assert json.loads(denied["body"])["requiredBoundary"] == "private-link"
+
+    private_event: dict[str, Any] = {
+        "path": "/api/enterprise/data-boundary",
+        "httpMethod": "GET",
+        "headers": {},
+        "requestContext": {
+            "apiId": "a1b2c3d4e5",
+            "identity": {"vpceId": "vpce-0123456789abcdef0"},
+            "authorizer": {"claims": claims},
+        },
+    }
+    response = _invoke(module, private_event)
+    assert response["statusCode"] == 200
+    posture = json.loads(response["body"])
+    assert posture["operatorAccess"]["privateLinkConfigured"] is True
+    assert posture["operatorAccess"]["allowedVpcEndpointCount"] == 1
+    assert "vpce-" not in response["body"]
+
+    private_event["requestContext"]["apiId"] = "z9y8x7w6v5"
+    assert _invoke(module, private_event)["statusCode"] == 403
+
+
+def test_private_operator_infrastructure_binds_source_endpoint_and_cognito() -> None:
+    """IaC preserves both the network and identity checks on private operator ingress."""
+    stack = (
+        Path(__file__).parents[1] / "infra/aws-control-plane/lib/aws-control-plane-stack.ts"
+    ).read_text(encoding="utf-8")
+    assert 'types: ["PRIVATE"]' in stack
+    assert 'StringEquals: { "aws:SourceVpce": dataBoundaryOperatorVpcEndpointIds }' in stack
+    assert 'authorizationType: "COGNITO_USER_POOLS"' in stack
+    assert 'handler.addEnvironment("DATA_BOUNDARY_PRIVATE_API_ID", privateApi.ref)' in stack
+    assert 'new cdk.CfnOutput(this, "PrivateOperatorApiUrl"' in stack
+
+
 def _invoke(module: Any, event: dict[str, Any]) -> dict[str, Any]:
     """Invoke the Lambda with the context value unused by this handler."""
     return cast(dict[str, Any], module.handler(event, None))

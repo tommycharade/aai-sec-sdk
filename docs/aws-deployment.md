@@ -77,8 +77,10 @@ The stack creates:
 
 Routine deployments create a retained rotating service-managed data key for
 retained control-plane stores. To bind a customer-managed key, approved
-retained-data Regions and operator source networks, copy
-`infra/aws-control-plane/data-boundary.example.json` to a protected path and
+retained-data Regions and operator access, copy
+`infra/aws-control-plane/data-boundary-private.example.json` for PrivateLink or
+`infra/aws-control-plane/data-boundary.example.json` for legacy IP restriction
+to a protected path and
 replace every synthetic value. The KMS key must be enabled, symmetric,
 customer-owned, same-account and same-Region, with automatic rotation enabled.
 
@@ -102,8 +104,25 @@ variables, re-verifies the key and recovery Region, then checks the resulting
 CloudFormation outputs. Losing this manifest after configuration blocks future
 deployment. The example CIDR is synthetic and must not be reused.
 
-The first implementation restricts authenticated human routes by API Gateway
-source IPv4 address. It is not AWS PrivateLink. The approved Region claim
+Schema version 1 restricts authenticated human routes by API Gateway source
+IPv4 address. For private operator access, use schema version 2, set
+`operatorAccessMode` to `private-link`, set `operatorAllowedIpv4Cidrs` to an
+empty list, and provide `operatorVpcEndpointIds` plus
+`privateAccessEvidenceRef`. Each endpoint must be a same-account, available
+interface endpoint for `com.amazonaws.<region>.execute-api` with private DNS
+enabled. The preflight rejects wrong-service, wrong-account, unavailable or
+non-private-DNS endpoints.
+
+Private mode deploys a Cognito-authorized private REST API and emits
+`PrivateOperatorApiUrl`. Configure the production UI API base URL to that
+output. Operators must reach the VPC endpoint through an approved VPN or Direct
+Connect path and customer DNS. The public `ApiUrl` remains for separately
+authenticated machine, enrollment and agent traffic; it cannot serve human
+tenant routes in private mode. Review the VPC endpoint policy, endpoint security
+groups, DNS, routing and Entra Conditional Access, then retain live allow/deny
+evidence before production acceptance.
+
+The approved Region claim
 covers retained DynamoDB, tenant-data S3, SQS and SNS state; CloudFront,
 Cognito/Entra processing, CloudWatch logs, static assets, provider secrets and
 dedicated signing keys have separate boundaries. Review the deletion classes

@@ -206,12 +206,14 @@ encrypts retained tenant DynamoDB tables, tenant-data/evidence S3 buckets,
 durable queues and security notifications. A read-only UI and API expose only
 redacted posture, deletion classes and limitations.
 
-Configured human routes fail closed on missing or outside API Gateway source
-context before tenant lookup and ignore forwarding headers. This is a
-production-shaped foundation for P1-ADM-11 and the IP-restriction part of
-P1-ADM-12. It does **not** complete P1-ADM-12: AWS PrivateLink or equivalent
-private ingress is not implemented. Live customer key-policy, deletion,
-residency, network and acceptance exercises also remain open. CloudWatch logs,
+Configured human routes fail closed on missing or outside API Gateway context
+before tenant lookup and ignore forwarding headers. Schema-v2 private mode now
+deploys a Cognito-authorized private REST API restricted to exact reviewed
+execute-api VPC endpoint IDs, while preserving a separate public machine/agent
+channel. The software foundation for P1-ADM-12 is implemented. Live customer
+VPN/Direct Connect, routing, DNS, endpoint-policy, security-group and
+allow/deny acceptance evidence remains open, as do customer key-policy,
+deletion and residency exercises. CloudWatch logs,
 global identity/edge processing, static assets, signing keys and provider
 secrets are explicitly outside the customer data-key claim. See [Enterprise
 data boundary](enterprise-data-boundary-design.md).

@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import { createHash } from "node:crypto";
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
+import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
 import * as integrations from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import * as authorizers from "aws-cdk-lib/aws-apigatewayv2-authorizers";
@@ -319,14 +320,23 @@ export class AwsControlPlaneStack extends cdk.Stack {
       process.env.DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_REF?.trim() ?? "";
     const dataBoundaryApprovalEvidenceRef =
       process.env.DATA_BOUNDARY_APPROVAL_EVIDENCE_REF?.trim() ?? "";
+    const dataBoundaryPrivateAccessEvidenceRef =
+      process.env.DATA_BOUNDARY_PRIVATE_ACCESS_EVIDENCE_REF?.trim() ?? "";
     let dataBoundaryApprovedRegions: string[] = [];
     let dataBoundaryOperatorCidrs: string[] = [];
+    let dataBoundaryOperatorVpcEndpointIds: string[] = [];
     try {
       const regions = JSON.parse(process.env.DATA_BOUNDARY_APPROVED_REGIONS ?? "[]") as unknown;
       const cidrs = JSON.parse(process.env.DATA_BOUNDARY_OPERATOR_IPV4_CIDRS ?? "[]") as unknown;
-      if (!Array.isArray(regions) || !Array.isArray(cidrs)) throw new Error("invalid arrays");
+      const endpointIds = JSON.parse(
+        process.env.DATA_BOUNDARY_OPERATOR_VPC_ENDPOINT_IDS ?? "[]",
+      ) as unknown;
+      if (!Array.isArray(regions) || !Array.isArray(cidrs) || !Array.isArray(endpointIds)) {
+        throw new Error("invalid arrays");
+      }
       dataBoundaryApprovedRegions = regions as string[];
       dataBoundaryOperatorCidrs = cidrs as string[];
+      dataBoundaryOperatorVpcEndpointIds = endpointIds as string[];
     } catch {
       throw new Error("data-boundary Region or network registry is malformed");
     }
@@ -345,16 +355,21 @@ export class AwsControlPlaneStack extends cdk.Stack {
     if (dataBoundaryConfigured) {
       if (
         dataBoundaryHomeRegion !== deploymentRegion
-        || dataBoundaryAccessMode !== "ip-restricted"
+        || !["ip-restricted", "private-link"].includes(dataBoundaryAccessMode)
         || !/^arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:key\/[0-9a-f-]{36}$/i.test(dataBoundaryKeyArn)
         || !dataBoundaryApprovedRegions.includes(dataBoundaryHomeRegion)
         || dataBoundaryApprovedRegions.length < 1
         || dataBoundaryApprovedRegions.length > 4
         || dataBoundaryApprovedRegions.join(",") !== [...new Set(dataBoundaryApprovedRegions)].sort().join(",")
-        || dataBoundaryOperatorCidrs.length < 1
         || dataBoundaryOperatorCidrs.length > 32
         || dataBoundaryOperatorCidrs.join(",") !== [...new Set(dataBoundaryOperatorCidrs)].sort().join(",")
         || dataBoundaryOperatorCidrs.some((cidr) => !/^(?:\d{1,3}\.){3}\d{1,3}\/(?:[0-9]|[12][0-9]|3[0-2])$/.test(cidr))
+        || dataBoundaryOperatorVpcEndpointIds.length > 8
+        || dataBoundaryOperatorVpcEndpointIds.join(",") !== [...new Set(dataBoundaryOperatorVpcEndpointIds)].sort().join(",")
+        || dataBoundaryOperatorVpcEndpointIds.some((endpointId) => !/^vpce-(?:[0-9a-f]{8}|[0-9a-f]{17})$/.test(endpointId))
+        || (dataBoundaryAccessMode === "ip-restricted" && (dataBoundaryOperatorCidrs.length < 1 || dataBoundaryOperatorVpcEndpointIds.length > 0))
+        || (dataBoundaryAccessMode === "private-link" && (dataBoundaryOperatorCidrs.length > 0 || dataBoundaryOperatorVpcEndpointIds.length < 1))
+        || (dataBoundaryAccessMode === "private-link" && !dataBoundaryPrivateAccessEvidenceRef)
       ) {
         throw new Error("data-boundary deployment authority is invalid");
       }
@@ -362,7 +377,12 @@ export class AwsControlPlaneStack extends cdk.Stack {
       if (recoveryRegion && !dataBoundaryApprovedRegions.includes(recoveryRegion)) {
         throw new Error("audit replica Region is outside the approved data boundary");
       }
-    } else if (dataBoundaryApprovedRegions.length || dataBoundaryOperatorCidrs.length) {
+    } else if (
+      dataBoundaryApprovedRegions.length
+      || dataBoundaryOperatorCidrs.length
+      || dataBoundaryOperatorVpcEndpointIds.length
+      || dataBoundaryPrivateAccessEvidenceRef
+    ) {
       throw new Error("data-boundary arrays require complete deployment authority");
     }
     // One deployment-owned key encrypts tenant records and transport queues.
@@ -1072,6 +1092,10 @@ export class AwsControlPlaneStack extends cdk.Stack {
       DATA_BOUNDARY_KEY_OWNERSHIP: dataBoundaryConfigured ? "customer-managed" : "service-managed",
       DATA_BOUNDARY_OPERATOR_ACCESS_MODE: dataBoundaryAccessMode || "public-authenticated",
       DATA_BOUNDARY_OPERATOR_IPV4_CIDRS: JSON.stringify(dataBoundaryOperatorCidrs),
+      DATA_BOUNDARY_OPERATOR_VPC_ENDPOINT_IDS: JSON.stringify(
+        dataBoundaryOperatorVpcEndpointIds,
+      ),
+      DATA_BOUNDARY_PRIVATE_API_ID: "not-configured",
       DATA_BOUNDARY_CONDITIONAL_ACCESS_EVIDENCE_CONFIGURED:
         dataBoundaryConditionalAccessEvidenceRef ? "true" : "false",
       DATA_BOUNDARY_APPROVAL_EVIDENCE_CONFIGURED:
@@ -1594,6 +1618,94 @@ export class AwsControlPlaneStack extends cdk.Stack {
     api.addRoutes({ path: "/{proxy+}", methods: [apigwv2.HttpMethod.OPTIONS], integration: new integrations.HttpLambdaIntegration("OptionsIntegration", handler) });
     api.addRoutes({ path: "/{proxy+}", methods: [apigwv2.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration("ApiIntegration", handler), authorizer: jwt });
 
+    // Human operator traffic can be moved onto an execute-api interface VPC
+    // endpoint without exposing a second public operator route. The existing
+    // HTTP API remains the separate machine/agent channel; the Lambda rejects
+    // its human catch-all while private mode is active.
+    let privateOperatorApiUrl = "not-configured";
+    if (dataBoundaryAccessMode === "private-link") {
+      const privateApi = new apigateway.CfnRestApi(this, "PrivateOperatorApi", {
+        name: "aai-sec-private-operator-api",
+        endpointConfiguration: {
+          types: ["PRIVATE"],
+          vpcEndpointIds: dataBoundaryOperatorVpcEndpointIds,
+        },
+        policy: {
+          Version: "2012-10-17",
+          Statement: [
+            {
+              Effect: "Allow",
+              Principal: "*",
+              Action: "execute-api:Invoke",
+              Resource: "execute-api:/*",
+              Condition: {
+                StringEquals: { "aws:SourceVpce": dataBoundaryOperatorVpcEndpointIds },
+              },
+            },
+          ],
+        },
+      });
+      const privateAuthorizer = new apigateway.CfnAuthorizer(this, "PrivateCognitoAuthorizer", {
+        name: "aai-sec-private-cognito",
+        restApiId: privateApi.ref,
+        type: "COGNITO_USER_POOLS",
+        identitySource: "method.request.header.Authorization",
+        providerArns: [userPool.userPoolArn],
+      });
+      const privateProxy = new apigateway.CfnResource(this, "PrivateOperatorProxy", {
+        restApiId: privateApi.ref,
+        parentId: privateApi.attrRootResourceId,
+        pathPart: "{proxy+}",
+      });
+      const lambdaUri = cdk.Fn.join("", [
+        "arn:",
+        cdk.Aws.PARTITION,
+        ":apigateway:",
+        cdk.Aws.REGION,
+        ":lambda:path/2015-03-31/functions/",
+        handler.functionArn,
+        "/invocations",
+      ]);
+      const privateAny = new apigateway.CfnMethod(this, "PrivateOperatorAny", {
+        restApiId: privateApi.ref,
+        resourceId: privateProxy.ref,
+        httpMethod: "ANY",
+        authorizationType: "COGNITO_USER_POOLS",
+        authorizerId: privateAuthorizer.ref,
+        integration: { type: "AWS_PROXY", integrationHttpMethod: "POST", uri: lambdaUri },
+      });
+      const privateOptions = new apigateway.CfnMethod(this, "PrivateOperatorOptions", {
+        restApiId: privateApi.ref,
+        resourceId: privateProxy.ref,
+        httpMethod: "OPTIONS",
+        authorizationType: "NONE",
+        integration: { type: "AWS_PROXY", integrationHttpMethod: "POST", uri: lambdaUri },
+      });
+      const privateDeployment = new apigateway.CfnDeployment(this, "PrivateOperatorDeployment", {
+        restApiId: privateApi.ref,
+      });
+      privateDeployment.addResourceDependency(privateAny);
+      privateDeployment.addResourceDependency(privateOptions);
+      new apigateway.CfnStage(this, "PrivateOperatorStage", {
+        restApiId: privateApi.ref,
+        deploymentId: privateDeployment.ref,
+        stageName: "prod",
+        tracingEnabled: true,
+      });
+      handler.addPermission("PrivateOperatorInvoke", {
+        principal: new iam.ServicePrincipal("apigateway.amazonaws.com"),
+        sourceArn: cdk.Fn.join("", [
+          "arn:", cdk.Aws.PARTITION, ":execute-api:", cdk.Aws.REGION, ":",
+          cdk.Aws.ACCOUNT_ID, ":", privateApi.ref, "/*/*/*",
+        ]),
+      });
+      handler.addEnvironment("DATA_BOUNDARY_PRIVATE_API_ID", privateApi.ref);
+      privateOperatorApiUrl = cdk.Fn.join("", [
+        "https://", privateApi.ref, ".execute-api.", cdk.Aws.REGION, ".",
+        cdk.Aws.URL_SUFFIX, "/prod",
+      ]);
+    }
+
     // Managed discovery separates provider credentials, source ingestion
     // authority and schedule invocation. The browser receives only setup
     // metadata; neither secret value is returned by the control plane.
@@ -1906,6 +2018,13 @@ export class AwsControlPlaneStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, "DataBoundaryOperatorAccessMode", {
       value: dataBoundaryAccessMode || "public-authenticated",
+    });
+    new cdk.CfnOutput(this, "PrivateOperatorApiStatus", {
+      value: dataBoundaryAccessMode === "private-link" ? "configured" : "not-configured",
+    });
+    new cdk.CfnOutput(this, "PrivateOperatorApiUrl", { value: privateOperatorApiUrl });
+    new cdk.CfnOutput(this, "PrivateOperatorVpcEndpointCount", {
+      value: String(dataBoundaryOperatorVpcEndpointIds.length),
     });
     new cdk.CfnOutput(this, "ControlTableName", { value: table.tableName });
     new cdk.CfnOutput(this, "PresenceTableName", { value: presence.tableName });
