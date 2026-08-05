@@ -278,9 +278,10 @@ the first pilot, provide the inputs above, retain an adapter-specific review,
 create the exact secret resource registry, and approve a lowercase SHA-256
 enablement evidence identity. Set that digest together with
 `ENDPOINT_DELIVERY_DISPATCH_ENABLED=true`; CDK rejects either input alone.
-Current commands are limited to 40 targets. The product still does not claim
-live Intune compatibility, remote installation success or causal proof until a
-real provider run is followed by fresh exact runtime attestation.
+Commands are bounded at 500 targets and use 40-target revisioned
+continuations. The product still does not claim live Intune compatibility,
+remote installation success or causal proof until a real provider run is
+followed by fresh exact runtime attestation.
 
 ### GitHub organization discovery pilot
 

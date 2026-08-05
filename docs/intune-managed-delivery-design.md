@@ -134,10 +134,12 @@ from API authority, validates tenant/KMS/purpose-bound secret metadata before
 decrypting, and reauthorizes current provider, rollout, agent, discovery,
 signed endpoint and latest-command authority before every mutation.
 
-One invocation currently admits at most 40 targets, matching one sealed cohort
-page. A larger command is blocked before secret or Graph access. This honest
-pilot bound avoids a timeout-dependent partial rollout; continuation authority
-is required before raising the enterprise cohort limit.
+One invocation processes at most one 40-target page. Commands of up to 500
+targets advance through revision-bound encrypted FIFO continuations. Each
+invocation reloads complete authority; the final stage prunes at most 40 stale
+dedicated-group members and creates the required assignment only after exact
+group reproduction. See the implemented
+[bounded continuation authority](intune-continuation-authority-design.md).
 
 ## Governed provider configuration
 

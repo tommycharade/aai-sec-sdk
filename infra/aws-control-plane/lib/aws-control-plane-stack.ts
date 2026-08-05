@@ -1499,6 +1499,9 @@ export class AwsControlPlaneStack extends cdk.Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, "../lambda")),
       timeout: cdk.Duration.seconds(60),
       memorySize: 512,
+      // Large, immutable cohorts continue through the same encrypted FIFO.
+      // State revisions and a hard 64-step bound prevent unbounded recursion.
+      recursiveLoop: lambda.RecursiveLoop.ALLOW,
       reservedConcurrentExecutions: 5,
       environment: {
         CONTROL_TABLE: table.tableName,
@@ -1508,6 +1511,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
         AWS_PARTITION: cdk.Aws.PARTITION,
         ENDPOINT_DELIVERY_SECRET_PREFIX: endpointDeliverySecretPrefix,
         ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN: endpointDeliveryCredentialKey.keyArn,
+        ENDPOINT_DELIVERY_QUEUE_URL: endpointDeliveryWorkerQueue.queueUrl,
         ENDPOINT_DELIVERY_DISPATCH_ENABLED: endpointDeliveryDispatchEnabled ? "true" : "false",
         ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256: endpointDeliveryEnablementEvidence,
       },
@@ -1521,6 +1525,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       resources: [audit.arnForObjects("tenant=*/endpoint-delivery/*")],
     }));
     endpointDeliveryCredentialKey.grantDecrypt(endpointDeliveryWorker);
+    endpointDeliveryWorkerQueue.grantSendMessages(endpointDeliveryWorker);
     endpointDeliveryWorker.addToRolePolicy(new iam.PolicyStatement({
       actions: ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"],
       resources: endpointDeliverySecretResources,

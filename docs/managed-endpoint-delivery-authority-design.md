@@ -239,18 +239,18 @@ Automated evidence in this tranche:
   activation-time metadata revalidation;
 - 40-target page boundaries, complete cohort sealing, idempotent replay and
   concurrent provider-cutover rollback;
+- revision-bound continuation through 500 targets, stale-message repair,
+  bounded pruning and assignment only after exact group reproduction;
 - tenant-role and exact machine `inventory_read` route isolation;
 - content minimisation and credential/path/command absence;
 - UI loading, unavailable, ready and blocked states;
 - keyboard, automated accessibility and 390-pixel narrow-browser acceptance; and
 - full SDK and UI quality gates.
 
-The dormant outbox now proves exact-state transactional creation, idempotent
-reconciliation and concurrent provider-cutover denial. The remaining provider
-tranche must prove stale, unmanaged, revoked, cross-deployment and duplicate
-binding denial again at dispatch time, package and binding reauthorization,
-permission-denied provider states, stale-command suppression and causal
-post-dispatch evidence. Live completion still requires a real Intune tenant,
+The outbox and disabled worker now prove exact-state transactional creation,
+idempotent reconciliation, concurrent provider-cutover denial, online
+reauthorization, bounded continuation and content-minimised provider evidence.
+Live completion still requires a real Intune tenant,
 dedicated provider role, managed pilot devices,
 immutable uploaded packages and upgrade/rollback acceptance. The software must
 continue to label those as outstanding.

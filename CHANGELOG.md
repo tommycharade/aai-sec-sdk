@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add fail-closed Microsoft Intune continuation authority for cohorts up to 500
+  targets. The isolated worker processes one sealed 40-target page at a time,
+  repairs lost continuation sends by exact revision, bounds stale-member
+  pruning and withholds app assignment until the dedicated group is reproduced.
+
 - Expose fixed Intune delivery attempt, failure and hashed convergence evidence
   to authorized operators without returning Graph object IDs or provider
   payloads.

@@ -18210,6 +18210,18 @@ def _endpoint_delivery_command_view(record):
         not isinstance(failure_code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{2,79}", failure_code)
     ):
         raise RuntimeError("endpoint delivery failure code is invalid")
+    continuation_revision = int(record.get("continuation_revision", 0))
+    continuation_stage = record.get("continuation_stage", "not_started")
+    completed_targets = int(record.get("continuation_completed_targets", 0))
+    mutation_count = int(record.get("continuation_mutation_count", 0))
+    target_count = int(record.get("target_count", 0))
+    if (
+        not 0 <= continuation_revision <= 64
+        or continuation_stage not in {"not_started", "resolving_pages", "pruning", "complete"}
+        or not 0 <= completed_targets <= target_count
+        or not 0 <= mutation_count <= 1000
+    ):
+        raise RuntimeError("endpoint delivery continuation state is invalid")
     return {
         "id": record.get("id"),
         "provider": record.get("provider"),
@@ -18219,12 +18231,16 @@ def _endpoint_delivery_command_view(record):
         "packageId": record.get("package_id"),
         "providerVersion": int(record.get("provider_version", 0)),
         "rolloutRevision": int(record.get("rollout_revision", 0)),
-        "targetCount": int(record.get("target_count", 0)),
+        "targetCount": target_count,
         "cohortDigest": record.get("cohort_digest"),
         "status": record.get("status"),
         "attemptCount": int(record.get("attempt_count", 0)),
         "failureCode": failure_code,
         "providerEvidence": provider_evidence,
+        "continuationRevision": continuation_revision,
+        "continuationStage": continuation_stage,
+        "completedTargets": completed_targets,
+        "mutationCount": mutation_count,
         "dispatchEnabled": _ENDPOINT_DELIVERY_DISPATCH_ENABLED,
         "instructionDigest": record.get("instruction_digest"),
         "createdAt": int(record.get("created_at", 0)),
@@ -18300,10 +18316,15 @@ def _dispatch_endpoint_delivery_command(record):
         SQS.send_message(
             QueueUrl=_ENDPOINT_DELIVERY_QUEUE_URL,
             MessageBody=json.dumps(
-                {"tenantId": tenant, "commandId": command_id}, separators=(",", ":")
+                {
+                    "tenantId": tenant,
+                    "commandId": command_id,
+                    "continuationRevision": 0,
+                },
+                separators=(",", ":"),
             ),
             MessageGroupId=tenant,
-            MessageDeduplicationId=command_id,
+            MessageDeduplicationId=f"{command_id}:0",
         )
         queued = {
             key: value
@@ -18754,6 +18775,11 @@ def _create_endpoint_delivery_commands(tenant, rollout):
             "instruction_digest": instruction_digest,
             "status": "pending",
             "attempt_count": 0,
+            "continuation_revision": 0,
+            "continuation_stage": "not_started",
+            "continuation_page": 0,
+            "continuation_completed_targets": 0,
+            "continuation_mutation_count": 0,
             "created_at": now,
             "updated_at": now,
             "delivery_outbox_pk": f"ENDPOINT_DELIVERY_OUTBOX#{tenant}",

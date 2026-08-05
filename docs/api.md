@@ -709,8 +709,11 @@ The five-minute reconciler creates an outbox command automatically from exact
 live provider, rollout, deployment, agent, endpoint-evidence and package
 authority. There is no browser install endpoint. The isolated FIFO worker and
 repair schedule remain inert unless deployment owners supply both the exact
-enablement flag and a reviewed evidence SHA-256. A worker invocation admits at
-most 40 targets and reauthorizes live state before each Graph mutation.
+enablement flag and a reviewed evidence SHA-256. One worker invocation handles
+at most one 40-target page or 40 stale-member removals. Commands of up to 500
+targets continue through monotonically revisioned opaque FIFO messages. The
+operator projection reports continuation stage, completed-target count,
+revision and bounded mutation count, but no provider object identity.
 
 `GET /enterprise/alerts` reconciles and returns content-minimised endpoint,
 explainable behavior and independently derived repository/configuration
