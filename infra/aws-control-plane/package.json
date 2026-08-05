@@ -16,7 +16,7 @@
     "destroy": "npm run build && cdk destroy --force"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^26.1.2",
     "@aws-sdk/client-secrets-manager": "3.1102.0",
     "aws-cdk": "2.1133.0",
     "aws-cdk-lib": "2.263.0",
