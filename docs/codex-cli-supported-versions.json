@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "host": "codex-cli",
+  "defaultStatus": "unsupported",
+  "versions": [
+    {
+      "version": "0.147.0-alpha.1.2",
+      "operatingSystem": "darwin",
+      "architecture": "arm64",
+      "installMethod": "chatgpt-bundled-native",
+      "status": "accepted",
+      "binarySha256": [
+        "9f6748b4ab10ffc92c28b9ccedae89e61a302bbc011df7d276ee38f55906e481"
+      ],
+      "digestMeasuredAt": "2026-08-05",
+      "evidence": "real-codex-cli-acceptance-evidence-2026-08-05.md"
+    }
+  ]
+}

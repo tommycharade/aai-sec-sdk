@@ -30,6 +30,8 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Claude Code example](claude-code.md)
 - [Real Claude Code acceptance harness](real-claude-code-acceptance-harness.md)
 - [Real Claude Code acceptance evidence — 2026-08-05](real-claude-code-acceptance-evidence-2026-08-05.md)
+- [Real Codex CLI acceptance harness](real-codex-cli-acceptance-harness.md)
+- [Real Codex CLI acceptance evidence — 2026-08-05](real-codex-cli-acceptance-evidence-2026-08-05.md)
 - [Management UI](ui.md)
 - [Enterprise fleet control plane](enterprise-fleet.md)
 - [AWS-managed discovery connectors](scheduled-discovery-connectors-design.md)

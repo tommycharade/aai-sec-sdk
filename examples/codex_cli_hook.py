@@ -243,7 +243,16 @@ def _build_hook() -> CodexCliHook:
             allowed_root=project_dir,
         ),
         codex_tool_prefix_rule(
-            {"mcp__agentic-security__"},
+            {
+                # Codex 0.147 normalizes MCP server IDs for hook tool names:
+                # ``agentic-security`` becomes ``agentic_security``. Keep the
+                # literal form for compatibility, but authorize only these two
+                # exact namespaces; near-prefix server names remain denied.
+                # Managed MCP configuration and app-server evidence must bind
+                # this namespace to the expected gateway process in production.
+                "mcp__agentic-security__",
+                "mcp__agentic_security__",
+            },
             reason="the governed SDK gateway performs live authorization",
         ),
     ]
