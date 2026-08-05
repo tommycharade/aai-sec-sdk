@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added server-owned native-control conflict analysis for governed Claude Code
+  and Codex policy. Policy views explain content-minimised blockers and
+  warnings, while provider-neutral and AWS control planes recompute the exact
+  candidate at staging and activation. Contradictory command decisions and
+  native authority outside SDK boundaries now fail closed; live endpoint
+  convergence remains separately measured.
+
 - Added exact-binary real Codex CLI acceptance for process-loaded controls,
   native command and patch boundaries, guarded MCP execution and content-free
   audit. The live 0.147.0-alpha.1.2 macOS arm64 run passed 10 checks with zero

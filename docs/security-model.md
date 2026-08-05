@@ -205,6 +205,15 @@ revision, reason, or target set fails closed. The API also rejects adding an
 active agent already present in another group so a browser cannot create the
 ambiguous multi-group authority that runtime verification denies.
 
+Policy/native compatibility reports are advisory data until the server uses
+them as a lifecycle gate. The browser cannot submit or acknowledge a report to
+gain authority. Both staging and activation recompute static conflicts from the
+authoritative immutable policy. Exact duplicate command expressions are
+compared internally but never returned; findings contain only fixed text,
+field names and host identity. Static analysis cannot prove regex languages do
+not overlap and cannot prove a host applied its configuration, so post-
+activation native-control evidence and convergence remain mandatory.
+
 ## Guarantees and non-guarantees
 
 The SDK aims to guarantee that unknown or unauthorized actions do not execute

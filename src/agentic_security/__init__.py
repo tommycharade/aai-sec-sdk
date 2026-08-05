@@ -209,6 +209,12 @@ from .managed_deployment import (
     ManagedExecutableRequirement,
     measure_managed_deployment_package,
 )
+from .native_control_conflicts import (
+    NativeControlAnalysis,
+    NativeControlAnalysisError,
+    NativeControlConflict,
+    analyze_native_control_conflicts,
+)
 from .policies import AllowListPolicy, PolicyDecision, PolicyEngine, PolicyResult
 from .policy_adapters import CedarPolicyEngine, OpaPolicyEngine, PolicyRequest
 from .policy_composition import (
@@ -420,6 +426,10 @@ __all__ = [
     "ManagedDeploymentPackage",
     "ManagedExecutableRequirement",
     "measure_managed_deployment_package",
+    "NativeControlAnalysis",
+    "NativeControlAnalysisError",
+    "NativeControlConflict",
+    "analyze_native_control_conflicts",
     "ControlPlaneApplication",
     "AgentPresence",
     "AgentPresenceStore",

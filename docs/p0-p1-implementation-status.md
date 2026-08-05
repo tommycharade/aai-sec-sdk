@@ -395,6 +395,24 @@ pilot tenant and real Entra OIDC sign-in, role transition and token-revocation
 exercise, a deployed two-person Entra MFA break-glass and access-review
 exercise, and a multi-business-unit delegated-scope exercise.
 
+### P1-POL-11 implementation evidence
+
+The provider-neutral and AWS policy ledgers now return a deterministic,
+configuration-digest-bound `nativeControlAnalysis` for every immutable version.
+It identifies exact command expressions assigned conflicting decisions, native
+built-in or file-tool authority outside the SDK boundary, stricter native
+settings that make SDK permissions inoperative, and configured native controls
+that are disabled. Findings contain fixed explanations and field names only;
+the expression or policy value is never returned.
+
+Both staging and activation recompute this analysis from stored candidate
+content and reject any blocker. The enterprise UI displays blockers, warnings,
+affected host and remediation, treats a missing report as unavailable, and
+disables staging/activation unless the server reports zero blockers. Unit,
+adversarial, AWS parity, Lambda-contract and UI journey tests cover the gate.
+A clear static report does not prove deployment: Claude/Codex endpoint
+convergence remains a separate rollout acceptance requirement.
+
 ## Current AWS acceptance — 2026-07-29
 
 The governed policy lifecycle and hosted UI are merged and deployed. The live

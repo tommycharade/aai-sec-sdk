@@ -388,6 +388,16 @@ are metadata only; credentials and bearer material are never accepted. Legacy
 extension sections remain supported for migration, but typed sections are the
 recommended enterprise contract.
 
+Every immutable governed policy version includes a server-computed
+`nativeControlAnalysis`. The report is bound to a SHA-256 digest of the exact
+configuration, covers Claude Code and Codex unless `managedHost.host` narrows
+the target, and contains only fixed explanations plus field names. Command
+expressions and other policy values are not returned in findings. The local and
+AWS control planes recompute the report before staging and again before final
+activation; blocking SDK/native contradictions fail closed. Warnings expose
+stricter but unusable native settings without preventing a safe restriction.
+Endpoint convergence remains separate measured evidence.
+
 Persistence is an explicit adapter boundary. The bundled
 `SQLiteFleetPersistenceAdapter` enables WAL and bounded lock waits for local
 development, but advertises `highAvailability: false`. Deployments can require
