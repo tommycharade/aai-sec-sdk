@@ -2,10 +2,11 @@
 
 | Field | Decision |
 | --- | --- |
-| Status | Accepted temporarily; upstream remediation pending |
+| Status | Closed; superseded dependency published and exact pin upgraded |
 | Owner | Tom Mooney, project owner |
 | Accepted | 2026-07-29 |
 | Expires | 2026-08-28 |
+| Closed | 2026-08-04 |
 | Advisory | `GHSA-mh99-v99m-4gvg` / `CVE-2026-14257` |
 | Affected component | `aws-cdk-lib@2.262.2` development dependency |
 | Vulnerable bundled package | `brace-expansion@5.0.7` |
@@ -14,10 +15,18 @@
 
 ## Decision
 
-The project temporarily accepts this development-tooling availability risk
-until 2026-08-28. It does not accept the dependency as a production runtime
+This historical exception closed when `aws-cdk-lib@2.263.0` bundled
+`brace-expansion@5.0.8`, satisfying the advisory recorded here. It does **not**
+authorize the later `GHSA-rgw5-rvv9-x895`, which affects versions before
+`5.0.9`. That successor advisory is an unaccepted owner decision recorded in
+[Inputs needed from the product owner](needed-from-from.md); the daily watcher
+fails visibly until AWS publishes a fixed bundle or the owner creates a new,
+dated decision.
+
+The project temporarily accepted this development-tooling availability risk
+until its closure. It did not accept the dependency as a production runtime
 component and does not suppress other high-severity findings. The exception
-must be removed sooner if AWS publishes a bundle containing
+was to be removed sooner if AWS published a bundle containing
 `brace-expansion>=5.0.8`.
 
 `npm audit fix` and package-manager overrides cannot repair this finding
@@ -37,9 +46,9 @@ would create a less trustworthy supply-chain state and is prohibited.
   the CDK process.
 - The advisory is an availability failure caused by attacker-influenced brace
   expansion. No such untrusted input path exists in the deployment workflow.
-- `npm audit --omit=dev` reports zero production dependency vulnerabilities.
-  A full audit continues to report the accepted development finding, preserving
-  visibility.
+- At acceptance time, `npm audit --omit=dev` reported zero production
+  dependency vulnerabilities and the full audit retained the accepted
+  development finding. The later full-audit finding is not accepted here.
 
 This lowers exploitability for this deployment but does not make the affected
 package safe in a different context. CDK commands must not be exposed as a
@@ -58,16 +67,15 @@ service or run against untrusted repositories or user-supplied patterns.
    attach a manual dismissal rationale to that state, so this record and
    tracking issue 34 provide the accountable decision trail. Other findings
    remain blocking unless separately accepted.
-6. `.github/workflows/cdk-upstream-watch.yml` inspects the latest published CDK
-   bundle every day. It deliberately fails when the patched bundle becomes
-   available, making removal of the exception an operator action.
+6. `.github/workflows/cdk-upstream-watch.yml` inspected the latest published
+   CDK bundle every day and deliberately failed when the historical patched
+   bundle became available, making closure an operator action.
 7. Dependabot monitors the infrastructure npm package daily for direct updates.
-8. Repository tests fail after the expiry date unless this record and the
-   dependency state are reviewed.
+8. Repository tests required the record to remain current until closure.
 
 ## Closure criteria
 
-Close the exception only after all of the following are true:
+The historical closure required all of the following:
 
 1. a published `aws-cdk-lib` contains `brace-expansion>=5.0.8`;
 2. the exact CDK pin and lockfile are upgraded;

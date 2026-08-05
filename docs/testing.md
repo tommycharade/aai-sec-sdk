@@ -334,6 +334,19 @@ transient DynamoDB claim failures, prove revision-bound concurrent repair and
 advance beyond fully corrupt 250-record pages containing malformed string,
 boolean, missing and oversized revisions.
 
+## Vulnerability-management rehearsal
+
+`scripts/verify_vulnerability_management.py` treats the checked governance
+policy and exercise record as untrusted input. It rejects unknown fields,
+non-UTC or unordered timestamps, stale review authority, weakened higher-
+severity deadlines, unbounded exceptions and every individual critical SLA
+miss. `make check` runs the verifier through the repository guardrail target.
+
+The checked exercise is explicitly synthetic. Its success proves the policy
+shape, deadline calculations and evidence contract; it is not evidence that a
+live response team met those times. Production acceptance must retain a real
+exercise or incident record and independently review its timestamps.
+
 ## Adapter contracts
 
 Managed package distribution contracts cover canonical publication and exact

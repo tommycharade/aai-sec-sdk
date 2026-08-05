@@ -8,6 +8,9 @@ REQUIRED = (
     "CONTRIBUTING.md",
     "README.md",
     "docs/guardrails.md",
+    "docs/enterprise-trust-pack.md",
+    "docs/vulnerability-management.md",
+    "docs/data-processing-and-subprocessors.md",
     "pyproject.toml",
     "Makefile",
     "requirements-ci.txt",
@@ -21,6 +24,8 @@ REQUIRED = (
     "docs/vulnerability-management.md",
     "docs/data-processing-and-subprocessors.md",
     "docs/compliance-roadmap.md",
+    "security/vulnerability-management-policy.json",
+    "security/vulnerability-rehearsal.example.json",
 )
 
 

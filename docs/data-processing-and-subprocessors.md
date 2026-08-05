@@ -1,59 +1,104 @@
 # Data processing and subprocessors
 
-## Status
+This is the technical data-processing schedule for security review of the
+open-source SDK and reference AWS control plane. It is not a signed Data
+Processing Agreement (DPA). A customer-specific DPA must identify the legal
+entities, governing law, approved regions, retention choices and commercial
+service before production data is processed.
 
-This is a technical disclosure for architecture and pilot planning. Legal
-approval is still required. It is not an executed Data Processing Addendum
-(DPA), and the hosted product must not process pilot personal data until the
-contracting entity, controller/processor roles, transfer terms and customer
-instructions are approved.
+## Roles and scope
 
-## Intended processing boundary
+The Apache-2.0 SDK runs in the adopter's application or developer host. The
+project does not receive data merely because the SDK is installed. In that
+deployment the adopter selects providers and normally acts as both controller
+and operator of processing.
 
-The open-source SDK can run entirely in the adopter's environment. In the
-hosted enterprise control plane, the customer is expected to control agent
-purpose, identity, policy and connected systems; the service processes bounded
-security and operational metadata to enforce and evidence those instructions.
+For the hosted control plane, the customer determines purposes, authorized
+agents, users, policies, evidence settings and integrations. The hosted service
+processes those instructions as a processor. Model providers remain the
+customer's direct providers: the reference control plane does not proxy prompts
+or model responses to Anthropic, OpenAI or GitHub Copilot.
 
-Default retained categories include tenant and opaque agent identifiers,
-policy/version references, structured decisions, approval lifecycle, health,
-configuration digests, timestamps and content-minimised audit evidence. Raw
-prompts, tool arguments/results, credentials, source files and project paths
-are excluded by default. Optional capture requires explicit policy,
-classification, redaction and retention review.
+## Data categories and minimisation
 
-## Technical subprocessor inventory
+| Category | Examples | Default handling |
+| --- | --- | --- |
+| Identity and ownership | Tenant, user subject, role, team, business owner | Required for authorization; no model-supplied principal is trusted |
+| Agent and device posture | Agent ID, project root, version, heartbeat, configuration digest | Collected for fleet governance and drift; no raw credential is accepted |
+| Policy and approval | Policy versions, semantic changes, rationale, approval binding | Versioned and auditable; activated policy is immutable |
+| Decision evidence | Tool identity, redacted arguments, outcome, policy version, timestamps | Redacted before persistence; content capture is opt-in |
+| Integration metadata | Repository, MCP, skill, provider and delivery status | Scoped to configured integrations; secrets are referenced, not returned |
+| Incident and assurance | Alert/case metadata, evidence object identities, signed report summaries | Content-minimised and integrity-bound |
 
-| Provider | Purpose | Customer content boundary | Region/transfer status |
-| --- | --- | --- | --- |
-| Amazon Web Services | Hosted compute, API, encrypted persistence, immutable evidence, queues, keys and monitoring | Bounded control-plane metadata and configured retained evidence | Customer-approved deployment Region; final legal transfer terms required |
-| GitHub | Public source, private vulnerability reporting, CI and release provenance | Repository content and security reports; no hosted customer control-plane data by design | GitHub terms apply; final legal review required |
+The system is not designed to store prompts, source files, tool output or
+credentials by default. A customer who enables content capture must define a
+lawful purpose, minimisation rule, retention period and authorized reader
+scope. Secret values belong in the customer's approved secret manager.
 
-Microsoft Entra ID, customer GitHub organizations, ServiceNow, Jira,
-PagerDuty, Splunk and cloud credential providers are customer-selected
-integrations. Whether a provider is a customer processor, independent
-controller or our subprocessor depends on the final hosted data flow and
-contract; this document does not silently classify it.
+## Reference AWS locations and retention
 
-No provider may be added to the hosted customer-data path without a purpose,
-data-category, Region/transfer, retention, security and deletion review plus an
-updated notice before use.
+The current reference deployment uses `eu-west-2` as its primary application
+region and `eu-west-1` for immutable audit recovery. CloudFront serves public
+static UI assets through its global edge network; this does not move control-
+plane records into the UI bundle. No broader residency guarantee is made until
+a customer-specific architecture and contract identify it.
 
-## DPA requirements before hosted pilot
+Immutable audit evidence uses S3 Object Lock COMPLIANCE retention. Tenant
+retention is increase-only from 365 to 3,650 days. Legal hold can extend
+retention. DynamoDB control records and retained KMS keys use infrastructure
+retention protections; deletion therefore requires a reviewed tenant
+offboarding plan and cannot override active Object Lock or legal hold.
+CloudWatch retention is resource-specific, not a single service-wide promise.
+The regional fault-controller workflow explicitly retains its log group for
+one year. Some Lambda-created log groups currently rely on AWS defaults rather
+than an explicit CDK retention declaration. A production deployment must
+inventory every log group, set the customer-approved period and retain that
+generated inventory as DPA evidence; this draft schedule must not be used to
+infer an undocumented 1-, 4- or 14-day guarantee.
 
-The executed DPA must define:
+The deletion procedure must inventory active records, retained evidence,
+replicas, backups, legal holds, pending jobs and secret references. A request
+cannot promise immediate erasure of compliance-locked evidence. The response
+must state what was deleted, what remains, the controlling retention basis and
+the final eligible deletion date.
 
-- legal entities and controller/processor roles;
-- documented processing instructions, purpose and duration;
-- data-subject categories and personal-data fields;
-- confidentiality, security measures and incident notification;
-- deletion/return, retention and legal-hold behavior;
-- approved subprocessors and change-notice/objection process;
-- international-transfer mechanism and locations;
-- audit/assistance duties and liability terms; and
-- customer-specific optional integrations and capture settings.
+## Subprocessor and provider register
 
-Technical deletion classes, retention controls, customer-managed keys and
-residency behavior are documented in [Enterprise data
-boundaries](enterprise-data-boundary-design.md). Those controls support a DPA;
-they do not substitute for one.
+| Provider | Purpose | Data involved | Location/control | Optional |
+| --- | --- | --- | --- | --- |
+| Amazon Web Services | Hosted API, identity, compute, storage, queues, keys, monitoring and static UI delivery | Categories enabled in the hosted tenant | Primary `eu-west-2`, audit recovery `eu-west-1`, CloudFront global edge | No for reference hosted service |
+| GitHub | Source repository, private vulnerability intake, release artifacts/provenance and optional repository discovery/policy source | Project source; private-report identity/contact details, embargoed evidence and affected-version metadata; and, only when configured, scoped customer repository metadata | Project security repository plus customer-approved GitHub organization and repository scope | Repository connector is optional; project vulnerability intake is not |
+| PyPI | Public Python package distribution | Public artifacts and package metadata; no customer control-plane data | PyPI service | Optional; GitHub artifacts may be used instead |
+| Microsoft Entra ID | Customer-selected workforce identity and SCIM lifecycle | User/group identifiers and role mapping | Customer tenant; configured directly by customer administrator | Optional until enterprise federation is enabled |
+
+Anthropic, OpenAI and other model providers are not subprocessors of the
+reference control plane merely because an enrolled developer uses their agent.
+If a future hosted feature transmits data to a model provider, it requires a
+new data-flow review, register update and customer opt-in before release.
+
+## Security measures
+
+Technical measures include tenant-bound authorization, deny-by-default runtime
+policy, per-action approval binding, scoped credentials, redaction before
+persistence, private S3 origins, encryption in transit and at rest, KMS-signed
+policy/evidence artifacts, Object Lock, cross-region audit replication,
+bounded queues with dead-letter alarms and authenticated operator/agent
+surfaces. The [security model](security-model.md) defines the exact guarantees
+and non-guarantees.
+
+## Customer decisions required for a DPA
+
+Before production use, record:
+
+- controller and processor legal entities and contacts;
+- data subjects, purposes and lawful basis;
+- approved regions and cross-border transfer mechanism;
+- tenant retention, legal hold and deletion contacts;
+- enabled integrations and their credential/data scopes;
+- incident notification terms and audit rights;
+- approved subprocessor notice/change mechanism; and
+- return/deletion evidence required at termination.
+
+The absence of those decisions is a deployment blocker, not permission to use
+synthetic defaults for customer data.
+

@@ -25,6 +25,7 @@ The Agentic AI Security SDK is an open-source execution-security runtime for age
 - [Operational runbooks](docs/runbooks.md)
 - [Testing and assurance](docs/testing.md)
 - [Customer assurance pack](docs/customer-assurance-pack.md)
+- [Enterprise trust statement](docs/enterprise-trust-pack.md)
 - [Vulnerability management](docs/vulnerability-management.md)
 - [Data processing and subprocessors](docs/data-processing-and-subprocessors.md)
 - [SOC 2 and ISO 27001 roadmap](docs/compliance-roadmap.md)

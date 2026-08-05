@@ -75,3 +75,4 @@ coverage:
 
 guardrails:
 	$(PYTHON) scripts/check_guardrails.py
+	$(PYTHON) scripts/verify_vulnerability_management.py
