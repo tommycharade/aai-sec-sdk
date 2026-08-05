@@ -1,5 +1,20 @@
 # Changelog
 
+- Added a read-only deployment-owned runtime-release catalog and tenant-scoped
+  version-compliance report for Claude Code and Codex. The API reuses exact
+  manifest/provenance validation, exposes separate SDK package, MCP gateway and
+  native-hook digests without artifact bytes, and derives every agent,
+  deployment and bounded-page status from live server state. Tenant-bound
+  continuation tokens remove the previous 2,000-record all-or-nothing ceiling,
+  and incomplete pages are never reported as complete fleet health. Missing release
+  authority, unapproved targets, quarantine, missing/expired evidence and
+  version mismatch remain explicit non-compliant outcomes, with containment
+  taking precedence. Human inventory-read roles and the exact machine
+  `inventory_read` capability can inspect posture; policy-only roles are denied;
+  the browser cannot register or approve a release. The private Deployments UI
+  adds one responsive Runtime releases workspace with approved authority,
+  integrity evidence, version coverage and a prioritized remediation queue.
+
 - Added operator-created and daily/weekly scheduled enterprise assurance
   snapshots. Domain-separated KMS signatures bind tenant, snapshot identity,
   profile, source, timestamps, schedule revision and canonical report digest.

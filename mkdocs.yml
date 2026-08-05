@@ -100,6 +100,7 @@ nav:
   - Secure webhooks: secure-webhooks-design.md
   - Enterprise integration design: enterprise-integration-design.md
   - Runtime attestation design: runtime-attestation-design.md
+  - Approved runtime releases and version compliance: runtime-release-compliance-design.md
   - Managed host configuration: managed-host-configuration.md
   - Managed endpoint deployment design: managed-endpoint-deployment-design.md
   - Managed package distribution design: managed-package-distribution-design.md

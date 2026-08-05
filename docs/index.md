@@ -14,6 +14,7 @@ The SDK is built around one boundary:
 - [Architecture](architecture.md)
 - [End-to-end example](end-to-end-example.md)
 - [Production readiness](production-readiness.md)
+- [Approved runtime releases and version compliance](runtime-release-compliance-design.md)
 - [API design](api.md)
 - [Engineering guardrails](guardrails.md)
 - [Licensing](license.md)

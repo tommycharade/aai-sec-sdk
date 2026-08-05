@@ -117,6 +117,10 @@ Managed rollouts bind immutable desired configuration and package revisions,
 select deterministic canary rings, enforce maintenance windows and health
 thresholds, and accept convergence only from fresh exact endpoint evidence;
 see [Measured managed-configuration rollouts](docs/measured-managed-rollout-design.md).
+Approved runtime-release inventory separately projects deployment-owned SDK,
+gateway and hook evidence, while server-derived version compliance identifies
+unapproved, missing, expired, mismatched and quarantined agents; see [Approved
+runtime releases and version compliance](docs/runtime-release-compliance-design.md).
 AWS policy activation freezes registry-resolved Skills and MCP servers and
 signs the exact tenant, policy version and effective configuration with a
 non-exportable asymmetric KMS key. Claude Code and Codex verify that bundle
