@@ -8,7 +8,7 @@ the registered tool and its validated resources.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
@@ -163,7 +163,19 @@ class RevocationAwareCredentialBroker:
         credential = self._broker.mint(context, tool, resources, ttl_seconds)
         if not isinstance(credential, ScopedCredential):
             raise ValueError("credential broker returned no scoped capability")
-        live_request = replace(request, credential_id=credential.credential_id)
+        # Rebuild the live request explicitly so the post-mint trust binding is
+        # visible at this boundary.  No provider object, model value or mutable
+        # copy operation may supply identity or scope for the second check.
+        live_request = CredentialAuthorityRequest(
+            broker_id=request.broker_id,
+            tenant=request.tenant,
+            agent_id=request.agent_id,
+            principal_id=request.principal_id,
+            task_id=request.task_id,
+            tool_name=request.tool_name,
+            resource_ids=request.resource_ids,
+            credential_id=credential.credential_id,
+        )
         self._decision(live_request)
 
         def remains_active() -> bool:
