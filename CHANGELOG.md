@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added a deployment-disabled Microsoft Intune delivery worker with encrypted
+  FIFO/DLQ dispatch, scheduled outbox repair and a dedicated least-privilege
+  credential boundary. It reconstructs current endpoint-to-agent bindings,
+  resolves Entra device identities online, verifies reviewed group/app
+  evidence, reauthorizes before Graph mutations, preserves unrelated Intune
+  assignments, retries unknown outcomes and retains content-minimised Object
+  Lock evidence. Enabling requires an explicit flag and separately reviewed
+  SHA-256 evidence; pilot commands are fail-closed above 40 targets.
+
 - Added independently governed Microsoft Intune delivery configuration and a
   dormant transactional outbox. Exact tenant/KMS/purpose-bound Secrets Manager
   metadata is revalidated at draft and activation boundaries without secret
@@ -9,14 +18,15 @@
   immutable version. Scheduled rollout reconciliation now commits idempotent
   commands and primary evidence only while provider, rollout, deployment,
   agent, signed endpoint evidence and package authority still match. Dispatch
-  is explicitly disabled; no Microsoft Graph worker or mutation is enabled.
+  is explicitly disabled by default; the worker added in the next tranche is
+  inert unless deployment-owned enablement evidence is supplied.
 
 - Documented the provider-correct Microsoft Intune delivery architecture:
   Graph app delivery is group-assignment based, so hosted rollout requires an
   exact AAI-owned cohort rather than a browser-selected managed device. Intune
   collectors now retain the canonical Entra device registration ID as
   authoritative targeting evidence; endpoint sensors cannot submit it, and a
-  future worker must resolve and reproduce the directory object online before
+  isolated worker resolves and reproduces the directory object online before
   mutation. Hosted Graph writes remain disabled by default.
 
 - Added the first managed endpoint-delivery authority gates for Claude Code
@@ -26,8 +36,8 @@
   measured platform identity, while a locator-free API and rollout UI expose
   exact device/install/agent readiness and actionable blockers. This is a
   read-only preflight; hosted Microsoft Intune dispatch remains explicitly
-  disabled pending dedicated credentials, outbox/idempotency,
-  reauthorization and post-install attestation.
+  disabled pending customer credentials, enablement approval and live
+  post-install attestation acceptance.
 
 - Separated deterministic UI simulation from the HTTP-only production client,
   added emitted-asset purity and raw/gzip budget gates with adversarial tests,

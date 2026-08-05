@@ -273,10 +273,14 @@ provider-owned inputs that engineering must not invent:
   channel success remains `awaiting_attestation` until the governed host emits
   fresh exact runtime evidence.
 
-Until these inputs and an adapter-specific threat-model review exist, the
-control plane coordinates an administrator-owned external worker only. It does
-not claim hosted dispatch, remote installation or causal proof that a provider
-job produced the later attestation.
+The isolated hosted worker now exists but remains deployment-disabled. Before
+the first pilot, provide the inputs above, retain an adapter-specific review,
+create the exact secret resource registry, and approve a lowercase SHA-256
+enablement evidence identity. Set that digest together with
+`ENDPOINT_DELIVERY_DISPATCH_ENABLED=true`; CDK rejects either input alone.
+Current commands are limited to 40 targets. The product still does not claim
+live Intune compatibility, remote installation success or causal proof until a
+real provider run is followed by fresh exact runtime attestation.
 
 ### GitHub organization discovery pilot
 

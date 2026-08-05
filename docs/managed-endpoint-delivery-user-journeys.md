@@ -54,7 +54,7 @@ No manual “force bind” control exists. Ambiguity is corrected at its source.
    **release approved**, **package ready**, **target bound**, and
    **runtime verified**.
 5. The server creates exact dormant outbox commands automatically. Until the
-   separately reviewed worker exists, confirm they remain **Dispatch disabled**;
+   separately reviewed worker is enabled, confirm they remain **Dispatch disabled**;
    do not export or manually execute their internal instruction.
 6. Treat channel success as **Awaiting attestation**.
 7. Expand only after every selected endpoint has fresh exact target
@@ -96,7 +96,7 @@ No manual “force bind” control exists. Ambiguity is corrected at its source.
 2. Create, independently approve and activate the immutable provider
    configuration for one non-production deployment.
 3. Confirm deterministic commands are created with **Dispatch disabled**.
-4. Deploy the dedicated least-privilege Intune worker role and run synthetic
+4. Review the deployed dedicated least-privilege Intune worker role and run synthetic
    provider verification without exposing the credential value.
 5. Exercise install, response loss, duplicate submission, provider outage,
    retry, rotation, revocation and rollback.

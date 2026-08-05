@@ -11,12 +11,12 @@ provider worker can dispatch privileged installation work:
 2. a current bijective binding between one managed device, one observed
    installation and one active enrolled agent.
 
-This tranche does **not** call Microsoft Graph, upload executable bytes, read
+This authority tranche does **not** itself call Microsoft Graph, upload executable bytes, read
 Intune credentials or claim that an endpoint installed anything. It adds a
 read-only preflight plus an independently approved credential reference and a
 dormant transactional outbox beside the existing runtime-remediation queue. The
-API stores only a tenant/KMS/tag-validated secret ARN and cannot read its value. A
-provider worker still does not exist. The preflight lets an
+API stores only a tenant/KMS/tag-validated secret ARN and cannot read its value. An
+isolated provider worker now exists but is deployment-disabled by default. The preflight lets an
 operator can distinguish “release intent exists” from “release intent also has
 an exact approved delivery object and an unambiguous target identity.” The
 existing claim/report queue is unchanged and cannot retrieve package locators.
@@ -182,11 +182,11 @@ and package identity. Advanced package-bundle digests are collapsed behind
 Every metric and state has keyboard-focusable contextual help. Empty,
 unavailable, stale, forbidden and partial-page states explain one safe next
 action. The UI never offers an “Install” button until the separately reviewed
-Intune worker exists.
+Intune worker has been explicitly enabled and accepted.
 
 ## Intune worker sequence
 
-The next tranche may add hosted dispatch only after this authority is deployed:
+The disabled-by-default hosted worker follows this sequence after authority is deployed:
 
 1. a dedicated Lambda role authenticates to Microsoft Graph using a
    tenant-tagged Secrets Manager reference;
@@ -225,7 +225,7 @@ online and converge only an AAI-owned rollout cohort group. See
 | Secret reference crosses tenant or purpose | Draft and activation validate exact ARN namespace, dedicated KMS key and exact tenant/purpose tags with metadata-only authority. |
 | Partial per-device work is mistaken for complete Intune desired state | Individually authorized targets are sealed into bounded pages; only a complete package/cohort command receives an outbox key. |
 | Provider, rollout, agent or evidence changes during materialization | Conditional DynamoDB transactions roll back stale target, page or command creation. |
-| An old complete command remains after target drift | Dispatch is disabled in this phase; the future worker must suppress predecessors and reauthorize the complete live cohort before any Graph write. |
+| An old complete command remains after target drift | Dispatcher and worker reproduce the latest authority pointer and reauthorize the complete live cohort before every Graph write; predecessors are superseded. |
 
 ## Verification
 

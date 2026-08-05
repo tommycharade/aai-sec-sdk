@@ -685,6 +685,13 @@ _ENDPOINT_DELIVERY_SECRET_PREFIX = os.environ.get(
     "ENDPOINT_DELIVERY_SECRET_PREFIX", "aai-sec/endpoint-delivery/"
 )
 _ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN = os.environ.get("ENDPOINT_DELIVERY_SECRET_KMS_KEY_ARN", "")
+_ENDPOINT_DELIVERY_QUEUE_URL = os.environ.get("ENDPOINT_DELIVERY_QUEUE_URL", "")
+_ENDPOINT_DELIVERY_DISPATCH_ENABLED = (
+    os.environ.get("ENDPOINT_DELIVERY_DISPATCH_ENABLED", "false") == "true"
+)
+_ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256 = os.environ.get(
+    "ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256", ""
+)
 _CREDENTIAL_BROKER_PROVIDERS = frozenset(
     {"aws_sts", "azure_workload_identity", "gcp_workload_identity"}
 )
@@ -18188,7 +18195,7 @@ def _endpoint_delivery_command_view(record):
         "targetCount": int(record.get("target_count", 0)),
         "cohortDigest": record.get("cohort_digest"),
         "status": record.get("status"),
-        "dispatchEnabled": False,
+        "dispatchEnabled": _ENDPOINT_DELIVERY_DISPATCH_ENABLED,
         "instructionDigest": record.get("instruction_digest"),
         "createdAt": int(record.get("created_at", 0)),
         "updatedAt": int(record.get("updated_at", 0)),
@@ -18211,7 +18218,7 @@ def _endpoint_delivery_commands(tenant, deployment_id=None):
     )
     return {
         "items": [_endpoint_delivery_command_view(item) for item in records],
-        "dispatchEnabled": False,
+        "dispatchEnabled": _ENDPOINT_DELIVERY_DISPATCH_ENABLED,
         "nextCursor": None,
     }
 
@@ -18222,6 +18229,120 @@ def _endpoint_delivery_command_id(tenant, instruction):
     return hashlib.sha256(
         json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _endpoint_delivery_dispatch_ready():
+    """Return true only for an explicitly evidenced deployment cutover."""
+    return (
+        _ENDPOINT_DELIVERY_DISPATCH_ENABLED
+        and bool(_ENDPOINT_DELIVERY_QUEUE_URL)
+        and re.fullmatch(r"[0-9a-f]{64}", _ENDPOINT_DELIVERY_ENABLEMENT_EVIDENCE_SHA256) is not None
+    )
+
+
+def _dispatch_endpoint_delivery_command(record):
+    """Send only a latest immutable command identity to the isolated FIFO worker."""
+    if not _endpoint_delivery_dispatch_ready() or record.get("status") != "pending":
+        return False
+    tenant = record.get("tenant_id")
+    command_id = record.get("id")
+    if not isinstance(tenant, str) or not isinstance(command_id, str):
+        raise RuntimeError("endpoint delivery outbox identity is invalid")
+    instruction = record.get("instruction")
+    if not isinstance(instruction, dict):
+        raise RuntimeError("endpoint delivery outbox instruction is invalid")
+    authority = TABLE.get_item(
+        Key=_item_key(
+            tenant,
+            "ENDPOINT_DELIVERY_AUTHORITY",
+            f"{instruction.get('deploymentId')}:{instruction.get('packageId')}",
+        ),
+        ConsistentRead=True,
+    ).get("Item")
+    if (
+        not authority
+        or authority.get("command_id") != command_id
+        or authority.get("instruction_digest") != record.get("instruction_digest")
+        or authority.get("cohort_digest") != record.get("cohort_digest")
+    ):
+        return False
+    try:
+        SQS.send_message(
+            QueueUrl=_ENDPOINT_DELIVERY_QUEUE_URL,
+            MessageBody=json.dumps(
+                {"tenantId": tenant, "commandId": command_id}, separators=(",", ":")
+            ),
+            MessageGroupId=tenant,
+            MessageDeduplicationId=command_id,
+        )
+        queued = {
+            key: value
+            for key, value in record.items()
+            if key not in {"delivery_outbox_pk", "delivery_outbox_sk"}
+        }
+        queued.update({"status": "queued", "updated_at": int(time.time())})
+        try:
+            TABLE.put_item(
+                Item=queued,
+                ConditionExpression="#status = :pending AND instruction_digest = :digest",
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={
+                    ":pending": "pending",
+                    ":digest": record.get("instruction_digest"),
+                },
+            )
+        except Exception:
+            # The FIFO message is already authoritative and deduplicated. The
+            # worker accepts the original pending state after reauthorization.
+            return True
+        return True
+    except Exception:
+        # DynamoDB remains the outbox authority and the scheduled repair will
+        # retry. Provider details and queue errors are never persisted.
+        return False
+
+
+def _endpoint_delivery_dispatch_cycle():
+    """Repair bounded endpoint-delivery outboxes when dispatch is enabled."""
+    if not _endpoint_delivery_dispatch_ready():
+        return {"dispatchEnabled": False, "processedTenants": 0, "dispatchedCommands": 0}
+    registrations = []
+    for shard in range(_ENDPOINT_DETECTION_SHARDS):
+        result = TABLE.query(
+            IndexName=_ENDPOINT_DETECTION_INDEX,
+            KeyConditionExpression=Key("endpoint_detection_pk").eq(
+                f"ENDPOINT_DETECTION#{shard:02d}"
+            ),
+            Limit=250,
+        )
+        if result.get("LastEvaluatedKey"):
+            raise RuntimeError("endpoint delivery tenant shard exceeds its safe bound")
+        registrations.extend(result.get("Items", []))
+        if len(registrations) > _ENDPOINT_DETECTION_TENANT_LIMIT:
+            raise RuntimeError("endpoint delivery tenant inventory exceeds its safe bound")
+    dispatched = 0
+    for registration in registrations:
+        tenant = registration.get("endpoint_detection_sk")
+        if not isinstance(tenant, str) or registration.get("pk") != f"TENANT#{tenant}":
+            raise RuntimeError("endpoint delivery tenant registration is invalid")
+        result = TABLE.query(
+            IndexName=_ENDPOINT_DELIVERY_OUTBOX_INDEX,
+            KeyConditionExpression=Key("delivery_outbox_pk").eq(
+                f"ENDPOINT_DELIVERY_OUTBOX#{tenant}"
+            ),
+            Limit=101,
+        )
+        pending = result.get("Items", [])
+        if result.get("LastEvaluatedKey") or len(pending) > 100:
+            raise RuntimeError("endpoint delivery outbox exceeds its per-tenant bound")
+        for command in pending:
+            if _dispatch_endpoint_delivery_command(command):
+                dispatched += 1
+    return {
+        "dispatchEnabled": True,
+        "processedTenants": len(registrations),
+        "dispatchedCommands": dispatched,
+    }
 
 
 def _create_endpoint_delivery_commands(tenant, rollout):
@@ -18303,9 +18424,14 @@ def _create_endpoint_delivery_commands(tenant, rollout):
             "providerVersion": provider_version,
             "providerContentHash": provider.get("content_hash"),
             "deploymentId": deployment_id,
+            "agentKey": row.get("agentKey"),
             "agentId": row.get("agentId"),
             "agentLifecycleRevision": lifecycle_revision,
             "directoryDeviceRegistrationId": row.get("directoryDeviceRegistrationId"),
+            "deviceId": row.get("deviceId"),
+            "installationId": row.get("installationId"),
+            "operatingSystem": row.get("operatingSystem"),
+            "architecture": row.get("architecture"),
             "releaseId": row.get("releaseId"),
             "packageId": row.get("packageId"),
             "packageManifestSha256": package.get("manifestSha256"),
@@ -18321,6 +18447,7 @@ def _create_endpoint_delivery_commands(tenant, rollout):
             "bindingDigest": row.get("bindingDigest"),
             "endpointEvidenceRevision": int(evidence.get("revision", 0)),
             "endpointEvidenceDigest": evidence.get("reportDigest"),
+            "endpointEvidenceObservedAt": row.get("evidenceObservedAt"),
             "rolloutRevision": int(rollout["revision"]),
             "rolloutState": rollout["state"],
         }
@@ -18564,6 +18691,21 @@ def _create_endpoint_delivery_commands(tenant, rollout):
                 str(existing_command.get("instruction_digest", "")), instruction_digest
             ):
                 raise RuntimeError("endpoint delivery command identity collision")
+            authority = TABLE.get_item(
+                Key=_item_key(
+                    tenant,
+                    "ENDPOINT_DELIVERY_AUTHORITY",
+                    f"{deployment_id}:{package_id}",
+                ),
+                ConsistentRead=True,
+            ).get("Item")
+            if (
+                not authority
+                or authority.get("command_id") != command_id
+                or authority.get("instruction_digest") != instruction_digest
+            ):
+                raise RuntimeError("endpoint delivery latest-command authority is inconsistent")
+            _dispatch_endpoint_delivery_command(existing_command)
             continue
         command = {
             **command_key,
@@ -18603,6 +18745,29 @@ def _create_endpoint_delivery_commands(tenant, rollout):
             "system:rollout-reconciliation",
             audit_payload,
             now=now,
+        )
+        authority_key = _item_key(
+            tenant,
+            "ENDPOINT_DELIVERY_AUTHORITY",
+            f"{deployment_id}:{package_id}",
+        )
+        current_authority = TABLE.get_item(Key=authority_key, ConsistentRead=True).get("Item")
+        authority_revision = int(current_authority.get("revision", 0)) if current_authority else 0
+        authority = {
+            **authority_key,
+            "tenant_id": tenant,
+            "provider": "intune",
+            "deployment_id": deployment_id,
+            "package_id": package_id,
+            "command_id": command_id,
+            "instruction_digest": instruction_digest,
+            "rollout_revision": int(rollout["revision"]),
+            "cohort_digest": cohort_digest,
+            "revision": authority_revision + 1,
+            "updated_at": now,
+        }
+        authority_condition = (
+            "attribute_not_exists(pk)" if current_authority is None else "revision = :revision"
         )
         try:
             DYNAMODB.transact_write_items(
@@ -18649,6 +18814,13 @@ def _create_endpoint_delivery_commands(tenant, rollout):
                         )
                         for page in pages
                     ],
+                    _transaction_put(
+                        authority,
+                        condition=authority_condition,
+                        values=None
+                        if current_authority is None
+                        else {":revision": authority_revision},
+                    ),
                     _transaction_put(command, condition="attribute_not_exists(pk)"),
                     _transaction_put(audit_record, condition="attribute_not_exists(pk)"),
                 ]
@@ -18659,6 +18831,19 @@ def _create_endpoint_delivery_commands(tenant, rollout):
                 if current and secrets.compare_digest(
                     str(current.get("instruction_digest", "")), instruction_digest
                 ):
+                    current_authority = TABLE.get_item(Key=authority_key, ConsistentRead=True).get(
+                        "Item"
+                    )
+                    if (
+                        not current_authority
+                        or current_authority.get("command_id") != command_id
+                        or current_authority.get("instruction_digest") != instruction_digest
+                        or current_authority.get("cohort_digest") != cohort_digest
+                    ):
+                        raise PolicyConflict(
+                            "endpoint delivery authority changed during command sealing"
+                        ) from error
+                    _dispatch_endpoint_delivery_command(current)
                     continue
                 raise PolicyConflict(
                     "endpoint delivery authority changed during command sealing"
@@ -18670,6 +18855,7 @@ def _create_endpoint_delivery_commands(tenant, rollout):
             "system:rollout-reconciliation",
             audit_payload,
         )
+        _dispatch_endpoint_delivery_command(command)
         created_commands += 1
     return created_commands
 
@@ -25639,6 +25825,10 @@ def handler(event, context):
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("workflow dispatch schedule event is invalid")
         return _workflow_dispatch_cycle()
+    if isinstance(event, dict) and event.get("source") == "aai.endpoint-delivery-dispatch":
+        if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
+            raise ValueError("endpoint delivery dispatch schedule event is invalid")
+        return _endpoint_delivery_dispatch_cycle()
     if isinstance(event, dict) and event.get("source") == "aai.evidence-assurance":
         if set(event) != {"source", "schemaVersion"} or event.get("schemaVersion") != 1:
             raise ValueError("evidence assurance schedule event is invalid")
