@@ -106,3 +106,8 @@ Automated contracts must prove:
 
 Live acceptance still requires a customer-owned non-production Intune tenant,
 approved packages and managed Claude Code and Codex devices.
+
+The maximum bounded path has deterministic synthetic evidence in
+[Synthetic Intune continuation acceptance](synthetic-intune-continuation-acceptance-2026-08-05.md).
+That evidence executes the production handler and convergence functions, but
+does not replace live-provider or customer-capacity acceptance.

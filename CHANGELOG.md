@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add a network-incapable synthetic Intune acceptance harness that executes the
+  production continuation handler through 500 desired devices and bounded stale
+  membership cleanup, emits content-minimised mode-0600 evidence and explicitly
+  distinguishes deterministic control proof from live-provider acceptance.
+
 - Add fail-closed Microsoft Intune continuation authority for cohorts up to 500
   targets. The isolated worker processes one sealed 40-target page at a time,
   repairs lost continuation sends by exact revision, bounds stale-member
