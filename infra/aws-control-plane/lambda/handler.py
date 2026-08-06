@@ -4145,6 +4145,7 @@ def _machine_route_capability(method, path):
         "/enterprise/mcp-servers",
         "/enterprise/organizations",
         "/enterprise/policies",
+        "/enterprise/pilot-readiness",
         "/enterprise/projects",
         "/enterprise/runtime-releases",
         "/enterprise/runtime-remediations",
@@ -5743,6 +5744,23 @@ def _access_certification(tenant, event):
     return {**artifact, "generatedAt": generated_at, "contentHash": digest}
 
 
+def _splunk_posture():
+    """Return the code-owned Splunk stub posture without implying delivery.
+
+    The stub has no tenant credentials or mutable verification state. Keeping
+    this projection independent prevents an unrelated malformed credential or
+    isolation registration from making the readiness endpoint unavailable.
+    """
+    return {
+        "provider": "splunk_hec",
+        "status": "stub" if os.environ.get("SPLUNK_STUB_ENABLED") == "true" else "disabled",
+        "deliveryVerified": False,
+        "description": (
+            "Schema and operator workflow placeholder only; no event delivery is configured."
+        ),
+    }
+
+
 def _enterprise_integrations(tenant):
     """Return honest integration posture without exposing destination secrets."""
     brokers = [
@@ -5756,14 +5774,7 @@ def _enterprise_integrations(tenant):
     ]
     isolation_profiles.sort(key=lambda item: (item["name"].lower(), item["id"]))
     return {
-        "splunk": {
-            "provider": "splunk_hec",
-            "status": "stub" if os.environ.get("SPLUNK_STUB_ENABLED") == "true" else "disabled",
-            "deliveryVerified": False,
-            "description": (
-                "Schema and operator workflow placeholder only; no event delivery is configured."
-            ),
-        },
+        "splunk": _splunk_posture(),
         "credentialBrokers": brokers,
         "credentialBrokerProviders": sorted(_CREDENTIAL_BROKER_PROVIDERS),
         "credentialBrokerEvidenceTtlSeconds": _CREDENTIAL_BROKER_EVIDENCE_MAX_TTL_SECONDS,
@@ -24529,6 +24540,304 @@ def _discovery_export(tenant):
     return {**report, "contentHash": digest}
 
 
+def _design_partner_readiness(tenant, *, now=None):
+    """Derive controlled-pilot and enterprise rollout posture from live authority.
+
+    The result is read-only and content-minimised. Agents, browsers and models
+    cannot submit a readiness bit: missing, stale, ambiguous or malformed
+    tenant evidence either lowers a named item or makes this bounded read fail.
+    """
+    current = int(time.time()) if now is None else int(now)
+    agents = [
+        item
+        for item in _list(tenant, "AGENT", consistent_read=True)
+        if _agent_lifecycle_state(item) == "active"
+    ]
+    groups = _list(tenant, "GROUP", consistent_read=True)
+    active_policy_ids = {
+        str(item.get("id"))
+        for item in _list(tenant, "POLICY", consistent_read=True)
+        if isinstance(item.get("id"), str) and int(item.get("version", 0)) > 0
+    }
+    discovery = _discovery_report(tenant, now=current)
+    scim = _scim_lifecycle(tenant)
+
+    entra_ready = (
+        os.environ.get("ENTRA_PROVIDER_ENABLED") == "true"
+        and bool(os.environ.get("ENTRA_TENANT_ID"))
+        and os.environ.get("ENTRA_AAI_TENANT_ID") == tenant
+        and os.environ.get("ENTRA_STRONG_AUTH_ENFORCED") == "true"
+        and scim.get("status") == "configured"
+    )
+    coverage = discovery["summary"]
+    coverage_percent = coverage.get("coveragePercent")
+    coverage_ready = (
+        coverage.get("coverageAvailable") is True
+        and coverage.get("sourceComplete") is True
+        and isinstance(coverage_percent, (int, float))
+        and coverage_percent >= 95
+    )
+
+    # Only membership in one group backed by a live active policy counts. An
+    # invalid policy reference never creates apparent coverage.
+    assignment_counts = {}
+    agent_keys = {
+        f"{item.get('deployment_id')}:{item.get('id')}" for item in agents
+    }
+    for group in groups:
+        if group.get("policyId") not in active_policy_ids:
+            continue
+        for agent_key in set(group.get("agent_keys", [])):
+            if agent_key in agent_keys:
+                assignment_counts[agent_key] = assignment_counts.get(agent_key, 0) + 1
+    assigned = sum(assignment_counts.get(agent_key) == 1 for agent_key in agent_keys)
+    policy_ready = bool(agents) and assigned == len(agents)
+
+    managed = 0
+    runtime = 0
+    response_clear = 0
+    for agent in agents:
+        managed_posture = _managed_configuration_posture(tenant, agent, now=current)
+        native_posture = _native_effective_control_posture(tenant, agent, now=current)
+        if managed_posture.get("status") == "enforced" and native_posture.get("status") in {
+            "enforced",
+            "not_applicable",
+        }:
+            managed += 1
+        try:
+            manifest = _runtime_manifest(
+                tenant,
+                str(agent.get("deployment_id", "")),
+                str(agent.get("host", "")),
+                agent=agent,
+            )
+        except (PermissionError, ValueError):
+            manifest = None
+        if (
+            manifest
+            and agent.get("status") == "connected"
+            and int(agent.get("expires_at", 0)) > current
+            and agent.get("attestation_status") == "compliant"
+            and int(agent.get("attestation_expires_at", 0)) > current
+            and agent.get("attestation_sdk_version") == manifest.get("sdkVersion")
+            and agent.get("attestation_sdk_revision") == manifest.get("sdkRevision")
+            and agent.get("attestation_manifest_sha256") == _runtime_manifest_digest(manifest)
+        ):
+            runtime += 1
+        control = _agent_control_state(tenant, agent)
+        if not control.get("activeStopScopes") and control.get("quarantine") is None:
+            response_clear += 1
+
+    managed_ready = bool(agents) and managed == len(agents)
+    runtime_ready = bool(agents) and runtime == len(agents)
+    alerts = _list(tenant, "ALERT", consistent_read=True)
+    cases = _list(tenant, "CASE", consistent_read=True)
+    open_security_work = sum(
+        item.get("status") not in {"resolved", "closed"}
+        and str(item.get("severity", "")).lower() in {"high", "critical"}
+        for item in alerts + cases
+    )
+    fleet_stopped = _fleet_emergency_stop_active(tenant)
+    response_blockers = open_security_work + (len(agents) - response_clear) + int(fleet_stopped)
+    response_ready = (
+        bool(agents)
+        and response_clear == len(agents)
+        and not fleet_stopped
+        and open_security_work == 0
+    )
+
+    monitor = _evidence_monitor_view(_evidence_monitor_record(tenant))
+    monitor_checked_at = monitor.get("checkedAt")
+    evidence_ready = (
+        monitor.get("status") == "healthy"
+        and isinstance(monitor_checked_at, int)
+        and current - _EVIDENCE_JOB_FRESHNESS_SECONDS <= monitor_checked_at <= current
+    )
+    assurance_ready = (
+        CUSTOMER_ASSURANCE_RELEASE.get("status") == "available"
+        and not CUSTOMER_ASSURANCE_RELEASE.get("blockers")
+    )
+    splunk = _splunk_posture()
+
+    def item(
+        identifier,
+        label,
+        ready,
+        detail,
+        metric_value,
+        metric_label,
+        action_path,
+        *,
+        observed_at=None,
+        enterprise_only=False,
+        external=False,
+        deferred=False,
+    ):
+        """Build one closed, code-owned readiness item."""
+        status = (
+            "ready"
+            if ready
+            else "deferred"
+            if deferred
+            else "external_required"
+            if external
+            else "action_required"
+        )
+        return {
+            "id": identifier,
+            "label": label,
+            "status": status,
+            "requiredForPilot": not enterprise_only,
+            "requiredForEnterprise": True,
+            "detail": detail,
+            "metric": {"value": str(metric_value), "label": metric_label},
+            "actionPath": action_path,
+            "observedAt": observed_at,
+        }
+
+    items = [
+        item(
+            "enterprise_identity",
+            "Enterprise identity",
+            entra_ready,
+            "Entra SSO, SCIM and MFA are enforced."
+            if entra_ready
+            else "Configure tenant-bound Entra SSO, SCIM and mandatory MFA.",
+            "Enforced" if entra_ready else "Not ready",
+            "identity boundary",
+            "/api/enterprise/identity",
+            observed_at=scim.get("lastProvisionedAt"),
+        ),
+        item(
+            "population_coverage",
+            "Population coverage",
+            coverage_ready,
+            f"{coverage_percent}% of the complete pilot population is enrolled."
+            if coverage_ready
+            else "Complete identity, endpoint and source-control discovery must reach 95%.",
+            f"{coverage_percent}%" if coverage_percent is not None else "Unavailable",
+            "enrolled coverage",
+            "/api/enterprise/discovery",
+            observed_at=discovery.get("generatedAt"),
+        ),
+        item(
+            "policy_assignment",
+            "Policy assignment",
+            policy_ready,
+            "Every active agent has exactly one active central policy."
+            if policy_ready
+            else "Enroll agents and resolve missing, invalid or conflicting group policy assignments.",
+            f"{assigned}/{len(agents)}",
+            "agents assigned",
+            "/api/enterprise/groups",
+            observed_at=current,
+        ),
+        item(
+            "managed_host",
+            "Managed host policy",
+            managed_ready,
+            "Every active host reports the exact managed bundle and native controls."
+            if managed_ready
+            else "Fresh exact host policy and native-control evidence is required.",
+            f"{managed}/{len(agents)}",
+            "hosts enforced",
+            "/api/enterprise/agents",
+            observed_at=current,
+        ),
+        item(
+            "runtime_trust",
+            "Runtime trust",
+            runtime_ready,
+            "Every active agent is connected and bound to an approved release manifest."
+            if runtime_ready
+            else "Publish approved manifests and restore fresh release-bound attestation.",
+            f"{runtime}/{len(agents)}",
+            "agents verified",
+            "/api/enterprise/version-compliance",
+            observed_at=current,
+        ),
+        item(
+            "incident_response",
+            "Incident response",
+            response_ready,
+            "No stop, quarantine or unresolved high-severity security work blocks the pilot."
+            if response_ready
+            else "Resolve active containment and high-severity alerts or cases before rollout.",
+            str(response_blockers),
+            "response blockers",
+            "/api/enterprise/cases",
+            observed_at=current,
+        ),
+        item(
+            "durable_evidence",
+            "Durable evidence",
+            evidence_ready,
+            "Scheduled immutable-evidence assurance is healthy and current."
+            if evidence_ready
+            else "Run and resolve scheduled immutable-evidence assurance.",
+            str(monitor.get("status", "not_run")),
+            "assurance status",
+            "/api/enterprise/evidence",
+            observed_at=monitor_checked_at,
+        ),
+        item(
+            "buyer_assurance",
+            "Buyer assurance",
+            assurance_ready,
+            "The immutable release-bound customer assurance pack is available."
+            if assurance_ready
+            else "Release, legal and independent-assurance evidence remains outstanding.",
+            str(CUSTOMER_ASSURANCE_RELEASE.get("status", "unavailable")),
+            "release status",
+            "/api/enterprise/trust-center",
+            enterprise_only=True,
+            external=not assurance_ready,
+        ),
+        item(
+            "splunk_delivery",
+            "Splunk delivery",
+            splunk.get("deliveryVerified") is True,
+            "Production Splunk delivery and replay are verified."
+            if splunk.get("deliveryVerified") is True
+            else "Splunk is intentionally a stub; no production delivery is claimed.",
+            str(splunk.get("status", "disabled")),
+            "integration status",
+            "/api/enterprise/integrations",
+            enterprise_only=True,
+            deferred=splunk.get("deliveryVerified") is not True,
+        ),
+    ]
+    pilot_items = [value for value in items if value["requiredForPilot"]]
+    enterprise_items = [value for value in items if value["requiredForEnterprise"]]
+    pilot_ready = sum(value["status"] == "ready" for value in pilot_items)
+    enterprise_ready = sum(value["status"] == "ready" for value in enterprise_items)
+    report = {
+        "schemaVersion": 1,
+        "generatedAt": current,
+        "expiresAt": current + 60,
+        "scope": "tenant",
+        "pilot": {
+            "status": "ready" if pilot_ready == len(pilot_items) else "action_required",
+            "ready": pilot_ready,
+            "required": len(pilot_items),
+        },
+        "enterprise": {
+            "status": "ready"
+            if enterprise_ready == len(enterprise_items)
+            else "blocked",
+            "ready": enterprise_ready,
+            "required": len(enterprise_items),
+        },
+        "items": items,
+        "nonGuarantees": [
+            "Pilot readiness is not a compliance certification or penetration test.",
+            "Operational observations do not replace customer deployment approval.",
+            "A ready pilot does not waive any enterprise P0 rollout requirement.",
+        ],
+    }
+    return {**report, "contentHash": _canonical_sha256(report)}
+
+
 def _assurance_report(tenant, profile, *, now=None):
     """Build one content-addressed, read-only enterprise assurance summary.
 
@@ -27409,6 +27718,15 @@ def handler(event, context):
                         {"error": "auditor assurance requires evidence-read authority"},
                     )
                 return _response(200, _assurance_report(tenant, parts[1]))
+            if method == "GET" and parts == ["pilot-readiness"]:
+                if not _operator_authorized(
+                    event, "inventory_read", tenant, include_break_glass=False
+                ):
+                    return _response(
+                        403,
+                        {"error": "pilot readiness requires inventory-read authority"},
+                    )
+                return _response(200, _design_partner_readiness(tenant))
             if method == "GET" and parts in (
                 ["trust-center"],
                 ["trust-center", "download"],
