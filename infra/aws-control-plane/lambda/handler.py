@@ -364,14 +364,22 @@ _DYNAMIC_GROUP_FIELDS = frozenset(
     {
         "criticality",
         "deploymentId",
+        "endpointPosture",
         "environment",
         "host",
         "projectId",
         "region",
+        "riskLevel",
         "team",
     }
 )
 _DYNAMIC_GROUP_OPERATORS = frozenset({"equals_any", "not_equals_any"})
+_DYNAMIC_GROUP_CONTEXT_FIELDS = frozenset({"endpointPosture", "riskLevel"})
+_DYNAMIC_GROUP_ENUM_VALUES = {
+    "endpointPosture": frozenset({"healthy", "attention", "stale"}),
+    "riskLevel": frozenset({"none", "low", "medium", "high", "critical"}),
+}
+_DYNAMIC_GROUP_RISK_RANK = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 _DYNAMIC_GROUP_CONDITION_LIMIT = 7
 _DYNAMIC_GROUP_VALUE_LIMIT = 20
 _DYNAMIC_GROUP_MEMBER_LIMIT = 500
@@ -15057,6 +15065,9 @@ def _dynamic_group_rule(raw_rule):
         values = sorted({_bounded_text(value, "dynamic group value", 128) for value in raw_values})
         if len(values) != len(raw_values):
             raise ValueError("dynamic group condition values must be unique")
+        allowed_values = _DYNAMIC_GROUP_ENUM_VALUES.get(field)
+        if allowed_values is not None and not set(values).issubset(allowed_values):
+            raise ValueError(f"dynamic group {field} value is unsupported")
         seen_fields.add(field)
         conditions.append({"field": field, "operator": operator, "values": values})
     return {"match": "all", "conditions": sorted(conditions, key=lambda item: item["field"])}
@@ -15083,11 +15094,158 @@ def _dynamic_group_request(body):
     return mode, request_id, expected, _dynamic_group_rule(body.get("rule")), reason
 
 
-def _dynamic_agent_attributes(agent, deployment):
+def _dynamic_group_context_fields(rule):
+    """Return the server-derived fields required by one canonical rule."""
+    return frozenset(
+        condition["field"]
+        for condition in rule["conditions"]
+        if condition["field"] in _DYNAMIC_GROUP_CONTEXT_FIELDS
+    )
+
+
+def _dynamic_target_key(project_root_digest, host):
+    """Return an opaque installation target key or ``None`` for missing lineage."""
+    if not isinstance(project_root_digest, str) or re.fullmatch(
+        r"[0-9a-f]{64}", project_root_digest
+    ) is None:
+        return None
+    if not isinstance(host, str) or not host:
+        return None
+    return f"{project_root_digest}:{host}"
+
+
+def _dynamic_agent_target_key(agent):
+    """Digest an agent project root without retaining or returning its path."""
+    project_root = agent.get("project_root")
+    if not isinstance(project_root, str) or not project_root:
+        return None
+    return _dynamic_target_key(hashlib.sha256(project_root.encode()).hexdigest(), agent.get("host"))
+
+
+def _dynamic_risk_max(*values):
+    """Return the highest fixed risk tier and reject unknown retained values."""
+    if any(value not in _DYNAMIC_GROUP_RISK_RANK for value in values):
+        raise PolicyConflict("dynamic group risk evidence is malformed")
+    return max(values, key=lambda value: _DYNAMIC_GROUP_RISK_RANK[value])
+
+
+def _dynamic_group_security_context(tenant, fields, *, now=None):
+    """Derive content-minimised posture and risk from trusted retained evidence.
+
+    The browser supplies only a field selector. Device state comes from the
+    authenticated endpoint-evidence ledger and risk comes from retained alert
+    records. Missing or ambiguous device lineage deliberately yields no
+    ``endpointPosture`` attribute, so neither inclusion nor exclusion matches.
+    """
+    requested = frozenset(fields)
+    if not requested or not requested.issubset(_DYNAMIC_GROUP_CONTEXT_FIELDS):
+        raise ValueError("dynamic group context fields are invalid")
+    current = int(time.time()) if now is None else int(now)
+    target_devices = {}
+    device_targets = {}
+    reports = _list(tenant, "ENDPOINT_EVIDENCE", consistent_read=True)
+    for report in reports:
+        device_id = report.get("deviceId")
+        payload = report.get("payload")
+        installations = payload.get("installations") if isinstance(payload, dict) else None
+        if (
+            not isinstance(device_id, str)
+            or not device_id
+            or not isinstance(installations, list)
+            or len(installations) > 100
+        ):
+            raise PolicyConflict("dynamic group endpoint evidence is malformed")
+        for installation in installations:
+            if not isinstance(installation, dict):
+                raise PolicyConflict("dynamic group endpoint evidence is malformed")
+            target_key = _dynamic_target_key(
+                installation.get("projectRootDigest"), installation.get("host")
+            )
+            if target_key is None:
+                raise PolicyConflict("dynamic group endpoint evidence is malformed")
+            target_devices.setdefault(target_key, set()).add(device_id)
+            device_targets.setdefault(device_id, set()).add(target_key)
+
+    endpoint_by_target = {}
+    if "endpointPosture" in requested:
+        health = _endpoint_evidence_health(tenant, now=current)
+        health_items = health.get("items") if isinstance(health, dict) else None
+        if not isinstance(health_items, list):
+            raise PolicyConflict("dynamic group endpoint health is malformed")
+        health_by_device = {}
+        for item in health_items:
+            device_id = item.get("deviceId") if isinstance(item, dict) else None
+            status = item.get("status") if isinstance(item, dict) else None
+            if (
+                not isinstance(device_id, str)
+                or not device_id
+                or status not in _DYNAMIC_GROUP_ENUM_VALUES["endpointPosture"]
+                or device_id in health_by_device
+            ):
+                raise PolicyConflict("dynamic group endpoint health is malformed")
+            health_by_device[device_id] = status
+        for target_key, device_ids in target_devices.items():
+            if len(device_ids) != 1:
+                continue
+            device_id = next(iter(device_ids))
+            if device_id in health_by_device:
+                endpoint_by_target[target_key] = health_by_device[device_id]
+
+    risk_by_agent = {}
+    risk_by_target = {}
+    if "riskLevel" in requested:
+        for alert in _list(tenant, "ALERT", consistent_read=True):
+            status = alert.get("status")
+            if status == "resolved":
+                continue
+            if status not in {"open", "acknowledged", "suppressed"}:
+                raise PolicyConflict("dynamic group alert evidence is malformed")
+            severity = alert.get("severity")
+            if severity not in _DYNAMIC_GROUP_ENUM_VALUES["riskLevel"] - {"none"}:
+                raise PolicyConflict("dynamic group alert evidence is malformed")
+            agent_key = alert.get("agentKey")
+            if agent_key is None and alert.get("deploymentId") and alert.get("agentId"):
+                agent_key = f"{alert.get('deploymentId')}:{alert.get('agentId')}"
+            if agent_key is not None:
+                try:
+                    agent_key = _bounded_text(agent_key, "alert agentKey", 257)
+                except ValueError as error:
+                    raise PolicyConflict("dynamic group alert evidence is malformed") from error
+                risk_by_agent[agent_key] = _dynamic_risk_max(
+                    risk_by_agent.get(agent_key, "none"), severity
+                )
+            device_id = alert.get("deviceId")
+            if device_id is not None:
+                if not isinstance(device_id, str) or not device_id:
+                    raise PolicyConflict("dynamic group alert evidence is malformed")
+                for target_key in device_targets.get(device_id, set()):
+                    risk_by_target[target_key] = _dynamic_risk_max(
+                        risk_by_target.get(target_key, "none"), severity
+                    )
+
+    projection = {
+        "evaluatedAt": current,
+        "sources": sorted(
+            {
+                "endpoint-evidence" if field == "endpointPosture" else "alert-ledger"
+                for field in requested
+            }
+        ),
+        "endpointPostureByTarget": dict(sorted(endpoint_by_target.items())),
+        "riskLevelByAgent": dict(sorted(risk_by_agent.items())),
+        "riskLevelByTarget": dict(sorted(risk_by_target.items())),
+    }
+    projection["contextDigest"] = hashlib.sha256(
+        json.dumps(projection, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return projection
+
+
+def _dynamic_agent_attributes(agent, deployment, context=None):
     """Project only stable server-owned values used by dynamic membership."""
     ownership = agent.get("ownership")
     criticality = ownership.get("criticality") if isinstance(ownership, dict) else None
-    return {
+    attributes = {
         "criticality": criticality,
         "deploymentId": deployment.get("id"),
         "environment": deployment.get("environment"),
@@ -15096,6 +15254,17 @@ def _dynamic_agent_attributes(agent, deployment):
         "region": deployment.get("region"),
         "team": deployment.get("team"),
     }
+    if context is None:
+        return attributes
+    target_key = _dynamic_agent_target_key(agent)
+    if target_key is not None:
+        attributes["endpointPosture"] = context["endpointPostureByTarget"].get(target_key)
+    agent_key = f"{agent.get('deployment_id')}:{agent.get('id')}"
+    attributes["riskLevel"] = _dynamic_risk_max(
+        context["riskLevelByAgent"].get(agent_key, "none"),
+        context["riskLevelByTarget"].get(target_key, "none") if target_key else "none",
+    )
+    return attributes
 
 
 def _dynamic_rule_matches(rule, attributes):
@@ -15112,8 +15281,11 @@ def _dynamic_rule_matches(rule, attributes):
     return True
 
 
-def _dynamic_membership_evaluation(tenant, group, rule):
+def _dynamic_membership_evaluation(tenant, group, rule, *, context=None, now=None):
     """Derive desired membership and overlap conflicts from consistent state."""
+    context_fields = _dynamic_group_context_fields(rule)
+    if context_fields and context is None:
+        context = _dynamic_group_security_context(tenant, context_fields, now=now)
     group_id = group.get("id")
     organization_id = group.get("organizationId") or group.get("organization_id")
     if not group_id or not organization_id:
@@ -15148,7 +15320,9 @@ def _dynamic_membership_evaluation(tenant, group, rule):
             deployment.get("organization_id") or deployment.get("organizationId")
         ) != organization_id:
             raise PolicyConflict("dynamic group inventory lineage conflicts")
-        if not _dynamic_rule_matches(rule, _dynamic_agent_attributes(agent, deployment)):
+        if not _dynamic_rule_matches(
+            rule, _dynamic_agent_attributes(agent, deployment, context=context)
+        ):
             continue
         key = f"{deployment_id}:{agent_id}"
         other_groups = sorted(memberships.get(key, set()) - {group_id})
@@ -15206,7 +15380,16 @@ def _configure_dynamic_group(tenant, group_id, body, actor):
     if current_revision != expected:
         raise PolicyConflict("group membership revision is stale")
     current_keys = _group_agent_keys(group)
-    desired_keys, conflicts = _dynamic_membership_evaluation(tenant, group, rule)
+    evaluated_at = int(time.time())
+    context_fields = _dynamic_group_context_fields(rule)
+    context = (
+        _dynamic_group_security_context(tenant, context_fields, now=evaluated_at)
+        if context_fields
+        else None
+    )
+    desired_keys, conflicts = _dynamic_membership_evaluation(
+        tenant, group, rule, context=context, now=evaluated_at
+    )
     additions = sorted(set(desired_keys) - set(current_keys))
     removals = sorted(set(current_keys) - set(desired_keys))
     unchanged = sorted(set(current_keys) & set(desired_keys))
@@ -15226,6 +15409,13 @@ def _configure_dynamic_group(tenant, group_id, body, actor):
         "resultingMembershipRevision": next_revision,
         "rule": rule,
         "ruleHash": rule_hash,
+        "evaluation": {
+            "evaluatedAt": evaluated_at,
+            "contextDigest": context.get("contextDigest") if context else None,
+            "sources": (
+                context.get("sources") if context else ["control-plane-inventory"]
+            ),
+        },
         "counts": {
             "matched": len(desired_keys) + len(conflicts),
             "additions": len(additions),
@@ -15244,7 +15434,7 @@ def _configure_dynamic_group(tenant, group_id, body, actor):
         return response
     if conflicts:
         raise PolicyConflict("dynamic group rule overlaps another policy group")
-    now = int(time.time())
+    now = evaluated_at
     audit_payload = {
         "request_id": request_id,
         "request_hash": request_hash,
@@ -15256,6 +15446,8 @@ def _configure_dynamic_group(tenant, group_id, body, actor):
         "addition_count": len(additions),
         "removal_count": len(removals),
         "unchanged_count": len(unchanged),
+        "context_digest": context.get("contextDigest") if context else None,
+        "context_sources": context.get("sources") if context else ["control-plane-inventory"],
         "reason": reason,
     }
     audit = _membership_audit_record(
@@ -15281,6 +15473,10 @@ def _configure_dynamic_group(tenant, group_id, body, actor):
             "dynamic_rule_hash": rule_hash,
             "dynamic_last_evaluated_at": now,
             "dynamic_last_evaluated_by": actor,
+            "dynamic_context_digest": context.get("contextDigest") if context else None,
+            "dynamic_context_sources": (
+                context.get("sources") if context else ["control-plane-inventory"]
+            ),
         }
         if "membership_revision" in group:
             condition = "agent_keys = :agent_keys AND membership_revision = :membership_revision"
@@ -15326,6 +15522,11 @@ def _dynamic_reconciliation_status(tenant, group_id):
         "changed": bool(item.get("changed") is True),
         "counts": {key: int(value) for key, value in counts.items()},
         "errorCode": item.get("error_code") if outcome == "failed" else None,
+        "evaluation": {
+            "evaluatedAt": int(item.get("context_evaluated_at", item.get("last_attempt_at", 0))),
+            "contextDigest": item.get("context_digest"),
+            "sources": list(item.get("context_sources", ["control-plane-inventory"])),
+        },
     }
 
 
@@ -15340,6 +15541,7 @@ def _dynamic_status_record(
     changed=False,
     error_code=None,
     previous=None,
+    context=None,
 ):
     """Build bounded operational state without storing candidate membership."""
     last_success = now if outcome == "healthy" else (previous or {}).get("last_success_at", 0)
@@ -15353,6 +15555,9 @@ def _dynamic_status_record(
         "changed": bool(changed),
         "counts": counts,
         "error_code": error_code,
+        "context_digest": context.get("contextDigest") if context else None,
+        "context_sources": context.get("sources") if context else ["control-plane-inventory"],
+        "context_evaluated_at": context.get("evaluatedAt") if context else now,
     }
 
 
@@ -15421,7 +15626,7 @@ def _record_dynamic_reconciliation_failure(tenant, group, error_code, *, now):
     return status
 
 
-def _reconcile_dynamic_group(tenant, group, *, now=None):
+def _reconcile_dynamic_group(tenant, group, *, now=None, context=None):
     """Materialize one approved rule under exact live revision authority."""
     now = int(time.time()) if now is None else now
     if _group_membership_mode(group) != "dynamic":
@@ -15434,9 +15639,14 @@ def _reconcile_dynamic_group(tenant, group, *, now=None):
     rule_hash = hashlib.sha256(canonical_rule.encode()).hexdigest()
     if not secrets.compare_digest(str(group.get("dynamic_rule_hash", "")), rule_hash):
         raise PolicyConflict("dynamic group rule integrity check failed")
+    context_fields = _dynamic_group_context_fields(rule)
+    if context_fields and context is None:
+        context = _dynamic_group_security_context(tenant, context_fields, now=now)
     current_revision = _group_membership_revision(group)
     current_keys = _group_agent_keys(group)
-    desired_keys, conflicts = _dynamic_membership_evaluation(tenant, group, rule)
+    desired_keys, conflicts = _dynamic_membership_evaluation(
+        tenant, group, rule, context=context, now=now
+    )
     if conflicts:
         return _record_dynamic_reconciliation_failure(
             tenant, group, "policy_group_overlap", now=now
@@ -15463,6 +15673,7 @@ def _reconcile_dynamic_group(tenant, group, *, now=None):
         counts=counts,
         changed=changed,
         previous=previous,
+        context=context,
     )
     if not changed:
         TABLE.put_item(Item=status)
@@ -15473,6 +15684,10 @@ def _reconcile_dynamic_group(tenant, group, *, now=None):
         "membership_revision": next_revision,
         "dynamic_last_evaluated_at": now,
         "dynamic_last_evaluated_by": _DYNAMIC_GROUP_RECONCILIATION_ACTOR,
+        "dynamic_context_digest": context.get("contextDigest") if context else None,
+        "dynamic_context_sources": (
+            context.get("sources") if context else ["control-plane-inventory"]
+        ),
     }
     payload = {
         "group_id": group_id,
@@ -15483,6 +15698,8 @@ def _reconcile_dynamic_group(tenant, group, *, now=None):
         "addition_count": len(additions),
         "removal_count": len(removals),
         "unchanged_count": len(unchanged),
+        "context_digest": context.get("contextDigest") if context else None,
+        "context_sources": context.get("sources") if context else ["control-plane-inventory"],
     }
     audit = _membership_audit_record(
         tenant,
@@ -23250,6 +23467,7 @@ def _dynamic_group_reconciliation_cycle():
     processed_tenants = 0
     processed_groups = 0
     failed_groups = 0
+    context_cache = {}
     for registration in tenants:
         tenant = registration.get("endpoint_detection_sk")
         if not isinstance(tenant, str) or registration.get("pk") != f"TENANT#{tenant}":
@@ -23262,7 +23480,23 @@ def _dynamic_group_reconciliation_cycle():
             if processed_groups > _DYNAMIC_GROUP_RECONCILIATION_LIMIT:
                 raise RuntimeError("dynamic group schedule exceeds its safe bound")
             try:
-                result = _reconcile_dynamic_group(tenant, group)
+                rule = _dynamic_group_rule(group.get("dynamic_rule"))
+                context_fields = _dynamic_group_context_fields(rule)
+                context = None
+                if context_fields:
+                    cache_key = (tenant, tuple(sorted(context_fields)))
+                    cached = context_cache.get(cache_key)
+                    if isinstance(cached, Exception):
+                        raise cached
+                    if cached is None:
+                        try:
+                            cached = _dynamic_group_security_context(tenant, context_fields)
+                        except Exception as error:
+                            context_cache[cache_key] = error
+                            raise
+                        context_cache[cache_key] = cached
+                    context = cached
+                result = _reconcile_dynamic_group(tenant, group, context=context)
                 if result.get("outcome") == "failed":
                     failed_groups += 1
             except Exception as error:
@@ -24881,6 +25115,8 @@ def _fleet(tenant):
         group["dynamicRuleHash"] = group.get("dynamic_rule_hash")
         group["dynamicLastEvaluatedAt"] = group.get("dynamic_last_evaluated_at")
         group["dynamicLastEvaluatedBy"] = group.get("dynamic_last_evaluated_by")
+        group["dynamicContextDigest"] = group.get("dynamic_context_digest")
+        group["dynamicContextSources"] = group.get("dynamic_context_sources")
         group["dynamicReconciliation"] = (
             _dynamic_reconciliation_status(tenant, group.get("id", ""))
             if group["membershipMode"] == "dynamic"

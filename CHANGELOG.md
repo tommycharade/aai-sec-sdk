@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add server-derived endpoint-posture and open-alert-risk fields to governed
+  dynamic groups. Exact endpoint identity comes from authenticated device
+  evidence, unresolved retained alerts determine the highest risk tier, and
+  ambiguous or malformed context fails closed. Preview and scheduled
+  reconciliation retain content-minimised context proof and reuse one bounded
+  read per tenant/field set. The typed UI exposes only code-owned values.
+
 - Add a digest-bound macOS endpoint-sensor package builder with a fixed
   root-owned launch daemon, secret-free metadata, explicit package-signing
   posture, protected credential-file input and atomic mode-`0600` report
