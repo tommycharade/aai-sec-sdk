@@ -646,8 +646,24 @@ _ROLE_CAPABILITIES = {
     "auditor": frozenset({"access_certification_read", "evidence_read", "inventory_read"}),
 }
 _DELEGATABLE_OPERATOR_ROLES = frozenset(_CANONICAL_OPERATOR_ROLES - {"platform-admin"})
-_DELEGATED_SCOPE_TYPES = frozenset({"organization", "project", "deployment"})
+_DELEGATED_SCOPE_TYPES = frozenset(
+    {"tenant", "organization", "project", "environment", "deployment"}
+)
 _DELEGATED_GRANT_MAX_SECONDS = 366 * 24 * 60 * 60
+_CUSTOM_ROLE_CAPABILITIES = frozenset(
+    {
+        "approval_decision",
+        "evidence_read",
+        "fleet_write",
+        "incident_response",
+        "inventory_read",
+        "policy_approval",
+        "policy_simulation",
+        "policy_write",
+    }
+)
+_CUSTOM_ROLE_STATES = frozenset({"draft", "active", "rejected", "retired"})
+_CUSTOM_ROLE_LIMIT = 100
 _BREAK_GLASS_CAPABILITIES = frozenset(
     {
         "approval_decision",
@@ -3181,6 +3197,8 @@ def _required_mutation_capability(path):
         return "approval_decision"
     if normalized.startswith("/enterprise/identity/scim"):
         return "identity_admin"
+    if normalized.startswith("/enterprise/identity/custom-roles"):
+        return "identity_admin"
     if normalized.startswith("/enterprise/identity/delegated-grants"):
         return "identity_admin"
     if normalized.startswith("/enterprise/evidence"):
@@ -3325,7 +3343,7 @@ def _item_resource_scope(tenant, kind, identifier):
     organization_id = item.get("organization_id") or item.get("organizationId")
     project_id = item.get("project_id") or item.get("projectId")
     deployment_id = item.get("deployment_id") or item.get("deploymentId")
-    scope = {}
+    scope = {"tenant": tenant}
     if isinstance(organization_id, str) and organization_id:
         scope["organization"] = organization_id
     if isinstance(project_id, str) and project_id:
@@ -3334,7 +3352,10 @@ def _item_resource_scope(tenant, kind, identifier):
         scope["deployment"] = item.get("id", identifier)
     elif isinstance(deployment_id, str) and deployment_id:
         scope["deployment"] = deployment_id
-    return scope or None
+    environment = item.get("environment")
+    if isinstance(environment, str) and environment:
+        scope["environment"] = environment
+    return scope
 
 
 def _mutation_resource_scope(tenant, event, path):
@@ -3358,7 +3379,9 @@ def _mutation_resource_scope(tenant, event, path):
     if parts == ["deployments"]:
         project_id = body.get("projectId")
         try:
-            return _delegated_scope_lineage(tenant, "project", project_id)
+            scope = _delegated_scope_lineage(tenant, "project", project_id)
+            scope["environment"] = _bounded_text(body.get("environment"), "environment", 64)
+            return scope
         except (ValueError, LookupError):
             return None
     if parts and parts[0] == "deployments" and len(parts) >= 2:
@@ -3494,12 +3517,55 @@ _DELEGATED_READ_ROLES = {
     "AUDIT": frozenset({"security-operator", "auditor"}),
 }
 
+# Read visibility is derived from the same code-owned capability vocabulary
+# used for mutations. Custom-role authors cannot invent broad read privileges
+# or smuggle canonical-only platform authority into a role definition.
+_DELEGATED_READ_CAPABILITIES = {
+    "ORG": _CUSTOM_ROLE_CAPABILITIES,
+    "PROJECT": _CUSTOM_ROLE_CAPABILITIES,
+    "DEPLOYMENT": frozenset(
+        {"inventory_read", "fleet_write", "incident_response", "evidence_read"}
+    ),
+    "AGENT": frozenset({"inventory_read", "fleet_write", "incident_response", "evidence_read"}),
+    "GROUP": frozenset(
+        {
+            "inventory_read",
+            "fleet_write",
+            "incident_response",
+            "policy_write",
+            "policy_approval",
+            "policy_simulation",
+            "evidence_read",
+        }
+    ),
+    "POLICY": frozenset(
+        {"inventory_read", "policy_write", "policy_approval", "policy_simulation", "evidence_read"}
+    ),
+    "SKILL": frozenset({"inventory_read", "policy_write", "policy_approval", "evidence_read"}),
+    "MCP": frozenset({"inventory_read", "policy_write", "policy_approval", "evidence_read"}),
+    "CONFIGURATION": frozenset(
+        {"inventory_read", "fleet_write", "incident_response", "evidence_read"}
+    ),
+    "DRIFT": frozenset({"inventory_read", "fleet_write", "incident_response", "evidence_read"}),
+    "HEALTH": frozenset({"inventory_read", "fleet_write", "incident_response", "evidence_read"}),
+    "SLO": frozenset({"inventory_read", "fleet_write", "incident_response", "evidence_read"}),
+    "APPROVAL": frozenset({"approval_decision", "policy_approval", "evidence_read"}),
+    "ALERT": frozenset({"incident_response", "evidence_read"}),
+    "ALERT_SUPPRESSION": frozenset({"incident_response", "evidence_read"}),
+    "CASE": frozenset({"incident_response", "evidence_read"}),
+    "AUDIT": frozenset({"evidence_read"}),
+}
+
 
 def _delegated_item_scope(tenant, kind, item):
     """Resolve one list item into a scope without trusting presentation fields."""
     if kind == "ORG":
         identifier = item.get("id")
-        return {"organization": identifier} if isinstance(identifier, str) and identifier else None
+        return (
+            {"tenant": tenant, "organization": identifier}
+            if isinstance(identifier, str) and identifier
+            else None
+        )
     if kind == "PROJECT":
         identifier = item.get("id")
         try:
@@ -3537,8 +3603,16 @@ def _delegated_item_scope(tenant, kind, item):
 def _delegated_operator_can_read(tenant, event, kind, scope):
     """Authorize scoped read visibility from live role and resource grants."""
     allowed_roles = _DELEGATED_READ_ROLES.get(kind, frozenset())
+    allowed_capabilities = _DELEGATED_READ_CAPABILITIES.get(kind, frozenset())
     return any(
-        grant.get("role") in allowed_roles and _delegated_grant_covers(grant, scope)
+        (
+            (
+                grant.get("role_type", "canonical") == "canonical"
+                and grant.get("role") in allowed_roles
+            )
+            or bool(grant.get("_resolved_capabilities", frozenset()) & allowed_capabilities)
+        )
+        and _delegated_grant_covers(grant, scope)
         for grant in _active_delegated_grants(tenant, event)
     )
 
@@ -4302,14 +4376,22 @@ def _identity_access(tenant, event):
     )
     scim = _scim_lifecycle(tenant, include_operators=can_manage_delegation)
     all_grants = _delegated_grants(tenant)
+    all_custom_roles = _custom_roles(tenant)
     principal = _operator_principal(event)
     visible_grants = (
         all_grants
         if can_manage_delegation
         else [grant for grant in all_grants if grant["principalId"] == principal]
     )
+    visible_custom_roles = (
+        all_custom_roles
+        if can_manage_delegation
+        else [role for role in all_custom_roles if role["status"] == "active"]
+    )
+    deployments = _list(tenant, "DEPLOYMENT", consistent_read=True)
     scope_catalog = (
         {
+            "tenants": [{"id": tenant, "name": tenant}],
             "organizations": [
                 {"id": item.get("id", ""), "name": item.get("name", item.get("id", ""))}
                 for item in _list(tenant, "ORG", consistent_read=True)
@@ -4328,12 +4410,29 @@ def _identity_access(tenant, event):
                     "name": item.get("name", item.get("id", "")),
                     "organizationId": item.get("organization_id", ""),
                     "projectId": item.get("project_id", ""),
+                    "environment": item.get("environment", ""),
                 }
-                for item in _list(tenant, "DEPLOYMENT", consistent_read=True)
+                for item in deployments
+            ],
+            "environments": [
+                {"id": environment, "name": environment}
+                for environment in sorted(
+                    {
+                        item.get("environment")
+                        for item in deployments
+                        if isinstance(item.get("environment"), str) and item.get("environment")
+                    }
+                )
             ],
         }
         if can_manage_delegation
-        else {"organizations": [], "projects": [], "deployments": []}
+        else {
+            "tenants": [],
+            "organizations": [],
+            "projects": [],
+            "environments": [],
+            "deployments": [],
+        }
     )
     return {
         "provider": "microsoft_entra_id",
@@ -4358,6 +4457,8 @@ def _identity_access(tenant, event):
         "delegatedAdministration": {
             "canManage": can_manage_delegation,
             "grants": visible_grants,
+            "customRoles": visible_custom_roles,
+            "customRoleCapabilities": sorted(_CUSTOM_ROLE_CAPABILITIES),
             "scopeCatalog": scope_catalog,
         },
         "roleMatrix": [
@@ -4554,6 +4655,373 @@ def _operator_principal(event):
     return value
 
 
+def _delegated_governance_reason(value, name="reason"):
+    """Return bounded non-secret rationale used by delegated authority records."""
+    reason = _bounded_text(value, name, 500)
+    if len(reason) < 20:
+        raise ValueError(f"{name} must contain at least 20 characters")
+    if re.search(
+        r"(?i)(authorization\s*:\s*bearer|-----BEGIN [A-Z ]+PRIVATE KEY-----|"
+        r"(?:token|secret|password|api[_ -]?key)\s*[:=]\s*\S+)",
+        reason,
+    ):
+        raise ValueError(f"{name} must not contain credential material")
+    return reason
+
+
+def _custom_role_capability_set(value):
+    """Require a unique, non-empty subset of code-owned delegated capabilities."""
+    if (
+        not isinstance(value, list)
+        or not 1 <= len(value) <= len(_CUSTOM_ROLE_CAPABILITIES)
+        or any(not isinstance(item, str) for item in value)
+    ):
+        raise ValueError("custom role capabilities have an invalid schema")
+    capabilities = frozenset(value)
+    if len(capabilities) != len(value) or not capabilities <= _CUSTOM_ROLE_CAPABILITIES:
+        raise ValueError("custom role capability is unsupported or duplicated")
+    return capabilities
+
+
+def _custom_role_authority_digest(role_id, capabilities):
+    """Bind immutable custom-role authority independently from presentation text."""
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "customRoleId": role_id,
+                "capabilities": sorted(capabilities),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def _validated_custom_role(item, tenant, role_id=None):
+    """Fail closed unless one persisted custom role has exact immutable authority."""
+    required = {
+        "pk",
+        "sk",
+        "tenant_id",
+        "schemaVersion",
+        "id",
+        "name",
+        "description",
+        "capabilities",
+        "status",
+        "revision",
+        "authority_digest",
+        "created_at",
+        "created_by",
+        "reason",
+        "decided_at",
+        "decided_by",
+        "decision_reason",
+        "retired_at",
+        "retired_by",
+        "retirement_reason",
+        "updated_at",
+    }
+    if not isinstance(item, dict) or set(item) != required:
+        raise RuntimeError("custom role record has an invalid schema")
+    identifier = _bounded_identifier(item.get("id"), "customRoleId")
+    if (
+        item.get("tenant_id") != tenant
+        or (role_id is not None and identifier != role_id)
+        or {"pk": item.get("pk"), "sk": item.get("sk")}
+        != _item_key(tenant, "CUSTOM_ROLE", identifier)
+        or item.get("schemaVersion") != 1
+        or identifier in _CANONICAL_OPERATOR_ROLES
+    ):
+        raise RuntimeError("custom role identity is invalid")
+    try:
+        capabilities = _custom_role_capability_set(item.get("capabilities"))
+    except ValueError as error:
+        raise RuntimeError("custom role capabilities are invalid") from error
+    if not secrets.compare_digest(
+        str(item.get("authority_digest", "")),
+        _custom_role_authority_digest(identifier, capabilities),
+    ):
+        raise RuntimeError("custom role authority digest is invalid")
+    if item.get("status") not in _CUSTOM_ROLE_STATES:
+        raise RuntimeError("custom role status is invalid")
+    revision = item.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        raise RuntimeError("custom role revision is invalid")
+    for field in ("created_at", "updated_at"):
+        value = item.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise RuntimeError("custom role timestamp is invalid")
+    if item["updated_at"] < item["created_at"]:
+        raise RuntimeError("custom role timestamp order is invalid")
+    if not isinstance(item.get("name"), str) or not item["name"] or len(item["name"]) > 120:
+        raise RuntimeError("custom role name is invalid")
+    if not isinstance(item.get("description"), str) or len(item["description"]) > 500:
+        raise RuntimeError("custom role description is invalid")
+    if (
+        not isinstance(item.get("created_by"), str)
+        or not item["created_by"]
+        or len(item["created_by"]) > 256
+    ):
+        raise RuntimeError("custom role author is invalid")
+    try:
+        _delegated_governance_reason(item.get("reason"))
+    except ValueError as error:
+        raise RuntimeError("custom role creation evidence is invalid") from error
+    decision_fields = ("decided_at", "decided_by", "decision_reason")
+    retirement_fields = ("retired_at", "retired_by", "retirement_reason")
+    if item["status"] == "draft":
+        if revision != 1 or any(
+            item.get(field) is not None for field in (*decision_fields, *retirement_fields)
+        ):
+            raise RuntimeError("custom role draft lifecycle is invalid")
+    else:
+        if (
+            isinstance(item.get("decided_at"), bool)
+            or not isinstance(item.get("decided_at"), int)
+            or item["decided_at"] < item["created_at"]
+            or not isinstance(item.get("decided_by"), str)
+            or not item["decided_by"]
+            or len(item["decided_by"]) > 256
+        ):
+            raise RuntimeError("custom role decision evidence is invalid")
+        try:
+            _delegated_governance_reason(item.get("decision_reason"), "decision reason")
+        except ValueError as error:
+            raise RuntimeError("custom role decision evidence is invalid") from error
+        if item["status"] in {"active", "rejected"}:
+            if revision != 2 or any(item.get(field) is not None for field in retirement_fields):
+                raise RuntimeError("custom role decision lifecycle is invalid")
+        elif (
+            revision != 3
+            or isinstance(item.get("retired_at"), bool)
+            or not isinstance(item.get("retired_at"), int)
+            or item["retired_at"] < item["decided_at"]
+            or not isinstance(item.get("retired_by"), str)
+            or not item["retired_by"]
+            or len(item["retired_by"]) > 256
+        ):
+            raise RuntimeError("custom role retirement evidence is invalid")
+        if item["status"] == "retired":
+            try:
+                _delegated_governance_reason(item.get("retirement_reason"), "retirement reason")
+            except ValueError as error:
+                raise RuntimeError("custom role retirement evidence is invalid") from error
+    return item
+
+
+def _custom_role_view(item, tenant):
+    """Project one custom role without adding browser-owned authority."""
+    item = _validated_custom_role(item, tenant, item.get("id"))
+    return {
+        "id": item["id"],
+        "name": item["name"],
+        "description": item["description"],
+        "capabilities": sorted(item["capabilities"]),
+        "status": item["status"],
+        "revision": item["revision"],
+        "authorityDigest": item["authority_digest"],
+        "createdAt": item["created_at"],
+        "createdBy": item["created_by"],
+        "reason": item["reason"],
+        "decidedAt": item["decided_at"],
+        "decidedBy": item["decided_by"],
+        "decisionReason": item["decision_reason"],
+        "retiredAt": item["retired_at"],
+        "retiredBy": item["retired_by"],
+        "retirementReason": item["retirement_reason"],
+        "updatedAt": item["updated_at"],
+    }
+
+
+def _custom_role_records(tenant):
+    """Return a bounded, fully validated custom-role authority catalog."""
+    items = _list(tenant, "CUSTOM_ROLE", consistent_read=True)
+    if len(items) > _CUSTOM_ROLE_LIMIT:
+        raise RuntimeError("custom role catalog exceeds its safe bound")
+    return [_validated_custom_role(item, tenant) for item in items]
+
+
+def _custom_roles(tenant):
+    """Return custom-role governance records newest first."""
+    return sorted(
+        (_custom_role_view(item, tenant) for item in _custom_role_records(tenant)),
+        key=lambda item: (item["updatedAt"], item["id"]),
+        reverse=True,
+    )
+
+
+def _custom_role_record(tenant, role_id):
+    """Strongly load one exact custom role or report it missing."""
+    identifier = _bounded_identifier(role_id, "customRoleId")
+    item = TABLE.get_item(
+        Key=_item_key(tenant, "CUSTOM_ROLE", identifier), ConsistentRead=True
+    ).get("Item")
+    if not item:
+        raise LookupError("custom role not found")
+    return _validated_custom_role(item, tenant, identifier)
+
+
+def _create_custom_role(tenant, event, body):
+    """Create an immutable draft from a fixed safe capability vocabulary."""
+    if not isinstance(body, dict) or set(body) != {
+        "customRoleId",
+        "name",
+        "description",
+        "capabilities",
+        "reason",
+    }:
+        raise ValueError("custom role request has an invalid schema")
+    if len(_custom_role_records(tenant)) >= _CUSTOM_ROLE_LIMIT:
+        raise PolicyConflict("custom role catalog is full")
+    role_id = _bounded_identifier(body.get("customRoleId"), "customRoleId")
+    if role_id in _CANONICAL_OPERATOR_ROLES:
+        raise ValueError("custom role ID conflicts with a canonical role")
+    name = _bounded_text(body.get("name"), "name", 120)
+    description_value = body.get("description")
+    if (
+        not isinstance(description_value, str)
+        or len(description_value.strip()) > 500
+        or any(ord(char) < 32 for char in description_value)
+    ):
+        raise ValueError("description must be bounded text")
+    capabilities = _custom_role_capability_set(body.get("capabilities"))
+    reason = _delegated_governance_reason(body.get("reason"))
+    actor = _operator_subject(event)
+    now = int(time.time())
+    item = {
+        **_item_key(tenant, "CUSTOM_ROLE", role_id),
+        "tenant_id": tenant,
+        "schemaVersion": 1,
+        "id": role_id,
+        "name": name,
+        "description": description_value.strip(),
+        "capabilities": sorted(capabilities),
+        "status": "draft",
+        "revision": 1,
+        "authority_digest": _custom_role_authority_digest(role_id, capabilities),
+        "created_at": now,
+        "created_by": actor,
+        "reason": reason,
+        "decided_at": None,
+        "decided_by": None,
+        "decision_reason": None,
+        "retired_at": None,
+        "retired_by": None,
+        "retirement_reason": None,
+        "updated_at": now,
+    }
+    payload = {
+        "custom_role_id": role_id,
+        "authority_digest": item["authority_digest"],
+        "capabilities": sorted(capabilities),
+        "revision": 1,
+    }
+    audit = _identity_governance_audit_record(
+        tenant, "custom_role_created", actor, payload, now=now
+    )
+    _transact_identity_governance(
+        [
+            _transaction_put(item, condition="attribute_not_exists(pk)"),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_identity_governance_audit(tenant, "custom_role_created", actor, payload)
+    return _custom_role_view(item, tenant)
+
+
+def _decide_custom_role(tenant, event, role_id, body):
+    """Independently approve or reject one immutable custom-role draft."""
+    if not isinstance(body, dict) or set(body) != {"expectedRevision", "decision", "reason"}:
+        raise ValueError("custom role decision has an invalid schema")
+    expected = _discovery_integer(body.get("expectedRevision"), "expectedRevision", minimum=1)
+    decision = body.get("decision")
+    if decision not in {"approve", "reject"}:
+        raise ValueError("custom role decision is invalid")
+    reason = _delegated_governance_reason(body.get("reason"), "decision reason")
+    actor = _operator_subject(event)
+    current = _custom_role_record(tenant, role_id)
+    if current["status"] != "draft" or current["revision"] != expected:
+        raise PolicyConflict("custom role draft changed")
+    if actor == current["created_by"]:
+        raise PermissionError("custom role author cannot approve or reject their own draft")
+    now = int(time.time())
+    updated = {
+        **current,
+        "status": "active" if decision == "approve" else "rejected",
+        "revision": expected + 1,
+        "decided_at": now,
+        "decided_by": actor,
+        "decision_reason": reason,
+        "updated_at": now,
+    }
+    payload = {
+        "custom_role_id": current["id"],
+        "authority_digest": current["authority_digest"],
+        "decision": decision,
+        "revision": updated["revision"],
+    }
+    event_type = f"custom_role_{'approved' if decision == 'approve' else 'rejected'}"
+    audit = _identity_governance_audit_record(tenant, event_type, actor, payload, now=now)
+    _transact_identity_governance(
+        [
+            _transaction_put(
+                updated,
+                condition="#status = :draft AND #revision = :revision",
+                names={"#status": "status", "#revision": "revision"},
+                values={":draft": "draft", ":revision": expected},
+            ),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_identity_governance_audit(tenant, event_type, actor, payload)
+    return _custom_role_view(updated, tenant)
+
+
+def _retire_custom_role(tenant, event, role_id, body):
+    """Revoke future and existing authority from one active custom role."""
+    if not isinstance(body, dict) or set(body) != {"expectedRevision", "reason"}:
+        raise ValueError("custom role retirement has an invalid schema")
+    expected = _discovery_integer(body.get("expectedRevision"), "expectedRevision", minimum=1)
+    reason = _delegated_governance_reason(body.get("reason"), "retirement reason")
+    current = _custom_role_record(tenant, role_id)
+    if current["status"] != "active" or current["revision"] != expected:
+        raise PolicyConflict("custom role is not active at the expected revision")
+    actor = _operator_subject(event)
+    now = int(time.time())
+    updated = {
+        **current,
+        "status": "retired",
+        "revision": expected + 1,
+        "retired_at": now,
+        "retired_by": actor,
+        "retirement_reason": reason,
+        "updated_at": now,
+    }
+    payload = {
+        "custom_role_id": current["id"],
+        "authority_digest": current["authority_digest"],
+        "revision": updated["revision"],
+    }
+    audit = _identity_governance_audit_record(
+        tenant, "custom_role_retired", actor, payload, now=now
+    )
+    _transact_identity_governance(
+        [
+            _transaction_put(
+                updated,
+                condition="#status = :active AND #revision = :revision",
+                names={"#status": "status", "#revision": "revision"},
+                values={":active": "active", ":revision": expected},
+            ),
+            _transaction_put(audit, condition="attribute_not_exists(pk)"),
+        ]
+    )
+    _export_identity_governance_audit(tenant, "custom_role_retired", actor, payload)
+    return _custom_role_view(updated, tenant)
+
+
 def _delegated_grant_view(item, *, now=None):
     """Return one secret-free delegated authority record with live status."""
     current = int(time.time()) if now is None else now
@@ -4564,7 +5032,11 @@ def _delegated_grant_view(item, *, now=None):
     return {
         "id": item.get("id", ""),
         "principalId": item.get("principal_id", ""),
+        "roleType": item.get("role_type", "canonical"),
         "role": item.get("role", ""),
+        "roleLabel": item.get("role_name") or item.get("role", ""),
+        "roleRevision": int(item["role_revision"]) if item.get("role_revision") else None,
+        "roleDigest": item.get("role_digest") or None,
         "scopeType": item.get("scope_type", ""),
         "scopeId": item.get("scope_id", ""),
         "reason": item.get("reason", ""),
@@ -4582,14 +5054,22 @@ def _delegated_scope_lineage(tenant, scope_type, scope_id):
     """Resolve one tenant-owned scope and its immutable parent lineage."""
     if scope_type not in _DELEGATED_SCOPE_TYPES:
         raise ValueError("delegated scope type is unsupported")
-    identifier = _bounded_identifier(scope_id, "scopeId")
+    identifier = (
+        _bounded_text(scope_id, "scopeId", 64)
+        if scope_type == "environment"
+        else _bounded_identifier(scope_id, "scopeId")
+    )
+    if scope_type == "tenant":
+        if identifier != tenant:
+            raise LookupError("delegated tenant scope was not found")
+        return {"tenant": tenant}
     if scope_type == "organization":
         item = TABLE.get_item(Key=_item_key(tenant, "ORG", identifier), ConsistentRead=True).get(
             "Item"
         )
         if not item:
             raise LookupError("delegated organization scope was not found")
-        return {"organization": identifier}
+        return {"tenant": tenant, "organization": identifier}
     if scope_type == "project":
         item = TABLE.get_item(
             Key=_item_key(tenant, "PROJECT", identifier), ConsistentRead=True
@@ -4597,7 +5077,12 @@ def _delegated_scope_lineage(tenant, scope_type, scope_id):
         if not item:
             raise LookupError("delegated project scope was not found")
         organization_id = _bounded_identifier(item.get("organization_id"), "organizationId")
-        return {"organization": organization_id, "project": identifier}
+        return {"tenant": tenant, "organization": organization_id, "project": identifier}
+    if scope_type == "environment":
+        deployments = _list(tenant, "DEPLOYMENT", consistent_read=True)
+        if not any(item.get("environment") == identifier for item in deployments):
+            raise LookupError("delegated environment scope was not found")
+        return {"tenant": tenant, "environment": identifier}
     item = TABLE.get_item(Key=_item_key(tenant, "DEPLOYMENT", identifier), ConsistentRead=True).get(
         "Item"
     )
@@ -4605,9 +5090,12 @@ def _delegated_scope_lineage(tenant, scope_type, scope_id):
         raise LookupError("delegated deployment scope was not found")
     organization_id = _bounded_identifier(item.get("organization_id"), "organizationId")
     project_id = _bounded_identifier(item.get("project_id"), "projectId")
+    environment = _bounded_text(item.get("environment"), "deployment environment", 64)
     return {
+        "tenant": tenant,
         "organization": organization_id,
         "project": project_id,
+        "environment": environment,
         "deployment": identifier,
     }
 
@@ -4624,15 +5112,33 @@ def _active_delegated_grants(tenant, event):
     principal = _operator_principal(event)
     now = int(time.time())
     grants = []
+    # Resolve custom authority from the live, tenant-owned catalog on every
+    # decision. A retired or tampered role therefore invalidates all grants
+    # immediately without trusting the role snapshot stored on the grant.
+    custom_roles = {item["id"]: item for item in _custom_role_records(tenant)}
     for item in _list(tenant, "DELEGATED_GRANT", consistent_read=True):
-        if (
+        if not (
             item.get("principal_id") == principal
             and item.get("status") == "active"
             and int(item.get("expires_at", 0)) > now
-            and item.get("role") in _DELEGATABLE_OPERATOR_ROLES
             and item.get("scope_type") in _DELEGATED_SCOPE_TYPES
         ):
-            grants.append(item)
+            continue
+        role_type = item.get("role_type", "canonical")
+        if role_type == "canonical" and item.get("role") in _DELEGATABLE_OPERATOR_ROLES:
+            grants.append({**item, "_resolved_capabilities": _ROLE_CAPABILITIES[item["role"]]})
+            continue
+        if role_type != "custom":
+            continue
+        role = custom_roles.get(item.get("role"))
+        if (
+            role
+            and role["status"] == "active"
+            and item.get("role_revision") == role["revision"]
+            and isinstance(item.get("role_digest"), str)
+            and secrets.compare_digest(item["role_digest"], role["authority_digest"])
+        ):
+            grants.append({**item, "_resolved_capabilities": frozenset(role["capabilities"])})
     return grants
 
 
@@ -4644,7 +5150,7 @@ def _delegated_operator_authorized(tenant, event, capability, resource_scope):
     grants = [
         grant
         for grant in _active_delegated_grants(tenant, event)
-        if capability in _ROLE_CAPABILITIES.get(grant.get("role"), frozenset())
+        if capability in grant.get("_resolved_capabilities", frozenset())
     ]
     return bool(grants) and all(
         any(_delegated_grant_covers(grant, scope) for grant in grants) for scope in scopes
@@ -4666,6 +5172,19 @@ def _delegated_grants(tenant):
 
 def _create_delegated_grant(tenant, event, body):
     """Create one expiring, server-owned and resource-scoped operator grant."""
+    legacy_fields = {
+        "principalId",
+        "role",
+        "scopeType",
+        "scopeId",
+        "reason",
+        "durationDays",
+    }
+    if not isinstance(body, dict) or set(body) not in (
+        legacy_fields,
+        legacy_fields | {"roleType"},
+    ):
+        raise ValueError("delegated grant request has an invalid schema")
     actor = _operator_subject(event)
     actor_principal = _operator_principal(event)
     principal_id = _bounded_text(body.get("principalId"), "principalId", 256)
@@ -4686,21 +5205,31 @@ def _create_delegated_grant(tenant, event, body):
         ).get("Item")
         if not principal or principal.get("active") is not True:
             raise ValueError("delegated Entra principal is not actively provisioned")
-    role = body.get("role")
-    if role not in _DELEGATABLE_OPERATOR_ROLES:
-        raise ValueError("delegated role is unsupported")
+    role = _bounded_identifier(body.get("role"), "role")
+    role_type = body.get("roleType", "canonical")
+    role_revision = None
+    role_digest = None
+    role_name = role
+    if role_type == "canonical":
+        if role not in _DELEGATABLE_OPERATOR_ROLES:
+            raise ValueError("delegated role is unsupported")
+    elif role_type == "custom":
+        custom_role = _custom_role_record(tenant, role)
+        if custom_role["status"] != "active":
+            raise ValueError("custom role is not active")
+        role_revision = custom_role["revision"]
+        role_digest = custom_role["authority_digest"]
+        role_name = custom_role["name"]
+    else:
+        raise ValueError("delegated role type is unsupported")
     scope_type = body.get("scopeType")
-    scope_id = _bounded_identifier(body.get("scopeId"), "scopeId")
+    scope_id = (
+        _bounded_text(body.get("scopeId"), "scopeId", 64)
+        if body.get("scopeType") == "environment"
+        else _bounded_identifier(body.get("scopeId"), "scopeId")
+    )
     _delegated_scope_lineage(tenant, scope_type, scope_id)
-    reason = _bounded_text(body.get("reason"), "reason", 500)
-    if len(reason) < 20:
-        raise ValueError("reason must contain at least 20 characters")
-    if re.search(
-        r"(?i)(authorization\s*:\s*bearer|-----BEGIN [A-Z ]+PRIVATE KEY-----|"
-        r"(?:token|secret|password|api[_ -]?key)\s*[:=]\s*\S+)",
-        reason,
-    ):
-        raise ValueError("reason must not contain credential material")
+    reason = _delegated_governance_reason(body.get("reason"))
     duration_days = body.get("durationDays")
     if isinstance(duration_days, bool) or not isinstance(duration_days, int):
         raise ValueError("durationDays must be an integer")
@@ -4714,7 +5243,11 @@ def _create_delegated_grant(tenant, event, body):
         "tenant_id": tenant,
         "id": grant_id,
         "principal_id": principal_id,
+        "role_type": role_type,
         "role": role,
+        "role_name": role_name,
+        "role_revision": role_revision,
+        "role_digest": role_digest,
         "scope_type": scope_type,
         "scope_id": scope_id,
         "reason": reason,
@@ -4729,7 +5262,10 @@ def _create_delegated_grant(tenant, event, body):
     audit_payload = {
         "grant_id": grant_id,
         "principal_id": principal_id,
+        "role_type": role_type,
         "role": role,
+        "role_revision": role_revision,
+        "role_digest": role_digest,
         "scope_type": scope_type,
         "scope_id": scope_id,
         "expires_at": item["expires_at"],
@@ -4772,7 +5308,10 @@ def _revoke_delegated_grant(tenant, event, grant_id):
     audit_payload = {
         "grant_id": current.get("id", ""),
         "principal_id": current.get("principal_id", ""),
+        "role_type": current.get("role_type", "canonical"),
         "role": current.get("role", ""),
+        "role_revision": current.get("role_revision"),
+        "role_digest": current.get("role_digest"),
         "scope_type": current.get("scope_type", ""),
         "scope_id": current.get("scope_id", ""),
     }
@@ -5035,7 +5574,7 @@ def _access_certification(tenant, event):
                 }
             )
     artifact = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "tenantId": tenant,
         "identityProvider": "microsoft_entra_id",
         "lifecycleStatus": scim["status"],
@@ -5044,6 +5583,7 @@ def _access_certification(tenant, event):
         "groupMappings": scim["groupMappings"],
         "breakGlass": _break_glass_requests(tenant),
         "delegatedGrants": _delegated_grants(tenant),
+        "customRoles": _custom_roles(tenant),
         "roleMatrix": [
             {"role": role, "capabilities": sorted(capabilities)}
             for role, capabilities in _ROLE_CAPABILITIES.items()
@@ -5057,6 +5597,7 @@ def _access_certification(tenant, event):
         "content_hash": digest,
         "operator_count": len(operators),
         "delegated_grant_count": len(artifact["delegatedGrants"]),
+        "custom_role_count": len(artifact["customRoles"]),
     }
     audit_record = _identity_governance_audit_record(
         tenant, "access_certification_exported", actor, audit_payload, now=generated_at
@@ -15105,9 +15646,10 @@ def _dynamic_group_context_fields(rule):
 
 def _dynamic_target_key(project_root_digest, host):
     """Return an opaque installation target key or ``None`` for missing lineage."""
-    if not isinstance(project_root_digest, str) or re.fullmatch(
-        r"[0-9a-f]{64}", project_root_digest
-    ) is None:
+    if (
+        not isinstance(project_root_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", project_root_digest) is None
+    ):
         return None
     if not isinstance(host, str) or not host:
         return None
@@ -15412,9 +15954,7 @@ def _configure_dynamic_group(tenant, group_id, body, actor):
         "evaluation": {
             "evaluatedAt": evaluated_at,
             "contextDigest": context.get("contextDigest") if context else None,
-            "sources": (
-                context.get("sources") if context else ["control-plane-inventory"]
-            ),
+            "sources": (context.get("sources") if context else ["control-plane-inventory"]),
         },
         "counts": {
             "matched": len(desired_keys) + len(conflicts),
@@ -26536,6 +27076,7 @@ def handler(event, context):
                 marker in path
                 for marker in (
                     "/enterprise/identity/scim",
+                    "/enterprise/identity/custom-roles",
                     "/enterprise/identity/delegated-grants",
                 )
             )
@@ -27314,6 +27855,44 @@ def handler(event, context):
                         },
                     )
                 return _response(200, _access_certification(tenant, event))
+            if method == "GET" and parts == ["identity", "custom-roles"]:
+                if not _operator_authorized(
+                    event,
+                    "identity_admin",
+                    tenant,
+                    include_break_glass=False,
+                    include_delegated=False,
+                ):
+                    return _response(
+                        403,
+                        {
+                            "error": "operator role does not permit this action",
+                            "requiredCapability": "identity_admin",
+                        },
+                    )
+                return _response(200, {"items": _custom_roles(tenant), "nextCursor": None})
+            if method == "POST" and parts == ["identity", "custom-roles"]:
+                return _response(201, _create_custom_role(tenant, event, _body(event)))
+            if (
+                method == "POST"
+                and len(parts) == 4
+                and parts[:2] == ["identity", "custom-roles"]
+                and parts[3] == "decision"
+            ):
+                return _response(
+                    200,
+                    _decide_custom_role(tenant, event, parts[2], _body(event)),
+                )
+            if (
+                method == "POST"
+                and len(parts) == 4
+                and parts[:2] == ["identity", "custom-roles"]
+                and parts[3] == "retire"
+            ):
+                return _response(
+                    200,
+                    _retire_custom_role(tenant, event, parts[2], _body(event)),
+                )
             if method == "GET" and parts == ["identity", "delegated-grants"]:
                 if not _operator_authorized(
                     event,
