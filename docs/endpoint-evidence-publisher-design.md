@@ -170,12 +170,20 @@ Official references:
 
 ## Remaining production acceptance
 
-The implementation provides a deployable reference sensor and fleet assembly
-contract, not hardware-backed attestation or an MDM product package. Enterprise
-acceptance still requires root/admin rollout through the customer's Intune or
-Jamf tenant, independent verification of file ownership and secret delivery,
-successful reports from at least 95% of the agreed pilot, explicit review of
-the remaining devices, and UI health visibility for sensor/report freshness.
+The implementation provides a deployable reference sensor, a digest-bound
+[macOS MDM package builder](macos-endpoint-sensor-package.md), and the fleet
+assembly contract. Scheduled collection can read the key identifier and secret
+from protected root-owned files and atomically replace a mode-`0600` report.
+The installer is deliberately secret-free: MDM remains responsible for each
+device manifest and credential.
+
+This is not hardware-backed attestation or evidence of a live MDM rollout.
+Enterprise acceptance still requires root/admin rollout through the customer's
+Intune or Jamf tenant, independent verification of package signing, file
+ownership and secret delivery, successful reports from at least 95% of the
+agreed pilot, explicit review of the remaining devices, and UI health
+visibility for sensor/report freshness. Windows also remains fail-closed until
+an ACL adapter can prove the owner and effective write boundary.
 
 The optional [hosted endpoint evidence channel](hosted-endpoint-evidence.md)
 now provides central credential lifecycle, signed ingestion and server-derived

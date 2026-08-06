@@ -440,4 +440,75 @@ def test_sensor_cli_does_not_accept_a_plaintext_secret_flag() -> None:
     module = _module("collect_endpoint_evidence")
     actions = {option for action in module._parser()._actions for option in action.option_strings}
     assert "--secret" not in actions
+    assert {"--key-id-file", "--secret-file", "--output"}.issubset(actions)
     assert "AAI_ENDPOINT_EVIDENCE_KEY" not in os.environ
+
+
+def test_sensor_reads_only_exact_protected_key_material(tmp_path: Path) -> None:
+    module = _module("collect_endpoint_evidence")
+    uid = os.getuid()
+    secret = tmp_path / "endpoint.key"
+    secret.write_text("s" * 32, encoding="utf-8")
+    secret.chmod(0o600)
+    assert (
+        module._read_protected_text(
+            secret,
+            label="endpoint signing secret",
+            owner_uid=uid,
+            minimum_bytes=32,
+        )
+        == "s" * 32
+    )
+
+    secret.chmod(0o640)
+    with pytest.raises(module.EndpointEvidenceError, match="protected"):
+        module._read_protected_text(secret, label="endpoint signing secret", owner_uid=uid)
+    secret.chmod(0o600)
+    secret.write_text(f"{'s' * 32}\n", encoding="utf-8")
+    with pytest.raises(module.EndpointEvidenceError, match="whitespace"):
+        module._read_protected_text(secret, label="endpoint signing secret", owner_uid=uid)
+    target = tmp_path / "target.key"
+    secret.rename(target)
+    secret.symlink_to(target)
+    with pytest.raises(module.EndpointEvidenceError, match="protected"):
+        module._read_protected_text(secret, label="endpoint signing secret", owner_uid=uid)
+
+
+def test_sensor_atomically_replaces_a_protected_report(tmp_path: Path) -> None:
+    module = _module("collect_endpoint_evidence")
+    uid = os.getuid()
+    reports = tmp_path / "reports"
+    reports.mkdir(mode=0o700)
+    output = reports / "report.json"
+    report = {"keyId": "key-a", "payload": {"schemaVersion": 2}, "signature": "a" * 64}
+
+    module.write_signed_report(output, report, owner_uid=uid, effective_uid=uid)
+    assert json.loads(output.read_text(encoding="utf-8")) == report
+    assert output.stat().st_mode & 0o777 == 0o600
+    assert not list(reports.glob("*.aai-stage-*"))
+
+    replacement = {**report, "signature": "b" * 64}
+    module.write_signed_report(output, replacement, owner_uid=uid, effective_uid=uid)
+    assert json.loads(output.read_text(encoding="utf-8")) == replacement
+
+
+def test_sensor_report_output_rejects_unsafe_authority(tmp_path: Path) -> None:
+    module = _module("collect_endpoint_evidence")
+    uid = os.getuid()
+    reports = tmp_path / "reports"
+    reports.mkdir(mode=0o700)
+    output = reports / "report.json"
+    report = {"keyId": "key-a", "payload": {"schemaVersion": 2}, "signature": "a" * 64}
+
+    with pytest.raises(module.EndpointEvidenceError, match="administrator"):
+        module.write_signed_report(output, report, owner_uid=uid, effective_uid=uid + 1)
+    reports.chmod(0o777)
+    with pytest.raises(module.EndpointEvidenceError, match="directory is not protected"):
+        module.write_signed_report(output, report, owner_uid=uid, effective_uid=uid)
+    reports.chmod(0o700)
+    target = tmp_path / "outside.json"
+    target.write_text("outside", encoding="utf-8")
+    output.symlink_to(target)
+    with pytest.raises(module.EndpointEvidenceError, match="output is not protected"):
+        module.write_signed_report(output, report, owner_uid=uid, effective_uid=uid)
+    assert target.read_text(encoding="utf-8") == "outside"

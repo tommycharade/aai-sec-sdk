@@ -151,8 +151,15 @@ endpoint discovery handoff. It proves administrator-only collection, exact
 binary/process measurement, path and secret minimisation, symlink and binary
 tamper behavior, per-device signature binding, stale/revoked/cross-device and
 duplicate-report rejection, unknown-field denial, exact MDM metadata matching,
-and compatibility with the existing endpoint normalizer. Real MDM rollout and
-95% pilot report freshness remain deployment acceptance; see
+protected key-file ownership/mode enforcement, atomic mode-`0600` report
+replacement, and compatibility with the existing endpoint normalizer.
+`tests/test_macos_endpoint_sensor_package.py` proves digest binding,
+secret-free package contents, fixed shell-free launchd arguments, explicit
+signed/unsigned posture, protected output handling and fail-closed macOS tool
+execution. On macOS, `scripts/test_macos_endpoint_sensor_package.py` assembles
+and inspects a disposable package with the real `pkgbuild` and `pkgutil` tools;
+it does not claim MDM deployment or production code signing. Real MDM rollout
+and 95% pilot report freshness remain deployment acceptance; see
 [Endpoint evidence publisher](endpoint-evidence-publisher-design.md).
 `scripts/test_endpoint_evidence.py` is the isolated root/admin acceptance
 command. With the `endpoint` extra installed, it measures the live Python
