@@ -36,6 +36,7 @@ _KEY_ID_PATH = _CONFIGURATION_ROOT / "endpoint-evidence-key-id"
 _SECRET_PATH = _CONFIGURATION_ROOT / "endpoint-evidence.key"
 _REPORT_ROOT = Path("/var/db/aai-security/endpoint-evidence")
 _REPORT_PATH = _REPORT_ROOT / "report.json"
+_RUNTIME_TEMP_ROOT = _REPORT_ROOT / "runtime"
 _LOG_ROOT = Path("/var/log/aai-security")
 _LOG_PATH = _LOG_ROOT / "endpoint-evidence.log"
 _PLIST_PATH = Path("/Library/LaunchDaemons") / f"{_LAUNCHD_LABEL}.plist"
@@ -197,6 +198,9 @@ def _launchd_plist(interval_seconds: int) -> bytes:
         "UserName": "root",
         "GroupName": "wheel",
         "Umask": 0o077,
+        # PyInstaller one-file extraction happens before sensor code executes;
+        # launchd must therefore provide a protected root-owned temp boundary.
+        "EnvironmentVariables": {"TMPDIR": str(_RUNTIME_TEMP_ROOT)},
         "StandardOutPath": "/dev/null",
         "StandardErrorPath": str(_LOG_PATH),
     }
@@ -209,6 +213,7 @@ def _postinstall_script() -> bytes:
 set -eu
 /usr/bin/install -d -o root -g wheel -m 0700 '/Library/Application Support/AAI Security/config'
 /usr/bin/install -d -o root -g wheel -m 0700 '/var/db/aai-security/endpoint-evidence'
+/usr/bin/install -d -o root -g wheel -m 0700 '/var/db/aai-security/endpoint-evidence/runtime'
 /usr/bin/install -d -o root -g wheel -m 0755 '/var/log/aai-security'
 /usr/sbin/chown root:wheel '/Library/Application Support/AAI Security'
 /bin/chmod 0755 '/Library/Application Support/AAI Security'

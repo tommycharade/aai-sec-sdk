@@ -76,6 +76,16 @@ does not permit an independently selected source ref and release tag. These chec
 identity and provenance bindings; they do not certify the package's runtime
 behavior or external provider deployments.
 
+The endpoint sensor has a separate macOS build boundary documented in
+[macOS endpoint sensor artifact](macos-endpoint-sensor-artifact.md). Pull
+requests build disposable arm64 and Intel ad-hoc artifacts with exact direct
+inputs and seven-day retention. Those files are deliberately not tag-triggered,
+attested or published because their measured test entitlement weakens library
+validation. A future production release may add the Developer ID executable as
+a release subject only after the signing/notarization identity and clean
+verification job are approved. Wheel/source provenance must not be presented as
+provenance for a separately frozen macOS executable.
+
 ### Standalone adopter verification
 
 Adopters can verify downloaded release evidence without trusting the build

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add an exact-input macOS endpoint-sensor artifact builder and independent
+  verifier for arm64 and Intel. Closed manifests bind source, commit,
+  toolchain, Mach-O architecture, executable, Developer ID leaf identity and
+  entitlements; one-file extraction uses a protected runtime directory.
+  Disposable ad-hoc CI is explicitly weakened, measured, seven-day-only and
+  never published as production release provenance.
+
 - Add a digest-bound macOS endpoint-sensor package builder with a fixed
   root-owned launch daemon, secret-free metadata, explicit package-signing
   posture, protected credential-file input and atomic mode-`0600` report

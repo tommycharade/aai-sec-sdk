@@ -17,7 +17,10 @@ compromised root administrator.
 ## Package boundary
 
 `scripts/build_macos_endpoint_sensor_package.py` accepts a prebuilt endpoint
-sensor executable and its independently delivered SHA-256. It builds a macOS
+sensor executable and its independently delivered SHA-256. Build and verify
+that input through the
+[macOS sensor artifact boundary](macos-endpoint-sensor-artifact.md) before
+packaging it. The package builder builds a macOS
 installer with the fixed identifier
 `com.aai-security.endpoint-evidence`. A normal operator build requires a
 Developer ID Installer signing identity; unsigned output requires the explicit
@@ -71,6 +74,12 @@ interval can be increased up to 3,600 seconds at package build time, but cannot
 be reduced below the five-minute enterprise detection target. The job passes
 only the fixed manifest, key-ID, secret and output file paths.
 
+The frozen one-file executable extracts native libraries before Python sensor
+code starts. The package therefore creates the root-owned mode-`0700`
+`/var/db/aai-security/endpoint-evidence/runtime` directory and launchd sets it
+as `TMPDIR`. This extraction boundary is fixed deployment authority and cannot
+come from the manifest, model or endpoint report.
+
 The sensor writes:
 
 ```text
@@ -90,10 +99,11 @@ text and never print credential bytes or the manifest's project paths.
 
 ## Build journey
 
-The sensor executable is a release artifact, not a source checkout. Build or
-retrieve the reviewed standalone executable first, verify its release
-provenance, and obtain its SHA-256 through an independent channel. Then run on
-macOS:
+The sensor executable is a release artifact, not a source checkout. Build and
+independently verify it using the
+[artifact runbook](macos-endpoint-sensor-artifact.md), or retrieve it from an
+equivalent reviewed release service. Obtain its SHA-256 through an independent
+channel. Then run on macOS:
 
 ```bash
 python3 scripts/build_macos_endpoint_sensor_package.py \
@@ -172,6 +182,7 @@ The package guarantees, when its preconditions hold:
 
 - exact sensor bytes are bound to an out-of-band SHA-256 and signed package;
 - launchd invokes a fixed program and arguments without a shell;
+- launchd supplies a protected root-owned one-file extraction directory;
 - per-device credentials are absent from the package and command line;
 - scheduled credential reads and report writes enforce root ownership, modes,
   regular-file identity and no-follow behavior; and

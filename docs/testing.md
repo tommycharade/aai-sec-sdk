@@ -161,6 +161,18 @@ and inspects a disposable package with the real `pkgbuild` and `pkgutil` tools;
 it does not claim MDM deployment or production code signing. Real MDM rollout
 and 95% pilot report freshness remain deployment acceptance; see
 [Endpoint evidence publisher](endpoint-evidence-publisher-design.md).
+
+`tests/test_macos_endpoint_sensor_artifact.py` proves closed atomic artifact
+generations, exact build dependencies, source/executable/manifest tamper denial,
+symlink and weak-permission denial, architecture and tool failure behavior,
+frozen CLI completeness, measured ad-hoc entitlements, independently bound
+Developer ID identity and non-release CI semantics.
+`scripts/test_macos_endpoint_sensor_artifact.py` uses the real pinned
+PyInstaller, psutil, `lipo`, `codesign` and frozen executable on macOS. The
+dedicated workflow repeats disposable ad-hoc evidence on official arm64 and
+Intel runners but cannot satisfy production Developer ID, notarization or MDM
+acceptance. See
+[macOS endpoint sensor artifact](macos-endpoint-sensor-artifact.md).
 `scripts/test_endpoint_evidence.py` is the isolated root/admin acceptance
 command. With the `endpoint` extra installed, it measures the live Python
 process and executable, proves that temporary paths and the synthetic secret do

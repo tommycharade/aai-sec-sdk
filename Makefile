@@ -28,6 +28,7 @@ security-check:
 	$(PYTHON) -m pip_audit --strict -r requirements-docs.txt
 	$(PYTHON) -m pip_audit --strict -r requirements-ci.txt
 	$(PYTHON) -m pip_audit --strict -r requirements-build.txt
+	$(PYTHON) -m pip_audit --strict -r requirements-sensor-build.txt
 
 mutation-check:
 	$(PYTHON) scripts/check_mutation_baseline.py

@@ -1184,6 +1184,24 @@ provenance, not MDM authorization, endpoint health, successful installation,
 runtime activity or hardware-backed device identity. See
 [macOS endpoint sensor MDM package](macos-endpoint-sensor-package.md).
 
+The standalone macOS sensor is a separate build-time supply-chain boundary.
+Its builder accepts exact reviewed source bytes and release identity, invokes a
+pinned PyInstaller toolchain with a closed environment and no shell, and
+commits one architecture-specific executable plus closed manifest atomically.
+The independent verifier remeasures the executable, manifest, Mach-O
+architecture, frozen command interface, code signature and entitlement set.
+Production verification requires a Developer ID Application leaf-authority
+digest supplied out of band. Disposable ad-hoc builds require an explicit flag
+and exactly one measured `disable-library-validation` entitlement because the
+Python.org framework and ad-hoc outer executable have different signing teams;
+that posture cannot satisfy production verification or release publication.
+PyInstaller one-file extraction occurs before collector code, so launchd,
+verification and acceptance supply a pre-created mode-`0700` `TMPDIR`. A source
+digest or code signature does not prove build-runner integrity, Apple
+certificate control, notarization, MDM installation, runtime activity or
+hardware identity. See
+[macOS endpoint sensor artifact](macos-endpoint-sensor-artifact.md).
+
 Hosted Intune delivery is a separate privileged boundary. Intune app
 deployment is group-assignment based, so the control plane derives an exact
 rollout cohort rather than treating a managed-device ID as a command target.
