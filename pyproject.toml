@@ -129,6 +129,13 @@ pytest_add_cli_args = [
   "--ignore=tests/test_managed_deployment.py",
   "--ignore=tests/test_managed_endpoint_installer.py",
   "--ignore=tests/test_upgrade_managed_package_trust.py",
+  # These suites validate repository-owned assurance scripts and evidence
+  # files. The bounded mutation source scope contains only runtime modules, so
+  # rerunning them for every runtime mutant cannot contribute a killed mutant.
+  # They remain mandatory in every normal and coverage test matrix.
+  "--ignore=tests/test_customer_assurance_bundle.py",
+  "--ignore=tests/test_customer_assurance_pack.py",
+  "--ignore=tests/test_vulnerability_management.py",
   "-k",
   "not test_handler_completion_is_local_and_stress_timeouts_do_not_retain_registry and not test_onboarding_script_imports_adjacent_checkout_without_install and not test_agent_client_sends_bounded_authenticated_registration_and_heartbeat and not test_aws_agent_client_rejects_unsigned_or_cross_tenant_policy and not test_aws_policy_trust_cutover_readiness_requires_every_live_authority and not test_aws_managed_package_v2_requires_exact_deployment_owned_trust and not test_agent_client_requires_v2_trust_digest_outside_package_bytes",
 ]

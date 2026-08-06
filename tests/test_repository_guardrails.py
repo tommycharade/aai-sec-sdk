@@ -56,11 +56,17 @@ def test_quality_gate_propagates_coverage_failure() -> None:
 
 
 def test_mutation_workspace_copies_assurance_evidence_inputs() -> None:
-    """Mutation's isolated checkout must retain files read by assurance tests."""
+    """Mutation's isolated checkout must retain assurance guardrail inputs."""
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert '"assurance/",' in project
     assert '"security/",' in project
     assert '"SECURITY.md",' in project
+    for test_module in (
+        "tests/test_customer_assurance_bundle.py",
+        "tests/test_customer_assurance_pack.py",
+        "tests/test_vulnerability_management.py",
+    ):
+        assert f'"--ignore={test_module}",' in project
 
 
 def test_license_policy_is_explicit() -> None:
