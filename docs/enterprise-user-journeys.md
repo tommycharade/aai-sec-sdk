@@ -127,6 +127,26 @@ If any source is missing, incomplete, or stale, the journey stops at source
 recovery. The UI must not present a percentage or recommend destructive action
 from absence alone.
 
+### Journey 4a: Decide whether a controlled pilot can begin
+
+**Actor:** Platform owner and security operations engineer.
+
+1. Open **Overview** and review the controlled-pilot score separately from the
+   enterprise score. Do not infer readiness from the fleet headline.
+2. Inspect all seven pilot foundations. A missing, expired or unavailable
+   server response appears as **Checking** or **Action required**, never ready.
+3. Use each card's help text and fixed destination to resolve its owning
+   identity, coverage, policy, host, runtime, incident or evidence blocker.
+4. Refresh after the control plane has new evidence. Begin the bounded pilot
+   only when all seven foundations are current and ready and customer change
+   control approves the rollout.
+5. Keep the enterprise result blocked until buyer assurance and production
+   SIEM delivery are independently complete. The parked Splunk stub is not an
+   export, replay or monitoring control.
+
+The score is an operational go/no-go aid. It is not a certification,
+penetration test, legal approval or substitute for customer acceptance.
+
 ### Journey 4b: Review enterprise assurance
 
 **Actor:** Executive sponsor, security leader, auditor or evidence reader.

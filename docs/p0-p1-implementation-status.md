@@ -35,6 +35,27 @@ mock, heartbeat or local test cannot be mistaken for enterprise acceptance.
 P0-08 is complete for the deployed evidence boundary. The remaining partial P0
 rows still prevent enterprise-wide rollout.
 
+## Current delivery slice — design-partner readiness
+
+The Overview decision is now an authenticated, tenant-scoped server projection
+rather than a browser calculation. Seven independently evaluated foundations
+gate a controlled pilot: Entra/SCIM/MFA, complete discovery at or above 95%,
+exactly one active policy assignment, managed-host enforcement, release-bound
+runtime trust, clear response state and fresh durable-evidence monitoring.
+Buyer assurance and Splunk delivery remain separate enterprise requirements.
+
+The route accepts no caller evidence, uses bounded strongly consistent reads,
+expires after sixty seconds and returns a canonical content hash. Adversarial
+contracts cover every failed pilot foundation, no-agent posture, stale runtime
+and evidence, conflicting policy assignments, containment, unresolved severe
+work, role and machine-scope denial, caller-input irrelevance and deterministic
+hashing. UI contracts cover unavailable and expired fail-closed states, the
+separate 7/9 decisions, fixed remediation routing, help text and accessibility.
+
+This does not change the ledger statuses above. In particular, the honest
+Splunk stub and unreleased buyer-assurance archive prevent enterprise readiness,
+and real customer Entra, endpoint and workload acceptance remains required.
+
 ## Current delivery slice — managed host authority
 
 The managed-host compiler converts typed policy intent into deterministic

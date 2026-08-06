@@ -771,6 +771,29 @@ text or MCP server identity was not retained. It never executes actions or
 changes policy authority. See
 [Policy change assurance](policy-change-assurance-design.md).
 
+## Design-partner readiness
+
+`GET /api/enterprise/pilot-readiness` requires `inventory_read` and returns a
+tenant-scoped, read-only projection of controlled-pilot and enterprise-rollout
+readiness. It accepts no caller-supplied facts. The control plane derives nine
+fixed checks from strongly consistent identity, discovery, policy assignment,
+managed-host, runtime, response, durable-evidence, buyer-assurance and Splunk
+posture. The first seven are required for a controlled pilot; all nine are
+required for enterprise rollout.
+
+Each item has a closed identifier and status (`ready`, `action_required`,
+`external_required` or `deferred`), requirement flags, aggregate metric,
+observation time and code-owned action route. The complete response has a
+canonical SHA-256 `contentHash` and expires after sixty seconds. Missing,
+stale, malformed or ambiguous evidence cannot be upgraded by the request,
+agent or browser. The current Splunk stub always reports
+`deliveryVerified: false`, so enterprise readiness remains blocked until a
+production adapter and its acceptance evidence exist. See
+[Design-partner readiness authority](design-partner-readiness-design.md).
+The synchronous v1 projection inherits the 2,000-record tenant-list bound and
+fails rather than scoring a partial larger fleet; fleet-scale materialization
+and customer load acceptance remain required before wider rollout.
+
 ## Enterprise assurance reports
 
 `GET /enterprise/reports/executive` returns an aggregate-only leadership view.

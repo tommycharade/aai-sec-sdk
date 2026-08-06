@@ -1319,6 +1319,18 @@ diffs highlight expansions, restrictions and data-capture changes without
 turning reviewer judgement into an automated allow decision. See
 [Policy change assurance](policy-change-assurance-design.md).
 
+Design-partner readiness is a server-owned operational projection, not agent
+or browser authority. The authenticated tenant is fixed by the operator or
+service identity; callers cannot submit evidence, waive checks or choose the
+result. The server uses one clock and bounded strongly consistent reads. Exact
+one-policy assignment, managed-host reconciliation, release-bound attestation,
+response state and fresh evidence monitoring fail closed independently.
+Aggregate content is hash-bound and expires after sixty seconds, but the hash
+is not a signature or trusted timestamp. A ready controlled pilot is not an
+enterprise certification and cannot waive buyer assurance, SIEM delivery,
+change control or customer acceptance. See [Design-partner readiness
+authority](design-partner-readiness-design.md).
+
 Enterprise assurance reports are read-only projections, not new authority.
 The server derives tenant and canonical operator role from authentication,
 strongly reads bounded tenant records and preserves unavailable coverage when

@@ -111,6 +111,23 @@ cursor-paginated by the API and the browser follows continuation pages
 automatically for larger tenants. Session tokens and credential material are
 never displayed.
 
+### Controlled-pilot readiness on Overview
+
+Overview shows a nine-card readiness gate returned by
+`GET /api/enterprise/pilot-readiness`. The browser displays the server-owned
+result and may lower an expired response to **Checking**; it never rebuilds or
+upgrades readiness from locally cached fleet fields. Seven cards form the
+controlled-pilot decision. Buyer assurance and Splunk delivery are additional
+enterprise-wide requirements, and the score keeps those two decisions visibly
+separate.
+
+Every card exposes its evidence summary through visible help and routes to a
+fixed owning workspace. Routes are code-owned rather than trusted from the API
+response. `External evidence`, `Deferred`, `Action required` and `Checking`
+remain distinct states. The current Splunk stub therefore cannot appear as
+delivering, and an unavailable or expired readiness response cannot appear
+ready. See [Design-partner readiness authority](design-partner-readiness-design.md).
+
 Mutating group controls and policy saves show an explicit pending state and
 disable competing actions until the control-plane request completes. Success
 and failure remain visible through the console status banners; a disabled

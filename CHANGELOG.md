@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Replaced the browser-derived pilot checklist with an authenticated,
+  tenant-scoped design-partner readiness API. Seven current server-owned checks
+  gate a controlled pilot while buyer assurance and the honest Splunk stub
+  separately block enterprise-wide readiness. Responses are bounded,
+  content-hashed, sixty-second-expiring and fail closed for missing, stale,
+  malformed or ambiguous evidence.
 - Add an authenticated customer assurance Trust Center backed by a closed,
   deployment-digest-bound release manifest. Unpublished source candidates show
   honest blockers without a download; published packs must bind the exact tag,

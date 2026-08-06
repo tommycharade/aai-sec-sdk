@@ -1599,6 +1599,318 @@ def test_enterprise_assurance_report_routes_enforce_profile_roles(monkeypatch: A
     )
 
 
+def test_design_partner_readiness_separates_pilot_from_enterprise_claims(
+    monkeypatch: Any,
+) -> None:
+    """Live tenant evidence may ready a pilot while parked P0 work stays blocked."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-design-partner"
+    now = 1_800_000_000
+    monkeypatch.setenv("ENTRA_PROVIDER_ENABLED", "true")
+    monkeypatch.setenv("ENTRA_TENANT_ID", "11111111-1111-4111-8111-111111111111")
+    monkeypatch.setenv("ENTRA_AAI_TENANT_ID", tenant)
+    monkeypatch.setenv("ENTRA_STRONG_AUTH_ENFORCED", "true")
+    monkeypatch.setenv("SCIM_ENABLED", "true")
+    module.SCIM = FakeTable()
+    monkeypatch.setattr(
+        module,
+        "_discovery_report",
+        lambda observed_tenant, now=None: {
+            "schemaVersion": 1,
+            "generatedAt": now,
+            "summary": {
+                "coverageAvailable": True,
+                "sourceComplete": True,
+                "coveragePercent": 98.0,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "_managed_configuration_posture",
+        lambda *_args, **_kwargs: {"status": "enforced"},
+    )
+    monkeypatch.setattr(
+        module,
+        "_native_effective_control_posture",
+        lambda *_args, **_kwargs: {"status": "not_applicable", "desired": None},
+    )
+    manifest = {"sdkVersion": "1.1.0", "sdkRevision": "release-1"}
+    monkeypatch.setattr(module, "_runtime_manifest", lambda *_args, **_kwargs: manifest)
+    monkeypatch.setattr(module, "_runtime_manifest_digest", lambda _value: "a" * 64)
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "TENANT", "root"),
+            "tenant_id": tenant,
+            "id": tenant,
+            "status": "active",
+        }
+    )
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "POLICY", "safe-default"),
+            "tenant_id": tenant,
+            "id": "safe-default",
+            "version": 1,
+        }
+    )
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "GROUP", "pilot"),
+            "tenant_id": tenant,
+            "id": "pilot",
+            "policyId": "safe-default",
+            "agent_keys": ["deployment-a:agent-a"],
+        }
+    )
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "AGENT", "deployment-a:agent-a"),
+            "tenant_id": tenant,
+            "id": "agent-a",
+            "deployment_id": "deployment-a",
+            "host": "claude-code",
+            "status": "connected",
+            "expires_at": now + 300,
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+            "attestation_status": "compliant",
+            "attestation_expires_at": now + 300,
+            "attestation_sdk_version": "1.1.0",
+            "attestation_sdk_revision": "release-1",
+            "attestation_manifest_sha256": "a" * 64,
+        }
+    )
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "EVIDENCE_MONITOR", "current"),
+            "tenant_id": tenant,
+            "id": "current",
+            "status": "healthy",
+            "checked_at": now - 60,
+            "reason_codes": [],
+            "delivery_status": "delivered",
+        }
+    )
+
+    report = module._design_partner_readiness(tenant, now=now)
+
+    assert report["pilot"] == {"status": "ready", "ready": 7, "required": 7}
+    assert report["enterprise"] == {"status": "blocked", "ready": 7, "required": 9}
+    assert [item["id"] for item in report["items"]] == [
+        "enterprise_identity",
+        "population_coverage",
+        "policy_assignment",
+        "managed_host",
+        "runtime_trust",
+        "incident_response",
+        "durable_evidence",
+        "buyer_assurance",
+        "splunk_delivery",
+    ]
+    assert report["items"][7]["status"] == "external_required"
+    assert report["items"][8]["status"] == "deferred"
+    assert report["items"][8]["metric"] == {
+        "value": "stub",
+        "label": "integration status",
+    }
+    unsigned = {key: value for key, value in report.items() if key != "contentHash"}
+    assert report["contentHash"] == module._canonical_sha256(unsigned)
+    assert report["expiresAt"] == now + 60
+    encoded = json.dumps(report, sort_keys=True)
+    assert "project_root" not in encoded
+    assert "attestation_manifest" not in encoded
+
+    operator = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "operator-a",
+    }
+    monkeypatch.setattr(module.time, "time", lambda: now)
+    allowed = _invoke(
+        module,
+        _event(
+            "/api/enterprise/pilot-readiness",
+            "GET",
+            claims=operator,
+            body={"pilot": {"status": "ready"}, "enterprise": {"status": "ready"}},
+        ),
+    )
+    assert allowed["statusCode"] == 200
+    assert json.loads(allowed["body"])["enterprise"]["status"] == "blocked"
+    denied = _invoke(
+        module,
+        _event(
+            "/api/enterprise/pilot-readiness",
+            "GET",
+            claims={
+                "custom:tenant_id": tenant,
+                "cognito:groups": ["policy-author"],
+                "sub": "author-a",
+            },
+        ),
+    )
+    assert denied["statusCode"] == 403
+    assert "inventory-read" in json.loads(denied["body"])["error"]
+
+
+def test_design_partner_readiness_fails_closed_for_each_pilot_foundation(
+    monkeypatch: Any,
+) -> None:
+    """Zero population, stale proof and active response work can never look ready."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-design-partner-blocked"
+    now = 1_800_000_000
+    monkeypatch.setattr(
+        module,
+        "_discovery_report",
+        lambda observed_tenant, now=None: {
+            "schemaVersion": 1,
+            "generatedAt": now,
+            "summary": {
+                "coverageAvailable": False,
+                "sourceComplete": False,
+                "coveragePercent": None,
+            },
+        },
+    )
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "ALERT", "alert-a"),
+            "tenant_id": tenant,
+            "id": "alert-a",
+            "status": "open",
+            "severity": "critical",
+        }
+    )
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "EVIDENCE_MONITOR", "current"),
+            "tenant_id": tenant,
+            "id": "current",
+            "status": "healthy",
+            "checked_at": now - module._EVIDENCE_JOB_FRESHNESS_SECONDS - 1,
+            "reason_codes": [],
+            "delivery_status": "delivered",
+        }
+    )
+
+    report = module._design_partner_readiness(tenant, now=now)
+
+    pilot = [item for item in report["items"] if item["requiredForPilot"]]
+    assert report["pilot"] == {"status": "action_required", "ready": 0, "required": 7}
+    assert all(item["status"] == "action_required" for item in pilot)
+    assert (
+        next(item for item in pilot if item["id"] == "durable_evidence")["observedAt"]
+        == now - module._EVIDENCE_JOB_FRESHNESS_SECONDS - 1
+    )
+    assert report["enterprise"]["status"] == "blocked"
+
+
+def test_design_partner_readiness_rejects_ambiguous_and_stale_agent_proof(
+    monkeypatch: Any,
+) -> None:
+    """Duplicate policy membership, stale runtime and containment remain blockers."""
+    module, _table = _load_handler(monkeypatch)
+    tenant = "tenant-design-partner-adversarial"
+    now = 1_800_000_000
+    monkeypatch.setenv("ENTRA_PROVIDER_ENABLED", "true")
+    monkeypatch.setenv("ENTRA_TENANT_ID", "11111111-1111-4111-8111-111111111111")
+    monkeypatch.setenv("ENTRA_AAI_TENANT_ID", tenant)
+    monkeypatch.setenv("ENTRA_STRONG_AUTH_ENFORCED", "true")
+    monkeypatch.setattr(
+        module,
+        "_scim_lifecycle",
+        lambda *_args, **_kwargs: {"status": "configured", "lastProvisionedAt": now - 30},
+    )
+    monkeypatch.setattr(
+        module,
+        "_discovery_report",
+        lambda *_args, **_kwargs: {
+            "generatedAt": now,
+            "summary": {
+                "coverageAvailable": True,
+                "sourceComplete": True,
+                "coveragePercent": 100.0,
+            },
+        },
+    )
+    agent = {
+        "id": "agent-a",
+        "deployment_id": "deployment-a",
+        "host": "claude-code",
+        "status": "connected",
+        "expires_at": now - 1,
+        "lifecycle_state": "active",
+        "attestation_status": "compliant",
+        "attestation_expires_at": now - 1,
+    }
+    records: dict[str, list[dict[str, Any]]] = {
+        "AGENT": [agent],
+        "GROUP": [
+            {"id": "group-a", "policyId": "policy-a", "agent_keys": ["deployment-a:agent-a"]},
+            {"id": "group-b", "policyId": "policy-a", "agent_keys": ["deployment-a:agent-a"]},
+        ],
+        "POLICY": [{"id": "policy-a", "version": 1}],
+        "ALERT": [{"id": "alert-a", "status": "open", "severity": "high"}],
+        "CASE": [],
+        "CREDENTIAL_BROKER": [],
+        "ISOLATION_PROFILE": [],
+    }
+    monkeypatch.setattr(
+        module,
+        "_list",
+        lambda observed_tenant, kind, **_kwargs: [dict(item) for item in records.get(kind, [])],
+    )
+    monkeypatch.setattr(
+        module,
+        "_managed_configuration_posture",
+        lambda *_args, **_kwargs: {"status": "missing"},
+    )
+    monkeypatch.setattr(
+        module,
+        "_native_effective_control_posture",
+        lambda *_args, **_kwargs: {"status": "not_applicable", "desired": None},
+    )
+    monkeypatch.setattr(module, "_runtime_manifest", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module,
+        "_agent_control_state",
+        lambda *_args, **_kwargs: {
+            "activeStopScopes": ["agent"],
+            "quarantine": {"active": True},
+        },
+    )
+    monkeypatch.setattr(module, "_fleet_emergency_stop_active", lambda _tenant: False)
+    monkeypatch.setattr(
+        module,
+        "_evidence_monitor_record",
+        lambda _tenant: {
+            "status": "healthy",
+            "checked_at": now - module._EVIDENCE_JOB_FRESHNESS_SECONDS - 1,
+            "reason_codes": [],
+            "delivery_status": "delivered",
+        },
+    )
+
+    report = module._design_partner_readiness(tenant, now=now)
+    items = {item["id"]: item for item in report["items"]}
+
+    assert items["enterprise_identity"]["status"] == "ready"
+    assert items["population_coverage"]["status"] == "ready"
+    assert items["policy_assignment"]["status"] == "action_required"
+    assert items["policy_assignment"]["metric"]["value"] == "0/1"
+    assert items["managed_host"]["status"] == "action_required"
+    assert items["runtime_trust"]["status"] == "action_required"
+    assert items["incident_response"]["status"] == "action_required"
+    assert items["incident_response"]["metric"] == {
+        "value": "2",
+        "label": "response blockers",
+    }
+    assert items["durable_evidence"]["status"] == "action_required"
+    assert report["pilot"] == {"status": "action_required", "ready": 2, "required": 7}
+
+
 def test_customer_assurance_pack_is_honest_tenant_guarded_and_release_bound(
     monkeypatch: Any,
 ) -> None:
@@ -3340,6 +3652,10 @@ def test_machine_api_allowlist_covers_each_scope_and_excludes_human_governance(
     )
     assert (
         module._machine_route_capability("GET", "/api/enterprise/version-compliance")
+        == "inventory_read"
+    )
+    assert (
+        module._machine_route_capability("GET", "/api/enterprise/pilot-readiness")
         == "inventory_read"
     )
     assert (
