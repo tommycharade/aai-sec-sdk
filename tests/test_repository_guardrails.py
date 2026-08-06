@@ -55,9 +55,10 @@ def test_quality_gate_propagates_coverage_failure() -> None:
     assert "fail_under = 90\nprecision = 2" in project
 
 
-def test_mutation_workspace_copies_vulnerability_evidence_inputs() -> None:
-    """Mutation's isolated checkout must retain files read by repository tests."""
+def test_mutation_workspace_copies_assurance_evidence_inputs() -> None:
+    """Mutation's isolated checkout must retain files read by assurance tests."""
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"assurance/",' in project
     assert '"security/",' in project
     assert '"SECURITY.md",' in project
 
