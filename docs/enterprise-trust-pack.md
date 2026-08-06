@@ -11,8 +11,8 @@ represented as certification.
 | Technical owner | Tom Mooney, project owner |
 | Security owner | Tom Mooney, project security owner |
 | Technical statements reviewed | 5 August 2026 |
-| Next review | 5 November 2026 (CI-enforced; an expired pack fails the repository gate) |
-| Applies to | Draft SDK `1.1.0` release candidate based on source baseline `05be1ebd16c1c8bf8232476e5a0b5929a8101621`; release claims become valid only when replaced by tag-, commit- and artifact-digest-bound release evidence |
+| Next review | 3 November 2026 (CI-enforced; an expired pack fails the repository gate) |
+| Applies to | Draft SDK `1.1.0` source candidate; release claims become valid only when the release workflow binds this pack to the exact tag, commit, artifact digests, SBOMs and provenance |
 | Legal status | Technical assurance statement; not a contract, DPA or certification |
 | Approval status | Technical owner review only; legal/privacy approval and immutable release binding are outstanding |
 

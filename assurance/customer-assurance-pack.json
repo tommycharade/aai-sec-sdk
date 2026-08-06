@@ -1,9 +1,9 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "pack_id": "aai-security-customer-assurance",
   "product": "Agentic AI Security SDK and enterprise control plane",
   "owner": {
-    "team": "AAI Security maintainers",
+    "team": "Tom Mooney, project owner and security owner",
     "contact_route": "https://github.com/tommycharade/aai-sec-sdk/security/advisories/new"
   },
   "approval": {
@@ -21,6 +21,21 @@
     {
       "id": "vulnerability_management",
       "path": "docs/vulnerability-management.md",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "enterprise_trust_statement",
+      "path": "docs/enterprise-trust-pack.md",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "vulnerability_policy",
+      "path": "security/vulnerability-management-policy.json",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "vulnerability_rehearsal",
+      "path": "security/vulnerability-rehearsal.example.json",
       "status": "technical_reviewed"
     },
     {
@@ -47,6 +62,11 @@
       "id": "release_process",
       "path": "docs/releasing.md",
       "status": "technical_reviewed"
+    },
+    {
+      "id": "production_readiness",
+      "path": "docs/production-readiness.md",
+      "status": "technical_reviewed"
     }
   ],
   "independent_assurance": {
@@ -64,34 +84,8 @@
     }
   },
   "vulnerability_management": {
-    "clock": "calendar_hours",
-    "severity_source": "CVSS v3.1 plus exploitability and security-boundary impact",
-    "severities": {
-      "critical": {
-        "acknowledge_hours": 24,
-        "initial_assessment_hours": 48,
-        "affected_customer_notification_hours": 48,
-        "remediation_days": 7
-      },
-      "high": {
-        "acknowledge_hours": 48,
-        "initial_assessment_hours": 120,
-        "affected_customer_notification_hours": 120,
-        "remediation_days": 30
-      },
-      "medium": {
-        "acknowledge_hours": 120,
-        "initial_assessment_hours": 240,
-        "affected_customer_notification_hours": null,
-        "remediation_days": 90
-      },
-      "low": {
-        "acknowledge_hours": 240,
-        "initial_assessment_hours": 480,
-        "affected_customer_notification_hours": null,
-        "remediation_days": 180
-      }
-    }
+    "policy_path": "security/vulnerability-management-policy.json",
+    "synthetic_rehearsal_path": "security/vulnerability-rehearsal.example.json"
   },
   "guarantees": [
     {

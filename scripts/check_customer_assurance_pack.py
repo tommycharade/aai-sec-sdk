@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
-import json
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+# Direct execution starts with ``scripts/`` on the import path. Add only the
+# repository root so direct and package execution load the same verifier.
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.verify_vulnerability_management import (
+    VulnerabilityManagementVerificationError,
+    load_json_document,
+    parse_policy,
+    verify_exercise,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "assurance/customer-assurance-pack.json"
 SEVERITIES = ("critical", "high", "medium", "low")
-MAXIMUM_SLA = {
-    "critical": (24, 48, 48, 7),
-    "high": (48, 120, 120, 30),
-    "medium": (120, 240, None, 90),
-    "low": (240, 480, None, 180),
-}
 
 
 class AssurancePackError(ValueError):
@@ -38,13 +44,6 @@ def _parse_date(value: Any, label: str) -> date:
         return date.fromisoformat(value)
     except ValueError as error:
         raise AssurancePackError(f"{label} must be YYYY-MM-DD") from error
-
-
-def _positive_integer(value: Any, label: str) -> int:
-    """Reject booleans, fractions, and non-positive SLA values."""
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise AssurancePackError(f"{label} must be a positive integer")
-    return value
 
 
 def _resolve_repository_file(repository_root: Path, value: Any, label: str) -> Path:
@@ -78,8 +77,8 @@ def validate_customer_assurance_pack(
         },
         "manifest",
     )
-    if manifest["schema_version"] != 1:
-        raise AssurancePackError("schema_version must be 1")
+    if manifest["schema_version"] != 2:
+        raise AssurancePackError("schema_version must be 2")
     if manifest["pack_id"] != "aai-security-customer-assurance":
         raise AssurancePackError("pack_id is not canonical")
     if not isinstance(manifest["product"], str) or not manifest["product"].strip():
@@ -91,8 +90,10 @@ def validate_customer_assurance_pack(
     _closed_keys(owner, {"team", "contact_route"}, "owner")
     if not all(isinstance(owner[key], str) and owner[key].strip() for key in owner):
         raise AssurancePackError("owner team and contact_route are required")
-    if not owner["contact_route"].startswith("https://github.com/"):
-        raise AssurancePackError("contact_route must be an HTTPS private-reporting route")
+    if owner["contact_route"] != (
+        "https://github.com/tommycharade/aai-sec-sdk/security/advisories/new"
+    ):
+        raise AssurancePackError("contact_route must be the canonical private-reporting route")
 
     approval = manifest["approval"]
     if not isinstance(approval, dict):
@@ -121,6 +122,7 @@ def validate_customer_assurance_pack(
     document_ids: set[str] = set()
     document_paths: set[str] = set()
     document_statuses: dict[str, str] = {}
+    document_paths_by_id: dict[str, str] = {}
     for index, document in enumerate(documents):
         if not isinstance(document, dict):
             raise AssurancePackError(f"documents[{index}] must be an object")
@@ -130,7 +132,12 @@ def validate_customer_assurance_pack(
         if not isinstance(identifier, str) or not identifier:
             raise AssurancePackError(f"documents[{index}].id is required")
         resolved_path = _resolve_repository_file(repository_root, path, f"documents[{index}].path")
-        if document["status"] not in {"technical_reviewed", "legal_review_required"}:
+        if document["status"] not in {
+            "technical_reviewed",
+            "legal_review_required",
+            "legal_reviewed",
+            "independent_reviewed",
+        }:
             raise AssurancePackError(f"documents[{index}].status is invalid")
         if identifier in document_ids or path in document_paths:
             raise AssurancePackError("document IDs and paths must be unique")
@@ -139,18 +146,30 @@ def validate_customer_assurance_pack(
         document_ids.add(identifier)
         document_paths.add(path)
         document_statuses[path] = document["status"]
+        document_paths_by_id[identifier] = path
 
     required_documents = {
         "customer_assurance_pack",
         "vulnerability_management",
+        "enterprise_trust_statement",
+        "vulnerability_policy",
+        "vulnerability_rehearsal",
         "data_processing_and_subprocessors",
         "compliance_roadmap",
         "security_policy",
         "security_model",
         "release_process",
+        "production_readiness",
     }
     if not required_documents.issubset(document_ids):
         raise AssurancePackError("required assurance documents are missing")
+    legal_evidence = [
+        path
+        for path, status in document_statuses.items()
+        if status == "legal_reviewed" and path.startswith("assurance/legal/")
+    ]
+    if approval["legal_status"] == "approved" and not legal_evidence:
+        raise AssurancePackError("legal approval requires reviewed evidence under assurance/legal")
 
     independent = manifest["independent_assurance"]
     if not isinstance(independent, dict):
@@ -176,9 +195,12 @@ def validate_customer_assurance_pack(
             if (
                 not isinstance(evidence, str)
                 or evidence not in document_paths
-                or document_statuses[evidence] != "technical_reviewed"
+                or document_statuses[evidence] != "independent_reviewed"
+                or not evidence.startswith("assurance/independent/")
             ):
-                raise AssurancePackError(f"{control} requires a reviewed evidence document")
+                raise AssurancePackError(
+                    f"{control} requires independent evidence under assurance/independent"
+                )
         elif evidence is not None:
             raise AssurancePackError(f"{control} cannot cite evidence before completion")
 
@@ -186,74 +208,67 @@ def validate_customer_assurance_pack(
     if not isinstance(vulnerability, dict):
         raise AssurancePackError("vulnerability_management must be an object")
     _closed_keys(
-        vulnerability, {"clock", "severity_source", "severities"}, "vulnerability_management"
+        vulnerability,
+        {"policy_path", "synthetic_rehearsal_path"},
+        "vulnerability_management",
     )
-    if vulnerability["clock"] != "calendar_hours":
-        raise AssurancePackError("SLA clock must be calendar_hours")
-    if (
-        not isinstance(vulnerability["severity_source"], str)
-        or not vulnerability["severity_source"]
+    policy_value = vulnerability["policy_path"]
+    exercise_value = vulnerability["synthetic_rehearsal_path"]
+    policy_path = _resolve_repository_file(repository_root, policy_value, "policy_path")
+    exercise_path = _resolve_repository_file(
+        repository_root, exercise_value, "synthetic_rehearsal_path"
+    )
+    for path_value, label in (
+        (policy_value, "vulnerability policy"),
+        (exercise_value, "vulnerability rehearsal"),
     ):
-        raise AssurancePackError("severity_source is required")
-    severities = vulnerability["severities"]
-    if not isinstance(severities, dict) or set(severities) != set(SEVERITIES):
-        raise AssurancePackError("severities must be critical, high, medium, low")
-    previous: tuple[int, int, int, int] | None = None
-    for severity in SEVERITIES:
-        record = severities[severity]
-        if not isinstance(record, dict):
-            raise AssurancePackError(f"{severity} SLA must be an object")
-        _closed_keys(
-            record,
-            {
-                "acknowledge_hours",
-                "initial_assessment_hours",
-                "affected_customer_notification_hours",
-                "remediation_days",
-            },
-            f"{severity} SLA",
-        )
-        acknowledge = _positive_integer(
-            record["acknowledge_hours"], f"{severity}.acknowledge_hours"
-        )
-        assessment = _positive_integer(
-            record["initial_assessment_hours"], f"{severity}.initial_assessment_hours"
-        )
-        notification_value = record["affected_customer_notification_hours"]
-        if severity in {"critical", "high"}:
-            notification = _positive_integer(
-                notification_value, f"{severity}.affected_customer_notification_hours"
-            )
-        elif notification_value is not None:
-            raise AssurancePackError(f"{severity} customer notification must be null")
-        else:
-            notification = assessment
-        remediation = _positive_integer(record["remediation_days"], f"{severity}.remediation_days")
-        observed = (acknowledge, assessment, notification, remediation)
-        maximum = MAXIMUM_SLA[severity]
-        for value, limit in zip(observed, maximum, strict=True):
-            if limit is not None and value > limit:
-                raise AssurancePackError(f"{severity} SLA exceeds the approved maximum")
-        if previous is not None and any(
-            current < earlier for current, earlier in zip(observed, previous, strict=True)
+        if (
+            path_value not in document_paths
+            or document_statuses[path_value] != "technical_reviewed"
         ):
-            raise AssurancePackError("lower severities cannot have shorter SLA targets")
-        previous = observed
+            raise AssurancePackError(f"{label} must be a technically reviewed pack document")
+    if (
+        policy_value != document_paths_by_id["vulnerability_policy"]
+        or exercise_value != document_paths_by_id["vulnerability_rehearsal"]
+    ):
+        raise AssurancePackError(
+            "vulnerability authority must reference its canonical reviewed documents"
+        )
+    try:
+        policy = parse_policy(load_json_document(policy_path, "vulnerability policy"), as_of=today)
+        rehearsal = verify_exercise(
+            load_json_document(exercise_path, "vulnerability rehearsal"), policy
+        )
+    except VulnerabilityManagementVerificationError as error:
+        raise AssurancePackError(f"vulnerability authority is invalid: {error}") from error
+    if policy.effective_date != approved_at or policy.next_review_date != review_due:
+        raise AssurancePackError(
+            "assurance and vulnerability review authority must use the same dates"
+        )
+    if policy.owner != owner["team"]:
+        raise AssurancePackError(
+            "assurance and vulnerability authority must have the same named owner"
+        )
+    if (
+        rehearsal.get("status") != "verified-synthetic-rehearsal"
+        or rehearsal.get("synthetic") is not True
+    ):
+        raise AssurancePackError("vulnerability rehearsal must remain explicitly synthetic")
 
     published_sla_rows = []
     for severity in SEVERITIES:
-        record = severities[severity]
-        notification = record["affected_customer_notification_hours"]
-        notification_text = f"{notification} hours" if notification is not None else "Case-by-case"
+        level = policy.service_levels[severity]
         published_sla_rows.append(
-            f"| {severity.title()} | {record['acknowledge_hours']} hours | "
-            f"{record['initial_assessment_hours']} hours | {notification_text} | "
-            f"{record['remediation_days']} days |"
+            f"| {severity.title()} | {level.acknowledge_hours} hours | "
+            f"{level.triage_hours} hours | {level.mitigation_hours} hours | "
+            f"{level.remediation_days} days | {level.customer_notification_hours} hours |"
         )
     for published_path in ("SECURITY.md", "docs/vulnerability-management.md"):
         published_text = (repository_root / published_path).read_text(encoding="utf-8")
         if any(row not in published_text for row in published_sla_rows):
-            raise AssurancePackError(f"{published_path} does not match the assurance SLA manifest")
+            raise AssurancePackError(
+                f"{published_path} does not match the canonical vulnerability policy"
+            )
 
     pack_text = (repository_root / "docs/customer-assurance-pack.md").read_text(encoding="utf-8")
     for required_value in (
@@ -295,12 +310,22 @@ def validate_customer_assurance_pack(
                 )
                 if not resolved_evidence.is_file():
                     raise AssurancePackError(f"guarantee evidence is missing: {evidence}")
+                if (
+                    evidence not in document_paths
+                    or document_statuses[evidence] != "technical_reviewed"
+                ):
+                    raise AssurancePackError(
+                        "guarantee evidence must be technically reviewed pack content"
+                    )
             identifiers.add(statement["id"])
 
 
 def load_customer_assurance_pack(path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
-    """Load the assurance manifest without accepting a non-object root."""
-    value = json.loads(path.read_text(encoding="utf-8"))
+    """Load a bounded assurance manifest with duplicate-key rejection."""
+    try:
+        value = load_json_document(path, "customer assurance manifest")
+    except VulnerabilityManagementVerificationError as error:
+        raise AssurancePackError(f"customer assurance manifest is invalid: {error}") from error
     if not isinstance(value, dict):
         raise AssurancePackError("assurance manifest root must be an object")
     return value
@@ -311,7 +336,7 @@ def main() -> int:
     try:
         manifest = load_customer_assurance_pack()
         validate_customer_assurance_pack(manifest, repository_root=ROOT, today=date.today())
-    except (AssurancePackError, OSError, json.JSONDecodeError) as error:
+    except (AssurancePackError, OSError) as error:
         print(f"Customer assurance pack invalid: {error}")
         return 1
     print(

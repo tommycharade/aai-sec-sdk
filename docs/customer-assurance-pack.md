@@ -6,12 +6,13 @@ requires legal review, a customer environment or an independent assessor.
 
 | Pack owner | Technical approval | Legal status | Approved | Next review |
 | --- | --- | --- | --- | --- |
-| AAI Security maintainers | Approved | Review required | 2026-08-05 | 2026-11-03 |
+| Tom Mooney, project owner and security owner | Approved | Review required | 2026-08-05 | 2026-11-03 |
 
-The machine-readable source is
+The schema-v2 machine-readable source is
 `assurance/customer-assurance-pack.json`. CI validates its closed schema,
-ownership, document existence, review clock, vulnerability targets and
-independent-assurance claims. An overdue pack fails `make check`.
+ownership, document existence, shared review clock, canonical vulnerability
+policy and explicitly synthetic rehearsal, and independent-assurance claims.
+An overdue or internally inconsistent pack fails `make check`.
 
 Every tagged release attaches `customer-assurance-pack.zip`. The archive
 contains this index, the machine-readable pack and every listed evidence
@@ -25,7 +26,7 @@ document. Its internal manifest hashes each file, and the release-level
 | Security architecture | Published architecture, security model, threat boundaries and deployment responsibilities | Technically reviewed |
 | Secure development | Guardrails, adversarial tests, ≥90% coverage gate, bounded mutation testing and dependency audits | Automated evidence; not independent certification |
 | Supply chain | Per-artifact SBOMs, checksums, clean-install tests and GitHub provenance attestations in the release workflow | Implemented release control |
-| Vulnerability management | Private intake, severity method, notification and remediation targets | Public engineering commitment; contractual terms require legal review |
+| Vulnerability management | Private intake, machine-enforced severity method, calendar-time targets and synthetic critical-response rehearsal | Public engineering commitment and tested record shape; not proof of staffed response or delivered notification |
 | Data processing | Data categories, default AWS service boundary, optional providers and deletion/retention responsibilities | Technical disclosure; DPA and final subprocessor notice require legal review |
 | Penetration test | Provider and scope not yet approved | Not completed |
 | SOC 2 Type II | Roadmap only | Not certified |
@@ -37,7 +38,8 @@ document. Its internal manifest hashes each file, and the release-level
 - Unknown tools and missing or malformed identity, policy, approval or other
   required security context fail closed at the SDK boundary.
 - The release workflow produces checksums, per-artifact SBOMs and GitHub
-  provenance attestations.
+  provenance attestations. The deterministic assurance archive is separately
+  checksum-bound and provenance-attested.
 - Paid functionality is not required for core fail-closed behavior, public
   contracts, security fixes or documentation.
 
@@ -58,8 +60,11 @@ its documented acceptance gate.
 
 ## Pack contents
 
-- [Security policy and private reporting](https://github.com/tommycharade/aai-sec-sdk/blob/main/SECURITY.md)
+- `SECURITY.md` — security policy, private reporting route and support policy
 - [Vulnerability management](vulnerability-management.md)
+- [Detailed enterprise trust statement](enterprise-trust-pack.md)
+- `security/vulnerability-management-policy.json` — canonical response authority
+- `security/vulnerability-rehearsal.example.json` — explicitly synthetic rehearsal evidence
 - [Security model](security-model.md)
 - [Production readiness](production-readiness.md)
 - [Testing and assurance](testing.md)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
@@ -32,6 +33,17 @@ def _manifest() -> dict[str, Any]:
     return deepcopy(load_customer_assurance_pack(ROOT / "assurance/customer-assurance-pack.json"))
 
 
+def _copy_pack_inputs(manifest: dict[str, Any], destination: Path) -> None:
+    """Copy only reviewed pack inputs into an isolated adversarial fixture."""
+    paths = {document["path"] for document in manifest["documents"]}
+    paths.update(evidence["evidence"] for evidence in manifest["guarantees"])
+    for relative_path in paths:
+        source = ROOT / relative_path
+        target = destination / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+
+
 def test_checked_in_customer_assurance_pack_is_current_and_honest() -> None:
     validate_customer_assurance_pack(_manifest(), repository_root=ROOT, today=TODAY)
 
@@ -43,17 +55,38 @@ def test_expired_review_fails_closed() -> None:
         validate_customer_assurance_pack(manifest, repository_root=ROOT, today=TODAY)
 
 
-def test_weakened_critical_remediation_target_is_rejected() -> None:
+def test_weakened_critical_remediation_target_is_rejected(tmp_path: Path) -> None:
     manifest = _manifest()
-    manifest["vulnerability_management"]["severities"]["critical"]["remediation_days"] = 30
-    with pytest.raises(AssurancePackError, match="critical SLA exceeds"):
-        validate_customer_assurance_pack(manifest, repository_root=ROOT, today=TODAY)
+    _copy_pack_inputs(manifest, tmp_path)
+    policy_path = tmp_path / manifest["vulnerability_management"]["policy_path"]
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    policy["serviceLevels"]["critical"]["remediationDays"] = 30
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    with pytest.raises(AssurancePackError, match="code-owned maximum"):
+        validate_customer_assurance_pack(manifest, repository_root=tmp_path, today=TODAY)
 
 
 def test_false_certification_without_reviewed_evidence_is_rejected() -> None:
     manifest = _manifest()
     manifest["independent_assurance"]["soc2_type_ii"]["status"] = "certified"
-    with pytest.raises(AssurancePackError, match="requires a reviewed evidence document"):
+    with pytest.raises(AssurancePackError, match="requires independent evidence"):
+        validate_customer_assurance_pack(manifest, repository_root=ROOT, today=TODAY)
+
+
+def test_technical_document_cannot_masquerade_as_independent_evidence() -> None:
+    manifest = _manifest()
+    manifest["independent_assurance"]["penetration_test"] = {
+        "status": "completed",
+        "evidence_document": "docs/security-model.md",
+    }
+    with pytest.raises(AssurancePackError, match="requires independent evidence"):
+        validate_customer_assurance_pack(manifest, repository_root=ROOT, today=TODAY)
+
+
+def test_legal_approval_requires_separate_reviewed_evidence() -> None:
+    manifest = _manifest()
+    manifest["approval"]["legal_status"] = "approved"
+    with pytest.raises(AssurancePackError, match="assurance/legal"):
         validate_customer_assurance_pack(manifest, repository_root=ROOT, today=TODAY)
 
 
@@ -79,23 +112,45 @@ def test_nested_path_traversal_is_rejected() -> None:
 
 def test_published_sla_cannot_drift_from_machine_readable_commitment(tmp_path: Path) -> None:
     manifest = _manifest()
-    for document in manifest["documents"]:
-        source = ROOT / document["path"]
-        target = tmp_path / document["path"]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(source.read_bytes())
-    for evidence in manifest["guarantees"]:
-        source = ROOT / evidence["evidence"]
-        target = tmp_path / evidence["evidence"]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
-            target.write_bytes(source.read_bytes())
+    _copy_pack_inputs(manifest, tmp_path)
     security = tmp_path / "SECURITY.md"
     security.write_text(
         security.read_text(encoding="utf-8").replace(
-            "| Critical | 24 hours |", "| Critical | 72 hours |"
+            "| Critical | 4 hours |", "| Critical | 72 hours |"
         ),
         encoding="utf-8",
     )
-    with pytest.raises(AssurancePackError, match="does not match the assurance SLA"):
+    with pytest.raises(AssurancePackError, match="does not match the canonical"):
         validate_customer_assurance_pack(manifest, repository_root=tmp_path, today=TODAY)
+
+
+def test_assurance_and_vulnerability_review_dates_cannot_diverge(tmp_path: Path) -> None:
+    manifest = _manifest()
+    _copy_pack_inputs(manifest, tmp_path)
+    policy_path = tmp_path / manifest["vulnerability_management"]["policy_path"]
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    policy["nextReviewDate"] = "2026-11-02"
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    with pytest.raises(AssurancePackError, match="must use the same dates"):
+        validate_customer_assurance_pack(manifest, repository_root=tmp_path, today=TODAY)
+
+
+def test_vulnerability_authority_must_be_reviewed_pack_content() -> None:
+    manifest = _manifest()
+    manifest["vulnerability_management"]["policy_path"] = "SECURITY.md"
+    with pytest.raises(AssurancePackError, match="canonical reviewed documents"):
+        validate_customer_assurance_pack(manifest, repository_root=ROOT, today=TODAY)
+
+
+def test_guarantee_evidence_must_ship_in_the_pack() -> None:
+    manifest = _manifest()
+    manifest["guarantees"][0]["evidence"] = "docs/testing.md"
+    with pytest.raises(AssurancePackError, match="must be technically reviewed pack content"):
+        validate_customer_assurance_pack(manifest, repository_root=ROOT, today=TODAY)
+
+
+def test_duplicate_manifest_field_is_rejected(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"schema_version":2,"schema_version":2}', encoding="utf-8")
+    with pytest.raises(AssurancePackError, match="duplicate field"):
+        load_customer_assurance_pack(manifest)

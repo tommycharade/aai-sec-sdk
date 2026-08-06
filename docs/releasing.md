@@ -31,7 +31,8 @@ latest supported release line.
       technical approval, a non-expired review date, bounded vulnerability
       targets and evidence-backed independent-assurance labels.
 - [ ] `customer-assurance-pack.zip` is built deterministically, internally
-      hash-verified, covered by `SHA256SUMS` and attached to the GitHub release.
+      hash-verified, covered by `SHA256SUMS`, provenance-attested and attached
+      to the GitHub release.
 - [ ] Every critical/high vulnerability since the prior release has retained
       acknowledgement, assessment, notification and remediation/exception
       evidence against the published targets.
@@ -79,12 +80,14 @@ bundle, and a clean verification job downloads the published assets rather
 than trusting the pre-publication workspace.
 
 `verify_release_evidence.py` is run in a separate clean-verification job. It
-independently checks that every wheel and source
+independently checks that the assurance archive is bounded, has an exact
+schema-v2 document inventory, contains the canonical vulnerability authority,
+matches every tagged source byte and is checksum-bound. It also checks that every wheel and source
 archive has a matching SHA-256 entry, a matching SBOM manifest entry, and an
 SBOM containing the artifact filename and digest. It also checks the mutation
 evidence files, clean checkout commit, and exact tag against
 `RELEASE-METADATA.json`. The workflow then runs `gh attestation verify` for
-every subject in that same clean job, constraining the signer workflow and full
+every package and assurance-bundle subject in that same clean job, constraining the signer workflow and full
 `refs/tags/...` source ref. Release CI runs only for pushed version tags; it
 does not permit an independently selected source ref and release tag. These checks verify artifact
 identity and provenance bindings; they do not certify the package's runtime

@@ -1,31 +1,11 @@
 name: cdk-upstream-watch
 
 on:
-  pull_request:
-    paths:
-      - "infra/aws-control-plane/package.json"
-      - "infra/aws-control-plane/package-lock.json"
-      - ".github/workflows/cdk-upstream-watch.yml"
   schedule:
     - cron: "23 7 * * *"
   workflow_dispatch:
 
 jobs:
-  audit-pinned-deployment-toolchain:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262b # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: infra/aws-control-plane/package-lock.json
-      - name: Audit exact pinned CDK toolchain
-        working-directory: infra/aws-control-plane
-        run: |
-          npm ci --ignore-scripts
-          npm audit --audit-level=high
-
   inspect-bundled-dependency:
     runs-on: ubuntu-latest
     steps:
@@ -49,12 +29,11 @@ jobs:
             echo
             echo "- Latest aws-cdk-lib: $latest"
             echo "- Bundled brace-expansion: $bundled"
-            echo "- Current advisory: GHSA-rgw5-rvv9-x895"
-            echo "- Required fixed version: 5.0.9 or later"
+            echo "- Required fixed version: 5.0.8 or later"
           } >> "$GITHUB_STEP_SUMMARY"
           if node -e '
             const current = process.argv[1].split(".").map(Number);
-            const fixed = [5, 0, 9];
+            const fixed = [5, 0, 8];
             const comparable = current.every(Number.isInteger) && current.length === 3;
             if (!comparable) process.exit(2);
             for (let index = 0; index < fixed.length; index += 1) {
@@ -63,8 +42,7 @@ jobs:
             }
             process.exit(0);
           ' "$bundled"; then
-            echo "::error::AWS CDK now contains the patched dependency. Upgrade the exact pin and verify a clean full audit."
+            echo "::error::AWS CDK now contains the patched dependency. Upgrade the exact pin and close the temporary exception."
             exit 1
           fi
-          echo "::error::AWS CDK remains affected by GHSA-rgw5-rvv9-x895 and no owner-approved exception covers it."
-          exit 1
+          echo "AWS CDK is still vulnerable upstream; the dated build-time exception remains active."

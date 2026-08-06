@@ -59,6 +59,7 @@ jobs:
           subject-path: |
             dist/*.whl
             dist/*.tar.gz
+            dist/customer-assurance-pack.zip
 
   publish:
     needs: build
@@ -107,7 +108,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for artifact in dist/*.whl dist/*.tar.gz; do
+          for artifact in dist/*.whl dist/*.tar.gz dist/customer-assurance-pack.zip; do
             gh attestation verify "$artifact" \
               --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \

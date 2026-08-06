@@ -35,12 +35,14 @@ Include:
 
 Do not include credentials, customer data or live targets in a report. The
 [vulnerability-management policy](docs/vulnerability-management.md) defines
-severity, evidence, coordinated disclosure and calendar-time targets. Critical
-reports are acknowledged within 4 hours, triaged within 24 hours, targeted for
-mitigation within 24 hours and remediation within 7 days. High reports are
-acknowledged within 8 hours, triaged within 48 hours, targeted for mitigation
-within 72 hours and remediation within 30 days. Confirmed affected customers
-are notified within 24 hours for critical and 48 hours for high severity.
+severity, evidence, coordinated disclosure and these calendar-time targets:
+
+| Severity | Acknowledge | Triage | Mitigation | Remediation | Notify affected customers after confirmed impact |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Critical | 4 hours | 24 hours | 24 hours | 7 days | 24 hours |
+| High | 8 hours | 48 hours | 72 hours | 30 days | 48 hours |
+| Medium | 24 hours | 120 hours | 240 hours | 90 days | 120 hours |
+| Low | 72 hours | 240 hours | 720 hours | 180 days | 240 hours |
 
 These are open-source project response targets, not a contractual SLA or proof
 of 24x7 staffing, and not a promise that every report is a vulnerability

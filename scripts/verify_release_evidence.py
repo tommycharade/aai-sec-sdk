@@ -9,9 +9,15 @@ import re
 import subprocess
 import zipfile
 from pathlib import Path
+from typing import Any
 
 ASSURANCE_BUNDLE = "customer-assurance-pack.zip"
 ASSURANCE_MANIFEST = "BUNDLE-MANIFEST.json"
+ASSURANCE_PACK = "assurance/customer-assurance-pack.json"
+ROOT = Path(__file__).resolve().parents[1]
+MAX_ASSURANCE_FILES = 64
+MAX_ASSURANCE_FILE_BYTES = 2 * 1024 * 1024
+MAX_ASSURANCE_TOTAL_BYTES = 8 * 1024 * 1024
 
 
 def digest(path: Path) -> str:
@@ -24,12 +30,44 @@ def fail(message: str) -> None:
     raise ValueError(message)
 
 
-def verify_assurance_bundle(path: Path) -> None:
-    """Verify exact bundle membership and every embedded evidence-file digest."""
+def _strict_json(contents: bytes, label: str) -> Any:
+    """Parse bounded release JSON without duplicate keys or non-finite values."""
+
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                fail(f"{label} contains duplicate field: {key}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str) -> None:
+        fail(f"{label} contains non-finite number: {value}")
+
+    try:
+        return json.loads(
+            contents,
+            object_pairs_hook=reject_duplicates,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"{label} is not valid JSON")
+        raise AssertionError("unreachable") from error
+
+
+def verify_assurance_bundle(path: Path, *, repository_root: Path = ROOT) -> None:
+    """Verify bounded membership, hashes, claims, and exact tagged-source bytes."""
     if not path.is_file() or path.stat().st_size == 0:
         fail(f"missing or empty evidence file: {path.name}")
     with zipfile.ZipFile(path) as archive:
-        names = archive.namelist()
+        members = archive.infolist()
+        if len(members) > MAX_ASSURANCE_FILES:
+            fail("assurance bundle contains too many files")
+        if any(member.file_size > MAX_ASSURANCE_FILE_BYTES for member in members):
+            fail("assurance bundle contains an oversized file")
+        if sum(member.file_size for member in members) > MAX_ASSURANCE_TOTAL_BYTES:
+            fail("assurance bundle exceeds the uncompressed size limit")
+        names = [member.filename for member in members]
         if len(names) != len(set(names)) or ASSURANCE_MANIFEST not in names:
             fail("assurance bundle has duplicate files or no internal manifest")
         if any(
@@ -37,7 +75,7 @@ def verify_assurance_bundle(path: Path) -> None:
             for name in names
         ):
             fail("assurance bundle contains an unsafe path")
-        manifest = json.loads(archive.read(ASSURANCE_MANIFEST))
+        manifest = _strict_json(archive.read(ASSURANCE_MANIFEST), "assurance bundle manifest")
         if (
             manifest.get("schema_version") != 1
             or manifest.get("pack_id") != "aai-security-customer-assurance"
@@ -62,11 +100,43 @@ def verify_assurance_bundle(path: Path) -> None:
             expected[name] = checksum
         if set(names) != set(expected) | {ASSURANCE_MANIFEST}:
             fail("assurance bundle membership does not match its manifest")
-        if "assurance/customer-assurance-pack.json" not in expected:
+        if ASSURANCE_PACK not in expected:
             fail("assurance bundle omits the canonical pack")
         for name, expected_digest in expected.items():
             if hashlib.sha256(archive.read(name)).hexdigest() != expected_digest:
                 fail(f"assurance bundle hash mismatch: {name}")
+        pack = _strict_json(archive.read(ASSURANCE_PACK), "customer assurance pack")
+        if (
+            not isinstance(pack, dict)
+            or pack.get("schema_version") != 2
+            or pack.get("pack_id") != "aai-security-customer-assurance"
+        ):
+            fail("customer assurance pack identity is invalid")
+        documents = pack.get("documents")
+        if not isinstance(documents, list):
+            fail("customer assurance pack document inventory is invalid")
+        source_paths = {ASSURANCE_PACK}
+        for document in documents:
+            if not isinstance(document, dict) or set(document) != {"id", "path", "status"}:
+                fail("customer assurance pack document entry is invalid")
+            source_path = document["path"]
+            if not isinstance(source_path, str) or source_path in source_paths:
+                fail("customer assurance pack document path is malformed or duplicated")
+            source_paths.add(source_path)
+        if source_paths != set(expected):
+            fail("assurance bundle does not match the pack document inventory")
+        vulnerability = pack.get("vulnerability_management")
+        if not isinstance(vulnerability, dict) or set(vulnerability) != {
+            "policy_path",
+            "synthetic_rehearsal_path",
+        }:
+            fail("customer assurance vulnerability authority is invalid")
+        if not set(vulnerability.values()).issubset(source_paths):
+            fail("customer assurance vulnerability authority is absent from the bundle")
+        for name in source_paths:
+            source = repository_root / name
+            if not source.is_file() or source.read_bytes() != archive.read(name):
+                fail(f"assurance bundle source mismatch: {name}")
 
 
 def main() -> int:

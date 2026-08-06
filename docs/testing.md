@@ -32,18 +32,22 @@ evidence. The browser smoke path for the live
 reference server is documented in the enterprise fleet runbook and is used
 before release evidence is accepted.
 
-The gate also validates the machine-readable customer assurance pack. Its
-closed schema requires a technical owner, HTTPS private-reporting route,
-approved and next-review dates no more than 120 days apart, every required
-document, bounded vulnerability response targets, evidence for any completed
-penetration/certification claim, and evidence-linked guarantees. Adversarial
-tests reject expiry, SLA weakening, unsupported certification, missing
-documents and unreviewed fields. This proves the published pack remains current
-and internally consistent; it does not prove a real incident met its SLA or an
+The gate also validates the schema-v2 machine-readable customer assurance
+pack. Its closed schema requires a named technical owner, the exact private
+reporting route, one shared review clock, every required document, the
+canonical machine vulnerability policy and explicitly synthetic rehearsal,
+evidence-linked guarantees, and separate legal or independent evidence classes
+before stronger claims can be made. Adversarial tests reject duplicate keys,
+expiry, SLA weakening, owner/date drift, unsupported certification, missing or
+unshipped guarantee evidence and technical documents masquerading as legal or
+independent evidence. This proves the published pack remains current and
+internally consistent; it does not prove a real incident met its SLA or an
 external assessor approved the product.
 
-Tagged-release CI also builds a deterministic archive of the pack. The release
-verifier rejects extra, missing, traversing or hash-mismatched archive files.
+Tagged-release CI also builds and attests a deterministic archive of the pack.
+The clean-checkout verifier rejects extra, missing, traversing, oversized,
+duplicate-key, hash-mismatched or self-consistently substituted archive files,
+and requires every bundled byte to match the exact tagged source.
 
 `scripts/test_real_claude_code.py` is the separate live-host compatibility
 gate. It exact-matches the installed Claude Code version, platform,

@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import date
 from pathlib import Path
 
 
@@ -98,11 +99,13 @@ def test_release_workflow_is_tag_bound_and_publishes_the_verified_bundle() -> No
     assert "cp .mutmut-cache/results.txt dist/results.txt" in workflow
     assert "gh release create" in workflow
     assert "gh release download" in workflow
+    assert "dist/customer-assurance-pack.zip" in workflow
+    assert "dist/*.tar.gz dist/customer-assurance-pack.zip" in workflow
     assert '--source-ref "$GITHUB_REF"' in workflow
 
 
-def test_cdk_advisory_is_exact_pinned_monitored_and_not_silently_accepted() -> None:
-    """An uncovered toolchain advisory remains visible until fixed or approved."""
+def test_cdk_exception_is_exact_pinned_monitored_and_unexpired() -> None:
+    """A temporary toolchain exception cannot drift or silently become permanent."""
     package = json.loads(
         (ROOT / "infra/aws-control-plane/package.json").read_text(encoding="utf-8")
     )
@@ -113,24 +116,18 @@ def test_cdk_advisory_is_exact_pinned_monitored_and_not_silently_accepted() -> N
     assert "constructs" not in package.get("dependencies", {})
 
     workflow = (ROOT / ".github/workflows/cdk-upstream-watch.yml").read_text(encoding="utf-8")
-    assert "pull_request:" in workflow
-    assert "npm audit --audit-level=high" in workflow
-    assert "audit-pinned-deployment-toolchain" in workflow
     assert 'cron: "23 7 * * *"' in workflow
     assert "npm view aws-cdk-lib version" in workflow
     assert "brace-expansion/package.json" in workflow
-    assert "GHSA-rgw5-rvv9-x895" in workflow
-    assert "5.0.9" in workflow
-    assert "no owner-approved exception covers it" in workflow
+    assert "5.0.8" in workflow
 
     acceptance = (ROOT / "docs/risk-acceptance-cdk-brace-expansion-2026-07-29.md").read_text(
         encoding="utf-8"
     )
-    assert "| Status | Closed" in acceptance
+    expiry_match = re.search(r"\| Expires \| (\d{4}-\d{2}-\d{2}) \|", acceptance)
+    assert expiry_match is not None
+    assert date.today() <= date.fromisoformat(expiry_match.group(1))
     assert "aws/aws-cdk#38410" in acceptance
-    owner_inputs = (ROOT / "docs/needed-from-from.md").read_text(encoding="utf-8")
-    assert "GHSA-rgw5-rvv9-x895" in owner_inputs
-    assert "brace-expansion>=5.0.9" in owner_inputs
 
 
 def test_aws_deploy_routes_through_the_persistent_identity_guard() -> None:

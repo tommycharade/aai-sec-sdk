@@ -101,4 +101,3 @@ Before production use, record:
 
 The absence of those decisions is a deployment blocker, not permission to use
 synthetic defaults for customer data.
-
