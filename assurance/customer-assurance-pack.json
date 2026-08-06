@@ -1,0 +1,130 @@
+{
+  "schema_version": 2,
+  "pack_id": "aai-security-customer-assurance",
+  "product": "Agentic AI Security SDK and enterprise control plane",
+  "owner": {
+    "team": "Tom Mooney, project owner and security owner",
+    "contact_route": "https://github.com/tommycharade/aai-sec-sdk/security/advisories/new"
+  },
+  "approval": {
+    "technical_status": "approved",
+    "legal_status": "review_required",
+    "approved_at": "2026-08-05",
+    "next_review_due": "2026-11-03"
+  },
+  "documents": [
+    {
+      "id": "customer_assurance_pack",
+      "path": "docs/customer-assurance-pack.md",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "vulnerability_management",
+      "path": "docs/vulnerability-management.md",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "enterprise_trust_statement",
+      "path": "docs/enterprise-trust-pack.md",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "vulnerability_policy",
+      "path": "security/vulnerability-management-policy.json",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "vulnerability_rehearsal",
+      "path": "security/vulnerability-rehearsal.example.json",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "data_processing_and_subprocessors",
+      "path": "docs/data-processing-and-subprocessors.md",
+      "status": "legal_review_required"
+    },
+    {
+      "id": "compliance_roadmap",
+      "path": "docs/compliance-roadmap.md",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "security_policy",
+      "path": "SECURITY.md",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "security_model",
+      "path": "docs/security-model.md",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "release_process",
+      "path": "docs/releasing.md",
+      "status": "technical_reviewed"
+    },
+    {
+      "id": "production_readiness",
+      "path": "docs/production-readiness.md",
+      "status": "technical_reviewed"
+    }
+  ],
+  "independent_assurance": {
+    "penetration_test": {
+      "status": "not_completed",
+      "evidence_document": null
+    },
+    "soc2_type_ii": {
+      "status": "not_certified",
+      "evidence_document": null
+    },
+    "iso_27001": {
+      "status": "not_certified",
+      "evidence_document": null
+    }
+  },
+  "vulnerability_management": {
+    "policy_path": "security/vulnerability-management-policy.json",
+    "synthetic_rehearsal_path": "security/vulnerability-rehearsal.example.json"
+  },
+  "guarantees": [
+    {
+      "id": "host_authority",
+      "statement": "The host, never model output, decides whether a governed action executes.",
+      "evidence": "docs/security-model.md"
+    },
+    {
+      "id": "fail_closed",
+      "statement": "Unknown tools and missing or malformed security context fail closed at the SDK boundary.",
+      "evidence": "docs/security-model.md"
+    },
+    {
+      "id": "release_evidence",
+      "statement": "The release workflow produces checksums, per-artifact SBOMs and GitHub provenance attestations.",
+      "evidence": "docs/releasing.md"
+    },
+    {
+      "id": "open_core_security",
+      "statement": "Core fail-closed behavior, public contracts, security fixes and documentation do not require paid functionality.",
+      "evidence": "docs/production-readiness.md"
+    }
+  ],
+  "non_guarantees": [
+    {
+      "id": "not_agent_safety_oracle",
+      "statement": "The product does not prove that an agent, model output or generated code is safe."
+    },
+    {
+      "id": "not_compliance_certification",
+      "statement": "Repository tests and signed assurance reports are not SOC 2, ISO 27001 or regulatory certification."
+    },
+    {
+      "id": "deployment_controls_required",
+      "statement": "Production identity, managed-host enforcement, isolation, credential and network controls require deployment-owned configuration and acceptance."
+    },
+    {
+      "id": "independent_test_open",
+      "statement": "No independent penetration-test completion is claimed by this pack."
+    }
+  ]
+}

@@ -16,6 +16,10 @@ latest supported release line.
 - [ ] `make security-check` reports no unaccepted dependency vulnerabilities;
       any build-only exception has a named owner, compensating controls,
       automated upstream monitoring and an unexpired review date.
+- [ ] `python scripts/verify_vulnerability_management.py` proves the public
+      support/SLA policy is in review and the checked synthetic rehearsal meets
+      every deadline; retain separate live exercise evidence before claiming
+      operational performance.
 - [ ] `requirements-ci.txt` and `requirements-docs.txt` are reviewed when
       direct toolchain versions change; direct inputs are exact-pinned.
 - [ ] `requirements-build.txt` matches the exact PEP 517 build requirements.
@@ -23,6 +27,15 @@ latest supported release line.
 - [ ] `CHANGELOG.md` describes user-visible and security-relevant changes.
 - [ ] Public API and migration notes are up to date.
 - [ ] Security regressions and known limitations are documented.
+- [ ] `make assurance-check` confirms the buyer assurance pack has current
+      technical approval, a non-expired review date, bounded vulnerability
+      targets and evidence-backed independent-assurance labels.
+- [ ] `customer-assurance-pack.zip` is built deterministically, internally
+      hash-verified, covered by `SHA256SUMS`, provenance-attested and attached
+      to the GitHub release.
+- [ ] Every critical/high vulnerability since the prior release has retained
+      acknowledgement, assessment, notification and remediation/exception
+      evidence against the published targets.
 - [ ] The release is tagged from a clean, reviewed commit.
 - [ ] The package is published through trusted CI credentials, not a developer workstation token.
 - [ ] Release artifacts and checksums are retained.
@@ -55,8 +68,10 @@ and are excluded from deployed SDK, UI and Lambda artifacts. A scanner finding
 in bundled CDK tooling may be accepted only through a dated, owner-approved
 risk record that documents exploitability, preserves full-audit visibility,
 monitors upstream daily and causes CI to fail when the exception expires. The
-current record is [Temporary risk acceptance: AWS CDK bundled
-brace-expansion](risk-acceptance-cdk-brace-expansion-2026-07-29.md).
+[historical AWS CDK record](risk-acceptance-cdk-brace-expansion-2026-07-29.md)
+covers only `GHSA-mh99-v99m-4gvg`; it does not authorize later findings
+against the same bundled package. The current owner decision is tracked in
+[Inputs needed from the product owner](needed-from-from.md).
 
 The build job adds the raw mutation evidence to `dist/` before creating
 checksums with `scripts/write_checksums.py`, excluding only the checksum file
@@ -65,12 +80,14 @@ bundle, and a clean verification job downloads the published assets rather
 than trusting the pre-publication workspace.
 
 `verify_release_evidence.py` is run in a separate clean-verification job. It
-independently checks that every wheel and source
+independently checks that the assurance archive is bounded, has an exact
+schema-v2 document inventory, contains the canonical vulnerability authority,
+matches every tagged source byte and is checksum-bound. It also checks that every wheel and source
 archive has a matching SHA-256 entry, a matching SBOM manifest entry, and an
 SBOM containing the artifact filename and digest. It also checks the mutation
 evidence files, clean checkout commit, and exact tag against
 `RELEASE-METADATA.json`. The workflow then runs `gh attestation verify` for
-every subject in that same clean job, constraining the signer workflow and full
+every package and assurance-bundle subject in that same clean job, constraining the signer workflow and full
 `refs/tags/...` source ref. Release CI runs only for pushed version tags; it
 does not permit an independently selected source ref and release tag. These checks verify artifact
 identity and provenance bindings; they do not certify the package's runtime

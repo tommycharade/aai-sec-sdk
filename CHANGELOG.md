@@ -74,6 +74,17 @@
   read-only preflight; hosted Microsoft Intune dispatch remains explicitly
   disabled pending customer credentials, enablement approval and live
   post-install attestation acceptance.
+- Added a schema-v2 machine-validated customer assurance pack for P0-12 with a
+  named owner, maximum-120-day shared review clock, one canonical vulnerability
+  policy, an explicitly synthetic rehearsal, evidence-linked guarantees and
+  explicit non-guarantees, data-processing/subprocessor disclosure, and an
+  honest SOC 2/ISO/penetration-test roadmap. CI rejects stale or duplicate-key
+  claims, weakened critical/high commitments, unshipped guarantee evidence and
+  technical documents presented as legal or independent assurance.
+- Tagged releases now attach and provenance-attest a deterministic, internally
+  hashed customer assurance archive covered by the release checksum manifest.
+  Independent verification bounds the archive and requires every bundled byte
+  to match the exact tagged source, preventing self-consistent substitution.
 
 - Separated deterministic UI simulation from the HTTP-only production client,
   added emitted-asset purity and raw/gzip budget gates with adversarial tests,
@@ -229,6 +240,20 @@
   the browser cannot register or approve a release. The private Deployments UI
   adds one responsive Runtime releases workspace with approved authority,
   integrity evidence, version coverage and a prioritized remediation queue.
+- Added a machine-readable vulnerability-management policy, fail-closed review
+  expiry and SLA verifier, plus adversarial tests and a clearly labelled
+  synthetic critical-incident rehearsal covering private intake, CVSS scoring,
+  override authority, exceptions, notification receipts and every closure-
+  evidence category.
+- Replaced the pre-1.0 security support statement with the current `1.x`
+  support policy, a 30-day normal patch-overlap window and explicit
+  critical/high response targets and staffing non-guarantees.
+- Added an enterprise trust pack, technical data-processing/subprocessor
+  schedule and dated SOC 2/ISO 27001 roadmap with explicit non-guarantees and
+  outstanding independent/legal acceptance requirements.
+- Made the trust pack an explicit `1.1.0` release-candidate draft, enforced its
+  review expiry, corrected AWS log-retention and GitHub private-report data
+  claims, and added a pull-request audit for the exact pinned CDK toolchain.
 
 - Added operator-created and daily/weekly scheduled enterprise assurance
   snapshots. Domain-separated KMS signatures bind tenant, snapshot identity,

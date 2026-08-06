@@ -42,6 +42,8 @@ jobs:
           include-hidden-files: true
       - name: Generate artifact-specific CycloneDX SBOMs
         run: python scripts/build_artifact_sbom.py dist/*.whl dist/*.tar.gz
+      - name: Build customer assurance evidence bundle
+        run: python -m scripts.build_customer_assurance_bundle dist
       - name: Write release metadata
         run: python scripts/write_release_metadata.py dist --commit "$(git rev-parse HEAD)" --tag "$GITHUB_REF_NAME"
       - name: Generate checksums
@@ -57,6 +59,7 @@ jobs:
           subject-path: |
             dist/*.whl
             dist/*.tar.gz
+            dist/customer-assurance-pack.zip
 
   publish:
     needs: build
@@ -105,7 +108,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for artifact in dist/*.whl dist/*.tar.gz; do
+          for artifact in dist/*.whl dist/*.tar.gz dist/customer-assurance-pack.zip; do
             gh attestation verify "$artifact" \
               --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \

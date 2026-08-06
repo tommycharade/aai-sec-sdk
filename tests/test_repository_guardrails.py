@@ -21,12 +21,22 @@ def test_required_guardrail_files_exist() -> None:
         "CONTRIBUTING.md",
         "README.md",
         "docs/guardrails.md",
+        "docs/enterprise-trust-pack.md",
+        "docs/vulnerability-management.md",
+        "docs/data-processing-and-subprocessors.md",
+        "security/vulnerability-management-policy.json",
+        "security/vulnerability-rehearsal.example.json",
         "pyproject.toml",
         "Makefile",
         "LICENSE",
         "NOTICE",
         "TRADEMARKS.md",
         "docs/license.md",
+        "assurance/customer-assurance-pack.json",
+        "docs/customer-assurance-pack.md",
+        "docs/vulnerability-management.md",
+        "docs/data-processing-and-subprocessors.md",
+        "docs/compliance-roadmap.md",
     ):
         assert (ROOT / path).is_file(), path
 
@@ -43,6 +53,20 @@ def test_quality_gate_propagates_coverage_failure() -> None:
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert "coverage:\n\t@set -e;" in makefile
     assert "fail_under = 90\nprecision = 2" in project
+
+
+def test_mutation_workspace_copies_assurance_evidence_inputs() -> None:
+    """Mutation's isolated checkout must retain assurance guardrail inputs."""
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"assurance/",' in project
+    assert '"security/",' in project
+    assert '"SECURITY.md",' in project
+    for test_module in (
+        "tests/test_customer_assurance_bundle.py",
+        "tests/test_customer_assurance_pack.py",
+        "tests/test_vulnerability_management.py",
+    ):
+        assert f'"--ignore={test_module}",' in project
 
 
 def test_license_policy_is_explicit() -> None:
@@ -82,6 +106,8 @@ def test_release_workflow_is_tag_bound_and_publishes_the_verified_bundle() -> No
     assert "cp .mutmut-cache/results.txt dist/results.txt" in workflow
     assert "gh release create" in workflow
     assert "gh release download" in workflow
+    assert "dist/customer-assurance-pack.zip" in workflow
+    assert "dist/*.tar.gz dist/customer-assurance-pack.zip" in workflow
     assert '--source-ref "$GITHUB_REF"' in workflow
 
 

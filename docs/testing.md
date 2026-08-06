@@ -32,6 +32,23 @@ evidence. The browser smoke path for the live
 reference server is documented in the enterprise fleet runbook and is used
 before release evidence is accepted.
 
+The gate also validates the schema-v2 machine-readable customer assurance
+pack. Its closed schema requires a named technical owner, the exact private
+reporting route, one shared review clock, every required document, the
+canonical machine vulnerability policy and explicitly synthetic rehearsal,
+evidence-linked guarantees, and separate legal or independent evidence classes
+before stronger claims can be made. Adversarial tests reject duplicate keys,
+expiry, SLA weakening, owner/date drift, unsupported certification, missing or
+unshipped guarantee evidence and technical documents masquerading as legal or
+independent evidence. This proves the published pack remains current and
+internally consistent; it does not prove a real incident met its SLA or an
+external assessor approved the product.
+
+Tagged-release CI also builds and attests a deterministic archive of the pack.
+The clean-checkout verifier rejects extra, missing, traversing, oversized,
+duplicate-key, hash-mismatched or self-consistently substituted archive files,
+and requires every bundled byte to match the exact tagged source.
+
 `scripts/test_real_claude_code.py` is the separate live-host compatibility
 gate. It exact-matches the installed Claude Code version, platform,
 architecture and executable digest against a default-deny reviewed matrix,
@@ -320,6 +337,19 @@ Scheduler adversarial tests distinguish deterministic malformed records from
 transient DynamoDB claim failures, prove revision-bound concurrent repair and
 advance beyond fully corrupt 250-record pages containing malformed string,
 boolean, missing and oversized revisions.
+
+## Vulnerability-management rehearsal
+
+`scripts/verify_vulnerability_management.py` treats the checked governance
+policy and exercise record as untrusted input. It rejects unknown fields,
+non-UTC or unordered timestamps, stale review authority, weakened higher-
+severity deadlines, unbounded exceptions and every individual critical SLA
+miss. `make check` runs the verifier through the repository guardrail target.
+
+The checked exercise is explicitly synthetic. Its success proves the policy
+shape, deadline calculations and evidence contract; it is not evidence that a
+live response team met those times. Production acceptance must retain a real
+exercise or incident record and independently review its timestamps.
 
 ## Adapter contracts
 

@@ -37,9 +37,14 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Security model: security-model.md
-  - Temporary CDK risk acceptance: risk-acceptance-cdk-brace-expansion-2026-07-29.md
+  - Historical CDK risk acceptance: risk-acceptance-cdk-brace-expansion-2026-07-29.md
   - Operational runbooks: runbooks.md
   - Testing and assurance: testing.md
+  - Customer assurance pack: customer-assurance-pack.md
+  - Enterprise trust statement: enterprise-trust-pack.md
+  - Vulnerability management: vulnerability-management.md
+  - Data processing and subprocessors: data-processing-and-subprocessors.md
+  - SOC 2 and ISO 27001 roadmap: compliance-roadmap.md
   - Production readiness: production-readiness.md
   - Architecture: architecture.md
   - Cloud credential authority: cloud-credential-authority-design.md

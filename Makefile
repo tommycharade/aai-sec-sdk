@@ -1,8 +1,11 @@
 PYTHON ?= python3
 
-.PHONY: check format lint type test coverage guardrails docs docs-check package-check security-check mutation-check mutation terraform-check ui-check
+.PHONY: check format lint type test coverage guardrails assurance-check docs docs-check package-check security-check mutation-check mutation terraform-check ui-check
 
-check: format-check lint type test coverage guardrails docs-check package-check security-check mutation-check terraform-check ui-check
+check: format-check lint type test coverage guardrails assurance-check docs-check package-check security-check mutation-check terraform-check ui-check
+
+assurance-check:
+	$(PYTHON) scripts/check_customer_assurance_pack.py
 
 terraform-check:
 	@test -z "$$(gofmt -l terraform-provider-aai-sec)"
@@ -72,3 +75,4 @@ coverage:
 
 guardrails:
 	$(PYTHON) scripts/check_guardrails.py
+	$(PYTHON) scripts/verify_vulnerability_management.py
