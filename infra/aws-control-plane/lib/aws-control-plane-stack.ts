@@ -168,6 +168,75 @@ function validateRuntimeManifestApprovals(raw: string, manifestBundle: string): 
   }
 }
 
+/** Bind the buyer assurance projection to one closed deployment-owned manifest. */
+function validateCustomerAssuranceRelease(raw: string): void {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error("customer-assurance-release.json must contain valid JSON");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("customer assurance release manifest must be an object");
+  }
+  const manifest = value as Record<string, unknown>;
+  const expectedFields = [
+    "approvedAt", "archive", "blockers", "guarantees", "independentAssurance",
+    "legalStatus", "nextReviewDue", "nonGuarantees", "product", "schemaVersion",
+    "status", "technicalStatus",
+  ];
+  if (
+    Object.keys(manifest).sort().join(",") !== expectedFields.sort().join(",")
+    || manifest.schemaVersion !== 1
+    || (manifest.status !== "available" && manifest.status !== "unavailable")
+    || !Array.isArray(manifest.blockers)
+    || !Array.isArray(manifest.guarantees)
+    || !Array.isArray(manifest.nonGuarantees)
+  ) {
+    throw new Error("customer assurance release manifest schema is invalid");
+  }
+  const independent = manifest.independentAssurance;
+  if (!independent || typeof independent !== "object" || Array.isArray(independent)) {
+    throw new Error("customer assurance independent-assurance schema is invalid");
+  }
+  const statuses = independent as Record<string, unknown>;
+  if (
+    Object.keys(statuses).sort().join(",") !== "iso27001,penetrationTest,soc2TypeIi"
+    || !["not_completed", "completed"].includes(String(statuses.penetrationTest))
+    || !["not_certified", "certified"].includes(String(statuses.soc2TypeIi))
+    || !["not_certified", "certified"].includes(String(statuses.iso27001))
+  ) {
+    throw new Error("customer assurance independent-assurance status is invalid");
+  }
+  if (manifest.status === "unavailable" && (manifest.archive !== null || manifest.blockers.length < 1)) {
+    throw new Error("unavailable customer assurance release must declare blockers");
+  }
+  if (manifest.status === "available") {
+    const archive = manifest.archive;
+    if (!archive || typeof archive !== "object" || Array.isArray(archive)) {
+      throw new Error("available customer assurance release requires an archive");
+    }
+    const release = archive as Record<string, unknown>;
+    const expectedUrl = `https://github.com/tommycharade/aai-sec-sdk/releases/download/${release.releaseTag}/customer-assurance-pack.zip`;
+    if (
+      manifest.technicalStatus !== "approved"
+      || Object.keys(release).sort().join(",") !== "downloadUrl,fileName,provenanceStatus,releaseTag,sha256,sourceCommit,verifiedAt"
+      || typeof release.releaseTag !== "string"
+      || !/^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$/.test(release.releaseTag)
+      || typeof release.sourceCommit !== "string"
+      || !/^[0-9a-f]{40}$/.test(release.sourceCommit)
+      || release.fileName !== "customer-assurance-pack.zip"
+      || typeof release.sha256 !== "string"
+      || !/^[0-9a-f]{64}$/.test(release.sha256)
+      || release.downloadUrl !== expectedUrl
+      || release.provenanceStatus !== "verified"
+      || manifest.blockers.length !== 0
+    ) {
+      throw new Error("available customer assurance archive authority is invalid");
+    }
+  }
+}
+
 /** Initial production-shaped AWS boundary for the fleet management UI. */
 export class AwsControlPlaneStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -264,6 +333,15 @@ export class AwsControlPlaneStack extends cdk.Stack {
     );
     const runtimeApprovalBundle = fs.readFileSync(runtimeApprovalPath, "utf8");
     validateRuntimeManifestApprovals(runtimeApprovalBundle, runtimeManifestBundle);
+    const customerAssuranceReleasePath = path.join(
+      __dirname,
+      "../lambda/customer-assurance-release.json",
+    );
+    const customerAssuranceRelease = fs.readFileSync(customerAssuranceReleasePath, "utf8");
+    validateCustomerAssuranceRelease(customerAssuranceRelease);
+    const customerAssuranceReleaseDigest = createHash("sha256")
+      .update(customerAssuranceRelease)
+      .digest("hex");
     const runtimeManifestCount = (JSON.parse(runtimeManifestBundle) as unknown[]).length;
     const runtimeManifestDigest = createHash("sha256").update(runtimeManifestBundle).digest("hex");
     const runtimeApprovalDigest = createHash("sha256").update(runtimeApprovalBundle).digest("hex");
@@ -1182,6 +1260,7 @@ export class AwsControlPlaneStack extends cdk.Stack {
       RUNTIME_ATTESTATION_APPROVALS_SHA256: runtimeApprovalDigest,
       DELIVERY_PACKAGES_SHA256: deliveryPackageAuthority.packageBundleSha256,
       DELIVERY_PACKAGE_APPROVALS_SHA256: deliveryPackageAuthority.approvalBundleSha256,
+      CUSTOMER_ASSURANCE_RELEASE_SHA256: customerAssuranceReleaseDigest,
       POLICY_SIGNING_KEY_ARN: policySigningKey.keyArn,
       ASSURANCE_REPORT_SIGNING_KEY_ARN: assuranceReportSigningKey.keyArn,
       ASSURANCE_REPORT_VERIFICATION_KEY_ARNS: cdk.Fn.join("", [

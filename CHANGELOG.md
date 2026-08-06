@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add an authenticated customer assurance Trust Center backed by a closed,
+  deployment-digest-bound release manifest. Unpublished source candidates show
+  honest blockers without a download; published packs must bind the exact tag,
+  commit, archive SHA-256, official release URL and verified provenance before
+  the control plane or UI enables distribution.
+
 - Add immutable, independently reviewed custom roles from a fixed safe
   capability vocabulary and delegated tenant, business-unit, project,
   environment and deployment scopes. Custom grants bind the exact approved

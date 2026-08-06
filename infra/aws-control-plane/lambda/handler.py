@@ -53,6 +53,140 @@ POLICY_SIGNING_KEY_ARN = os.environ.get("POLICY_SIGNING_KEY_ARN", "")
 ASSURANCE_REPORT_SIGNING_KEY_ARN = os.environ.get("ASSURANCE_REPORT_SIGNING_KEY_ARN", "")
 
 
+def _load_customer_assurance_release():
+    """Load the immutable deployment-owned buyer-assurance release manifest.
+
+    The browser and tenant records cannot create product assurance claims. The
+    deployed bytes are bound to the digest supplied by infrastructure synthesis,
+    then validated as a closed schema before any request can observe them.
+    """
+    manifest_path = Path(__file__).with_name("customer-assurance-release.json")
+    raw = manifest_path.read_bytes()
+    expected_digest = os.environ.get("CUSTOMER_ASSURANCE_RELEASE_SHA256", "")
+    observed_digest = hashlib.sha256(raw).hexdigest()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_digest) or not secrets.compare_digest(
+        observed_digest, expected_digest
+    ):
+        raise RuntimeError("customer assurance release authority is not bound to deployment")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("customer assurance release manifest is malformed") from error
+    required = {
+        "schemaVersion",
+        "status",
+        "product",
+        "technicalStatus",
+        "legalStatus",
+        "approvedAt",
+        "nextReviewDue",
+        "archive",
+        "independentAssurance",
+        "guarantees",
+        "nonGuarantees",
+        "blockers",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise RuntimeError("customer assurance release manifest schema is invalid")
+    if (
+        value.get("schemaVersion") != 1
+        or value.get("status") not in {"available", "unavailable"}
+        or value.get("technicalStatus") not in {"approved", "review_required"}
+        or value.get("legalStatus") not in {"approved", "review_required"}
+        or not isinstance(value.get("product"), str)
+        or not 1 <= len(value["product"]) <= 160
+        or not all(
+            isinstance(value.get(field), str)
+            and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value[field])
+            for field in ("approvedAt", "nextReviewDue")
+        )
+    ):
+        raise RuntimeError("customer assurance release identity is invalid")
+    independent = value.get("independentAssurance")
+    if not isinstance(independent, dict) or set(independent) != {
+        "penetrationTest",
+        "soc2TypeIi",
+        "iso27001",
+    }:
+        raise RuntimeError("customer assurance independent-assurance schema is invalid")
+    if (
+        independent.get("penetrationTest") not in {"not_completed", "completed"}
+        or independent.get("soc2TypeIi") not in {"not_certified", "certified"}
+        or independent.get("iso27001") not in {"not_certified", "certified"}
+    ):
+        raise RuntimeError("customer assurance independent-assurance status is invalid")
+    try:
+        approved_at = datetime.strptime(value["approvedAt"], "%Y-%m-%d").date()
+        next_review_due = datetime.strptime(value["nextReviewDue"], "%Y-%m-%d").date()
+    except ValueError as error:
+        raise RuntimeError("customer assurance review date is invalid") from error
+    if next_review_due < approved_at or next_review_due < datetime.now(UTC).date():
+        raise RuntimeError("customer assurance review is overdue")
+    guarantees = value.get("guarantees")
+    if (
+        not isinstance(guarantees, list)
+        or not 1 <= len(guarantees) <= 16
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"id", "statement"}
+            or not isinstance(item.get("id"), str)
+            or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", item["id"])
+            or not isinstance(item.get("statement"), str)
+            or not 1 <= len(item["statement"]) <= 300
+            for item in guarantees
+        )
+    ):
+        raise RuntimeError("customer assurance guarantee schema is invalid")
+    for field in ("nonGuarantees", "blockers"):
+        entries = value.get(field)
+        if (
+            not isinstance(entries, list)
+            or len(entries) > 16
+            or any(not isinstance(item, str) or not 1 <= len(item) <= 300 for item in entries)
+        ):
+            raise RuntimeError(f"customer assurance {field} schema is invalid")
+    archive = value.get("archive")
+    if value["status"] == "unavailable":
+        if archive is not None or not value["blockers"]:
+            raise RuntimeError("unavailable customer assurance release must declare blockers")
+    else:
+        if not isinstance(archive, dict) or set(archive) != {
+            "releaseTag",
+            "sourceCommit",
+            "fileName",
+            "sha256",
+            "downloadUrl",
+            "provenanceStatus",
+            "verifiedAt",
+        }:
+            raise RuntimeError("available customer assurance archive schema is invalid")
+        release_tag = archive.get("releaseTag")
+        expected_url = (
+            "https://github.com/tommycharade/aai-sec-sdk/releases/download/"
+            f"{release_tag}/customer-assurance-pack.zip"
+        )
+        if (
+            value["technicalStatus"] != "approved"
+            or not isinstance(release_tag, str)
+            or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", release_tag)
+            or not isinstance(archive.get("sourceCommit"), str)
+            or not re.fullmatch(r"[0-9a-f]{40}", archive["sourceCommit"])
+            or archive.get("fileName") != "customer-assurance-pack.zip"
+            or not isinstance(archive.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", archive["sha256"])
+            or archive.get("downloadUrl") != expected_url
+            or archive.get("provenanceStatus") != "verified"
+            or not isinstance(archive.get("verifiedAt"), str)
+            or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", archive["verifiedAt"])
+            or value["blockers"]
+        ):
+            raise RuntimeError("available customer assurance archive authority is invalid")
+    return value, observed_digest
+
+
+CUSTOMER_ASSURANCE_RELEASE, CUSTOMER_ASSURANCE_RELEASE_SHA256 = _load_customer_assurance_release()
+
+
 def _parse_assurance_key_registry(raw, region, signing_key, policy_keys):
     """Validate local, unique, dedicated MRK authority before serving requests."""
     try:
@@ -4029,6 +4163,8 @@ def _machine_route_capability(method, path):
         "/enterprise/evidence/export",
         "/enterprise/reports/auditor",
         "/enterprise/reports/executive",
+        "/enterprise/trust-center",
+        "/enterprise/trust-center/download",
     }
     if method == "GET" and normalized in inventory_paths:
         return "inventory_read"
@@ -24594,6 +24730,69 @@ def _assurance_report(tenant, profile, *, now=None):
     return {**report, "contentHash": _canonical_sha256(report)}
 
 
+def _customer_assurance_release_view():
+    """Project the validated release-bound buyer assurance pack.
+
+    The manifest is global product evidence, but callers must still cross an
+    authenticated tenant evidence boundary. The projection deliberately
+    replaces the external archive URL with an authenticated API path so the
+    browser cannot learn or choose distribution authority from configuration.
+    """
+    archive = CUSTOMER_ASSURANCE_RELEASE.get("archive")
+    public_archive = None
+    if isinstance(archive, dict):
+        public_archive = {
+            key: archive[key]
+            for key in (
+                "releaseTag",
+                "sourceCommit",
+                "fileName",
+                "sha256",
+                "provenanceStatus",
+                "verifiedAt",
+            )
+        }
+        public_archive["downloadPath"] = "/api/enterprise/trust-center/download"
+    return {
+        **{
+            key: _json(CUSTOMER_ASSURANCE_RELEASE[key])
+            for key in (
+                "schemaVersion",
+                "status",
+                "product",
+                "technicalStatus",
+                "legalStatus",
+                "approvedAt",
+                "nextReviewDue",
+                "independentAssurance",
+                "guarantees",
+                "nonGuarantees",
+                "blockers",
+            )
+        },
+        "manifestSha256": CUSTOMER_ASSURANCE_RELEASE_SHA256,
+        "archive": public_archive,
+    }
+
+
+def _customer_assurance_download():
+    """Return the exact validated immutable release-asset locator.
+
+    This is a locator exchange rather than a redirect so authenticated API
+    clients can verify the expected archive digest before beginning a download.
+    No tenant record or request field can influence the returned origin.
+    """
+    archive = CUSTOMER_ASSURANCE_RELEASE.get("archive")
+    if CUSTOMER_ASSURANCE_RELEASE.get("status") != "available" or not isinstance(archive, dict):
+        raise AssuranceSnapshotUnavailable("customer assurance pack is not released")
+    return {
+        "url": archive["downloadUrl"],
+        "fileName": archive["fileName"],
+        "sha256": archive["sha256"],
+        "releaseTag": archive["releaseTag"],
+    }
+
+
 def _assurance_report_schedule_view(item):
     """Project tenant-owned scheduling state without mutation rationale text."""
     if not item:
@@ -27210,6 +27409,21 @@ def handler(event, context):
                         {"error": "auditor assurance requires evidence-read authority"},
                     )
                 return _response(200, _assurance_report(tenant, parts[1]))
+            if method == "GET" and parts in (
+                ["trust-center"],
+                ["trust-center", "download"],
+            ):
+                if not _operator_authorized(event, "evidence_read", tenant):
+                    return _response(
+                        403,
+                        {"error": "customer assurance requires evidence-read authority"},
+                    )
+                return _response(
+                    200,
+                    _customer_assurance_download()
+                    if parts == ["trust-center", "download"]
+                    else _customer_assurance_release_view(),
+                )
             if parts == ["reports", "schedule"]:
                 if method == "GET":
                     if not _operator_authorized(event, "evidence_read", tenant):

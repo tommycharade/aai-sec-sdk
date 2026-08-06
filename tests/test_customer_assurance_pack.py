@@ -48,6 +48,32 @@ def test_checked_in_customer_assurance_pack_is_current_and_honest() -> None:
     validate_customer_assurance_pack(_manifest(), repository_root=ROOT, today=TODAY)
 
 
+def test_hosted_trust_center_cannot_drift_from_reviewed_pack() -> None:
+    """The deployment projection must preserve reviewed claims and open statuses."""
+    source = _manifest()
+    hosted = json.loads(
+        (ROOT / "infra/aws-control-plane/lambda/customer-assurance-release.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert hosted["technicalStatus"] == source["approval"]["technical_status"]
+    assert hosted["legalStatus"] == source["approval"]["legal_status"]
+    assert hosted["approvedAt"] == source["approval"]["approved_at"]
+    assert hosted["nextReviewDue"] == source["approval"]["next_review_due"]
+    assert hosted["independentAssurance"] == {
+        "penetrationTest": source["independent_assurance"]["penetration_test"]["status"],
+        "soc2TypeIi": source["independent_assurance"]["soc2_type_ii"]["status"],
+        "iso27001": source["independent_assurance"]["iso_27001"]["status"],
+    }
+    assert hosted["guarantees"] == [
+        {"id": item["id"], "statement": item["statement"]} for item in source["guarantees"]
+    ]
+    assert hosted["nonGuarantees"] == [item["statement"] for item in source["non_guarantees"]]
+    assert hosted["status"] == "unavailable"
+    assert hosted["archive"] is None
+    assert hosted["blockers"]
+
+
 def test_expired_review_fails_closed() -> None:
     manifest = _manifest()
     manifest["approval"]["next_review_due"] = "2026-08-04"

@@ -1005,6 +1005,18 @@ paths, commands, prompts or credentials. It is inventory evidence, not an MDM
 delivery or managed-upgrade claim. See
 [Approved runtime releases and version compliance](runtime-release-compliance-design.md).
 
+Buyer-assurance release metadata is also deployment-owned and read-only. CDK
+binds one closed manifest to Lambda by SHA-256; Lambda rejects stale,
+malformed, contradictory or unbound bytes at startup. An available customer
+assurance archive must name the exact official GitHub release asset derived
+from its semantic tag and bind its source commit, archive digest, provenance
+status and verification date. An unavailable source candidate has no archive
+or download locator and must expose explicit blockers. Browser input, tenant
+records and enrolled-agent observations cannot create assurance claims or
+select a release. Technical, legal and independent-assurance statuses remain
+separate and are not compliance certification. See [Customer assurance Trust
+Center](customer-assurance-trust-center-design.md).
+
 Runtime upgrades are separate revision-bound authority. A deployment may admit
 only its retained approved current release and one approved same-host target.
 The server deterministically selects canary members from tenant, deployment and

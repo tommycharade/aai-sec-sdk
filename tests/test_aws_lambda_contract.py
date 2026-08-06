@@ -652,7 +652,7 @@ class FakeCondition:
         )
 
 
-def _load_handler(monkeypatch: Any) -> Any:
+def _load_handler(monkeypatch: Any, *, assurance_release_digest: str | None = None) -> Any:
     """Load the Lambda with dependency-free boto3 doubles."""
     table = FakeTable()
     boto3 = types.ModuleType("boto3")
@@ -716,6 +716,17 @@ def _load_handler(monkeypatch: Any) -> Any:
     assurance_key_id = "arn:aws:kms:eu-west-1:111111111111:key/mrk-abcdefabcdefabcdefabcdefabcdefab"
     monkeypatch.setenv("ASSURANCE_REPORT_SIGNING_KEY_ARN", assurance_key_id)
     monkeypatch.setenv("ASSURANCE_REPORT_VERIFICATION_KEY_ARNS", json.dumps([assurance_key_id]))
+    assurance_release = (
+        Path(__file__).parents[1]
+        / "infra"
+        / "aws-control-plane"
+        / "lambda"
+        / "customer-assurance-release.json"
+    )
+    monkeypatch.setenv(
+        "CUSTOMER_ASSURANCE_RELEASE_SHA256",
+        assurance_release_digest or hashlib.sha256(assurance_release.read_bytes()).hexdigest(),
+    )
     monkeypatch.setenv(
         "REGIONAL_POLICY_SIGNING_KEY_ARN",
         "arn:aws:kms:eu-west-2:111111111111:key/mrk-1234567890abcdef1234567890abcdef",
@@ -1586,6 +1597,71 @@ def test_enterprise_assurance_report_routes_enforce_profile_roles(monkeypatch: A
         )["statusCode"]
         == 403
     )
+
+
+def test_customer_assurance_pack_is_honest_tenant_guarded_and_release_bound(
+    monkeypatch: Any,
+) -> None:
+    """An unpublished pack exposes blockers but no caller-shaped download authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-trust-center"
+    table.put_item(
+        Item={
+            **module._item_key(tenant, "TENANT", "root"),
+            "tenant_id": tenant,
+            "id": tenant,
+            "status": "active",
+        }
+    )
+    auditor = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["auditor"],
+        "sub": "auditor-trust",
+    }
+    author = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["policy-author"],
+        "sub": "author-trust",
+    }
+
+    response = _invoke(
+        module,
+        _event("/api/enterprise/trust-center", "GET", claims=auditor),
+    )
+    assert response["statusCode"] == 200
+    view = json.loads(response["body"])
+    assert view["status"] == "unavailable"
+    assert view["archive"] is None
+    assert view["blockers"]
+    assert re.fullmatch(r"[0-9a-f]{64}", view["manifestSha256"])
+    assert "downloadUrl" not in response["body"]
+    assert (
+        _invoke(
+            module,
+            _event("/api/enterprise/trust-center", "GET", claims=author),
+        )["statusCode"]
+        == 403
+    )
+    unavailable = _invoke(
+        module,
+        _event(
+            "/api/enterprise/trust-center/download",
+            "GET",
+            claims=auditor,
+            body={"url": "https://attacker.invalid/fake.zip"},
+        ),
+    )
+    assert unavailable["statusCode"] == 503
+    assert "not released" in json.loads(unavailable["body"])["error"]
+
+
+def test_customer_assurance_pack_rejects_unbound_deployment_bytes(monkeypatch: Any) -> None:
+    """A stale infrastructure digest prevents the control plane from importing."""
+    with pytest.raises(
+        RuntimeError,
+        match="customer assurance release authority is not bound to deployment",
+    ):
+        _load_handler(monkeypatch, assurance_release_digest="0" * 64)
 
 
 def test_signed_assurance_snapshot_is_exact_version_bound_and_verifiable(
@@ -3268,6 +3344,13 @@ def test_machine_api_allowlist_covers_each_scope_and_excludes_human_governance(
     )
     assert (
         module._machine_route_capability("GET", "/api/enterprise/reports/auditor")
+        == "evidence_read"
+    )
+    assert (
+        module._machine_route_capability("GET", "/api/enterprise/trust-center") == "evidence_read"
+    )
+    assert (
+        module._machine_route_capability("GET", "/api/enterprise/trust-center/download")
         == "evidence_read"
     )
     assert (
