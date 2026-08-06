@@ -121,8 +121,9 @@ audited. Emergency capabilities cannot request or decide another emergency
 grant; those lifecycle controls require normal directory-derived authority.
 
 The auditor-only access-certification API exports a bounded complete view of
-SCIM operators, memberships, group-to-role mappings, canonical capabilities
-break-glass history and delegated grants with a stable SHA-256 content digest.
+SCIM operators, memberships, group-to-role mappings, canonical capabilities,
+custom-role lifecycle, break-glass history and delegated grants with a stable
+SHA-256 content digest.
 It refuses a
 partial oversized inventory and marks an export incomplete when SCIM is not
 configured. The digest is integrity evidence, not a signature, human review,
@@ -134,14 +135,26 @@ and leaver evidence.
 
 Delegated administration is server-owned authority rather than a browser or
 token role claim. A normal tenant identity administrator may assign one
-non-admin canonical role to another exact signed principal for an existing
-organization, project or deployment and a maximum of 366 days. The API
+non-admin canonical role or independently approved immutable custom role to
+another exact signed principal for an existing tenant, organization, project,
+environment or deployment and a maximum of 366 days. The API
 resolves resource lineage from tenant-owned records, checks the live grant on
-every scoped mutation and filters delegated-only inventory reads. Organization
-scope contains projects and deployments; project scope contains deployments;
-deployment scope is exact. A missing target, unknown route, failed lookup,
-expired grant, revoked grant, forged informational claim or sibling resource
-denies authority. Batch operations require every target to be covered.
+every scoped mutation and filters delegated-only inventory reads. Tenant scope
+is exact to the authenticated AAI tenant; organization is the business-unit
+boundary; project scope contains deployments; environment scope matches an
+exact server-owned deployment environment; deployment scope is exact. A
+missing target, unknown route, failed lookup, expired grant, revoked grant,
+forged informational claim or sibling resource denies authority. Batch
+operations require every target to be covered.
+
+Custom roles can contain only a fixed code-owned subset of approval, evidence,
+fleet, incident, inventory and policy capabilities. Wildcard, identity,
+integration, runtime, provider, discovery and machine authority cannot be
+composed. Creation is an inactive draft; another identity administrator must
+approve or reject it. Grants bind the exact approved revision and capability
+digest, while every authorization reloads the live role. Malformed records,
+changed capabilities, a changed digest or revision, and retirement deny all
+bound grants. Custom roles never enter Cognito or Entra group claims.
 
 Delegation cannot create `platform-admin`, identity administration, emergency
 grant governance or another delegation. Self-delegation is denied. Create and

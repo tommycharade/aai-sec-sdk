@@ -828,6 +828,34 @@ resolves the snapshot's stable MRK identity through a deployment-owned list of
 current and historical local-Region replica ARNs. Unknown, duplicate,
 cross-Region or policy-signing authority fails closed.
 
+## Custom roles and delegated administration
+
+Only normal directory-derived `identity_admin` authority may govern custom
+roles or delegated grants; break-glass and delegated authority are explicitly
+excluded from these routes:
+
+- `GET|POST /api/enterprise/identity/custom-roles` lists the bounded catalog or
+  creates an immutable inactive draft;
+- `POST /api/enterprise/identity/custom-roles/{roleId}/decision` accepts exact
+  `expectedRevision`, `approve` or `reject`, and a bounded rationale from an
+  administrator other than the author;
+- `POST /api/enterprise/identity/custom-roles/{roleId}/retire` retires one
+  exact active revision and invalidates its grants;
+- `GET|POST /api/enterprise/identity/delegated-grants` lists or creates
+  expiring canonical/custom grants; and
+- `POST /api/enterprise/identity/delegated-grants/{grantId}/revoke` revokes one
+  live grant conditionally.
+
+Custom role creation accepts exact `customRoleId`, `name`, `description`, one
+or more fixed safe `capabilities`, and `reason`. The role is immutable after
+creation. Grant creation accepts `principalId`, `roleType`, `role`,
+`scopeType`, `scopeId`, `durationDays` and `reason`. Scope type is `tenant`,
+`organization` (business unit), `project`, `environment` or `deployment`.
+Legacy canonical requests may omit `roleType`. Custom responses expose the
+bound role revision and authority digest but no credential or directory token.
+See [Delegated administration](delegated-administration.md) for capability and
+scope semantics.
+
 ## Service identities and machine access
 
 Human lifecycle management uses the Cognito/Entra-protected API:

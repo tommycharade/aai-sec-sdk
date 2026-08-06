@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add immutable, independently reviewed custom roles from a fixed safe
+  capability vocabulary and delegated tenant, business-unit, project,
+  environment and deployment scopes. Custom grants bind the exact approved
+  role revision and digest, reload live authority on every request and fail
+  closed after tampering or retirement. Schema-v3 access certification and the
+  typed Identity & Access UI expose lifecycle and effective authority without
+  putting custom roles into Entra/Cognito claims.
+
 - Add server-derived endpoint-posture and open-alert-risk fields to governed
   dynamic groups. Exact endpoint identity comes from authenticated device
   evidence, unresolved retained alerts determine the highest risk tier, and

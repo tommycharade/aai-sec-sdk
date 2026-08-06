@@ -86,7 +86,10 @@ in **Identity & trust**. The tenant-scoped artifact contains:
   directory object ID;
 - current group membership and exact group-to-role mappings;
 - the canonical role-to-capability matrix;
-- every delegated role, organization/project/deployment scope, expiry and
+- every immutable custom-role draft, decision, digest, retirement and safe
+  capability set;
+- every delegated canonical/custom role, tenant/business-unit/project/
+  environment/deployment scope, exact role revision/digest, expiry and
   revocation state;
 - pending, active, expired, denied and revoked break-glass records;
 - generation time and a SHA-256 digest of the complete review payload.
@@ -106,10 +109,18 @@ review.
 
 Use **Identity & trust → Delegated operator access** for normal least-privilege
 operations, not break glass. The target must be an active SCIM operator when
-SCIM is configured. Select one non-admin canonical role, an organization,
-project or deployment, an expiry no longer than 366 days, and a reviewable
-business rationale. The API rejects self-delegation and never allows
-`platform-admin` or identity governance to be delegated.
+SCIM is configured. Select one non-admin canonical role or independently
+approved custom role, a tenant, business unit, project, environment or
+deployment, an expiry no longer than 366 days, and a reviewable business
+rationale. The API rejects self-delegation and never allows `platform-admin`
+or identity governance to be delegated.
+
+Create custom roles under **Identity & trust → Custom roles**. Select only the
+fixed capabilities needed for one operator job. Saving creates an inactive
+draft. A different identity administrator must inspect its effective authority
+and approve or reject it. Roles cannot be edited after creation. Retiring an
+active role invalidates every grant bound to it immediately; retain one
+post-retirement HTTP 403 as acceptance evidence.
 
 After creating the grant, remove any broader Entra group membership that would
 still assign a tenant-wide role. Verify the operator can manage one in-scope
@@ -131,11 +142,16 @@ Before enterprise rollout, retain synthetic evidence that proves:
 5. granted authority cannot perform an unrequested capability;
 6. expiry and revocation remove authority on the next API request;
 7. a cross-tenant subject receives no grant;
-8. delegated authority permits one descendant resource, denies a sibling,
-   expires automatically and is denied immediately after revocation;
-9. the certification export is complete, digest-verifiable and auditor-only;
+8. delegated canonical/custom authority permits one descendant or exact
+   environment resource, denies a sibling, expires automatically and is denied
+   immediately after revocation;
+9. custom role approval is independent, unsupported authority is rejected,
+   grant revision/digest tampering fails closed, and retirement invalidates the
+   next request;
+10. the certification export is schema version 3, complete,
+    digest-verifiable and auditor-only;
    and
-10. every lifecycle transition has content-minimised durable audit evidence.
+11. every lifecycle transition has content-minimised durable audit evidence.
 
 Source-level contract tests provide repeatable adversarial evidence. They do
 not replace a deployed Entra MFA, API Gateway claim-projection and two-person

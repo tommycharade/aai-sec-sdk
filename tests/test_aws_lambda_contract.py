@@ -5985,6 +5985,29 @@ def test_delegated_admin_scope_is_live_narrow_and_revocable(monkeypatch: Any) ->
         },
     ):
         table.put_item(Item=item)
+    assert module._delegated_scope_lineage(tenant, "tenant", tenant) == {"tenant": tenant}
+    assert module._delegated_scope_lineage(tenant, "project", "project-a") == {
+        "tenant": tenant,
+        "organization": "org-a",
+        "project": "project-a",
+    }
+    with pytest.raises(LookupError, match="tenant scope"):
+        module._delegated_scope_lineage(tenant, "tenant", "another-tenant")
+    spaced_environment_scope = module._mutation_resource_scope(
+        tenant,
+        _event(
+            "/enterprise/deployments",
+            "POST",
+            body={"projectId": "project-a", "environment": "Development EU"},
+        ),
+        "/enterprise/deployments",
+    )
+    assert spaced_environment_scope == {
+        "tenant": tenant,
+        "organization": "org-a",
+        "project": "project-a",
+        "environment": "Development EU",
+    }
     admin_claims = {
         "custom:tenant_id": tenant,
         "cognito:groups": ["platform-admin"],
@@ -6168,6 +6191,419 @@ def test_delegated_admin_rejects_self_wildcard_expired_and_cross_tenant_grants(
         tenant,
         resource_scope={"organization": "org-a"},
     )
+
+
+def test_custom_role_requires_independent_approval_and_binds_environment_scope(
+    monkeypatch: Any,
+) -> None:
+    """Custom authority is immutable, independently approved and exactly scoped."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-custom-role"
+    for item in (
+        module._item_key(tenant, "TENANT", "root") | {"id": tenant},
+        module._item_key(tenant, "ORG", "org-a") | {"id": "org-a", "name": "A"},
+        module._item_key(tenant, "PROJECT", "project-a")
+        | {"id": "project-a", "organization_id": "org-a", "name": "A project"},
+        module._item_key(tenant, "DEPLOYMENT", "dev-existing")
+        | {
+            "id": "dev-existing",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "environment": "development",
+            "name": "Development",
+        },
+        module._item_key(tenant, "DEPLOYMENT", "prod-existing")
+        | {
+            "id": "prod-existing",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "environment": "production",
+            "name": "Production",
+        },
+    ):
+        table.put_item(Item=item)
+    admin_a = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    admin_b = {**admin_a, "sub": "admin-b"}
+    role_path = "/enterprise/identity/custom-roles"
+    created = _invoke(
+        module,
+        _event(
+            role_path,
+            "POST",
+            body={
+                "customRoleId": "development-fleet-operator",
+                "name": "Development fleet operator",
+                "description": "Operate development deployments without production authority.",
+                "capabilities": ["fleet_write", "inventory_read"],
+                "reason": "Delegate bounded development fleet operations to the platform team",
+            },
+            claims=admin_a,
+        ),
+    )
+    assert created["statusCode"] == 201
+    draft = json.loads(created["body"])
+    assert draft["status"] == "draft"
+    assert draft["revision"] == 1
+    assert len(draft["authorityDigest"]) == 64
+
+    before_approval = _invoke(
+        module,
+        _event(
+            "/enterprise/identity/delegated-grants",
+            "POST",
+            body={
+                "principalId": "operator-a",
+                "roleType": "custom",
+                "role": draft["id"],
+                "scopeType": "environment",
+                "scopeId": "development",
+                "durationDays": 30,
+                "reason": "Operate only the development environment for this tenant",
+            },
+            claims=admin_a,
+        ),
+    )
+    assert before_approval["statusCode"] == 400
+    self_decision = _invoke(
+        module,
+        _event(
+            f"{role_path}/{draft['id']}/decision",
+            "POST",
+            body={
+                "expectedRevision": 1,
+                "decision": "approve",
+                "reason": "Approve the bounded development operations role after review",
+            },
+            claims=admin_a,
+        ),
+    )
+    assert self_decision["statusCode"] == 403
+    approved = _invoke(
+        module,
+        _event(
+            f"{role_path}/{draft['id']}/decision",
+            "POST",
+            body={
+                "expectedRevision": 1,
+                "decision": "approve",
+                "reason": "Approve the bounded development operations role after review",
+            },
+            claims=admin_b,
+        ),
+    )
+    role = json.loads(approved["body"])
+    assert approved["statusCode"] == 200
+    assert role["status"] == "active"
+    assert role["revision"] == 2
+    assert role["decidedBy"] == "admin-b"
+    identity = _invoke(module, _event("/enterprise/identity", "GET", claims=admin_a))
+    identity_payload = json.loads(identity["body"])
+    delegated_posture = identity_payload["delegatedAdministration"]
+    assert delegated_posture["customRoles"] == [role]
+    assert "identity_admin" not in delegated_posture["customRoleCapabilities"]
+    assert delegated_posture["scopeCatalog"]["tenants"] == [{"id": tenant, "name": tenant}]
+    assert delegated_posture["scopeCatalog"]["environments"] == [
+        {"id": "development", "name": "development"},
+        {"id": "production", "name": "production"},
+    ]
+    certification = _invoke(
+        module,
+        _event("/enterprise/identity/access-certification", "GET", claims=admin_a),
+    )
+    certification_payload = json.loads(certification["body"])
+    assert certification_payload["schemaVersion"] == 3
+    assert certification_payload["customRoles"] == [role]
+
+    granted = _invoke(
+        module,
+        _event(
+            "/enterprise/identity/delegated-grants",
+            "POST",
+            body={
+                "principalId": "operator-a",
+                "roleType": "custom",
+                "role": role["id"],
+                "scopeType": "environment",
+                "scopeId": "development",
+                "durationDays": 30,
+                "reason": "Operate only the development environment for this tenant",
+            },
+            claims=admin_a,
+        ),
+    )
+    assert granted["statusCode"] == 201
+    grant = json.loads(granted["body"])
+    assert grant["roleType"] == "custom"
+    assert grant["roleRevision"] == role["revision"]
+    assert grant["roleDigest"] == role["authorityDigest"]
+    assert grant["roleLabel"] == role["name"]
+
+    delegated = {"custom:tenant_id": tenant, "sub": "operator-a", "cognito:groups": []}
+    visible = _invoke(module, _event("/enterprise/deployments", "GET", claims=delegated))
+    assert visible["statusCode"] == 200
+    assert [item["id"] for item in json.loads(visible["body"])["items"]] == ["dev-existing"]
+    allowed = _invoke(
+        module,
+        _event(
+            "/enterprise/deployments",
+            "POST",
+            body={
+                "organizationId": "org-a",
+                "projectId": "project-a",
+                "deploymentId": "dev-new",
+                "name": "New development deployment",
+                "environment": "development",
+                "region": "test-1",
+            },
+            claims=delegated,
+        ),
+    )
+    assert allowed["statusCode"] == 201
+    denied = _invoke(
+        module,
+        _event(
+            "/enterprise/deployments",
+            "POST",
+            body={
+                "organizationId": "org-a",
+                "projectId": "project-a",
+                "deploymentId": "prod-new",
+                "name": "New production deployment",
+                "environment": "production",
+                "region": "test-1",
+            },
+            claims=delegated,
+        ),
+    )
+    assert denied["statusCode"] == 403
+
+
+def test_custom_role_retirement_tamper_and_claims_fail_closed(monkeypatch: Any) -> None:
+    """Retired, forged or tampered custom roles never retain delegated authority."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-custom-role-fail-closed"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=module._item_key(tenant, "ORG", "org-a") | {"id": "org-a"})
+    admin_a = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    admin_b = {**admin_a, "sub": "admin-b"}
+    role_path = "/enterprise/identity/custom-roles"
+    created = _invoke(
+        module,
+        _event(
+            role_path,
+            "POST",
+            body={
+                "customRoleId": "bounded-policy-author",
+                "name": "Bounded policy author",
+                "description": "Author policy only inside an assigned business unit.",
+                "capabilities": ["policy_write", "policy_simulation"],
+                "reason": "Delegate policy authoring without platform administration rights",
+            },
+            claims=admin_a,
+        ),
+    )
+    draft = json.loads(created["body"])
+    approved = _invoke(
+        module,
+        _event(
+            f"{role_path}/{draft['id']}/decision",
+            "POST",
+            body={
+                "expectedRevision": 1,
+                "decision": "approve",
+                "reason": "Approve this least privilege policy authoring role after review",
+            },
+            claims=admin_b,
+        ),
+    )
+    role = json.loads(approved["body"])
+    granted = _invoke(
+        module,
+        _event(
+            "/enterprise/identity/delegated-grants",
+            "POST",
+            body={
+                "principalId": "author-a",
+                "roleType": "custom",
+                "role": role["id"],
+                "scopeType": "organization",
+                "scopeId": "org-a",
+                "durationDays": 30,
+                "reason": "Author policy only for the assigned synthetic business unit",
+            },
+            claims=admin_a,
+        ),
+    )
+    assert granted["statusCode"] == 201
+    author_event = _event(
+        "/",
+        "GET",
+        claims={"custom:tenant_id": tenant, "sub": "author-a", "cognito:groups": []},
+    )
+    scope = {"tenant": tenant, "organization": "org-a"}
+    assert module._operator_authorized(author_event, "policy_write", tenant, resource_scope=scope)
+    assert not module._operator_authorized(
+        author_event, "identity_admin", tenant, resource_scope=scope
+    )
+    assert not module._operator_authorized(
+        _event(
+            "/",
+            "GET",
+            claims={
+                "custom:tenant_id": tenant,
+                "sub": "forged",
+                "cognito:groups": [role["id"]],
+            },
+        ),
+        "policy_write",
+        tenant,
+        resource_scope=scope,
+    )
+
+    grant = json.loads(granted["body"])
+    grant_key = (f"TENANT#{tenant}", f"DELEGATED_GRANT#{grant['id']}")
+    table.items[grant_key]["role_digest"] = "f" * 64
+    assert not module._operator_authorized(
+        author_event, "policy_write", tenant, resource_scope=scope
+    )
+    table.items[grant_key]["role_digest"] = role["authorityDigest"]
+    table.items[grant_key]["role_revision"] = 99
+    assert not module._operator_authorized(
+        author_event, "policy_write", tenant, resource_scope=scope
+    )
+    table.items[grant_key]["role_revision"] = role["revision"]
+    assert module._operator_authorized(author_event, "policy_write", tenant, resource_scope=scope)
+
+    role_key = (f"TENANT#{tenant}", f"CUSTOM_ROLE#{role['id']}")
+    original_digest = table.items[role_key]["authority_digest"]
+    table.items[role_key]["authority_digest"] = "0" * 64
+    assert not module._operator_authorized(
+        author_event, "policy_write", tenant, resource_scope=scope
+    )
+    table.items[role_key]["authority_digest"] = original_digest
+    table.items[role_key]["capabilities"] = ["*"]
+    assert not module._operator_authorized(
+        author_event, "policy_write", tenant, resource_scope=scope
+    )
+    table.items[role_key]["capabilities"] = ["policy_simulation", "policy_write"]
+    assert module._operator_authorized(author_event, "policy_write", tenant, resource_scope=scope)
+
+    retired = _invoke(
+        module,
+        _event(
+            f"{role_path}/{role['id']}/retire",
+            "POST",
+            body={
+                "expectedRevision": 2,
+                "reason": "Retire the role because the delegated operating model has ended",
+            },
+            claims=admin_a,
+        ),
+    )
+    assert retired["statusCode"] == 200
+    assert json.loads(retired["body"])["status"] == "retired"
+    assert not module._operator_authorized(
+        author_event, "policy_write", tenant, resource_scope=scope
+    )
+
+    wildcard = _invoke(
+        module,
+        _event(
+            role_path,
+            "POST",
+            body={
+                "customRoleId": "unsafe-role",
+                "name": "Unsafe role",
+                "description": "This role must never be persisted.",
+                "capabilities": ["*"],
+                "reason": "Attempt to create unrestricted custom authority for testing",
+            },
+            claims=admin_a,
+        ),
+    )
+    assert wildcard["statusCode"] == 400
+    assert (f"TENANT#{tenant}", "CUSTOM_ROLE#unsafe-role") not in table.items
+    credential_reason = _invoke(
+        module,
+        _event(
+            role_path,
+            "POST",
+            body={
+                "customRoleId": "secret-role",
+                "name": "Secret role",
+                "description": "This role must never be persisted.",
+                "capabilities": ["inventory_read"],
+                "reason": "password=synthetic-secret-value must never enter audit evidence",
+            },
+            claims=admin_a,
+        ),
+    )
+    assert credential_reason["statusCode"] == 400
+    assert (f"TENANT#{tenant}", "CUSTOM_ROLE#secret-role") not in table.items
+
+
+def test_custom_role_concurrent_decision_commits_no_false_audit(monkeypatch: Any) -> None:
+    """A stale role decision cannot diverge from its durable governance evidence."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-custom-role-race"
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    admin_a = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    path = "/enterprise/identity/custom-roles"
+    created = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                "customRoleId": "raced-reviewer",
+                "name": "Raced reviewer",
+                "description": "Synthetic optimistic concurrency evidence.",
+                "capabilities": ["evidence_read"],
+                "reason": "Prove concurrent role decisions cannot create false audit evidence",
+            },
+            claims=admin_a,
+        ),
+    )
+    role = json.loads(created["body"])
+    role_key = (f"TENANT#{tenant}", f"CUSTOM_ROLE#{role['id']}")
+
+    def concurrent_change() -> None:
+        table.items[role_key]["revision"] = 9
+
+    module.DYNAMODB.before_transaction = concurrent_change
+    decision = _invoke(
+        module,
+        _event(
+            f"{path}/{role['id']}/decision",
+            "POST",
+            body={
+                "expectedRevision": 1,
+                "decision": "approve",
+                "reason": "Approve only if the exact reviewed role revision remains current",
+            },
+            claims={**admin_a, "sub": "admin-b"},
+        ),
+    )
+    assert decision["statusCode"] == 409
+    assert table.items[role_key]["status"] == "draft"
+    audit_types = [
+        item.get("event_type")
+        for item in table.items.values()
+        if str(item.get("sk", "")).startswith("BREAK_GLASS_AUDIT#")
+    ]
+    assert audit_types == ["custom_role_created"]
 
 
 def test_group_authority_edges_reject_cross_organization_policy_and_agent(
@@ -7941,9 +8377,10 @@ def test_access_certification_is_complete_bounded_and_auditor_only(monkeypatch: 
     )
     assert exported["statusCode"] == 200
     payload = json.loads(exported["body"])
-    assert payload["schemaVersion"] == 2
+    assert payload["schemaVersion"] == 3
     assert payload["complete"] is True
     assert payload["delegatedGrants"] == []
+    assert payload["customRoles"] == []
     assert payload["operators"] == [
         {
             "subjectId": user_id,
