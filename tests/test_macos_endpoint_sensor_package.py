@@ -106,6 +106,9 @@ def test_builds_secret_free_shellless_launchd_package(
     assert tools.plist is not None
     assert tools.plist["UserName"] == "root"
     assert tools.plist["StartInterval"] == 300
+    assert tools.plist["EnvironmentVariables"] == {
+        "TMPDIR": "/var/db/aai-security/endpoint-evidence/runtime"
+    }
     assert tools.plist["ProgramArguments"] == [
         "/Library/Application Support/AAI Security/bin/aai-endpoint-evidence",
         "--manifest",

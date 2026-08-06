@@ -369,10 +369,14 @@ types and test tenant must be approved explicitly.
 ### macOS endpoint sensor rollout
 
 The repository includes a digest-bound macOS installer-package builder and a
-fixed root launch-daemon contract. Live acceptance still needs:
+fixed root launch-daemon contract. It now also includes a pinned standalone
+artifact builder, independent verifier and disposable arm64/Intel CI. Live
+acceptance still needs:
 
-- an independently built and signed production sensor executable;
+- a protected Developer ID Application identity and independently reviewed
+  leaf-authority digest for the production sensor executable;
 - an Apple installer signing identity;
+- an approved notarization credential/workflow and supported macOS baseline;
 - customer MDM package and protected per-device configuration delivery;
 - a non-production managed macOS cohort; and
 - a retained pilot window for package, process and report-freshness evidence.

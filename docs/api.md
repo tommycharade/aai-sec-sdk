@@ -666,6 +666,17 @@ normal build requires a signing identity. `--allow-unsigned` is an explicit
 test-only posture. See
 [macOS endpoint sensor MDM package](macos-endpoint-sensor-package.md).
 
+`build_macos_endpoint_sensor_artifact.py` provides two typed commands. `build`
+freezes the exact collector source with pinned PyInstaller/psutil inputs,
+measures one architecture and code-signature posture, smoke-runs the frozen
+parser from a protected extraction directory and atomically commits the
+executable plus closed manifest. `verify` independently remeasures the
+manifest, bytes, architecture, signature, entitlements and command interface.
+Verification requires an independently supplied Developer ID leaf-authority
+digest by default. `--allow-adhoc` is test-only and accepts exactly the measured
+library-validation entitlement needed by the disposable Python.org-framework
+build. See [macOS endpoint sensor artifact](macos-endpoint-sensor-artifact.md).
+
 The `intune` mode of `collect_discovery_inventory.py` obtains that
 device file from the fixed Microsoft Graph v1.0 managed-devices query with only
 opaque managed-device/user IDs, the canonical Entra device registration ID

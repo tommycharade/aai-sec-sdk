@@ -146,6 +146,8 @@ also_copy = [
   "TRADEMARKS.md",
   "requirements-ci.txt",
   "requirements-build.txt",
+  "requirements-sensor-build.txt",
+  ".github/workflows/macos-sensor-artifact.yml",
   "mutation-baseline.json",
 ]
 mutate_only_covered_lines = true
