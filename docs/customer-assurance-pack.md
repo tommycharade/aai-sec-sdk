@@ -88,3 +88,8 @@ its documented acceptance gate.
 
 This pack is technical due-diligence material, not legal advice, a contract or
 an independent attestation.
+
+The hosted control plane presents the same distinction through the
+[customer assurance Trust Center](customer-assurance-trust-center-design.md).
+The Trust Center does not enable its download action until a deployment-owned
+manifest binds this pack to one independently verified immutable release.

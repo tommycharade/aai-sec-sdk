@@ -823,6 +823,16 @@ time and report digest. It proves control-plane origin and alteration detection,
 not a trusted timestamp, compliance certification or independent attestation. See
 [Enterprise assurance reports](enterprise-assurance-reports-design.md).
 
+### Customer assurance Trust Center
+
+`GET /api/enterprise/trust-center` requires `evidence_read` and returns the
+deployment-owned customer assurance status, reviewed guarantees,
+non-guarantees, open blockers and independent-assurance state. It does not
+return an external URL. `GET /api/enterprise/trust-center/download` returns the
+exact official release locator and expected archive SHA-256 only after the
+manifest is release-bound and provenance-verified; it otherwise fails closed.
+See [Customer assurance Trust Center](customer-assurance-trust-center-design.md).
+
 The signer is a dedicated retained multi-Region assurance key. Verification
 resolves the snapshot's stable MRK identity through a deployment-owned list of
 current and historical local-Region replica ARNs. Unknown, duplicate,

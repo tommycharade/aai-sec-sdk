@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "status": "unavailable",
+  "product": "Agentic AI Security SDK and enterprise control plane",
+  "technicalStatus": "approved",
+  "legalStatus": "review_required",
+  "approvedAt": "2026-08-05",
+  "nextReviewDue": "2026-11-03",
+  "archive": null,
+  "independentAssurance": {
+    "penetrationTest": "not_completed",
+    "soc2TypeIi": "not_certified",
+    "iso27001": "not_certified"
+  },
+  "guarantees": [
+    {
+      "id": "host_authority",
+      "statement": "The host, never model output, decides whether a governed action executes."
+    },
+    {
+      "id": "fail_closed",
+      "statement": "Unknown tools and missing or malformed security context fail closed at the SDK boundary."
+    },
+    {
+      "id": "release_evidence",
+      "statement": "The release workflow produces checksums, per-artifact SBOMs and GitHub provenance attestations."
+    },
+    {
+      "id": "open_core_security",
+      "statement": "Core fail-closed behavior, public contracts, security fixes and documentation do not require paid functionality."
+    }
+  ],
+  "nonGuarantees": [
+    "The product does not prove that an agent, model output or generated code is safe.",
+    "Repository tests and signed assurance reports are not SOC 2, ISO 27001 or regulatory certification.",
+    "Production identity, managed-host enforcement, isolation, credential and network controls require deployment-owned configuration and acceptance.",
+    "No independent penetration-test completion is claimed by this pack."
+  ],
+  "blockers": [
+    "Publish and independently verify the immutable v1.1.0 release artifacts.",
+    "Attach the deterministic customer-assurance-pack.zip and its checksum to that exact release.",
+    "Complete legal review before representing the data-processing material as approved."
+  ]
+}
