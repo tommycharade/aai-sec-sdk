@@ -366,6 +366,20 @@ types and test tenant must be approved explicitly.
   GDPR.
 - Pricing assumptions or authority for the product team to propose pricing.
 
+### macOS endpoint sensor rollout
+
+The repository includes a digest-bound macOS installer-package builder and a
+fixed root launch-daemon contract. Live acceptance still needs:
+
+- an independently built and signed production sensor executable;
+- an Apple installer signing identity;
+- customer MDM package and protected per-device configuration delivery;
+- a non-production managed macOS cohort; and
+- a retained pilot window for package, process and report-freshness evidence.
+
+Per-device key IDs and secrets must be delivered as protected files by the MDM
+and must never be embedded in the common installer package.
+
 ## Work that can continue without owner input
 
 Engineering can continue autonomously on:

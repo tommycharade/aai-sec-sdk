@@ -2,8 +2,9 @@
 """Measure and sign content-minimised Claude/Codex endpoint evidence.
 
 The script is intended for root/administrator execution by endpoint management.
-It never invokes a shell and reads the per-device signing secret only from a
-named environment variable.
+It never invokes a shell. Interactive runs may use a named environment variable;
+scheduled runs may instead use protected root-owned key and secret files and an
+atomic protected report output.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import os
 import platform
 import stat
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -28,6 +30,7 @@ _IDENTIFIER_CHARACTERS = frozenset(
 )
 _MAX_INSTALLATIONS = 100
 _MAX_BINARY_BYTES = 1_073_741_824
+_MAX_CREDENTIAL_BYTES = 4_096
 _OPERATING_SYSTEMS = {"darwin": "darwin", "linux": "linux", "windows": "windows"}
 _ARCHITECTURES = {
     "arm64": "arm64",
@@ -93,6 +96,134 @@ def _validate_manifest_security(path: Path) -> None:
         raise EndpointEvidenceError("endpoint manifest ACL verification is unsupported")
     if metadata.st_uid != 0 or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
         raise EndpointEvidenceError("endpoint manifest must be root-owned and not broadly writable")
+
+
+def _read_protected_text(
+    path: Path,
+    *,
+    label: str,
+    owner_uid: int = 0,
+    minimum_bytes: int = 1,
+    maximum_bytes: int = _MAX_CREDENTIAL_BYTES,
+) -> str:
+    """Read one exact administrator-owned value without following a link.
+
+    The value must be UTF-8 without whitespace or NUL bytes. This deliberately
+    rejects newline-terminated secret files so packaging cannot silently change
+    credential bytes produced by the control plane.
+    """
+    if not path.is_absolute() or ".." in path.parts:
+        raise EndpointEvidenceError(f"{label} path must be absolute and non-traversing")
+    try:
+        lexical = path.lstat()
+    except OSError as error:
+        raise EndpointEvidenceError(f"{label} could not be inspected") from error
+    if (
+        stat.S_ISLNK(lexical.st_mode)
+        or not stat.S_ISREG(lexical.st_mode)
+        or lexical.st_uid != owner_uid
+        or lexical.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
+        or not minimum_bytes <= lexical.st_size <= maximum_bytes
+    ):
+        raise EndpointEvidenceError(f"{label} must be a protected administrator-owned file")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
+                lexical.st_dev,
+                lexical.st_ino,
+            ):
+                raise EndpointEvidenceError(f"{label} changed during inspection")
+            encoded = stream.read(maximum_bytes + 1)
+    except OSError as error:
+        raise EndpointEvidenceError(f"{label} could not be read safely") from error
+    if not minimum_bytes <= len(encoded) <= maximum_bytes:
+        raise EndpointEvidenceError(f"{label} size is invalid")
+    try:
+        value = encoded.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise EndpointEvidenceError(f"{label} must be UTF-8") from error
+    if any(character.isspace() or character == "\x00" for character in value):
+        raise EndpointEvidenceError(f"{label} must not contain whitespace or NUL bytes")
+    return value
+
+
+def _verify_protected_directory(path: Path, *, owner_uid: int) -> None:
+    """Require one administrator-owned non-symlink output directory."""
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise EndpointEvidenceError("endpoint report directory could not be inspected") from error
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != owner_uid
+        or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+    ):
+        raise EndpointEvidenceError("endpoint report directory is not protected")
+
+
+def write_signed_report(
+    path: Path,
+    report: dict[str, Any],
+    *,
+    owner_uid: int = 0,
+    effective_uid: int | None = None,
+) -> None:
+    """Atomically replace one mode-0600 report in a protected directory.
+
+    The caller must already have generated a content-minimised report. Existing
+    links, devices, non-administrator files and broadly writable files are
+    rejected before replacement; a temporary file is fsynced before the atomic
+    rename so an MDM collector never reads a partial report.
+    """
+    current_uid = os.geteuid() if effective_uid is None else effective_uid
+    if current_uid != owner_uid:
+        raise EndpointEvidenceError("endpoint report output requires administrator identity")
+    output = _absolute_path(str(path), "output")
+    _verify_protected_directory(output.parent, owner_uid=owner_uid)
+    if output.exists() or output.is_symlink():
+        try:
+            existing = output.lstat()
+        except OSError as error:
+            raise EndpointEvidenceError("endpoint report output could not be inspected") from error
+        if (
+            stat.S_ISLNK(existing.st_mode)
+            or not stat.S_ISREG(existing.st_mode)
+            or existing.st_uid != owner_uid
+            or existing.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        ):
+            raise EndpointEvidenceError("endpoint report output is not protected")
+    encoded = json.dumps(report, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    descriptor = -1
+    temporary: Path | None = None
+    try:
+        descriptor, name = tempfile.mkstemp(prefix=f".{output.name}.aai-stage-", dir=output.parent)
+        temporary = Path(name)
+        os.fchmod(descriptor, 0o600)
+        os.fchown(descriptor, owner_uid, -1)
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = -1
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, output)
+        temporary = None
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_descriptor = os.open(output.parent, directory_flags)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    except OSError as error:
+        raise EndpointEvidenceError("endpoint report could not be written safely") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _is_administrator() -> bool:
@@ -363,24 +494,42 @@ def _parser() -> argparse.ArgumentParser:
     """Build a secret-free endpoint sensor command contract."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, type=Path)
-    parser.add_argument("--key-id", required=True)
-    parser.add_argument("--secret-env", default="AAI_ENDPOINT_EVIDENCE_KEY")
+    key_source = parser.add_mutually_exclusive_group(required=True)
+    key_source.add_argument("--key-id")
+    key_source.add_argument("--key-id-file", type=Path)
+    secret_source = parser.add_mutually_exclusive_group()
+    secret_source.add_argument("--secret-env")
+    secret_source.add_argument("--secret-file", type=Path)
+    parser.add_argument("--output", type=Path)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Measure and print one signed report without exposing paths or secrets."""
+    """Measure and emit one signed report without exposing paths or secrets."""
     arguments = _parser().parse_args(argv)
     try:
+        key_id = (
+            arguments.key_id
+            if arguments.key_id is not None
+            else _read_protected_text(arguments.key_id_file, label="endpoint key ID")
+        )
+        secret = (
+            _read_protected_text(arguments.secret_file, label="endpoint signing secret")
+            if arguments.secret_file is not None
+            else os.environ.get(arguments.secret_env or "AAI_ENDPOINT_EVIDENCE_KEY", "")
+        )
         result = collect_signed_report(
             arguments.manifest,
-            key_id=arguments.key_id,
-            secret=os.environ.get(arguments.secret_env, ""),
+            key_id=key_id,
+            secret=secret,
         )
+        if arguments.output is not None:
+            write_signed_report(arguments.output, result)
+        else:
+            print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     except EndpointEvidenceError as error:
         print(f"Endpoint evidence collection failed: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0
 
 

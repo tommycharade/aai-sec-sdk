@@ -1169,6 +1169,21 @@ The HMAC is source authentication, not hardware attestation; MDM administrators,
 endpoint root compromise and stolen device secrets remain deployment risks.
 See [Endpoint evidence publisher](endpoint-evidence-publisher-design.md).
 
+The macOS package builder is a deployment adapter, not new execution
+authority. It accepts only an absolute, administrator-owned, non-symlink
+executable with an exact out-of-band SHA-256 identity. Package output must be a
+new file in a protected administrator-owned directory. The adapter invokes
+fixed system `pkgbuild`, `productsign` and `pkgutil` paths with argument arrays,
+a closed environment and no shell. Its one shell boundary is a fixed
+post-install script with no caller-controlled interpolation; it establishes
+root ownership and restrictive modes before loading the fixed launch-daemon
+label. Package metadata and payload never contain the per-device key ID or
+secret. Scheduled collection reads those values only from protected files and
+atomically replaces its protected report. A package signature proves package
+provenance, not MDM authorization, endpoint health, successful installation,
+runtime activity or hardware-backed device identity. See
+[macOS endpoint sensor MDM package](macos-endpoint-sensor-package.md).
+
 Hosted Intune delivery is a separate privileged boundary. Intune app
 deployment is group-assignment based, so the control plane derives an exact
 rollout cohort rather than treating a managed-device ID as a command target.

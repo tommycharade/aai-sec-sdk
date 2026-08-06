@@ -651,7 +651,22 @@ For endpoint fleets, `collect_endpoint_evidence.py` produces a path-free,
 per-device signed installation/process report and
 `assemble_endpoint_inventory.py` validates every current report against the
 authoritative MDM device inventory before producing one complete endpoint
-export. The `intune` mode of `collect_discovery_inventory.py` obtains that
+export. Interactive use may read the signing key ID and secret from the
+environment. Scheduled deployments should use `--key-id-file` and
+`--secret-file`, which accept only absolute, root-owned, non-symlink regular
+files without group or world permissions. `--output` writes the signed report
+through a mode-`0600` temporary file and an atomic replacement in a protected
+directory. The report never contains either credential.
+
+`build_macos_endpoint_sensor_package.py` turns an independently built sensor
+executable with an out-of-band SHA-256 digest into a macOS installer package.
+The package contains the executable, a root launch daemon and secret-free
+metadata; per-device manifests and credentials remain MDM-owned inputs. A
+normal build requires a signing identity. `--allow-unsigned` is an explicit
+test-only posture. See
+[macOS endpoint sensor MDM package](macos-endpoint-sensor-package.md).
+
+The `intune` mode of `collect_discovery_inventory.py` obtains that
 device file from the fixed Microsoft Graph v1.0 managed-devices query with only
 opaque managed-device/user IDs, the canonical Entra device registration ID
 needed for later online target resolution, and optional reviewed business-unit

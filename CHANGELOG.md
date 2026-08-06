@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add a digest-bound macOS endpoint-sensor package builder with a fixed
+  root-owned launch daemon, secret-free metadata, explicit package-signing
+  posture, protected credential-file input and atomic mode-`0600` report
+  output. Unit and real-tool acceptance cover tamper, symlink, permissions,
+  shell-boundary and package-content failures without claiming live MDM rollout
+  or hardware-backed attestation.
+
 - Add a network-incapable synthetic Intune acceptance harness that executes the
   production continuation handler through 500 desired devices and bounded stale
   membership cleanup, emits content-minimised mode-0600 evidence and explicitly
