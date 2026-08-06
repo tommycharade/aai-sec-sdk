@@ -7007,6 +7007,352 @@ def test_dynamic_group_rejects_untrusted_rules_stale_revisions_and_transaction_r
     assert not [key for key in table.items if key[1].startswith("DYNAMIC_GROUP_OPERATION#")]
 
 
+def test_dynamic_group_derives_endpoint_posture_and_risk_from_server_evidence(
+    monkeypatch: Any,
+) -> None:
+    """Posture and risk selectors use retained evidence, never browser scores."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-dynamic-posture"
+    now = int(time.time())
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["fleet-operator"],
+        "sub": "fleet-operator-a",
+    }
+    deployment = module._item_key(tenant, "DEPLOYMENT", "dep-a") | {
+        "id": "dep-a",
+        "organization_id": "org-a",
+        "project_id": "project-a",
+        "team": "Platform",
+        "environment": "prod",
+        "region": "eu-west-2",
+    }
+    group = module._item_key(tenant, "GROUP", "target") | {
+        "id": "target",
+        "organizationId": "org-a",
+        "name": "At-risk endpoints",
+        "policyId": "policy-restrictive",
+        "policyName": "Restrictive policy",
+        "agent_keys": [],
+        "membership_revision": 1,
+        "membership_mode": "manual",
+    }
+    table.put_item(Item=module._item_key(tenant, "TENANT", "root") | {"id": tenant})
+    table.put_item(Item=deployment)
+    table.put_item(Item=group)
+    health_status = {"device-a": "healthy", "device-b": "attention"}
+    for agent_id, project_root, device_id in (
+        ("agent-a", "/synthetic/project-a", "device-a"),
+        ("agent-b", "/synthetic/project-b", "device-b"),
+    ):
+        table.put_item(
+            Item=module._item_key(tenant, "AGENT", f"dep-a:{agent_id}")
+            | {
+                "id": agent_id,
+                "organization_id": "org-a",
+                "project_id": "project-a",
+                "deployment_id": "dep-a",
+                "project_root": project_root,
+                "host": "claude-code",
+                "lifecycle_state": "active",
+                "lifecycle_revision": 1,
+            }
+        )
+        table.put_item(
+            Item=module._item_key(tenant, "ENDPOINT_EVIDENCE", device_id)
+            | {
+                "deviceId": device_id,
+                "payload": {
+                    "installations": [
+                        {
+                            "projectRootDigest": hashlib.sha256(project_root.encode()).hexdigest(),
+                            "host": "claude-code",
+                        }
+                    ]
+                },
+            }
+        )
+    table.put_item(
+        Item=module._item_key(tenant, "ALERT", "alert-device-b")
+        | {
+            "id": "alert-device-b",
+            "deviceId": "device-b",
+            "severity": "critical",
+            "status": "open",
+        }
+    )
+
+    def endpoint_health(_tenant: str, *, now: int | None = None) -> dict[str, Any]:
+        del _tenant, now
+        return {
+            "items": [
+                {"deviceId": device_id, "status": status}
+                for device_id, status in health_status.items()
+            ]
+        }
+
+    monkeypatch.setattr(module, "_endpoint_evidence_health", endpoint_health)
+    path = "/enterprise/groups/target/dynamic-membership"
+    request = {
+        "mode": "preview",
+        "requestId": "dynamic-posture-001",
+        "expectedMembershipRevision": 1,
+        "reason": "Move critical endpoint risk onto the restrictive policy.",
+        "rule": {
+            "match": "all",
+            "conditions": [
+                {
+                    "field": "endpointPosture",
+                    "operator": "equals_any",
+                    "values": ["attention"],
+                },
+                {
+                    "field": "riskLevel",
+                    "operator": "equals_any",
+                    "values": ["critical"],
+                },
+            ],
+        },
+    }
+    preview = _invoke(module, _event(path, "POST", body=request, claims=claims))
+    assert preview["statusCode"] == 200
+    preview_body = json.loads(preview["body"])
+    assert preview_body["additions"] == [{"deploymentId": "dep-a", "agentId": "agent-b"}]
+    assert preview_body["evaluation"]["sources"] == ["alert-ledger", "endpoint-evidence"]
+    assert re.fullmatch(r"[0-9a-f]{64}", preview_body["evaluation"]["contextDigest"])
+    assert "project-a" not in json.dumps(preview_body["evaluation"])
+
+    applied = _invoke(
+        module,
+        _event(path, "POST", body={**request, "mode": "apply"}, claims=claims),
+    )
+    assert applied["statusCode"] == 200
+    stored = table.items[(f"TENANT#{tenant}", "GROUP#target")]
+    assert stored["agent_keys"] == ["dep-a:agent-b"]
+    assert stored["dynamic_context_digest"] == preview_body["evaluation"]["contextDigest"]
+    audit = next(
+        item for key, item in table.items.items() if key[1].startswith("GROUP_MEMBERSHIP_AUDIT#")
+    )
+    assert audit["payload"]["context_digest"] == stored["dynamic_context_digest"]
+    assert "riskLevelByAgent" not in audit["payload"]
+
+    health_status["device-b"] = "stale"
+    table.items[(f"TENANT#{tenant}", "ALERT#alert-device-b")]["status"] = "resolved"
+    status = module._reconcile_dynamic_group(tenant, stored, now=now + 300)
+    assert status["counts"]["removals"] == 1
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["agent_keys"] == []
+
+
+def test_dynamic_group_posture_missing_ambiguous_and_malformed_evidence_fails_closed(
+    monkeypatch: Any,
+) -> None:
+    """Ambiguous targets never match and malformed risk cannot reduce protection."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-dynamic-posture-deny"
+    claims = {
+        "custom:tenant_id": tenant,
+        "cognito:groups": ["platform-admin"],
+        "sub": "admin-a",
+    }
+    project_root = "/synthetic/ambiguous"
+    target_digest = hashlib.sha256(project_root.encode()).hexdigest()
+    for record in (
+        module._item_key(tenant, "TENANT", "root") | {"id": tenant},
+        module._item_key(tenant, "DEPLOYMENT", "dep-a")
+        | {
+            "id": "dep-a",
+            "organization_id": "org-a",
+            "project_id": "project-a",
+            "team": "Platform",
+            "environment": "prod",
+            "region": "eu-west-2",
+        },
+        module._item_key(tenant, "GROUP", "target")
+        | {
+            "id": "target",
+            "organizationId": "org-a",
+            "agent_keys": [],
+            "membership_revision": 1,
+        },
+        module._item_key(tenant, "AGENT", "dep-a:agent-a")
+        | {
+            "id": "agent-a",
+            "organization_id": "org-a",
+            "deployment_id": "dep-a",
+            "project_root": project_root,
+            "host": "claude-code",
+            "lifecycle_state": "active",
+            "lifecycle_revision": 1,
+        },
+    ):
+        table.put_item(Item=record)
+    for device_id in ("device-a", "device-b"):
+        table.put_item(
+            Item=module._item_key(tenant, "ENDPOINT_EVIDENCE", device_id)
+            | {
+                "deviceId": device_id,
+                "payload": {
+                    "installations": [{"projectRootDigest": target_digest, "host": "claude-code"}]
+                },
+            }
+        )
+    monkeypatch.setattr(
+        module,
+        "_endpoint_evidence_health",
+        lambda _tenant, now=None: {
+            "items": [
+                {"deviceId": "device-a", "status": "healthy"},
+                {"deviceId": "device-b", "status": "healthy"},
+            ]
+        },
+    )
+    path = "/enterprise/groups/target/dynamic-membership"
+    base = {
+        "mode": "preview",
+        "requestId": "dynamic-posture-deny-001",
+        "expectedMembershipRevision": 1,
+        "reason": "Prove ambiguous endpoint evidence cannot select policy authority.",
+        "rule": {
+            "match": "all",
+            "conditions": [
+                {
+                    "field": "endpointPosture",
+                    "operator": "not_equals_any",
+                    "values": ["attention"],
+                }
+            ],
+        },
+    }
+    ambiguous = _invoke(module, _event(path, "POST", body=base, claims=claims))
+    assert ambiguous["statusCode"] == 200
+    assert json.loads(ambiguous["body"])["counts"]["matched"] == 0
+
+    unsupported = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                **base,
+                "requestId": "dynamic-posture-deny-002",
+                "rule": {
+                    "match": "all",
+                    "conditions": [
+                        {
+                            "field": "endpointPosture",
+                            "operator": "equals_any",
+                            "values": ["browser-says-healthy"],
+                        }
+                    ],
+                },
+            },
+            claims=claims,
+        ),
+    )
+    assert unsupported["statusCode"] == 400
+
+    table.put_item(
+        Item=module._item_key(tenant, "ALERT", "malformed")
+        | {"id": "malformed", "agentKey": "dep-a:agent-a", "severity": "safe", "status": "open"}
+    )
+    malformed = _invoke(
+        module,
+        _event(
+            path,
+            "POST",
+            body={
+                **base,
+                "requestId": "dynamic-posture-deny-003",
+                "rule": {
+                    "match": "all",
+                    "conditions": [
+                        {"field": "riskLevel", "operator": "equals_any", "values": ["none"]}
+                    ],
+                },
+            },
+            claims=claims,
+        ),
+    )
+    assert malformed["statusCode"] == 409
+    assert table.items[(f"TENANT#{tenant}", "GROUP#target")]["agent_keys"] == []
+
+
+def test_dynamic_group_schedule_reuses_one_trusted_context_per_tenant(
+    monkeypatch: Any,
+) -> None:
+    """Many rules cannot multiply endpoint and alert reads within one cycle."""
+    module, table = _load_handler(monkeypatch)
+    tenant = "tenant-dynamic-cache"
+    registration = module._item_key(tenant, "TENANT", "root") | {
+        "id": tenant,
+        "endpoint_detection_pk": "ENDPOINT_DETECTION#00",
+        "endpoint_detection_sk": tenant,
+    }
+    query_calls = 0
+
+    def query(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal query_calls
+        query_calls += 1
+        return {"Items": [registration] if query_calls == 1 else []}
+
+    table.query = query
+    rule = {
+        "match": "all",
+        "conditions": [{"field": "riskLevel", "operator": "equals_any", "values": ["high"]}],
+    }
+    groups = [
+        {
+            "id": group_id,
+            "membership_mode": "dynamic",
+            "dynamic_rule": rule,
+            "dynamic_rule_hash": hashlib.sha256(
+                json.dumps(rule, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+        }
+        for group_id in ("group-a", "group-b")
+    ]
+    monkeypatch.setattr(
+        module,
+        "_list",
+        lambda _tenant, kind, consistent_read=False: groups if kind == "GROUP" else [],
+    )
+    context_calls = 0
+    context = {
+        "evaluatedAt": 1,
+        "sources": ["alert-ledger"],
+        "endpointPostureByTarget": {},
+        "riskLevelByAgent": {},
+        "riskLevelByTarget": {},
+        "contextDigest": "a" * 64,
+    }
+
+    def security_context(_tenant: str, _fields: Any, *, now: int | None = None) -> dict[str, Any]:
+        nonlocal context_calls
+        del now
+        context_calls += 1
+        return context
+
+    observed_contexts = []
+
+    def reconcile_with_context(
+        _tenant: str,
+        _group: dict[str, Any],
+        *,
+        now: int | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, str]:
+        del now
+        observed_contexts.append(context)
+        return {"outcome": "healthy"}
+
+    monkeypatch.setattr(module, "_dynamic_group_security_context", security_context)
+    monkeypatch.setattr(module, "_reconcile_dynamic_group", reconcile_with_context)
+    result = module._dynamic_group_reconciliation_cycle()
+    assert result == {"processedTenants": 1, "processedGroups": 2, "failedGroups": 0}
+    assert context_calls == 1
+    assert observed_contexts == [context, context]
+
+
 def test_scheduled_dynamic_group_reconciliation_changes_authority_and_surfaces_overlap(
     monkeypatch: Any,
 ) -> None:

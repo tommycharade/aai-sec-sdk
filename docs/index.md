@@ -16,6 +16,7 @@ The SDK is built around one boundary:
 - [Production readiness](production-readiness.md)
 - [Approved runtime releases and version compliance](runtime-release-compliance-design.md)
 - [Measured runtime-release rollouts](runtime-release-rollout-design.md)
+- [Dynamic policy groups](dynamic-groups-design.md)
 - [API design](api.md)
 - [Engineering guardrails](guardrails.md)
 - [Licensing](license.md)

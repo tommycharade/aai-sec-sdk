@@ -271,8 +271,14 @@ service schedule now reevaluates only previously approved rules, atomically
 materializes changed authority and exposes durable health without member-list
 content. Contract tests prove automatic addition, no-change idempotence,
 last-known-authority preservation on overlap, fixed failure evidence and
-rejection of caller-shaped schedule events. Endpoint posture attributes remain
-outstanding and are not claimed.
+rejection of caller-shaped schedule events. Endpoint posture and open-alert
+risk are now code-owned enumerations derived from authenticated endpoint
+evidence and retained alert state. Ambiguous endpoint identity matches neither
+positive nor negative rules; acknowledgement and suppression do not lower risk;
+malformed retained evidence fails closed. A content-minimised context digest,
+source labels and evaluation time bind previews and reconciliation evidence,
+while one tenant context is reused across matching scheduled rules. Live
+customer posture transitions and policy-SLO acceptance remain open.
 
 ### P1-SOC-09 implementation evidence
 
