@@ -17,7 +17,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@aws-sdk/client-secrets-manager": "3.1102.0",
+    "@aws-sdk/client-secrets-manager": "3.1105.0",
     "aws-cdk": "2.1133.0",
     "aws-cdk-lib": "2.263.0",
     "constructs": "10.7.2",
